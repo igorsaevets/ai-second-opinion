@@ -138,13 +138,124 @@ def resolve_federal_register(url):
                                            d.get("publication_date")))
 
 
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
+
+_PRIVATE = re.compile(r"^(?:localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|\[?::1\]?$)")
+
+
+def probe_url(u, timeout=20):
+    """
+    Does this URL exist? Returns (verdict, detail).
+
+    Verdicts are deliberately asymmetric, because the failure modes are asymmetric:
+
+        LIVE     200 and the final URL is the cited one
+        MOVED    200 after a redirect - the page is real, the citation is stale
+        DEAD     404/410 - the page does not exist. This is the one that means fabrication.
+        BLOCKED  401/403/429 - a bot wall. Says NOTHING about whether the page exists.
+        UNKNOWN  anything else, including a redirect this client would not follow
+
+    BLOCKED and UNKNOWN must never be reported as fabrication. Inferring "it is fake" from "I
+    could not check" is precisely the move this harness forbids the models to make, and it would
+    be worse coming from the harness, which is the thing that is supposed to be trustworthy.
+
+    Only public http(s) hosts are probed. A cited URL is attacker-controlled text as far as this
+    process is concerned - a model can emit http://127.0.0.1:8080/admin - so loopback and RFC1918
+    targets are refused rather than fetched.
+    """
+    try:
+        s = urlsplit(u)
+        if s.scheme not in ("http", "https"):
+            return "SKIPPED", "not http(s)"
+        host = (s.hostname or "").lower()
+        if not host or _PRIVATE.match(host):
+            return "SKIPPED", "non-public host"
+        req = urllib.request.Request(u, method="GET", headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            final = r.geturl()
+            if final.split("?")[0].rstrip("/") == u.split("?")[0].rstrip("/"):
+                return "LIVE", ""
+            return "MOVED", "-> " + final
+    except urllib.error.HTTPError as e:
+        if e.code in (404, 410):
+            return "DEAD", "HTTP %d" % e.code
+        if e.code in (401, 403, 429):
+            return "BLOCKED", "HTTP %d - existence not established" % e.code
+        return "UNKNOWN", "HTTP %d" % e.code
+    except Exception as e:
+        return "UNKNOWN", type(e).__name__
+
+
+def resolve_all(urls, workers=10):
+    """Probe in parallel; ordering preserved. Falls back to serial if threads are unavailable."""
+    try:
+        import concurrent.futures as cf
+        with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+            return list(ex.map(probe_url, urls))
+    except Exception:
+        return [probe_url(u) for u in urls]
+
+
+def report_url_resolution(cited_raw):
+    """
+    Print the existence check and return the number of DEAD citations.
+
+    This is the ONLY mechanical citation check that works on the Codex channel, which reports no
+    tool telemetry at all - there is no event log to compare against, so "was it opened" is
+    unanswerable and "does it exist" is all that is left. Measured on the 2026-07-31 probe run:
+    agy 3 dead of 11, Spark 0 of 22, Codex 1 of 32 - and that single Codex one was a GitHub API
+    query for a release tag that does not exist, i.e. the 404 was the answer it wanted, not a
+    fabrication. Counting is not judging; read the list.
+    """
+    if not cited_raw:
+        return 0
+    print("\nURL existence check (%d cited URL(s)):" % len(cited_raw))
+    results = resolve_all(cited_raw)
+    tally = {}
+    dead = 0
+    for u, (v, detail) in zip(cited_raw, results):
+        tally[v] = tally.get(v, 0) + 1
+        if v in ("DEAD", "UNKNOWN", "MOVED"):
+            print("  %-8s %-72s %s" % (v, u[:72], detail[:60]))
+        if v == "DEAD":
+            dead += 1
+    print("  " + "  ".join("%s=%d" % (k, tally[k]) for k in sorted(tally)))
+    if dead:
+        print("  %d cited URL(s) do not exist. A citation to a 404 was not read - it was "
+              "constructed." % dead)
+    return dead
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("ndjson")
+    # Optional: Codex ships no event log, so --answer alone with --resolve-urls is a valid run
+    # and is the only check available for that channel.
+    ap.add_argument("ndjson", nargs="?")
     ap.add_argument("--answer")
     ap.add_argument("--resolve", action="store_true",
                     help="resolve federalregister.gov document numbers against the public API")
+    ap.add_argument("--resolve-urls", action="store_true",
+                    help="fetch every cited URL and report which ones do not exist. Works "
+                         "without an event log, so it covers channels with no telemetry")
     a = ap.parse_args()
+
+    if not a.ndjson:
+        if not a.answer:
+            ap.error("give an event log, or --answer FILE (optionally with --resolve-urls)")
+        text = open(a.answer, encoding="utf-8", errors="replace").read()
+        cited_raw, seen = [], set()
+        for m in URL_RE.finditer(text):
+            n = normalise(m.group())
+            if n not in seen:
+                seen.add(n)
+                cited_raw.append(m.group().rstrip(".,;:"))
+        print("no event log given - grounding cannot be checked, only existence.")
+        print("answer cites %d distinct URL(s)" % len(cited_raw))
+        report_url_resolution(cited_raw if a.resolve_urls else [])
+        if not a.resolve_urls:
+            print("pass --resolve-urls to check whether those URLs exist.")
+        return 0
 
     text = answer_text(a.ndjson, a.answer)
     urls, queries = opened_urls(a.ndjson)
@@ -188,6 +299,9 @@ def main():
         print("\n%d page(s) were opened successfully but appear nowhere in the answer:" % len(dropped))
         for u in dict.fromkeys(dropped):
             print("    " + u[:150])
+
+    if a.resolve_urls:
+        report_url_resolution([raw for raw, _ in cited])
     return 0
 
 

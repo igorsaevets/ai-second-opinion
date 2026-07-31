@@ -113,17 +113,45 @@ exit, which is indistinguishable from a hang.
 
 ---
 
-## 6. Antigravity CLI (`agy`) — v1.1.9, NOT on PATH
+## 6. Antigravity CLI (`agy`) — NOT on PATH
 
 
 Re-measured end to end 2026-07-31; the full study with raw event logs is in
 `(the author's raw measurement log, not shipped)`. Several rows of the old table were wrong.
+Ask `doctor.py` for the installed version — this file used to pin one and it went stale in a week.
 
 ```powershell
 & "$env:LOCALAPPDATA\agy\bin\agy.exe" -p $brief --model "gemini-3.1-pro" --effort high `
    --agent deep-researcher --mode plan --sandbox `
    --output-format stream-json --print-timeout 25m
 ```
+
+### 6.0 🔴 `--mode` is unvalidated, and it is not what makes the run read-only
+
+Measured 2026-07-31 in headless `-p`, four values including a deliberate nonsense one:
+
+| passed | exit | `permission_mode` in the `init` event |
+|---|---|---|
+| `--mode plan` | 0 | `request-review` |
+| `--mode default` | 0 | `request-review` |
+| `--mode accept-edits` | 0 | `request-review` |
+| `--mode definitely-not-a-mode` | 0 | `request-review` |
+
+Two consequences, and the second is the one that matters. **The flag is not validated** — a typo
+such as `--mode paln` runs happily, silent, exit 0. And **its effect is not observable in the
+telemetry**, so nothing in the event log can confirm it was applied.
+
+Therefore: do not treat `--mode plan` as the read-only guarantee. What actually constrains the run
+is the permission configuration written by `patch_agy_permissions.py` (§6.1), which `doctor.py`
+checks and which shows up as the granted-tool list in `init`. This is the third time in this one
+channel that the operator's rule has held — a system prompt does not restrict tool access, an agent
+persona does not, and a documented CLI flag does not either. Only permission rules do.
+
+Note also that the CLI's own bundled docs (`~/.gemini/antigravity-cli/builtin/skills/
+antigravity_guide/references/cli.md`) say **nothing** about `--mode`. When agy was asked to verify
+a claim about that flag it cited "the official CLI reference" while having opened only that file —
+it restated the claim it was given as though it were documented. Treat a channel confirming a
+claim about *its own* CLI as the weakest possible evidence.
 
 ### 6.1 🔴 One denied tool discards the whole run
 

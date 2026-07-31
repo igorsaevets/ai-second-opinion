@@ -47,11 +47,14 @@ kept **under** that budget (~4.3K tokens, ~300 lines) and is never clipped; the 
 - **agy dies silently if a tool is denied.** One auto-denied MCP call discards the whole run.
   Fixed once by `python patch_agy_permissions.py` (already applied 2026-07-31). If agy starts
   returning empty answers again, that is the first thing to check (`references/channels.md`).
-- **Citations are not evidence.** agy fabricated four Federal Register document numbers in one
-  session, each under the correct article slug, one of which it had genuinely fetched. Read the
-  `CITATIONS:` line — the harness prints it for **agy and Spark**, the two channels that report
-  which pages they opened; Codex reports none, so spot-check it by hand. `citecheck.py --resolve`
-  catches the rest (`references/verification.md`).
+- **Citations are not evidence — the most reliable failure there is.** Read the `CITATIONS:` line;
+  the harness prints it for **agy and Spark**, which report the pages they opened. For **Codex,
+  which reports no telemetry**, "was it opened" is unanswerable, so ask the only remaining
+  question — `citecheck.py --answer reviews\CODEX.md --resolve-urls`, which needs no event log.
+  Measured on one brief 2026-07-31: **agy 3 dead URLs of 11 having opened zero pages**, Spark 0/22,
+  Codex 1/32 — and that 404 was a GitHub API probe for a tag that does not exist, i.e. the answer.
+  `DEAD` means the page is not there; `BLOCKED`/`UNKNOWN` mean the check failed and prove nothing.
+  Details and the FR-number resolver: `references/verification.md`.
 - **Every model answers in English**, enforced by the default system preset — the report is
   machine-read, and Russian costs ~2× the tokens (§0.2 below).
 - **Choosing models is config, not code.** `--route "не используй 5.6 Sol, вместо нее 5.5"`,
@@ -146,11 +149,10 @@ the skill's own `systems/` directory, so a bare name works from any project dire
 | `base-depth` | **the default**, applied when `--system` is omitted |
 | `legal-research` | any legal / immigration / regulatory brief — read `references/legal-briefs.md` first |
 
-`base-depth.md` is the amplifier that used to be pasted into briefs by hand: maximum depth,
-first intuition may be wrong, enumerate alternatives, check for contradictions, name the
-unofficial-but-lawful route alongside the official one, no output-length limit, escalate to other
-fetch tools when the built-in one fails, never reconstruct a citation from memory, and say so
-explicitly when nothing could open a page.
+`base-depth.md` is the amplifier that used to be pasted into briefs by hand: maximum depth, first
+intuition may be wrong, enumerate alternatives, check for contradictions, name the
+unofficial-but-lawful route beside the official one, no length cap, escalate fetch tools, never
+reconstruct a citation from memory, and say so when nothing could open a page.
 
 **All presets force English output.** The report is consumed by the orchestrating model, not read
 directly by a human, and Cyrillic costs roughly twice the tokens for the same content. A Russian
@@ -165,12 +167,6 @@ and do not add the grey-routes line to the legal preset "for consistency".
 
 `--dry-run` validates the preset name and the brief path before anything is spent; a mistyped
 preset fails loudly and lists what exists.
-
-**One channel only, when you want a fast answer:**
-
-```powershell
-python "<SKILL_DIR>\orchestrate.py" --brief "$env:TEMP\brief.md" --tier strategic --marker REVIEW-DONE-01 --only spark --out "$env:TEMP\reviews"
-```
 
 **Timing.** `agy` ~1 min · Spark 2–5 min · **Codex 25–35 min**. Run the full set in the background
 and do other work; do not sit and wait on Codex. If you only need a sanity check, `--only agy` is
@@ -293,12 +289,11 @@ with proof**, and where the channels **disagreed with each other**.
 
 The disagreement is the product. One reviewer is not a second opinion.
 
-Two rounds, and the ordering **inverted** between them. 2026-07-26: `agy` at **55 s** found the
-round's most important item, which Codex (17 min) and Spark (4 min) both missed. 2026-07-27, a
-different brief: **Codex** at 568 s found the best item — a live contradiction between the client's
-privacy policy and fifteen of its marketing pages — and Spark, with 34 searches, contributed least.
-The lesson is not "the cheap one wins" but the stronger claim: **which channel wins is not
-predictable from cost, or from the last round.** That is the whole argument for running all three.
+Three rounds, three different winners. 07-26: `agy` at 55 s found the item Codex and Spark missed.
+07-27: **Codex** found it, Spark contributed least despite 34 searches. 07-31: **Spark** graded the
+one planted-wrong claim correctly while agy passed it and cited three URLs that 404. The lesson is
+not "the cheap one wins" but the stronger claim: **which channel wins is not predictable from cost,
+or from the last round** — the whole argument for running all three.
 
 Both rounds share one shape worth naming: the highest-value finding was **not an answer to a
 question that was asked**. It arrived under "what are we missing". Always include that question.

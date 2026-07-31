@@ -185,28 +185,54 @@ def check_agy_permissions(r, mod):
 
 def check_pii_gate(r, mod):
     """
-    A safety net nobody tests is a safety net nobody has. Two of these patterns were wrong on
-    first write - a leading \\b that can never match before '(' or after '_' - and both were
-    found only by feeding the gate a payload built to be caught. So the gate now self-tests.
+    A safety net nobody tests is a safety net nobody has. THREE of these patterns were wrong on
+    first write, and every one was found by running the gate, never by reading it:
+      - a leading \\b that can never match before '(' -> phone numbers sailed through;
+      - a leading \\b that can never match after '_'  -> .env lines sailed through;
+      - `bearer` as a labelled-assignment alternative, which demands ':' AFTER the label, while a
+        real header is `Authorization: Bearer <token>` and puts the delimiter before it.
+
+    That last one mattered most and was found last, because coverage here was lopsided: the PII
+    class - the one a human can wave through with --allow-pii - had six detectors under test,
+    while the SECRET class, which has no override at all, had exactly one. The probe below now
+    covers every pattern in both sets, derived from the tables themselves so a newly added
+    pattern fails this check until it is given a probe line.
+
+    The secret-shaped literals are deliberately non-functional example values (the AWS one is
+    AWS's own published EXAMPLE key). Nothing real is embedded in this file.
     """
     probe = ("Applicant A-123456789 receipt MSC2190123456 ssn 123-45-6789\n"
              "mail a@b.co phone (415) 555-0142 date of birth: 1988-04-12\n"
-             "FIRECRAWL_API_KEY=fc-1234567890abcdefghij\n")
+             "passport number: X1234567\n"
+             "FIRECRAWL_API_KEY=fc-1234567890abcdefghij\n"
+             "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6\n"
+             "-----BEGIN RSA PRIVATE KEY-----\n"
+             "anthropic sk-ant-" + "a" * 40 + "\n"
+             "openai sk-" + "b" * 40 + "\n"
+             "aws AKIAIOSFODNN7EXAMPLE\n"
+             "github ghp_" + "c" * 36 + "\n"
+             "slack xoxb-1234567890-abcdefghij\n"
+             "google AIza" + "d" * 35 + "\n")
     secrets, pii = mod.scan_payload(probe, "selftest")
     kinds = {h.split(" at ")[0] for h in secrets + pii}
-    expect = {"A_NUMBER", "USCIS_RECEIPT", "SSN", "EMAIL", "US_PHONE", "DATE_OF_BIRTH",
-              "LABELLED_SECRET"}
+    expect = {k for k, _ in mod.SECRET_PATTERNS} | {k for k, _ in mod.PII_PATTERNS}
     missed = expect - kinds
-    clean = "Rule 2026-14539, 91 FR 45324, effective 2026-09-18. See 8 CFR 212.22(a)(3)."
+    # Controls: an ordinary legal citation, plus the two prose shapes that sit closest to a secret
+    # without being one. A gate that cries wolf here trains you to wave the real alarm through.
+    clean = ("Rule 2026-14539, 91 FR 45324, effective 2026-09-18. See 8 CFR 212.22(a)(3).\n"
+             "Use Bearer authentication rather than a query parameter.\n"
+             "The API key is read from the environment and is never printed.\n")
     fp = sum(len(x) for x in mod.scan_payload(clean, "selftest"))
     if missed:
-        r.fail("pii gate", "did not detect: " + ", ".join(sorted(missed)),
-               "a pattern regressed. Personal data would be sent to three vendors unblocked.")
+        r.fail("secret/pii gate", "did not detect: " + ", ".join(sorted(missed)),
+               "a pattern regressed. That class would be sent to three vendors unblocked.")
     elif fp:
-        r.warn("pii gate", "false positive on an ordinary legal citation",
+        r.warn("secret/pii gate", "false positive on ordinary prose or a legal citation",
                "the gate will block clean briefs and train you to pass --allow-pii by reflex")
     else:
-        r.ok("pii gate", "%d detectors live, 0 false positives on the control text" % len(kinds))
+        r.ok("secret/pii gate",
+             "%d detectors live (%d secret, %d pii), 0 false positives on the controls"
+             % (len(kinds), len(mod.SECRET_PATTERNS), len(mod.PII_PATTERNS)))
 
 
 def check_skill_size(r):

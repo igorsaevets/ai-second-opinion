@@ -419,12 +419,24 @@ SECRET_PATTERNS = [
                                      r"\bgithub_pat_[A-Za-z0-9_]{30,}")),
     ("SLACK_TOKEN",       re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}")),
     ("GOOGLE_API_KEY",    re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
-    # Labelled assignment: catches .env lines and "Authorization: Bearer ..." pasted into a brief.
+    # Labelled assignment: catches .env lines and `Authorization: <token>` pasted into a brief.
     # `(?<![A-Za-z])` and not `\b`, because underscore counts as a word character: `\bapi_key`
     # never matches inside FIRECRAWL_API_KEY, which is the exact shape a real .env line has.
     ("LABELLED_SECRET",   re.compile(r"(?i)(?<![A-Za-z])(?:api[_-]?key|secret|token|password|"
-                                     r"passwd|client[_-]?secret|bearer)(?![A-Za-z])"
+                                     r"passwd|client[_-]?secret|authorization)(?![A-Za-z])"
                                      r"\s*[:=]\s*['\"]?[^\s'\"]{12,}")),
+    # `bearer` needs its own rule and used to be an alternative in the branch above, where it
+    # could never fire: that branch demands a ':' or '=' AFTER the label, and a real header is
+    # `Authorization: Bearer <token>` - the delimiter precedes the word. So the one shape the
+    # alternative was added for was the one shape it could not match. Found 2026-07-31 by the
+    # PostToolUse hook's self-test; the third pattern in this file to read correct and match
+    # nothing, which is why both gates now ship with tests instead of confidence.
+    #
+    # The digit lookahead is a deliberate trade: without it, `Bearer authentication` (14 chars of
+    # ordinary prose) trips the no-override class. Requiring one digit inside a 20+ char token
+    # costs the all-alphabetic token, which is rare, and buys silence on English.
+    ("BEARER_TOKEN",      re.compile(r"(?i)\bbearer\s+(?=[A-Za-z0-9._\-]*\d)"
+                                     r"[A-Za-z0-9._\-]{20,}")),
 ]
 
 PII_PATTERNS = [
@@ -935,6 +947,22 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
         if mdl.endswith(suffix):
             mdl = mdl[:-len(suffix)]
             break
+    # --mode is kept because it is the documented intent, but it must NOT be read as the thing
+    # that makes this run read-only. Measured 2026-07-31 on 1.1.9, headless `-p`:
+    #
+    #   --mode plan | default | accept-edits | definitely-not-a-mode
+    #     -> every one exits 0, and every one reports permission_mode="request-review" in init.
+    #
+    # So the flag is (a) unvalidated - a typo like `--mode paln` is accepted in silence, with no
+    # warning and no non-zero exit - and (b) not observable in the telemetry, so there is no way
+    # to confirm from the event log that it took effect at all. Anything that depends on it is
+    # depending on something unverifiable.
+    #
+    # What actually constrains this run is the permission configuration written by
+    # patch_agy_permissions.py, which is checked by doctor.py and is visible as the granted tool
+    # list in the init event. That is Igor's own rule holding for a third time in this channel:
+    # prose does not restrict tool access, an agent prompt does not, and now a CLI flag does not
+    # either - only permission rules do. Do not "harden" this by tightening the --mode value.
     cmd += ["--model", mdl,
             "--effort", effort,
             "--agent", AGY_AGENT,
