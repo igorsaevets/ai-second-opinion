@@ -1,5 +1,9 @@
 # AI Second Opinion
 
+[![selftest](https://github.com/igorsaevets/ai-second-opinion/actions/workflows/selftest.yml/badge.svg)](https://github.com/igorsaevets/ai-second-opinion/actions/workflows/selftest.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![no dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](INSTALL.md)
+
 **One AI agreeing with you proves nothing. Three of them arguing is worth reading.**
 
 Send the same document to three different top-tier AI models at once. Get back what each one

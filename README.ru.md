@@ -1,5 +1,9 @@
 # AI Second Opinion
 
+[![selftest](https://github.com/igorsaevets/ai-second-opinion/actions/workflows/selftest.yml/badge.svg)](https://github.com/igorsaevets/ai-second-opinion/actions/workflows/selftest.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![no dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](INSTALL.md)
+
 **Одна нейросеть, которая с вами согласилась, не доказывает ничего. Три спорящие — уже документ.**
 
 Отправьте один и тот же текст сразу трём топовым моделям. Получите: что нашла каждая, **где они
