@@ -908,8 +908,83 @@ def _parse_agy_stream(path):
     return out
 
 
+# Appended only on the second attempt. Deliberately short and concrete: the first run already had
+# the full source-discipline preset and ignored it, so repeating that language louder is not the
+# move. This names the specific observed failure and asks for a countable behaviour instead.
+AGY_ESCALATION = """
+
+---
+
+ADDITIONAL REQUIREMENT FOR THIS ATTEMPT.
+
+A previous attempt at this exact brief cited sources without opening a single page, and several of
+the URLs it produced do not exist. That is the failure to avoid here.
+
+- **Open the pages.** A search-result snippet is not a source; issuing a query is not reading.
+- **Cite only URLs you fetched in this run.** If you did not open it, do not list it. Reconstructing
+  a plausible-looking documentation URL from memory is worse than having no citation at all,
+  because it looks like evidence.
+- If a page will not open, say so explicitly, name the URL, and state what you concluded without
+  it. "I could not open this" is a completely acceptable answer and is far more useful than a
+  citation that turns out to be a 404.
+- Prefer fewer claims, each backed by a page you actually read, over broad coverage backed by
+  recollection.
+"""
+
+
 def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout="25m",
              system=None):
+    """
+    Run the channel, and re-run it ONCE if it cited sources without opening any.
+
+    Measured 2026-07-31: agy issued 10 searches, opened **zero** pages, and cited 11 URLs of which
+    3 return 404 - while getting the substance right. That combination is the dangerous one,
+    because it survives casual review: correct conclusions with invented receipts.
+
+    Why a mechanical retry rather than a stronger instruction: this channel has now refused to be
+    steered by prose three separate times (a system prompt could not restrict its tool access, an
+    agent persona could not, and `--mode` does nothing at all). Re-running is the lever that
+    actually exists. It is bounded to exactly one extra attempt, it announces itself and its cost
+    before spending, and it keeps BOTH transcripts on disk so the two can be compared.
+
+    The retry is not automatically believed. If the second attempt still opens nothing, the FIRST
+    answer is returned - it was produced under cleaner conditions, without an instruction nagging
+    it about sources - and both failures are reported. Two ungrounded runs is a much stronger
+    signal about the brief than one.
+    """
+    first = _agy_once(brief, marker, workdir, outfile, model, effort, timeout, system)
+
+    if not first.get("zero_grounding"):
+        return first
+
+    log("  [agy] cited %d URL(s) and opened NONE. Re-running once with an explicit instruction "
+        "to open sources (this costs a second agy call)." % first.get("n_cited", 0))
+
+    retry_out = os.path.splitext(outfile)[0] + ".retry" + (os.path.splitext(outfile)[1] or ".md")
+    second = _agy_once(brief + AGY_ESCALATION, marker,
+                       os.path.join(workdir, "retry"), retry_out,
+                       model, effort, timeout, system)
+
+    if second.get("n_grounded"):
+        second.setdefault("notes", []).append(
+            "SECOND ATTEMPT. The first run cited %d URL(s) and opened none of them; it is kept at "
+            "%s. This answer grounded %d of %d. Prefer this one, but the first is worth a glance - "
+            "a model told to open sources sometimes narrows to what it can easily fetch."
+            % (first.get("n_cited", 0), outfile, second.get("n_grounded", 0),
+               second.get("n_cited", 0)))
+        return second
+
+    first.setdefault("warnings", []).append(
+        "RE-RUN ALSO GROUNDED NOTHING (kept at %s). Two independent attempts cited sources and "
+        "opened none, so this is not a fluke: treat every URL in this review as unverified and "
+        "check them with `citecheck.py --answer <file> --resolve-urls` before repeating any of "
+        "them." % retry_out)
+    first["ok"] = False
+    return first
+
+
+def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeout="25m",
+              system=None):
     """
     Two ways in, and they fail differently. Inline -p avoids the file-reading tool (and its
     permission error) but is capped by the Windows argv limit. --add-dir has no size cap but needs
@@ -1029,7 +1104,12 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
             "notes": note, "tool_calls": sum(ev["tools"].values()), "searches": searches,
             "denied": sum(ev["denied"].values()), "thinking": ev["thinking"],
             "out_tokens": ev["out_tokens"], "agy_status": ev["status"],
-            "perm_mode": ev["perm_mode"], "events": ndjson}
+            "perm_mode": ev["perm_mode"], "events": ndjson,
+            # Machine-readable so the retry wrapper below does not have to re-parse prose.
+            # "cited sources and opened none of them" is a different animal from partial
+            # grounding: it is memory dressed as research, and it is worth one more attempt.
+            "zero_grounding": bool(n_cited and not grounded),
+            "n_cited": n_cited, "n_grounded": len(grounded)}
 
 
 # =============================================================================================

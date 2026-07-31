@@ -47,6 +47,10 @@ kept **under** that budget (~4.3K tokens, ~300 lines) and is never clipped; the 
 - **agy dies silently if a tool is denied.** One auto-denied MCP call discards the whole run.
   Fixed once by `python patch_agy_permissions.py` (already applied 2026-07-31). If agy starts
   returning empty answers again, that is the first thing to check (`references/channels.md`).
+- **agy re-runs itself once, automatically, if it cites sources and opened none** — and it costs a
+  second agy call, announced before it spends. Measured: 0/3 grounded → **8/8**, tool calls 14 → 72,
+  and dead citations 3 → 0. If the second attempt also grounds nothing the *first* answer is
+  returned with both marked unverified. Never edit this into a loop.
 - **Citations are not evidence — the most reliable failure there is.** Read the `CITATIONS:` line;
   the harness prints it for **agy and Spark**, which report the pages they opened. For **Codex,
   which reports no telemetry**, "was it opened" is unanswerable, so ask the only remaining
@@ -227,13 +231,11 @@ which is the same mistake one step earlier. `--dry-run` runs the gate, so checki
 | **`deep`** — architecture pivot, high-stakes audit | `{"type":"enabled","budget_tokens":100000}` | 60–100k | **≥25,000** |
 
 **Bare `adaptive` silently under-allocates on questions that look small.** Same brief, same model,
-same day: `adaptive` gave **9,955** output tokens and **0** web searches; `{"type":"enabled",
-"budget_tokens":100000}` gave **20,132** tokens and **34** searches. Depth has to be demanded with
-an explicit floor, not hoped for.
+same day: `adaptive` → **9,955** output tokens and **0** searches; `{"type":"enabled",
+"budget_tokens":100000}` → **20,132** and **34**. Demand depth with a floor; do not hope for it.
 
-**The floor is waived when your brief caps the answer length.** "Answer in under 250 words" makes a
-short reply correct, and the floor then fires on a good answer. It only means "under-allocated"
-when the brief did **not** ask for brevity.
+**The floor is waived when your brief caps the length.** "Under 250 words" makes a short reply
+correct — the floor only means "under-allocated" when the brief did not ask for brevity.
 
 Streaming is automatic above a 32,000 budget and is not optional — why, in `references/channels.md`.
 
