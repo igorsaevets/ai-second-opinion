@@ -69,6 +69,7 @@ complete instead of clipped.
 | `references/channels.md` | wire parameters and CLI traps per channel; a channel misbehaves, returns empty, or you are changing flags |
 | `references/briefs.md` | building any brief: what goes in it, and the live-web-search demand |
 | `references/verification.md` | judging whether a review actually happened; reviewer signatures; citation spot-checks |
+| `KIT-README.md` + `package.py` | giving this to somebody else's machine. `package.py --out <dir>` regenerates the distributable (plugin + installers) from this directory, so there is never a second copy to drift |
 
 Paths are relative to this skill's own directory,
 `<SKILL_DIR>\`.
