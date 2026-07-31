@@ -1,12 +1,20 @@
 {
   "name": "model-orchestration",
   "description": "Run one brief past three external reviewer models in parallel (Spark over HTTPS, Codex CLI, Antigravity/Gemini CLI) and verify each one actually did the work.",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "author": {
+    "name": "igorsaevets"
+  },
+  "homepage": "https://github.com/igorsaevets/ai-second-opinion",
+  "repository": "https://github.com/igorsaevets/ai-second-opinion",
+  "license": "MIT",
   "keywords": [
     "review",
     "second-opinion",
     "codex",
     "gemini",
-    "verification"
+    "verification",
+    "fact-checking",
+    "citations"
   ]
 }

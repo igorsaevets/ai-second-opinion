@@ -217,11 +217,16 @@ def check_pii_gate(r, mod):
     kinds = {h.split(" at ")[0] for h in secrets + pii}
     expect = {k for k, _ in mod.SECRET_PATTERNS} | {k for k, _ in mod.PII_PATTERNS}
     missed = expect - kinds
-    # Controls: an ordinary legal citation, plus the two prose shapes that sit closest to a secret
-    # without being one. A gate that cries wolf here trains you to wave the real alarm through.
+    # Controls: an ordinary legal citation, plus the prose shapes that sit closest to a secret or
+    # an identifier without being one. A gate that cries wolf here trains you to wave the real
+    # alarm through. The last two lines are verbatim from this project's own documentation and
+    # both used to FAIL: the DOB and passport patterns accepted any character after the label, so
+    # describing the gate tripped the gate. Keep them - they are the regression test for that.
     clean = ("Rule 2026-14539, 91 FR 45324, effective 2026-09-18. See 8 CFR 212.22(a)(3).\n"
              "Use Bearer authentication rather than a query parameter.\n"
-             "The API key is read from the environment and is never printed.\n")
+             "The API key is read from the environment and is never printed.\n"
+             "blocks one containing SSNs, emails, phones or a labelled date of birth unless you\n"
+             "pass --allow-pii, and the same applies to a passport number mentioned in prose.\n")
     fp = sum(len(x) for x in mod.scan_payload(clean, "selftest"))
     if missed:
         r.fail("secret/pii gate", "did not detect: " + ", ".join(sorted(missed)),
@@ -320,7 +325,16 @@ def main():
         print("NOT READY. Fix the [FAIL] lines above first.")
     print('  python "%s" --brief BRIEF.md --marker DONE-01 --out reviews --dry-run'
           % os.path.join(HERE, "orchestrate.py"))
-    return min(r.worst, 1)
+    # Exit code semantics, corrected 2026-07-31. This used to be min(worst, 1), which printed
+    # "READY" and then exited 1 - a status line contradicting its own exit code, which is the
+    # thing this project keeps saying is worse than no status line at all. It also made a partial
+    # install a failure, contradicting the design: running a subset of channels is a SUPPORTED
+    # state, not a fault, and a doctor that fails on it teaches people to ignore the doctor.
+    #
+    #   0  runnable - everything present, or only housekeeping warnings, or some channels absent
+    #   1  NOT runnable - a [FAIL] line: a missing file, a script that will not compile, a
+    #      registry that will not load. Something no --skip can work around.
+    return 0 if r.worst < 2 else 1
 
 
 def _wrap(s, width):

@@ -1,0 +1,56 @@
+name: selftest
+
+# Runs the behavioural test suite on every push and pull request.
+#
+# It needs NO credentials and contacts NO vendor: every check either uses --dry-run, points the
+# CLI channels at binaries that do not exist, or exercises pure functions. That is a property
+# worth keeping - a test suite that needs a paid key is a test suite nobody runs on a fork.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ['3.9', '3.13']
+        exclude:
+          # One Python version per non-Linux runner is enough; the code is standard-library only.
+          - os: macos-latest
+            python: '3.9'
+          - os: windows-latest
+            python: '3.9'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Compile every shipped script
+        shell: bash
+        run: |
+          cd plugins/model-orchestration/skills/model-orchestration
+          python -m compileall -q .
+
+      - name: doctor (install probe; missing CLIs are expected here)
+        shell: bash
+        continue-on-error: true
+        run: python plugins/model-orchestration/skills/model-orchestration/doctor.py
+
+      - name: selftest (behaviour; must pass)
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+          # Explicitly empty so no runner-level key can ever be picked up by accident.
+          MODEL_API_KEY: ''
+        run: python plugins/model-orchestration/skills/model-orchestration/selftest.py

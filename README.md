@@ -1,210 +1,201 @@
-# model-orchestration — review kit
+# AI Second Opinion
 
-Send one brief to three independent external reviewer models **in parallel**, then verify that
-each one actually did the work instead of trusting its exit code.
+**One AI agreeing with you proves nothing. Three of them arguing is worth reading.**
 
-| channel | what it is | speed | cost |
-|---|---|---|---|
-| **Spark** | Muse Spark 1.1 over the Messages API | 2–5 min | metered per API key |
-| **Codex** | OpenAI Codex CLI | **25–35 min** | your subscription's heaviest tier |
-| **agy** | Antigravity CLI (Gemini 3.1 Pro) | ~1 min | your Google subscription |
+Send the same document to three different top-tier AI models at once. Get back what each one
+found, where they contradict each other — and a mechanical check of whether they actually did
+the research or quietly made it up.
 
-The point is not redundancy, it is **disagreement**. Measured across two rounds on real work, the
-ordering inverted: once the 55-second channel found the item both slower ones missed, once the
-25-minute one did. Which channel wins is not predictable from cost or from the previous round —
-that is the entire argument for running all three.
+[Русская версия](README.ru.md) · [How it works, in technical detail](TECHNICAL.md) ·
+[Install](INSTALL.md) · [When something breaks](TROUBLESHOOTING.md)
 
 ---
 
-## 1. What you must supply yourself
+## The problem this solves
 
-Nothing in this kit provisions an account. Install it and you still have three empty channels
-until each of these is true **for you personally**:
+You ask an AI to review your strategy memo. It tells you the memo is strong, adds three
+supportive points, and cites four sources.
 
-| you need | how to check | if you don't have it |
+That answer is nearly worthless, for three reasons most people never check:
+
+1. **It is built to agree with you.** You wrote the memo, you asked the question, and the model
+   optimises for a helpful-feeling reply. Ask the same model to attack the memo and it will find
+   problems it just told you did not exist.
+2. **One model has one set of blind spots.** Whatever it was weak at yesterday, it is weak at
+   today, and nothing in its answer tells you which parts those are.
+3. **The sources may not exist.** Models generate citations that *look* right — real domain,
+   plausible path, correct-sounding document number — for pages that were never opened and
+   sometimes never existed. In one measured run here, a model produced 11 source links; **3 of
+   them were dead**, and its conclusions were still correct. That combination is the dangerous
+   one, because it survives a casual read.
+
+## What this does instead
+
+- **Three independent models, same document, at the same time.** They do not see each other's
+  answers, so agreement means something and disagreement means more.
+- **It shows you the disagreement.** That is the actual product. Two models calling a claim fine
+  and one calling it fatal is the most useful thing you will read all week.
+- **It checks the receipts.** Every source link each model cites is opened and reported as
+  live / moved / dead. Where the channel supports it, the tool also checks whether the model
+  *actually opened* the page it cited, or just listed it.
+- **It catches a model that quietly refused.** A model that declines a task still formats its
+  reply correctly, so it passes every naive "did it finish?" check. This catches that.
+- **Nothing with a password or key ever leaves your machine.** Blocked outright, no override.
+  Personal data — ID numbers, SSNs, emails, phone numbers, dates of birth — is blocked by default
+  and requires a deliberate flag.
+
+## Who this is for
+
+| You are | You use it to |
+|---|---|
+| **Founder / CEO** | Pressure-test a strategy memo, a board deck, an investor update or a pricing decision before anyone external sees it. Three models, three sets of objections, before your board finds them. |
+| **Product manager** | Review a spec or PRD for holes, check competitive claims you are about to publish, stress-test a launch plan's assumptions. |
+| **C-level / operations** | Verify claims in a vendor proposal or a consultant's report. Check that a regulation you are relying on is still current and says what someone told you it says. |
+| **Legal / compliance** | Verify that every citation in a research memo resolves to a real document that actually says what the memo claims. This is source-verification work, done properly and at speed. See the note below. |
+| **Anyone writing something that matters** | Get the objections in private, before they arrive in public. |
+
+### A note for legal teams
+
+This is a **research verification** tool, not an advice tool, and the distinction is built into
+the software rather than written on it. It ships with a mode (`--system legal-research`) that
+frames the work as what it is: checking sources for a document a licensed professional will
+review. Nothing in the output is legal advice, and the models are explicitly instructed not to
+opine on any named individual's situation or decide what anyone should file.
+
+That framing is also what makes it *work*. Asked to "review this filing strategy", the models
+refuse on policy. Asked to "verify these six claims against their cited sources", the same models
+answer all six with correct citations. The reframing is accurate, not a workaround — checking a
+document number against the register genuinely is research.
+
+## What one run looks like
+
+You write the question in a plain text file, then run one command. A few minutes later:
+
+```
+[spark] OK  97s    22 sources cited, 0 dead
+[codex] OK  407s   32 sources cited, 1 dead (deliberate negative check - correct)
+[agy]   OK  44s    11 sources cited, 3 dead  <- PROBLEM: cited pages it never opened
+2/3 channels returned a verified review.
+```
+
+Plus one file per model containing the actual review, and a diagnostics file if anything went
+wrong.
+
+## The one habit worth stealing
+
+**Put a claim you know is false into every document you send for review.**
+
+It costs nothing. A model that "confirms" your planted falsehood has just told you exactly what
+all its other confirmations are worth. In the runs behind this tool, all three models caught both
+planted claims — which is the only reason to believe the things they *did* confirm.
+
+## What it costs, honestly
+
+Three separate accounts, none of which this tool provides:
+
+| Channel | What you need | Rough cost |
 |---|---|---|
-| **Python 3.8+** on PATH | `python --version` | install it; the harness is standard-library only, there is nothing to `pip install` |
-| **Codex CLI** + a plan that includes Codex | `codex --version`, then `codex login` | the Codex channel is unavailable; run with `--skip codex` |
-| **Antigravity CLI** (`agy`) + an eligible Google account | `agy --version` | run with `--skip agy` |
-| **`MODEL_API_KEY`** for Spark | `doctor.py` reports presence and length | run with `--skip spark` |
+| **Spark** | An API key | Metered per use — you pay per review |
+| **Codex** | A paid OpenAI plan that includes Codex | Included in the subscription, with weekly limits |
+| **Antigravity (Gemini)** | An eligible Google account | Included, with limits |
 
-Two of those deserve a straight answer rather than a table row.
+**You do not need all three.** Missing a key or a CLI is a normal condition, not an error — the
+tool runs whatever is available and tells you plainly what it skipped. You can start with one.
 
-**🔴 The API key is per person. Do not share one.** A single `MODEL_API_KEY` is metered against
-whoever owns it: shared, one person's card silently pays for everyone's runs, nobody can be
-attributed, and revoking it takes down the whole team at once. If your organisation wants Spark
-for everybody, issue a key per person. If that is not on offer, run the two CLI channels and
-`--skip spark` — the harness is designed to run any subset.
+**Do not share one API key across a team.** It bills to whoever owns it, nobody can be
+attributed, and revoking it cuts everyone off at once. One key per person, or have those people
+run the other two channels.
 
-**🔴 The CLI channels bill against a *subscription*, not an API key, and subscriptions have weekly
-limits.** That is not a footnote, it is the reason the routing layer exists: when one model's
-limit runs out you re-point the round in prose (`--route "don't use 5.6, use 5.5 instead"`)
-instead of editing code. **Do not answer an exhausted limit by opening a metered API path** —
-that is usually several times more expensive than waiting or switching channel.
+## Install
 
-**The `gemini` CLI (`@google/gemini-cli`) is not a substitute for `agy`.** On a personal-tier
-account it fails with `IneligibleTierError / UNSUPPORTED_CLIENT`.
+Three ways, in order of how much you want to think about it. Full detail in
+**[INSTALL.md](INSTALL.md)**.
 
----
-
-## 2. Install
-
-### Option A — as a Claude Code plugin (recommended)
-
-This repository is a plugin marketplace. In Claude Code:
+**1 — Plugin (easiest, auto-updates).** In Claude Code:
 
 ```
-/plugin marketplace add <owner>/<this-repo>
+/plugin marketplace add igorsaevets/ai-second-opinion
 /plugin install model-orchestration@review-channels
-/reload-plugins
 ```
 
-Updates arrive automatically: Claude Code checks after session start and prompts you to
-`/reload-plugins`. A private repository works — you just need normal git access to it.
-
-To distribute it to a whole team without each person typing the commands, put this in the team
-repo's `.claude/settings.json`:
-
-```json
-{
-  "extraKnownMarketplaces": {
-    "review-channels": { "source": { "source": "github", "repo": "<owner>/<this-repo>" } },
-  },
-  "enabledPlugins": ["model-orchestration@review-channels"]
-}
-```
-
-Anyone who clones that repo and trusts the folder is prompted to install it.
-
-### Option B — as a personal skill (no git, no plugin system)
+**2 — Installer script.** Download the repo, then:
 
 ```powershell
 .\install.ps1        # Windows
-```
-```bash
 ./install.sh         # macOS / Linux
 ```
 
-Copies the skill into `~/.claude/skills/model-orchestration/`, backs up any previous install, and
-runs the doctor. Works from a zip; no network needed after download.
-
-### Then, on every machine, once:
+**3 — Just copy the files.** No git, no plugin system, no installer. Copy one folder:
 
 ```
-python <SKILL_DIR>/doctor.py
+plugins/model-orchestration/skills/model-orchestration/
 ```
 
-Its last line is your exact run command with the real path already filled in. Do not copy a path
-out of any document — ask the doctor.
-
----
-
-## 3. The one post-install step that is not optional
-
-If you will use the **agy** channel:
+into
 
 ```
-python <SKILL_DIR>/patch_agy_permissions.py --dry-run   # see the diff first
-python <SKILL_DIR>/patch_agy_permissions.py             # apply
+Windows:        %USERPROFILE%\.claude\skills\model-orchestration\
+macOS / Linux:  ~/.claude/skills/model-orchestration/
 ```
 
-**Why it matters, measured 5 runs out of 5:** in headless mode `agy` cannot display a permission
-prompt, so any tool still set to "ask" is auto-denied — and **one denial throws the entire run
-away**. What comes back is `response: ""` with `status: "SUCCESS"` and **exit code 0**, after
-dozens of successful tool calls. Nothing about the exit code, the status field or the elapsed time
-tells you it happened. With the patch applied, the same brief went from an empty answer to 49 tool
-calls and 3× the reasoning tokens.
+That is the entire installation. It is plain Python with no dependencies to install — nothing is
+compiled, nothing is downloaded, nothing runs in the background.
 
-The script edits only `~/.gemini/antigravity-cli/settings.json`, is additive and idempotent, backs
-up before writing, and has `--revert`. It also **denies the metered Firecrawl tools** (`crawl`
-bills per page with no ceiling; `monitor_*` bills on a schedule with nobody watching), which is
-why the answer to a permission problem is never `--dangerously-skip-permissions` — that flag
-unlocks those too.
+**Then, once per machine:**
 
-`doctor.py` checks this on every run and tells you if the file has been reverted or rewritten.
-
----
-
-## 4. Running a review
-
-```powershell
-python <SKILL_DIR>/orchestrate.py `
-  --brief brief.md --tier strategic --marker REVIEW-DONE-01 --out reviews --dry-run
+```
+python ~/.claude/skills/model-orchestration/doctor.py
 ```
 
-`--dry-run` is a **complete** preflight — plan, brief, system preset, API key, both binaries, agy
-permissions, and the personal-data gate — and spends nothing. Run it first, every time. Drop it to
-launch for real.
+It checks everything, reports what is missing in plain language, and prints your exact run
+command with the real path already filled in.
 
-Useful flags: `--only` / `--skip` (any channel alias works: `spark`/`http`, `codex`,
-`agy`/`gemini`), `--set codex=gpt-5.4` to pin a model, `--route "<what the user actually typed>"`
-for prose routing, `--system legal-research` for regulated-domain briefs.
+## When something goes wrong
 
-Everything else — the depth tiers, the flag traps, how to tell a real review from a fluent one —
-is in `SKILL.md` and the `references/` files beside it. Claude Code reads them on demand.
+Every run writes two files next to its results:
 
----
+- **`run.log`** — everything that happened, written as it happens, so it survives a crash.
+- **`diagnostics.json`** — a structured report: what is installed, what each model did, what
+  failed, and for each problem a plain-language cause and a suggested fix.
 
-## 5. Rules that are enforced in code, not in prose
+**Both are automatically stripped of keys, tokens and personal data**, so you can paste them
+straight into a chat with an AI assistant and ask it to fix the problem, or attach them to a bug
+report, without checking them first.
 
-This kit assumes prose does not restrain anything, because that was measured: an instruction in
-the model's own system prompt failed **5 times out of 5** to stop it calling a tool. Only
-permission rules worked. So the things that must not happen are checks, not sentences.
+That is the intended workflow when you are stuck: hand `diagnostics.json` to your AI assistant and
+ask it to diagnose the cause. See **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**.
 
-- **A payload containing a key, token or private key is never sent.** There is no override flag.
-- **A payload containing personal identifiers is blocked** — alien numbers, case/receipt numbers,
-  SSNs, emails, phone numbers, a labelled date of birth. Tokenize them in the *sent copy* only
-  (`APPLICANT_1`, `[CASE-NUMBER]`) and tell the model the placeholders are expected; a reviewer
-  never needs real identifiers to review reasoning. If they genuinely belong, pass `--allow-pii`
-  deliberately. The gate reports **kind and line number, never the value** — printing it would
-  leak it into the transcript, which is the same mistake one step earlier.
-  **Once a payload is sent it cannot be recalled.** It is at three separate vendors.
-- **A refusal cannot pass as a review.** A model that declines still obeys the formatting
-  instruction, so it appends your end marker and clears every mechanical check. Measured: a
-  162-byte refusal was reported as a successful channel.
-- **Citations are cross-checked against pages actually opened.** One channel fabricated four
-  real-looking document numbers in a single session, each under the correct article slug, and one
-  of them was even fetched successfully because the site resolves by number and ignores the slug.
-  Grounding varied 1/6 → 4/4 → 5/5 across runs of the *same* brief, so this is checked every run,
-  not once.
+## Roadmap
 
----
+Planned for the next versions:
 
-## 6. Cost discipline
+- **Kimi K3 via Hermes** — added as a fourth reviewer channel through the Hermes gateway.
+- **Direct OpenRouter support** — one credential reaching many models, so you can add reviewers
+  without a separate account and CLI for each. This makes running four or five independent
+  reviewers practical rather than an installation project.
+- Per-run cost reporting, and a summary that drafts the disagreement table for you.
 
-1. **Spark first** for anything a competent researcher with a search engine would settle.
-2. **agy** when that is inconclusive, for large-context reading, and as the fast sanity check.
-3. **Codex last.** It is for judgement calls and line-level audits of a finished artifact.
-   Sending it a lookup wastes 25 minutes and the most expensive quota you have.
+Both additions are configuration, not new code: every model this tool knows about lives in a
+single `channels.json` registry, and adding a channel is an edit to that file.
 
-That ladder governs ordinary work. It does **not** apply to a commissioned second opinion: there,
-run all three on the identical packet, because the disagreement is the product.
+## What this is not
 
----
+- **Not a fact database.** It reads the live web through the models' own search tools. It can be
+  wrong, which is exactly why it shows you three answers instead of one.
+- **Not a replacement for an expert.** It is very good at finding what an expert should look at.
+- **Not "deep research" mode.** Those are separate, separately-billed products at both vendors and
+  are not reachable from a normal subscription. This runs the models at maximum depth with a
+  source-discipline instruction, which is the same shape — with the advantage that you get three
+  of them and an audit of the citations, which no deep-research product gives you.
+- **Not automatic.** You still read the disagreement and decide. The tool's job is to make sure
+  you are deciding with the objections in front of you.
 
-## 7. Configuring it for your own models
+## Licence
 
-Every model name lives in **`channels.json`** and nowhere else — adding, disabling or re-pointing
-a channel is an edit there, never in `orchestrate.py`. Aliases in that file are what prose routing
-matches against, and a duplicate alias is rejected at load time (where it is a typo) rather than
-at spend time (where it is the wrong model).
-
-`systems/` holds the system-prompt presets. Two ship: `base-depth` (the default) and
-`legal-research`.
-
-⚠️ **Do not merge the two presets.** `base-depth` asks for "unofficial, grey routes alongside the
-official one", which is right for engineering and wrong for a regulated domain, where it reads as
-*suggest a way around the rule* — the exact trigger that gets a legal brief refused. The omission
-in `legal-research` is deliberate and is documented inside both files.
+MIT — see [LICENSE](LICENSE). Use it commercially, fork it, ship it inside your own product.
 
 ---
 
-## 8. When something breaks
-
-Run `doctor.py` first — it names the broken thing and what to do about it. Then `SKILL.md` §9,
-which is a symptom → cause → fix table built entirely from failures that actually happened.
-
-Two habits worth having from day one: **never pin a version in a document** (both CLIs moved under
-this kit inside one week, and stale versions in prose do not look stale — they look like
-documentation), and **never validate a channel on its exit code**. Both `status` and the exit code
-have been observed lying in both directions on the same channel.
+*Every rule enforced by this tool exists because something failed on a real run. The measurements
+quoted above are from actual runs, not estimates. Details and dates are in
+[TECHNICAL.md](TECHNICAL.md).*

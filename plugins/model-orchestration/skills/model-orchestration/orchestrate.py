@@ -19,12 +19,15 @@ Environment (see SKILL.md section 1). The key is read here and never printed:
 """
 
 import argparse
+import datetime
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
 import time
+import traceback
 import re
 import urllib.error
 import urllib.request
@@ -52,8 +55,29 @@ STREAM_ABOVE_BUDGET = 32000  # above this, a non-streaming call is a coin flip. 
 AGY_ARGV_LIMIT = 30000       # Windows command line dies somewhere past ~32K chars
 
 
+# Console output is also teed to <out>/run.log and kept in memory for diagnostics.json.
+# Appending per line rather than buffering is deliberate: if the run is killed or the machine
+# dies mid-review, the log of what happened up to that point is what makes the failure
+# diagnosable, and a buffered log is empty in exactly that case.
+_LOG = {"path": None, "lines": []}
+
+
 def log(msg):
+    # Scrubbed at the single choke point rather than at each call site. Caught while testing the
+    # crash handler: an exception whose MESSAGE contained a key printed it to the console in full,
+    # because only the diagnostics FILE was being scrubbed. stdout is read by the orchestrating
+    # model and archived to disk, so it is the same exfiltration surface as any other - and the
+    # one call site that forgets is the one that matters. scrub() is defined further down; the
+    # lookup happens at call time, so ordering is not a problem.
+    msg = scrub(str(msg))
     print(msg, flush=True)
+    _LOG["lines"].append(msg)
+    if _LOG["path"]:
+        try:
+            with open(_LOG["path"], "a", encoding="utf-8") as f:
+                f.write(msg + "\n")
+        except OSError:
+            pass          # a broken log must never take the run down with it
 
 
 # =============================================================================================
@@ -452,11 +476,30 @@ PII_PATTERNS = [
     # first version of this gate. Caught by testing it on a payload built to be caught.
     ("US_PHONE",       re.compile(r"(?<!\d)(?:\+1[ .\-]?)?\(\d{3}\)[ .\-]?\d{3}[ .\-]?\d{4}\b"
                                   r"|\b\d{3}-\d{3}-\d{4}\b")),
-    # Label-driven, because a bare date is far too common to flag.
-    ("DATE_OF_BIRTH",  re.compile(r"(?i)\b(?:date of birth|d\.?o\.?b\.?|дата рождения)\b"
-                                  r"\s*[:\-]?\s*\S")),
-    ("PASSPORT_LABEL", re.compile(r"(?i)\b(?:passport (?:no\.?|number|#)|номер паспорта)\b"
-                                  r"\s*[:\-]?\s*\S")),
+    # Label-driven, because a bare date is far too common to flag. But the label alone is not
+    # enough either: `\s*[:\-]?\s*\S` accepts ANY next character, so the sentence "blocks a
+    # labelled date of birth unless you pass --allow-pii" matched on the word "unless". Found by
+    # running the publish audit over this project's own prose, which is full of such sentences.
+    # A false positive here is not cosmetic - it is the failure mode that kills the gate, because
+    # a user who sees it fire on clean text learns to pass --allow-pii by reflex, and that flag
+    # disables the whole PII class at once. So the value must actually look like a date.
+    #
+    # NOTE the missing trailing \b after the label. This set has now hit the same trap four times:
+    # `d\.?o\.?b\.?\b` can never match in "d.o.b. April 12, 1988", because between the final "."
+    # and the space there is no word boundary - both are non-word characters. Ditto "passport no."
+    # The date/identifier shape below is the real gate, so the closing \b was only ever a liability.
+    ("DATE_OF_BIRTH",  re.compile(r"(?i)\b(?:date\s+of\s+birth|d\.?o\.?b\.?|дата\s+рождения)"
+                                  r"[\s:=—-]*(?:is|born)?[\s:=—-]*"
+                                  r"(?:\d{1,4}[./\-]\d{1,2}[./\-]\d{1,4}"        # 1988-04-12, 4/12/88
+                                  r"|\d{1,2}\s+[A-Za-zА-Яа-я]{3,}\.?\s+\d{4}"    # 12 April 1988
+                                  r"|[A-Za-zА-Яа-я]{3,}\.?\s+\d{1,2},?\s+\d{4})")),  # April 12, 1988
+    # Same failure, same fix: a passport number is an identifier, so require one - six to twelve
+    # alphanumerics containing at least one digit - rather than "any next character". The digit is
+    # what keeps "the passport number fields are blank" from matching on the word "fields".
+    ("PASSPORT_LABEL", re.compile(r"(?i)\b(?:passport\s*(?:no\.?|number|#)|номер\s+паспорта)"
+                                  r"[\s:=№-]*"
+                                  r"(?=[A-Za-z0-9]{6,12}(?![A-Za-z0-9]))"
+                                  r"[A-Za-z0-9]*\d[A-Za-z0-9]*")),
 ]
 
 
@@ -476,6 +519,155 @@ def scan_payload(text, label):
                     if hit not in bucket:
                         bucket.append(hit)
     return secrets, pii
+
+
+def scrub(text):
+    """
+    Replace every secret- and PII-shaped run with a labelled placeholder.
+
+    This is the one place in the program that REWRITES rather than reports, because
+    diagnostics.json is written to be pasted into a chat or attached to a public issue, and
+    "safe as long as the author remembered" is not safe.
+
+    re.sub, never a truncation. On 2026-07-31 a real key reached a transcript through a
+    "masking" expression that kept the first 60 characters of a 48-character key, i.e. all of
+    it. A substitution cannot fail that way: either the pattern matched and the text is gone,
+    or it did not match and nothing claimed otherwise.
+    """
+    if not isinstance(text, str):
+        return text
+    for kind, rx in SECRET_PATTERNS:
+        text = rx.sub("[REDACTED:%s]" % kind, text)
+    for kind, rx in PII_PATTERNS:
+        text = rx.sub("[REDACTED:%s]" % kind, text)
+    return text
+
+
+def scrub_deep(obj):
+    """scrub() over an arbitrary JSON-shaped structure, keys included."""
+    if isinstance(obj, dict):
+        return {scrub(k): scrub_deep(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [scrub_deep(v) for v in obj]
+    return scrub(obj)
+
+
+# Signature -> (plain-language cause, what to actually do). Matched case-insensitively against
+# the error text. This is what turns diagnostics.json from a stack trace into something an
+# assistant - or a non-technical user pasting the file into a chat - can act on.
+KNOWN_FAILURES = [
+    ("MODEL_API_KEY not set",
+     "The Spark channel has no API key.",
+     "Set MODEL_API_KEY, or run with --skip spark to use the other channels only. The harness "
+     "is designed to run any subset of channels; a missing key is not a fatal condition."),
+    ("binary not found",
+     "A command-line reviewer is not installed, or is installed somewhere this program did not "
+     "look.",
+     "Either install it, or exclude that channel (--skip codex / --skip gemini). If it IS "
+     "installed, point the harness at it explicitly with CODEX_BIN=... or AGY_BIN=..."),
+    ("END MARKER ABSENT",
+     "The model stopped before finishing, or never emitted the agreed end-of-review marker.",
+     "The harness appends the marker instruction automatically when the brief does not contain "
+     "it. If this still fires, the model most likely hit a length or time limit - re-run that "
+     "channel alone, or lower --tier."),
+    ("REFUSAL",
+     "The model declined the task on policy grounds rather than failing technically.",
+     "This is almost always a framing problem, not a subject ban. Rewrite the brief as "
+     "verification of sources rather than as strategy or advice, and pass "
+     "--system legal-research for regulated subjects."),
+    ("status.*401|unauthor|invalid.*api.?key|authentication",
+     "The API key was rejected by the vendor.",
+     "The key is present but not valid - it was revoked, rotated, or belongs to a different "
+     "account. Issue a new one and replace it in the environment."),
+    ("status.*429|rate.?limit|quota|weekly limit",
+     "A usage or rate limit was hit on that vendor.",
+     "Wait, or route the work to another channel with --route/--skip. Do NOT switch that "
+     "channel to a metered pay-per-token key to get around a subscription limit unless you "
+     "have decided that cost is acceptable."),
+    ("timed out|timeout",
+     "The channel took longer than its allotted time.",
+     "Raise the timeout for that channel, lower --tier, or split the brief into smaller "
+     "questions. Deep tiers on large briefs can legitimately run for many minutes."),
+    ("EMPTY ANSWER|response.*\"\"",
+     "The channel returned nothing at all.",
+     "On the Antigravity channel this is the classic symptom of a denied tool permission "
+     "discarding the whole run - run patch_agy_permissions.py. Otherwise check the run log for "
+     "an error frame."),
+    ("SECRETS IN THE PAYLOAD",
+     "The brief contains something shaped like a key, token or password.",
+     "This is refused with no override, because a credential sent to three external vendors "
+     "cannot be recalled. Remove or redact it in the brief."),
+]
+
+
+def diagnose(text):
+    """Return (cause, fix) for an error string, or (None, None) if unrecognised."""
+    for sig, cause, fix in KNOWN_FAILURES:
+        if re.search(sig, text or "", re.I):
+            return cause, fix
+    return None, None
+
+
+def write_diagnostics(outdir, payload):
+    """
+    Write a scrubbed, machine-readable account of the run to <outdir>/diagnostics.json.
+
+    Written on EVERY run, not only on failure: the common support question is "it worked
+    yesterday", which needs the successful run's file to compare against. Never raises - a
+    diagnostics writer that can break the thing it is diagnosing is worse than none.
+    """
+    try:
+        os.makedirs(outdir, exist_ok=True)
+        payload = scrub_deep(payload)
+        path = os.path.join(outdir, "diagnostics.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
+        return path
+    except Exception:
+        return None
+
+
+def environment_report(want=()):
+    """Facts about this machine that determine whether a run can work. No secret values."""
+    key = os.environ.get("MODEL_API_KEY") or ""
+    if not key and os.name == "nt":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg:
+                key = winreg.QueryValueEx(reg, "MODEL_API_KEY")[0]
+        except OSError:
+            key = ""
+    env = {
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "os_name": os.name,
+        "cwd": os.getcwd(),
+        "skill_dir": os.path.dirname(os.path.abspath(__file__)),
+        # Presence and length only. Printing the value is the failure this whole file guards.
+        "spark_key_present": bool(key),
+        "spark_key_length": len(key),
+        "spark_endpoint": os.environ.get("MODEL_API_BASE", "https://api.meta.ai/v1"),
+    }
+    for name, resolver in (("codex", codex_bin), ("agy", agy_bin)):
+        try:
+            b = resolver()
+            found = bool(os.path.isfile(b) or shutil.which(b))
+            env[name + "_path"] = b
+            env[name + "_installed"] = found
+            env[name + "_version"] = _binary_version(b) if found else None
+        except Exception as exc:
+            env[name + "_installed"] = False
+            env[name + "_error"] = repr(exc)
+    return env
+
+
+def _binary_version(binary):
+    """Ask the binary what it is. Never assert a version in prose - both CLIs moved inside a week."""
+    try:
+        p = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=20)
+        return (p.stdout or p.stderr or "").strip().splitlines()[0][:80] or None
+    except Exception:
+        return None
 
 
 def pii_gate(parts, allow_pii):
@@ -782,9 +974,9 @@ def channel_preflight(want, outdir):
         problem = agy_permission_preflight()
         if problem:
             yield "agy: " + problem
-        # agy mangles non-ASCII in its own JSON output (observed: a Cyrillic directory came back
-        # as "D:\\Claude Code\\???????????\\Gemini"). Nothing crashed, but a workspace it cannot
-        # spell is not a workspace you want a 25-minute run to depend on.
+        # agy mangles non-ASCII in its own JSON output (observed: a directory with a Cyrillic
+        # component came back as "...\\???????????\\..."). Nothing crashed, but a workspace it
+        # cannot spell is not a workspace you want a 25-minute run to depend on.
         p = os.path.abspath(outdir)
         try:
             p.encode("ascii")
@@ -1139,7 +1331,21 @@ def main():
                     help="print the resolved plan and exit without spending anything")
     ap.add_argument("--allow-pii", action="store_true",
                     help="send personal identifiers anyway. Secrets are never sendable")
+    ap.add_argument("--no-log", action="store_true",
+                    help="do not write run.log / diagnostics.json into the output directory")
     a = ap.parse_args()
+
+    # Start the file log before anything can fail, so a failure in validation is still recorded.
+    started = time.time()
+    if not a.no_log:
+        try:
+            os.makedirs(a.out, exist_ok=True)
+            _LOG["path"] = os.path.join(a.out, "run.log")
+            with open(_LOG["path"], "w", encoding="utf-8") as f:
+                f.write("# model-orchestration run log - %s\n"
+                        % datetime.datetime.now().astimezone().isoformat(timespec="seconds"))
+        except OSError as exc:
+            log("note: could not open a run log in %s (%s); continuing without one" % (a.out, exc))
 
     # Validate every input BEFORE the dry-run exit, so --dry-run is a real preflight. A mistyped
     # --system used to surface only after the expensive channels had already been launched.
@@ -1174,6 +1380,18 @@ def main():
 
     with open(a.brief, encoding="utf-8") as f:
         brief = f.read()
+
+    # Every channel is VERIFIED against the end marker, but until 2026-07-31 nothing ever asked
+    # the model to emit one: the brief's author was silently expected to know. A brief written by
+    # anyone who had not read the docs therefore came back PROBLEM on all three channels with a
+    # perfectly good review inside - the worst kind of failure, because the harness looked broken
+    # while the models had done their job. Measured on a two-line hand-written brief.
+    #
+    # Appended only when the brief does not already contain the marker, so an author who did
+    # write the instruction gets no duplicate, and `--marker ""` still disables the check.
+    if a.marker and a.marker not in brief:
+        brief += ("\n\n---\nWhen the ENTIRE review is finished, end your reply with this exact "
+                  "line and nothing after it:\n%s\n" % a.marker)
     # The default used to be a single sentence, and it reached only the HTTPS channel. Depth,
     # source discipline and output language were therefore left to whatever each model defaults
     # to - which for a terminal-tuned CLI is "short, fast, few tool calls". base-depth.md is the
@@ -1220,7 +1438,8 @@ def main():
     # preflight. Previously --dry-run verified the route, the brief path and the preset, then
     # said nothing about a missing key or a missing binary - so the first evidence that Codex
     # was not installed arrived after the other two channels had already been paid for.
-    for problem in channel_preflight(want, a.out):
+    preflight = list(channel_preflight(want, a.out))
+    for problem in preflight:
         log("  [preflight] " + problem)
 
     if a.dry_run:
@@ -1288,10 +1507,124 @@ def main():
     log("=" * 78)
     log("%d/%d channels returned a verified review. Outputs in %s"
         % (ok_count, len(results), os.path.abspath(a.out)))
+
+    # ---- diagnostics ------------------------------------------------------------------------
+    # Written on every run, success included: the most common support question is "it worked
+    # yesterday", and answering it needs the working run's file to diff against.
+    problems = []
+    for name, r in results.items():
+        for text in ([r.get("error")] if r.get("error") else []) + list(r.get("warnings", [])):
+            cause, fix = diagnose(str(text))
+            problems.append({"channel": name, "detail": str(text),
+                             "likely_cause": cause, "suggested_fix": fix})
+    # A missing binary is reported twice - once by the preflight, once by the channel that then
+    # failed on it - and printing the same advice four times reads like four separate faults.
+    # Keep the channel-level entry, which names the channel, and drop the preflight echo.
+    seen = {(p["channel"], p["likely_cause"]) for p in problems}
+    causes = {p["likely_cause"] for p in problems}
+    for p in preflight:
+        cause, fix = diagnose(p)
+        if cause and cause not in causes:
+            problems.append({"channel": "preflight", "detail": p,
+                             "likely_cause": cause, "suggested_fix": fix})
+            causes.add(cause)
+    deduped, keys = [], set()
+    for p in problems:
+        k = (p["channel"], p["likely_cause"], p["detail"])
+        if k not in keys:
+            keys.add(k)
+            deduped.append(p)
+    problems = deduped
+
+    diag = write_diagnostics(a.out, {
+        "schema": "model-orchestration/diagnostics/1",
+        "how_to_read_this":
+            "A machine-readable account of one review run. It is scrubbed of secrets and "
+            "personal identifiers by construction, so it is safe to paste into a chat or attach "
+            "to a bug report. `problems` is the part to act on: each entry carries the raw "
+            "detail plus a plain-language cause and a suggested fix. `channels` shows what each "
+            "reviewer actually did - a channel with ok=false still often produced usable text, "
+            "which is saved beside this file. `environment` shows what is installed; a missing "
+            "key or a missing CLI is a normal, non-fatal condition and only disables that one "
+            "channel.",
+        "generated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "seconds": round(time.time() - started, 1),
+        "ok_channels": ok_count,
+        "total_channels": len(results),
+        "invocation": {"tier": a.tier, "marker": a.marker, "system": a.system or "base-depth",
+                       "only": a.only, "skip": a.skip, "route": a.route, "sets": a.sets,
+                       "brief_chars": len(brief), "allow_pii": a.allow_pii},
+        "environment": environment_report(want),
+        "plan": plan,
+        "preflight": preflight,
+        "problems": problems,
+        "channels": {n: {k: v for k, v in r.items() if k != "text"} for n, r in results.items()},
+        "console": _LOG["lines"],
+    }) if not a.no_log else None
+
+    if problems:
+        log("\n%d problem(s) recorded. Plain-language cause and fix for each:" % len(problems))
+        for p in problems:
+            if p["likely_cause"]:
+                log("  [%s] %s" % (p["channel"], p["likely_cause"]))
+                log("      -> %s" % p["suggested_fix"])
+    if diag:
+        log("\nDiagnostics: %s" % diag)
+        log("If something went wrong, hand that file to an AI assistant and ask it to fix the "
+            "cause - it is scrubbed of keys and personal data and contains everything needed.")
+
     log("Now report, per channel: accepted / rejected with proof / where they disagreed. "
         "The disagreement is the product.")
     return 0 if ok_count else 1
 
 
+def _crash_handler():
+    """
+    Turn an unexpected exception into a diagnostics file instead of a bare traceback.
+
+    A traceback on a terminal is lost the moment the window closes, and it is the one thing a
+    user cannot usefully relay ("it says something about line 812"). Writing it to disk, scrubbed,
+    means the next question - "send me the file" - has an answer that costs the user nothing.
+    """
+    try:
+        return main()
+    except KeyboardInterrupt:
+        log("\ninterrupted by user")
+        return 130
+    except SystemExit:
+        raise
+    except BaseException as exc:                       # noqa: BLE001 - deliberate catch-all
+        tb = traceback.format_exc()
+        log("\nUNEXPECTED ERROR: %s: %s" % (type(exc).__name__, exc))
+        out = "./reviews"
+        for i, arg in enumerate(sys.argv):
+            if arg == "--out" and i + 1 < len(sys.argv):
+                out = sys.argv[i + 1]
+        cause, fix = diagnose(str(exc) + "\n" + tb)
+        path = write_diagnostics(out, {
+            "schema": "model-orchestration/diagnostics/1",
+            "how_to_read_this":
+                "This run crashed. `traceback` is the Python failure; it is scrubbed of secrets "
+                "and personal identifiers, so it is safe to paste into a chat or a bug report. "
+                "Give it to an AI assistant with the request to diagnose and fix the cause.",
+            "generated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "crashed": True,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "traceback": tb,
+            "likely_cause": cause,
+            "suggested_fix": fix,
+            "argv": sys.argv[1:],
+            "environment": environment_report(),
+            "console": _LOG["lines"],
+        })
+        if path:
+            log("Diagnostics written to %s - hand that file to an AI assistant and ask it to "
+                "diagnose the cause. It contains no keys and no personal data." % path)
+        else:
+            log(tb)
+        return 1
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_crash_handler())

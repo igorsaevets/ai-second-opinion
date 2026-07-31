@@ -1,0 +1,16 @@
+# Normalise to LF in the repository and on checkout.
+#
+# Without this, a clone on Windows checks out install.sh with CRLF endings, and bash then fails
+# with `bad interpreter: /usr/bin/env bash^M` for anyone who copies that file to a Mac or Linux
+# box. The generator already writes LF; this makes git stop helpfully undoing that.
+* text=auto eol=lf
+
+# PowerShell is happy with either, but CRLF is what a Windows editor will produce anyway, so
+# declaring it prevents a spurious whole-file diff the first time someone edits it there.
+*.ps1 text eol=crlf
+
+# Never touch these.
+*.png binary
+*.jpg binary
+*.ico binary
+*.zip binary

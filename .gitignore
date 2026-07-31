@@ -1,4 +1,40 @@
-__pycache__/
-*.pyc
-*.bak.*
+# --- credentials: nothing resembling a secret may ever be committed -------------------------
+.env
+.env.*
+*.pem
+*.pfx
+*.p12
+*.key
+id_rsa
+id_ed25519
+credentials.json
+oauth_creds.json
+.npmrc
+.pypirc
+secrets/
+
+# --- run output: contains the documents you reviewed and the models' answers ----------------
 reviews/
+*-ws/
+run.log
+diagnostics.json
+*.events.ndjson
+
+# --- python ---------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# --- editors / OS ---------------------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# --- local backups the tools make -----------------------------------------------------------
+*.bak
+*.bak.*
