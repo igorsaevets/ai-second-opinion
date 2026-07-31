@@ -1,0 +1,57 @@
+{
+  "_comment": "Channel registry for orchestrate.py. Adding, disabling or re-pointing a channel is a change HERE, never in the code. Every model that rotates lives in this file so there is exactly one place to edit when a weekly limit runs out. Aliases are what a natural-language override like '5.5 instead of 5.6 Sol' is matched against; they must be unique across the whole file - routing.py refuses to load a registry with a colliding alias rather than guessing.",
+  "version": 2,
+  "channels": {
+    "spark": {
+      "kind": "http",
+      "enabled": true,
+      "label": "Spark (Messages API)",
+      "cost": "cheap",
+      "model": "muse-spark-1.1",
+      "models": {
+        "muse-spark-1.1": {"aliases": ["muse-spark-1.1", "muse spark", "spark 1.1"]}
+      },
+      "aliases": ["spark", "спарк", "муза", "muse", "http"],
+      "notes": "Default for lookups and fact-checks. Content filter is cumulative - probe cheap first."
+    },
+    "codex": {
+      "kind": "codex",
+      "enabled": true,
+      "label": "Codex CLI",
+      "cost": "expensive",
+      "model": "gpt-5.5",
+      "effort": "xhigh",
+      "models": {
+        "gpt-5.5":     {"aliases": ["gpt-5.5", "5.5", "гпт-5.5"]},
+        "gpt-5.6-sol": {"aliases": ["gpt-5.6-sol", "5.6 sol", "5.6-sol", "sol", "соль", "5.6"]},
+        "gpt-5.4":     {"aliases": ["gpt-5.4", "5.4"]}
+      },
+      "aliases": ["codex", "кодекс", "openai"],
+      "notes": "Strategic questions and final line-level audits only. Never send it a lookup."
+    },
+    "agy": {
+      "kind": "agy",
+      "enabled": true,
+      "label": "Antigravity CLI (Gemini)",
+      "cost": "mid",
+      "model": "gemini-3.1-pro",
+      "agent": "deep-researcher",
+      "_model_form": "Base slugs only, never the -high/-low suffixed form. Suffix and --effort are two spellings of one setting and a disagreement is a HARD failure: '--model gemini-3.1-pro-high --effort low' exits 1 in 3 seconds with 'conflicts with --effort=low'. With a base slug, --effort is the single source of truth. 'efforts' below is not decoration: gemini-3.1-pro genuinely has no medium, and asking for one is the same hard failure.",
+      "models": {
+        "gemini-3.1-pro":   {"aliases": ["gemini-3.1-pro", "3.1 pro", "pro"],
+                             "efforts": ["low", "high"]},
+        "gemini-3.6-flash": {"aliases": ["gemini-3.6-flash", "3.6 flash", "flash"],
+                             "efforts": ["low", "medium", "high"]}
+      },
+      "_models_removed": "claude-sonnet-4-6, claude-opus-4-6-thinking and gemini-3.1-pro-low are deliberately absent (the operator, 2026-07-31): routing a Claude model through agy spends the Gemini weekly subscription on a model already reachable directly, and Pro Low is the shallow variant this channel exists to avoid.",
+      "aliases": ["agy", "gemini", "джемини", "гемини", "antigravity", "антигравити"],
+      "notes": "Reports no tool telemetry in text mode - always run it through stream-json and count the tool calls."
+    }
+  },
+  "tiers": {
+    "quick":     {"agy_effort": "low",    "agy_timeout": "10m"},
+    "standard":  {"agy_effort": "medium", "agy_timeout": "15m"},
+    "strategic": {"agy_effort": "high",   "agy_timeout": "25m"},
+    "deep":      {"agy_effort": "high",   "agy_timeout": "40m"}
+  }
+}
