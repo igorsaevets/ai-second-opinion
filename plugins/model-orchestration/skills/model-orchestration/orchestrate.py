@@ -108,7 +108,13 @@ def _read_sse(resp):
         elif t == "message_start":
             out["usage"].update(ev.get("message", {}).get("usage", {}) or {})
         elif t == "content_block_start":
-            blocks.append(ev.get("content_block", {}).get("type"))
+            # Keep the whole block, not just its type. A `web_search_tool_result` block carries
+            # the URLs the model actually fetched, and throwing them away was why the
+            # cited-vs-opened check existed for agy and not for this channel - the one place
+            # fabricated citations were proved, checked on one channel out of three.
+            cb = ev.get("content_block", {}) or {}
+            if cb.get("type") and cb.get("type") != "text":
+                blocks.append(cb)
         elif t == "content_block_delta":
             d = ev.get("delta", {})
             if d.get("type") == "text_delta":
@@ -117,7 +123,7 @@ def _read_sse(resp):
             out["stop_reason"] = ev.get("delta", {}).get("stop_reason") or out["stop_reason"]
             # output_tokens only becomes final here; message_start carries a placeholder
             out["usage"].update(ev.get("usage", {}) or {})
-    out["content"] = [{"type": b} for b in blocks if b]
+    out["content"] = blocks
     out["content"].append({"type": "text", "text": "".join(text_parts)})
     return out
 
@@ -253,6 +259,29 @@ def _verify_http(data, marker, floor, secs, tier):
     if not searches:
         note.append("ZERO tool invocations - every dated fact in this answer is from training data, "
                     "not from the web. Treat dated claims as unverified.")
+    # Same cited-vs-opened check the agy channel gets. This channel reports a search COUNT, which
+    # proves activity and not grounding - the distinction that caught four fabricated Federal
+    # Register document numbers on the other channel. `web_search_tool_result` blocks list the
+    # pages actually fetched, so the comparison is free once the blocks are kept.
+    opened = set()
+    for b in blocks:
+        if b.get("type") == "web_search_tool_result":
+            for item in (b.get("content") or []):
+                if isinstance(item, dict) and item.get("url"):
+                    opened.add(_norm_url(item["url"]))
+    n_cited, grounded, ungrounded = _cite_check(text, opened)
+    # Only speak when there IS a record of what was opened. With an empty `opened` set every
+    # citation looks ungrounded, which would be inferring a failure from missing evidence - the
+    # exact move this harness forbids the models themselves to make.
+    if opened and ungrounded:
+        msg = ("CITATIONS: only %d of %d cited URLs appear among the %d pages this run actually "
+               "fetched. Unopened: %s. Those came from the model's memory, not from a page it "
+               "read - verify before repeating them."
+               % (len(grounded), n_cited, len(opened), ", ".join(ungrounded[:5])))
+        # Zero grounding with citations present is memory dressed as research: a hard failure.
+        # Partial grounding stays a note, because such a review can still be worth reading.
+        (fail if n_cited and not grounded else note).append(msg)
+
     if floor and out_tok and out_tok < floor:
         # Caught by running it: a brief that says "answer in under 250 words" makes a short reply
         # CORRECT, and this check then fires on a perfectly good answer. The floor only means

@@ -49,7 +49,9 @@ kept **under** that budget (~4.3K tokens, ~300 lines) and is never clipped; the 
   returning empty answers again, that is the first thing to check (`references/channels.md`).
 - **Citations are not evidence.** agy fabricated four Federal Register document numbers in one
   session, each under the correct article slug, one of which it had genuinely fetched. Read the
-  `CITATIONS:` line the harness prints; run `citecheck.py --resolve` (`references/verification.md`).
+  `CITATIONS:` line — the harness prints it for **agy and Spark**, the two channels that report
+  which pages they opened; Codex reports none, so spot-check it by hand. `citecheck.py --resolve`
+  catches the rest (`references/verification.md`).
 - **Every model answers in English**, enforced by the default system preset — the report is
   machine-read, and Russian costs ~2× the tokens (§0.2 below).
 - **Choosing models is config, not code.** `--route "не используй 5.6 Sol, вместо нее 5.5"`,
@@ -95,10 +97,10 @@ That runs **all three channels in parallel** and writes `HTTP.md`, `CODEX.md`, `
 | flag | what it does |
 |---|---|
 | `--brief` | file with the question. **Required.** Its last line should instruct the model to end with your marker |
-| `--tier` | depth: `quick` · `standard` · `strategic` · `deep`. Default `strategic`. See §3 |
+| `--tier` | depth: `quick` · `standard` · `strategic` · `deep`. Default `strategic`. See §2 |
 | `--marker` | literal string the reply must end with. If it is absent the output is incomplete |
 | `--out` | output directory. Default `./reviews` |
-| `--system` | optional system-prompt file. **The harness appends §9 to it** — end the file with a newline or the appended sentence collides with your last word |
+| `--system` | preset name or path (§0.2). The harness **appends the no-non-existence rule** to whatever you pass — end the file with a newline or that sentence collides with your last word |
 | `--only` | restrict channels. Any alias in `channels.json` works: `spark`/`http`, `codex`, `agy`/`gemini`. Omit to run all three |
 | `--skip` | the inverse of `--only` |
 | `--set` | pin a model without editing anything: `--set codex=gpt-5.4` |
