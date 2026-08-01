@@ -31,13 +31,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this pr
 
 ### Fixed
 
-- 🔴 **The published `LICENSE` named the wrong copyright holder.** A substitution intended to strip
-  the author's machine identity from technical documents also rewrote the copyright line, which
-  read `Copyright (c) 2026 the operator Saevets` for the entire life of the 1.1.0 release. The
-  build reported clean throughout, because a per-file allowlist had told the leak sweep to skip
-  `LICENSE` — **an allowlist entry is a promise that a file is fine, and nothing ever re-checks the
-  promise.** The allowlist is gone; the sweep now exempts the exact configured disclosure string,
-  so a credit line passes while the same name beside a home path still fails.
+- 🔴 **The published `LICENSE` named the wrong copyright holder** for the entire life of the 1.1.0
+  release. The generator rewrites the author's given name out of technical documents so that no
+  machine-specific identity ships, and that substitution also hit the copyright line, replacing the
+  first name with the generic placeholder and leaving the surname beside it. The build reported
+  clean throughout, because a per-file allowlist had told the leak sweep to skip `LICENSE` —
+  **an allowlist entry is a promise that a file is fine, and nothing ever re-checks the promise.**
+  The allowlist is gone; the maintainer credit is generator configuration filled in *after* the
+  substitution runs, and the sweep exempts exactly that configured value.
 - **`SECURITY.md` pointed at a vulnerability-reporting channel that did not exist.** It told
   researchers to use GitHub's "Report a vulnerability" button while private vulnerability reporting
   was disabled on the repository, so the button was not there. Enabled, and verified anonymously.
