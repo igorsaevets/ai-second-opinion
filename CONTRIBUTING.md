@@ -71,9 +71,18 @@ assumed current.
 
 ## Reporting a bug
 
-Attach `diagnostics.json` from the failing run. It is scrubbed of keys and personal data by
-construction, so it is safe to attach without reading it first, and it contains the environment,
-the resolved plan and the failure — considerably more than a screenshot.
+[Open an issue](https://github.com/igorsaevets/ai-second-opinion/issues) and attach `diagnostics.json` from the
+failing run. It is scrubbed of keys and personal data by construction, so it is safe to attach
+without reading it first, and it contains the environment, the resolved plan and the failure —
+considerably more than a screenshot.
+
+**A security problem is the one exception:** use the
+[private advisory form](https://github.com/igorsaevets/ai-second-opinion/security/advisories/new) rather than a
+public issue. See [SECURITY.md](SECURITY.md).
+
+For questions and ideas that are not yet a bug, use
+[Discussions](https://github.com/igorsaevets/ai-second-opinion/discussions). For anything commercial, the contact
+links are at the bottom of the [README](README.md#found-a-bug-want-a-feature-want-to-work-together).
 
 ## Code style
 

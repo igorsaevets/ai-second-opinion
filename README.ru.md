@@ -192,6 +192,23 @@ python ~/.claude/skills/model-orchestration/doctor.py
 - **Не автомат.** Расхождение читаете и решаете вы. Задача инструмента — чтобы вы решали, имея
   возражения перед глазами.
 
+## Нашли баг? Нужна доработка? Хотите сотрудничать?
+
+| Что вы хотите сделать | Куда идти |
+|---|---|
+| **Сообщить о баге** | [Открыть issue](https://github.com/igorsaevets/ai-second-opinion/issues) и приложить `diagnostics.json` — он очищен по построению, можно прикладывать не читая |
+| **Попросить функцию или предложить улучшение** | [Открыть issue](https://github.com/igorsaevets/ai-second-opinion/issues) |
+| **Задать вопрос или показать, что вы собрали** | [Discussions](https://github.com/igorsaevets/ai-second-opinion/discussions) |
+| **Сообщить об уязвимости** | [Приватный отчёт об уязвимости](https://github.com/igorsaevets/ai-second-opinion/security/advisories/new) — пожалуйста, **не** через публичный issue. См. [SECURITY.md](SECURITY.md) |
+| **Сотрудничество, консалтинг, коммерческие вопросы** | [LinkedIn](https://www.linkedin.com/in/igorsaevets/) · [Facebook](https://facebook.com/igorsaevets) · [GitHub](https://github.com/igorsaevets) |
+
+Автор и мейнтейнер — **Igor Saevets** ([@igorsaevets](https://github.com/igorsaevets)), Los Angeles.
+
+Почтового адреса в репозитории намеренно **нет.** Публичный адрес в публичном репозитории
+вычерпывают спам-боты за считанные дни, а адрес в коммитах — это no-reply-релей GitHub, у которого
+вообще нет почтового сервера: письмо на него не доходит никуда и молча. Канал, который бесшумно
+проглатывает баг-репорт, хуже отсутствующего — поэтому рабочие каналы те, что в таблице выше.
+
 ## Лицензия
 
 MIT — см. [LICENSE](LICENSE). Можно использовать коммерчески, форкать, встраивать в свой продукт.

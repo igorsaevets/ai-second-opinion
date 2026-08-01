@@ -4,6 +4,61 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-08-01
+
+### Added
+
+- **Every run now ends with a citation existence check.** What used to be a separate command you
+  had to remember (`citecheck.py --resolve-urls`) runs automatically; `--no-citecheck` disables it.
+  Results are printed and recorded in `diagnostics.json` under `citations`.
+
+  The reasoning is worth stating, because it decides the design. There are two questions about a
+  citation and only one is answerable everywhere: *did the model open this page* needs the
+  channel's own tool telemetry, and the Codex channel reports none at all; *does this page exist*
+  needs only a fetch, so it works on every channel. Existence is the weaker question and the
+  universal one, and it catches the dangerous shape — a fluent, correct-sounding review citing
+  pages that were never opened. And a verification step that depends on remembering runs least
+  often when the run was rushed, which is the same moment nobody re-reads the citations by hand.
+
+  It deliberately **does not affect the exit code**. One measured "dead" citation was a query for
+  a release tag that does not exist — the 404 *was* the answer. Failing a run on that teaches
+  people to ignore the check. `BLOCKED` and `UNKNOWN` are never reported as fabrication, and when
+  the per-channel cap applies, the number of unchecked URLs is stated rather than dropped quietly.
+- **Contact and reporting section** in both READMEs: issues, discussions, private security
+  advisories, and the maintainer's professional links. There is deliberately no email — see below.
+- Maintainer identity is now generator configuration rather than literal text, so a fork rebuilds
+  with its own contact details instead of inheriting the author's.
+
+### Fixed
+
+- 🔴 **The published `LICENSE` named the wrong copyright holder.** A substitution intended to strip
+  the author's machine identity from technical documents also rewrote the copyright line, which
+  read `Copyright (c) 2026 the operator Saevets` for the entire life of the 1.1.0 release. The
+  build reported clean throughout, because a per-file allowlist had told the leak sweep to skip
+  `LICENSE` — **an allowlist entry is a promise that a file is fine, and nothing ever re-checks the
+  promise.** The allowlist is gone; the sweep now exempts the exact configured disclosure string,
+  so a credit line passes while the same name beside a home path still fails.
+- **`SECURITY.md` pointed at a vulnerability-reporting channel that did not exist.** It told
+  researchers to use GitHub's "Report a vulnerability" button while private vulnerability reporting
+  was disabled on the repository, so the button was not there. Enabled, and verified anonymously.
+- **The "binary not found" advice named specific channels** (`--skip codex`, `CODEX_BIN=…`), so a
+  user whose *other* channel failed was told to reconfigure Codex. It now names none.
+- **`selftest.py` had hardcoded the channel list**, so adding a channel to `channels.json` turned
+  every *exclusion* case red while the tool was working correctly. Expectations are derived from
+  the registry: an inclusion case may name its input, an exclusion case must compute the complement.
+
+### Known limitations
+
+- Deep-research modes are not reachable — they are separately metered products at both vendors, not
+  a switch on a chat model. See `TECHNICAL.md` §9 for the vendor's own refusal message.
+- Citation *grounding* (did the model open the page) needs a channel event log, which only the
+  Antigravity channel exposes. For Codex only *existence* can be checked — which is what the
+  automatic check does.
+- **There is no contact email, on purpose.** The address on this repository's commits is GitHub's
+  no-reply relay: it attributes commits correctly and has **no mail exchanger at all**, so mail to
+  it is discarded without a bounce. A reporting channel that silently swallows a bug report is
+  worse than an absent one. Use issues, discussions, or the private advisory form.
+
 ## [1.1.0] — 2026-07-31
 
 First public release. Everything below was verified by running it, not by reading it.
@@ -79,4 +134,5 @@ First public release. Everything below was verified by running it, not by readin
   Antigravity channel exposes. For Codex only *existence* can be checked.
 - `--resolve-urls` is a separate command; it is not yet run automatically at the end of a review.
 
+[1.2.0]: https://github.com/igorsaevets/ai-second-opinion/releases/tag/v1.2.0
 [1.1.0]: https://github.com/igorsaevets/ai-second-opinion/releases/tag/v1.1.0

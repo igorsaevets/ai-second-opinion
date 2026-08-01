@@ -563,8 +563,14 @@ KNOWN_FAILURES = [
     ("binary not found",
      "A command-line reviewer is not installed, or is installed somewhere this program did not "
      "look.",
-     "Either install it, or exclude that channel (--skip codex / --skip gemini). If it IS "
-     "installed, point the harness at it explicitly with CODEX_BIN=... or AGY_BIN=..."),
+     # Deliberately names no channel. This advice used to say "--skip codex / --skip gemini" and
+     # "CODEX_BIN=... or AGY_BIN=...", which was correct until a fourth channel was added to the
+     # registry - after which a user whose KIMI channel failed was told to reconfigure Codex. The
+     # channel that failed is already printed on the line above this one; repeating a frozen list
+     # here could only ever go stale.
+     "Either install it, or exclude that channel with --skip <channel>. If it IS installed, point "
+     "the harness at it explicitly with the matching <CHANNEL>_BIN environment variable "
+     "(CODEX_BIN / AGY_BIN / HERMES_BIN). `python doctor.py` reports which ones were found."),
     ("END MARKER ABSENT",
      "The model stopped before finishing, or never emitted the agreed end-of-review marker.",
      "The harness appends the marker instruction automatically when the brief does not contain "
@@ -627,6 +633,116 @@ def write_diagnostics(outdir, payload):
         return None
 
 
+# How many cited URLs to probe per channel. A review normally cites 10-35; a runaway answer can
+# cite hundreds, and probing those serially would make the check the slowest part of the run. When
+# the cap bites it is REPORTED, never silent - a truncated check that reads as a complete one is
+# the same lie as a citation to a page nobody opened.
+CITECHECK_MAX_URLS = 60
+
+
+def citation_audit(results, enabled=True):
+    """
+    Fetch every URL each channel cited and report which ones do not exist.
+
+    WHY THIS RUNS AUTOMATICALLY. There are two different questions about a citation, and only one
+    of them is answerable everywhere:
+
+      "did the model OPEN this page?"   - grounding. Needs the channel's own tool telemetry.
+                                          agy exposes it, Spark reports a count, Codex reports
+                                          NOTHING. So for a third of the panel it is unanswerable.
+      "does this page EXIST?"           - existence. Needs only a fetch, so it works on every
+                                          channel including Codex. Weaker, but universal.
+
+    Existence is the check that catches the dangerous failure: a fluent, correct-sounding review
+    citing pages that were never opened and sometimes never existed. Measured 2026-07-31: agy cited
+    11 URLs of which 3 were 404, while its conclusions were right. That combination survives a
+    skim, which is exactly why a human is the wrong instrument for it.
+
+    It used to be a separate command you had to remember to run afterwards. A verification step
+    that depends on remembering is one that runs least often when the run is rushed - which is the
+    same moment nobody re-reads the citations either. So: on by default, `--no-citecheck` to turn
+    it off.
+
+    Deliberately does NOT affect the exit code. A 404 is information for the reader, not a verdict:
+    one measured "dead" citation was a GitHub API query for a tag that does not exist, i.e. the 404
+    WAS the answer. Failing a run on that would teach people to ignore the check, and a gate that
+    gets ignored protects nothing.
+
+    Never raises. Costs nothing at either vendor - it is plain HTTP to the cited hosts.
+    """
+    out = {}
+    if not enabled:
+        return {"skipped": "disabled with --no-citecheck"}
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from citecheck import URL_RE, probe_url, resolve_all
+    except Exception as exc:
+        # A partial install is a supported state, so this is a note, not a failure.
+        return {"skipped": "citecheck.py unavailable (%s)" % type(exc).__name__}
+
+    for name, r in results.items():
+        text = r.get("text") or ""
+        if not text:
+            continue
+        seen, urls = set(), []
+        for u in URL_RE.findall(text):
+            u = u.rstrip(".,;:")          # prose punctuation is not part of the URL
+            if u not in seen:
+                seen.add(u)
+                urls.append(u)
+        if not urls:
+            out[name] = {"cited": 0}
+            continue
+        probed, dropped = urls[:CITECHECK_MAX_URLS], max(0, len(urls) - CITECHECK_MAX_URLS)
+        try:
+            verdicts = resolve_all(probed)
+        except Exception as exc:
+            out[name] = {"cited": len(urls), "error": type(exc).__name__}
+            continue
+        tally, detail = {}, []
+        for u, (v, why) in zip(probed, verdicts):
+            tally[v] = tally.get(v, 0) + 1
+            if v in ("DEAD", "MOVED", "UNKNOWN"):
+                detail.append({"verdict": v, "url": u, "note": why})
+        entry = {"cited": len(urls), "probed": len(probed), "tally": tally,
+                 "dead": tally.get("DEAD", 0), "flagged": detail}
+        if dropped:
+            entry["not_probed"] = dropped
+            entry["not_probed_note"] = ("cap of %d per channel; these were NOT checked and are "
+                                        "not counted as live" % CITECHECK_MAX_URLS)
+        out[name] = entry
+    return out
+
+
+def log_citation_audit(audit):
+    """Print the citation audit. BLOCKED/UNKNOWN are never called fabrication."""
+    if not audit or "skipped" in audit:
+        if audit.get("skipped"):
+            log("\nCitation check skipped: %s" % audit["skipped"])
+        return
+    log("\nCitation existence check (no vendor cost; fetches the cited pages directly):")
+    for name, e in sorted(audit.items()):
+        if e.get("error"):
+            log("  [%s] could not check (%s) - this is NOT evidence against the citations"
+                % (name, e["error"]))
+            continue
+        if not e.get("cited"):
+            log("  [%s] cited no URLs" % name)
+            continue
+        counts = "  ".join("%s=%d" % (k, v) for k, v in sorted(e.get("tally", {}).items()))
+        log("  [%s] %d cited, %d probed  %s" % (name, e["cited"], e.get("probed", 0), counts))
+        if e.get("not_probed"):
+            log("      %d URL(s) beyond the per-channel cap were NOT checked" % e["not_probed"])
+        for d in e.get("flagged", []):
+            # The URL is not truncated. It is the one thing on this line the reader has to be able
+            # to copy and open, and a shortened URL that looks whole is its own small lie.
+            log("      %-8s %s %s" % (d["verdict"], d["url"], (d["note"] or "")[:40]))
+        if e.get("dead"):
+            log("      %d cited URL(s) return 404/410. A citation to a page that does not exist "
+                "was not read - it was constructed. Check what it was supporting." % e["dead"])
+    log("  BLOCKED/UNKNOWN mean the check could not be completed, never that a source is fake.")
+
+
 def environment_report(want=()):
     """Facts about this machine that determine whether a run can work. No secret values."""
     key = os.environ.get("MODEL_API_KEY") or ""
@@ -648,7 +764,7 @@ def environment_report(want=()):
         "spark_key_length": len(key),
         "spark_endpoint": os.environ.get("MODEL_API_BASE", "https://api.meta.ai/v1"),
     }
-    for name, resolver in (("codex", codex_bin), ("agy", agy_bin)):
+    for name, resolver in (("codex", codex_bin), ("agy", agy_bin), ("kimi", hermes_bin)):
         try:
             b = resolver()
             found = bool(os.path.isfile(b) or shutil.which(b))
@@ -803,6 +919,74 @@ def call_codex(brief, marker, workdir, outfile, model=None, effort=None, system=
         warn.append(refusal)
     return {"channel": "codex", "ok": not warn, "text": text, "seconds": round(secs, 1),
             "bytes": len(text.encode("utf-8")), "exit": p.returncode, "warnings": warn}
+
+
+def hermes_bin():
+    return _resolve_bin("HERMES_BIN", "hermes.exe",
+                        [os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                                      "hermes", "hermes-agent", "venv", "Scripts")])
+
+
+# Toolsets handed to the Kimi channel. `web` and nothing else, on purpose: Hermes ships
+# terminal, file, code_execution, browser and computer_use ENABLED by default, and a review
+# channel's whole input is an untrusted brief. Granting those would turn a prompt into command
+# execution on this machine. Verified against `hermes tools list` on 2026-08-01.
+HERMES_TOOLSETS = "web"
+
+
+def call_hermes(brief, marker, outfile, model=None, toolsets=None, system=None, timeout=2400):
+    """
+    Kimi K3 through the Hermes CLI. `-z/--oneshot` prints ONLY the final response text to
+    stdout - no banner, no spinner, no tool previews - so stdout IS the review.
+
+    Two traps, both measured 2026-08-01 rather than assumed:
+      - the model id must be `moonshotai/kimi-k3`. Bare `kimi-k3` resolves to an unconfigured
+        `kimi-coding` provider, and `kimi-k3-max` is not a valid id at all ("K3 Max" is a
+        marketing variant name, not something the API accepts).
+      - the prompt rides on argv, so it hits the same Windows command-line ceiling that bites
+        agy. Same limit, same reason, so it reuses AGY_ARGV_LIMIT.
+    """
+    binary = hermes_bin()
+    model = model or os.environ.get("HERMES_MODEL", "moonshotai/kimi-k3")
+    payload = _with_system(brief, system)
+    if len(payload) > AGY_ARGV_LIMIT:
+        return {"channel": "kimi", "ok": False,
+                "error": "prompt is %d chars; argv dies past ~%d on Windows"
+                         % (len(payload), AGY_ARGV_LIMIT)}
+    cmd = [binary, "-z", payload,
+           "-m", model,
+           "-t", toolsets or HERMES_TOOLSETS,
+           # Do not inherit SOUL.md / AGENTS.md / Hermes memory: a reviewer that loads the
+           # persona of the setup under review is not independent, and the injection makes the
+           # run irreproducible. NEVER add --yolo here.
+           "--ignore-rules"]
+    try:
+        p, secs = _run(cmd, timeout=timeout)
+    except FileNotFoundError:
+        return {"channel": "kimi", "ok": False, "error": "binary not found: " + binary}
+    except subprocess.TimeoutExpired:
+        return {"channel": "kimi", "ok": False, "error": "timed out after %ss" % timeout}
+
+    text = p.stdout or ""
+    if outfile and text.strip():
+        with open(outfile, "w", encoding="utf-8") as f:
+            f.write(text)
+    warn = []
+    # Hermes exits 0 on a provider error and prints the error as the "answer", so the exit code
+    # proves nothing. These two strings are the observed shapes of that failure.
+    low = text.lower()
+    if "no usable credentials" in low or "is not a valid model id" in low:
+        warn.append("PROVIDER/MODEL ERROR returned as prose: " + text.strip()[:160])
+    if marker and not text.strip().endswith(marker):
+        warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
+    if not text.strip():
+        warn.append("EMPTY OUTPUT (exit=%d) %s" % (p.returncode, (p.stderr or "")[:200]))
+    refusal = refusal_check(text, marker)
+    if refusal:
+        warn.append(refusal)
+    return {"channel": "kimi", "ok": not warn, "text": text, "seconds": round(secs, 1),
+            "bytes": len(text.encode("utf-8")), "exit": p.returncode,
+            "model": model, "warnings": warn}
 
 
 AGY_AGENT = "deep-researcher"   # written into the run's own workspace; see _write_agy_agent
@@ -964,7 +1148,7 @@ def channel_preflight(want, outdir):
         else:
             yield "http: key present (len %d), endpoint %s" % (
                 len(key), os.environ.get("MODEL_API_BASE", "https://api.meta.ai/v1"))
-    for name, resolver in (("codex", codex_bin), ("agy", agy_bin)):
+    for name, resolver in (("codex", codex_bin), ("agy", agy_bin), ("kimi", hermes_bin)):
         if name not in want:
             continue
         b = resolver()
@@ -1333,6 +1517,12 @@ def main():
                     help="send personal identifiers anyway. Secrets are never sendable")
     ap.add_argument("--no-log", action="store_true",
                     help="do not write run.log / diagnostics.json into the output directory")
+    # Default ON. A verification step you have to remember is one that runs least often when the
+    # run was rushed - the same moment nobody re-reads the citations by hand either.
+    ap.add_argument("--no-citecheck", action="store_true",
+                    help="skip fetching the cited URLs at the end of the run. The check costs "
+                         "nothing at any vendor and never changes the exit code; it is on by "
+                         "default because it is the only citation check that works on Codex")
     a = ap.parse_args()
 
     # Start the file log before anything can fail, so a failure in validation is still recorded.
@@ -1425,13 +1615,14 @@ def main():
     else:
         # Registry unavailable: no alias table, so accept both spellings by hand rather than
         # letting the degraded path reintroduce the `--only http` failure the router just fixed.
-        want = {"spark": "http", "gemini": "agy"}.get
-        want = {want(c) or c for c in (a.only or ["http", "codex", "agy"])}
+        want = {"spark": "http", "gemini": "agy", "hermes": "kimi"}.get
+        want = {want(c) or c for c in (a.only or ["http", "codex", "agy", "kimi"])}
     if not want:
         log("every channel is disabled - nothing to run")
         return 2
     agy_cfg = (plan or {}).get("agy") or {}
     codex_cfg = (plan or {}).get("codex") or {}
+    kimi_cfg = (plan or {}).get("kimi") or {}
 
     # Everything below is free and answers "will this round survive?" before it is launched.
     # It runs on --dry-run too: a preflight that skips the checks a real run needs is not a
@@ -1452,7 +1643,13 @@ def main():
     log("brief=%d chars  tier=%s  marker=%s" % (len(brief), a.tier, a.marker))
     # Threads, not asyncio: two of the three channels are blocking subprocesses, and on Windows
     # asyncio subprocess support depends on the event loop policy. Threads just work.
-    with ThreadPoolExecutor(max_workers=3) as ex:
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        if "kimi" in want:
+            jobs["kimi"] = ex.submit(call_hermes, brief, a.marker,
+                                     os.path.join(a.out, "KIMI.md"),
+                                     model=kimi_cfg.get("model"),
+                                     toolsets=kimi_cfg.get("toolsets"),
+                                     system=system)
         if "http" in want:
             jobs["http"] = ex.submit(call_http_reviewer, brief, system, a.tier, a.marker)
         if "codex" in want:
@@ -1508,6 +1705,13 @@ def main():
     log("%d/%d channels returned a verified review. Outputs in %s"
         % (ok_count, len(results), os.path.abspath(a.out)))
 
+    # ---- citation audit ---------------------------------------------------------------------
+    # Runs on every review, because the alternative - a separate command afterwards - is a check
+    # that gets skipped exactly when the run was rushed. See citation_audit() for why existence
+    # rather than grounding, and why it never touches the exit code.
+    audit = citation_audit(results, enabled=not a.no_citecheck)
+    log_citation_audit(audit)
+
     # ---- diagnostics ------------------------------------------------------------------------
     # Written on every run, success included: the most common support question is "it worked
     # yesterday", and answering it needs the working run's file to diff against.
@@ -1558,6 +1762,15 @@ def main():
         "plan": plan,
         "preflight": preflight,
         "problems": problems,
+        "citations":
+            {"how_to_read_this":
+                "Per channel: how many URLs the review cited and what happened when each was "
+                "fetched. DEAD (404/410) is the one that matters - a citation to a page that "
+                "does not exist was constructed, not read. BLOCKED and UNKNOWN mean the check "
+                "could not be completed and are never evidence of fabrication. This checks "
+                "EXISTENCE, which works on every channel; whether the model actually opened a "
+                "page needs that channel's tool telemetry, which Codex does not report at all.",
+             "results": audit},
         "channels": {n: {k: v for k, v in r.items() if k != "text"} for n, r in results.items()},
         "console": _LOG["lines"],
     }) if not a.no_log else None

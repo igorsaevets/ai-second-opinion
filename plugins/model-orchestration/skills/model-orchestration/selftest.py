@@ -124,18 +124,33 @@ def suite_degradation():
 def suite_routing():
     section("2. 'Only these models' must be obeyed exactly")
 
+    # DERIVED from the registry, never listed here. This suite used to hardcode {spark, codex, agy};
+    # when a fourth channel was added to channels.json on 2026-08-01 the four EXCLUSION cases went
+    # red while the tool was working correctly, because "everything except spark" had been frozen
+    # into the test as a literal pair. Channel names have one home - channels.json - and a test that
+    # copies them is a second home that rots exactly like any other. An inclusion case (--only X)
+    # can name X, because X is the input; an exclusion case must compute the complement.
+    with open(HERE / "channels.json", encoding="utf-8") as fh:
+        ALL = {k for k, v in json.load(fh)["channels"].items() if v.get("enabled", True)}
+    check(len(ALL) >= 3, "the registry declares at least the three documented channels",
+          f"registry={sorted(ALL)}")
+
+    def without(*names):
+        return ALL - set(names)
+
     cases = [
         (["--only", "spark"], {"spark"}, "--only spark"),
         (["--only", "http"], {"spark"}, "--only http (alias)"),
         (["--only", "codex"], {"codex"}, "--only codex"),
         (["--only", "gemini"], {"agy"}, "--only gemini (alias)"),
         (["--only", "spark", "codex"], {"spark", "codex"}, "--only with two channels"),
-        (["--skip", "spark"], {"codex", "agy"}, "--skip spark"),
-        (["--skip", "codex", "agy"], {"spark"}, "--skip both CLIs"),
+        (["--skip", "spark"], without("spark"), "--skip spark"),
+        (["--skip", "codex", "agy"], without("codex", "agy"), "--skip both CLIs"),
         (["--route", "только spark"], {"spark"}, "route: только spark"),
-        (["--route", "не используй codex"], {"spark", "agy"}, "route: RU negation"),
-        (["--route", "кроме gemini"], {"spark", "codex"}, "route: кроме gemini"),
+        (["--route", "не используй codex"], without("codex"), "route: RU negation"),
+        (["--route", "кроме gemini"], without("agy"), "route: кроме gemini"),
         (["--route", "only codex"], {"codex"}, "route: EN only"),
+        ([], ALL, "no flags: every enabled channel runs"),
     ]
     for args, expect, label in cases:
         p = run_cli(args + ["--dry-run"], timeout=90)
@@ -239,6 +254,77 @@ def suite_contract():
               (cause or "unrecognised")[:44])
 
 
+def suite_citations():
+    section("5. The citation check must be honest about what it did and did not check")
+
+    import citecheck
+    import orchestrate as o
+
+    # The network is STUBBED on purpose. This suite's promise is that it costs nothing and
+    # contacts no vendor, and a test that reaches out to example.com breaks that promise and goes
+    # flaky in CI besides. What is worth testing here is this project's own logic - deduplication,
+    # punctuation, the cap, the never-raises contract - not whether urllib works.
+    verdicts = {
+        "https://real.example/ok":      ("LIVE", ""),
+        "https://real.example/gone":    ("DEAD", "HTTP 404"),
+        "https://real.example/wall":    ("BLOCKED", "HTTP 403 - existence not established"),
+        "https://real.example/moved":   ("MOVED", "-> https://real.example/new"),
+    }
+    real_resolve = citecheck.resolve_all
+    citecheck.resolve_all = lambda urls, workers=10: [verdicts.get(u, ("UNKNOWN", "stub"))
+                                                      for u in urls]
+    try:
+        text = ("See https://real.example/ok, and https://real.example/gone. "
+                "Also https://real.example/wall and https://real.example/moved; "
+                "plus https://real.example/ok again.")
+        e = o.citation_audit({"c": {"text": text}})["c"]
+
+        check(e["cited"] == 4, "duplicate citations are probed once", str(e["cited"]))
+        check(e["dead"] == 1, "a 404 is counted as DEAD", str(e))
+        flagged = {d["url"] for d in e["flagged"]}
+        check(not any(u.endswith((",", ".", ";")) for u in flagged),
+              "trailing prose punctuation is not part of the URL", str(sorted(flagged)))
+
+        # The rule this exists to enforce: a bot wall is not evidence of fabrication. Reporting
+        # "could not check" as "fake" is the exact move the harness forbids the models, and it
+        # would be worse coming from the harness, which is supposed to be the trustworthy part.
+        check("https://real.example/wall" not in flagged,
+              "a BLOCKED URL is not listed among the suspect citations")
+        check(e["tally"].get("BLOCKED") == 1, "but it IS counted, so nothing disappears silently",
+              str(e["tally"]))
+
+        saved, o.CITECHECK_MAX_URLS = o.CITECHECK_MAX_URLS, 2
+        try:
+            capped = o.citation_audit({"c": {"text": text}})["c"]
+        finally:
+            o.CITECHECK_MAX_URLS = saved
+        check(capped.get("not_probed") == 2 and bool(capped.get("not_probed_note")),
+              "when the per-channel cap bites, the dropped count is stated",
+              str(capped.get("not_probed")))
+    finally:
+        citecheck.resolve_all = real_resolve
+
+    check("skipped" in o.citation_audit({"c": {"text": "x"}}, enabled=False),
+          "--no-citecheck reports a stated skip rather than silently doing nothing")
+    for shape in ({}, {"c": {}}, {"c": {"text": None}}, {"c": {"text": ""}}):
+        try:
+            o.citation_audit(shape)
+            ok = True
+        except Exception:                                # noqa: BLE001
+            ok = False
+        check(ok, f"citation_audit survives {shape!r}"[:70])
+    for payload in ({}, {"skipped": "x"}, {"c": {"error": "URLError"}}, {"c": {"cited": 0}}):
+        try:
+            # Captured, because the assertion is "it does not raise", not "it prints" - and a
+            # --quiet run that still prints is a flag that does not do what it says.
+            with contextlib.redirect_stdout(io.StringIO()):
+                o.log_citation_audit(payload)
+            ok = True
+        except Exception:                                # noqa: BLE001
+            ok = False
+        check(ok, f"the printer survives {payload!r}"[:70])
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -246,7 +332,8 @@ def main():
     a = ap.parse_args()
     _quiet = a.quiet
 
-    for suite in (suite_degradation, suite_routing, suite_redaction, suite_contract):
+    for suite in (suite_degradation, suite_routing, suite_redaction, suite_contract,
+                  suite_citations):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

@@ -194,6 +194,23 @@ single `channels.json` registry, and adding a channel is an edit to that file.
 - **Not automatic.** You still read the disagreement and decide. The tool's job is to make sure
   you are deciding with the objections in front of you.
 
+## Found a bug? Want a feature? Want to work together?
+
+| What you want to do | Where it goes |
+|---|---|
+| **Report a bug** | [Open an issue](https://github.com/igorsaevets/ai-second-opinion/issues) and attach `diagnostics.json` — it is scrubbed by construction, so you can attach it without reading it first |
+| **Ask for a feature, or suggest an improvement** | [Open an issue](https://github.com/igorsaevets/ai-second-opinion/issues) |
+| **Ask a question, or show what you built with it** | [Discussions](https://github.com/igorsaevets/ai-second-opinion/discussions) |
+| **Report a security problem** | [Report a vulnerability privately](https://github.com/igorsaevets/ai-second-opinion/security/advisories/new) — please do *not* open a public issue first. See [SECURITY.md](SECURITY.md) |
+| **Collaboration, consulting, or anything commercial** | [LinkedIn](https://www.linkedin.com/in/igorsaevets/) · [Facebook](https://facebook.com/igorsaevets) · [GitHub](https://github.com/igorsaevets) |
+
+Maintained by **Igor Saevets** ([@igorsaevets](https://github.com/igorsaevets)), Los Angeles.
+
+There is deliberately **no contact email in this repository.** A public address in a public repo is
+harvested within days, and the address on the commits here is GitHub's no-reply relay, which has no
+mail exchanger at all — mail sent to it is not delivered anywhere, quietly. A channel that silently
+swallows a bug report is worse than no channel, so the links above are the real ones.
+
 ## Licence
 
 MIT — see [LICENSE](LICENSE). Use it commercially, fork it, ship it inside your own product.

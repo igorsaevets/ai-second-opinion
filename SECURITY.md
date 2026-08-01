@@ -93,9 +93,15 @@ zero pages, while its conclusions were correct. Verify before you repeat anythin
 
 ## Reporting a vulnerability
 
-Open a GitHub issue for anything already public. For something that should not be public yet, use
-GitHub's **Report a vulnerability** button on the Security tab of this repository, which opens a
-private advisory.
+Open a [GitHub issue](https://github.com/igorsaevets/ai-second-opinion/issues) for anything already public. For
+something that should not be public yet, use
+**[Report a vulnerability](https://github.com/igorsaevets/ai-second-opinion/security/advisories/new)**, which
+opens a private advisory visible only to the maintainer.
+
+There is no security email. The address on this repository's commits is GitHub's no-reply relay,
+which has no mail exchanger — mail to it is not delivered anywhere, and it fails silently. A
+reporting channel that quietly discards a vulnerability report is worse than an absent one, so the
+private advisory form is the channel.
 
 Please include `diagnostics.json` where relevant — it is scrubbed of keys and personal data by
 construction, so it is safe to attach.
