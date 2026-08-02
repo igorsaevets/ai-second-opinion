@@ -26,6 +26,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 import re
@@ -934,6 +935,34 @@ def hermes_bin():
 HERMES_TOOLSETS = "web"
 
 
+def neutral_cwd():
+    """A directory containing none of your files, for any channel that reads its own cwd.
+
+    🔴 CONFIRMED LEAK, and `--ignore-rules` does NOT close it. That flag stops SOUL.md, AGENTS.md
+    and Hermes's own memory; it does not stop the CLAUDE.md of the directory the CLI is launched
+    from. Asked how it knew a line from a project instruction file, the model answered that the file
+    had been "injected into my initial system context by the harness under a Project Context block",
+    then quoted the sentence and located it correctly. The same probe from a scratch folder answered
+    "NOTHING IN CONTEXT".
+
+    It costs twice:
+      INDEPENDENCE    - a reviewer that has read your own instructions is not a second opinion. In
+                        one live run a channel cited the project's own instruction file back as
+                        corroboration.
+      CONFIDENTIALITY - that file reaches the vendor on EVERY call, outside the PII gate, which only
+                        ever scanned the brief. This harness is run from project directories whose
+                        CLAUDE.md names other repositories and, in at least one case, a live legal
+                        matter.
+
+    Every path this module passes to a subprocess is already absolute, so changing the child's cwd
+    changes nothing else. `codex` gets `-C workdir` and `agy` gets `cwd=workdir` for their own
+    reasons; `hermes` had neither and inherited whatever directory the operator happened to be in.
+    """
+    scratch = os.path.join(tempfile.gettempdir(), "orchestrate-neutral-cwd")
+    os.makedirs(scratch, exist_ok=True)
+    return scratch
+
+
 def call_hermes(brief, marker, outfile, model=None, toolsets=None, system=None, timeout=2400):
     """
     Kimi K3 through the Hermes CLI. `-z/--oneshot` prints ONLY the final response text to
@@ -961,7 +990,9 @@ def call_hermes(brief, marker, outfile, model=None, toolsets=None, system=None, 
            # run irreproducible. NEVER add --yolo here.
            "--ignore-rules"]
     try:
-        p, secs = _run(cmd, timeout=timeout)
+        # 🔴 cwd, not the operator's directory. See neutral_cwd(): --ignore-rules does not stop this
+        # CLI injecting the launch directory's CLAUDE.md into the vendor's context, outside the gate.
+        p, secs = _run(cmd, timeout=timeout, cwd=neutral_cwd())
     except FileNotFoundError:
         return {"channel": "kimi", "ok": False, "error": "binary not found: " + binary}
     except subprocess.TimeoutExpired:

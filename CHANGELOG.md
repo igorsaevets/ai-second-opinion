@@ -4,6 +4,28 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] — 2026-08-02
+
+### Fixed
+
+- 🔴 **A command-line channel was reading the instruction file of whatever directory you launched
+  from, and sending it to the vendor.** One agent CLI injects the `CLAUDE.md` of its working
+  directory into the model's context, and its own `--ignore-rules` flag does not stop it — that flag
+  covers the agent's persona files, not this. Asked how it knew a line from a project instruction
+  file, the model answered that the file had been *"injected into my initial system context by the
+  harness under a Project Context block"*, then quoted the sentence and located it correctly. The
+  same probe run from a scratch folder answered *"NOTHING IN CONTEXT"*.
+
+  It cost twice. **Independence**: a reviewer that has read your own instructions is not a second
+  opinion, and in one live round a channel cited the project's own instruction file back as
+  corroboration. **Confidentiality**: that file reached the vendor on every call, *outside* the
+  outbound gate, which only ever scanned the brief — and this harness is normally launched from a
+  project directory, whose `CLAUDE.md` routinely names other repositories, clients or matters.
+
+  That channel now runs from a neutral scratch directory. Every path the harness passes to a
+  subprocess was already absolute, so nothing else changes. The two other command-line channels were
+  unaffected: each already set its own working directory, for unrelated reasons.
+
 ## [1.2.0] — 2026-08-01
 
 ### Added
