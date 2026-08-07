@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] — 2026-08-07
+
+### Fixed
+
+- 🔴 **1.3.0 shipped without `report.py`, so the run report it advertises could not be generated.**
+  The file list that decides what gets published is hand-maintained, `report.py` was never added
+  to it, and every check passed anyway: the registry loaded, the self-test scored 91/91 *inside*
+  the published tree, the privacy audit exited clean, and the build printed `clean`. The import
+  sits behind a `try`/`except` that logs a note, so the feature would have failed politely and
+  permanently on every machine that cloned the repository.
+
+  The fix is not "remember to add the file". **The build now derives the requirement from the
+  code**: it scans every shipped `.py` for imports of sibling modules and refuses to publish if
+  any of them is missing. Verified by removing the entry again and confirming the build exits 1.
+
+  This is the third time in this repository that a hand-maintained list has silently stopped
+  matching reality. The general shape is worth stating: *a list that describes what the code needs
+  is a claim, and a claim that nothing re-checks is eventually false.*
+
 ## [1.3.0] — 2026-08-07
 
 ### Added
