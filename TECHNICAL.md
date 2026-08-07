@@ -24,7 +24,7 @@ subprocess support depends on the event-loop policy. Threads just work.
 **The point is not redundancy, it is disagreement.** Measured across two rounds on real work the
 ordering inverted: once the 55-second channel found the item both slower ones missed, once the
 25-minute one did. Which channel wins is not predictable from cost, from speed, or from the
-previous round. That is the entire argument for running all three.
+previous round. That is the entire argument for running all seven.
 
 ### Files
 
@@ -86,8 +86,8 @@ because only the diagnostics file was being scrubbed.
   with a short body; a long review that merely mentions such a phrase does not trip it.
 - **The end marker is checked, and now also instructed.** The harness verified the marker for
   months without ever asking the model to emit one — the brief's author was silently expected to
-  know. A brief written by anyone who had not read the docs came back `PROBLEM` on all three
-  channels with a perfectly good review inside. The instruction is now appended automatically when
+  know. A brief written by anyone who had not read the docs came back `PROBLEM` on every
+  channel of the three then configured with a perfectly good review inside. The instruction is now appended automatically when
   the brief does not already contain the marker.
 - **Citations are cross-checked against pages actually opened.** One channel fabricated four
   real-looking document numbers in a single session, each under the correct article slug — and one
@@ -255,7 +255,7 @@ non-existence claim requires positive evidence of absence, with a URL.
    Sending it a lookup wastes half an hour and the most expensive quota you have.
 
 That ladder governs ordinary work. It does **not** apply to a commissioned second opinion: there,
-run all three on the identical packet, because the disagreement is the product.
+run every available channel on the identical packet, because the disagreement is the product.
 
 **Do not answer an exhausted subscription limit by opening a metered API path.** That is usually
 several times more expensive than waiting or switching channel. Re-point the round in prose
@@ -288,15 +288,15 @@ were opened and whether they exist. Deep-research products emit citations with n
 
 If you want a vendor's deep research, run it by hand in the browser, save the report, and pass it
 to this harness as an input document to be attacked. That costs nothing extra and plays to what
-the three channels are actually good at.
+these channels are actually good at.
 
 ---
 
 ## 10. Verification practice
 
 **Plant a deliberately false claim in every verification brief.** It costs nothing, and a channel
-that "confirms" it has priced all of its other confirmations. In the round behind this document,
-all three channels refused both planted claims — which is the only reason to credit what they did
+that "confirms" it has priced all of its other confirmations. In the three-channel round behind
+this document, all three refused both planted claims — which is the only reason to credit what they did
 confirm.
 
 **Demand a live web search, with a URL and a date for every dated claim.** A review citing no URLs

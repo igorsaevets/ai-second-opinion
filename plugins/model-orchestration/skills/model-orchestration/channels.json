@@ -1,40 +1,127 @@
 {
   "_comment": "Channel registry for orchestrate.py. Adding, disabling or re-pointing a channel is a change HERE, never in the code. Every model that rotates lives in this file so there is exactly one place to edit when a weekly limit runs out. Aliases are what a natural-language override like '5.5 instead of 5.6 Sol' is matched against; they must be unique across the whole file - routing.py refuses to load a registry with a colliding alias rather than guessing.",
-  "version": 2,
-  "channels": {
+  "_comment_dispatch": "🔴 2026-08-06: that promise was FALSE for anything beyond the four channels that existed when it was written. orchestrate.main() dispatched on literal names (if \"kimi\" in want / if \"http\" in want / ...), so a fifth entry here was silently never launched - the registry looked authoritative and was decorative at the point of use. Dispatch is now driven by `kind`, so a new channel IS a pure edit to this file. `kind` is the only field the code branches on; add one of: http | codex | agy | openrouter | hermes.",
+  "_comment_naming": "🔴 2026-08-06 (round 23), the operator: «Названия ты сделал неправильные, они не понятные». A channel name is now REQUIRED to identify the model, because the panel has grown past the point where 'spark' or 'agy' names anything: two Spark checkpoints and two Gemini models run in the same round. The rule that follows from that: ONE CHANNEL = ONE MODEL, and each channel lists only the models it may legally run. `--set agy36flash=gemini-3.1-pro` is now REFUSED by routing rather than silently producing a channel whose name lies about its contents - which is a stronger guarantee than any warning, because it cannot be ignored. 🔴 2026-08-07: THE ONE EXCEPTION IS NOW GONE TOO. spark12cont used to list the non-Contributor checkpoint as a second legal model, and on 2026-08-06 a session in another project ran the whole round on it (`--set spark12cont=muse-spark-1.2`). That was NOT a code defect and no guard failed: the session obeyed an instruction written in THIS FILE, three keys below, which told it to move confidential briefs off the Contributor tier. A registry that carries advice is a registry that gets obeyed - so an escape hatch documented as the right thing to do is not an escape hatch, it is the default. the operator, 2026-08-07: «указать в коде только эту модель: muse-spark-1.2-contributor ... лучше вообще из кода временно удалить модель не contributor». Removed. The ⚠ MODEL OVERRIDDEN printer stays exactly as it was - it is the reason the substitution was visible at all, and the operator found it by reading that line in diagnostics.json.",
+  "version": 4,
+  "groups": {
+    "_doc": "A word a human types that means SEVERAL channels. Without these, splitting agy into two channels would have broken `--only agy` and «не используй gemini» with 'unknown channel' - the exact defect that made `--only http` unusable for weeks in 2026-07. A group is expanded by routing before anything else runs, so every flag and every free-text route accepts it. Group names and their aliases share one namespace with channel and model aliases, and a collision is refused at load time.",
     "spark": {
-      "kind": "http",
-      "enabled": true,
-      "label": "Spark (Messages API)",
-      "cost": "cheap",
-      "model": "muse-spark-1.1",
-      "models": {
-        "muse-spark-1.1": {
-          "aliases": [
-            "muse-spark-1.1",
-            "muse spark",
-            "spark 1.1"
-          ]
-        }
-      },
+      "label": "both Spark voices",
+      "channels": [
+        "spark11",
+        "spark12cont"
+      ],
       "aliases": [
         "spark",
         "спарк",
         "муза",
         "muse",
         "http"
+      ]
+    },
+    "agy": {
+      "label": "both Antigravity/Gemini models",
+      "channels": [
+        "agy31pro",
+        "agy36flash"
       ],
-      "notes": "Default for lookups and fact-checks. Content filter is cumulative - probe cheap first."
+      "aliases": [
+        "agy",
+        "gemini",
+        "джемини",
+        "гемини",
+        "antigravity",
+        "антигравити"
+      ]
+    },
+    "openrouter": {
+      "label": "both metered OpenRouter models",
+      "channels": [
+        "kimik3",
+        "qwen38max"
+      ],
+      "aliases": [
+        "openrouter",
+        "опенроутер",
+        "or"
+      ]
+    }
+  },
+  "channels": {
+    "spark11": {
+      "kind": "http",
+      "enabled": true,
+      "label": "Spark11",
+      "cost": "cheap",
+      "model": "muse-spark-1.1",
+      "_renamed": "2026-08-06 (round 23) from `spark`, the operator: «spark надо переименовать в spark11». The bare name stopped being an identity the moment a second Spark checkpoint joined the round.",
+      "_model_was_decorative": "🔴 Until 2026-08-06 this key was READ BY NOTHING. call_http_reviewer took no model argument and resolved os.environ['MODEL_NAME'] with a hard-coded 'muse-spark-1.1' fallback - the identical defect codex carried until 2026-08-02, in the identical shape, in the same file, and it survived the round that fixed codex because the fix was applied to the instance rather than to the class. MODEL_NAME still works as a deliberate override, but it is now announced in the log when it disagrees with this file instead of quietly winning.",
+      "_web_grant_is_load_bearing": "MEASURED 2026-08-06, and now CONFIRMED BY THE VENDOR'S OWN DOCS. Measurement: identical question, the only variable being the `tools` array - WITH the grant the reply carried 11 server_tool_use blocks; WITHOUT it, one thinking block, zero tool calls and an empty answer. Documentation (dev.meta.ai/docs/search-grounding.md): «Add `web_search` to `tools` in a Responses API request. The model evaluates the query and decides whether to search.» So the grant is required, not redundant. Also measured: this endpoint does NOT populate usage.server_tool_use.web_search_requests - and the OpenAPI schema explains why, because AnthropicUsage has no server_tool_use member at all. `server_tool_use` exists only as a CONTENT BLOCK type, which is what the block-counting fallback in _verify_http reads. The usage field is not merely dead on this vendor, it was never specified.",
+      "_tool_type_string": "PROBED 2026-08-06, all four forms against the live endpoint at max_tokens=16. `{type: web_search_20250305, name: web_search}` (what we send) -> 200. `{type: web_search, name: web_search}` -> 200. `{type: web_search}` alone -> 200. `{type: web_search_99999999}` -> 400 «tool type is not supported», which is the negative control proving the endpoint really validates this field. The docs describe only the unversioned Meta form; Anthropic's versioned form is accepted as well. Nothing to change - recorded so nobody 'corrects' a working wire parameter to match a doc.",
+      "models": {
+        "muse-spark-1.1": {
+          "label": "Muse Spark 1.1",
+          "data_policy": "Standard tier - prompts and completions are NOT used for training.",
+          "aliases": [
+            "muse-spark-1.1",
+            "muse spark 1.1",
+            "spark 1.1"
+          ]
+        }
+      },
+      "aliases": [
+        "spark11",
+        "спарк11",
+        "http11",
+        "1.1"
+      ],
+      "notes": "Default for lookups and fact-checks. Content filter is cumulative - probe cheap first. Standard tier: $1.25/M in, $4.25/M out, 1,048,576 ctx (dev.meta.ai/docs/pricing-rate-limits, read 2026-08-06)."
+    },
+    "spark12cont": {
+      "kind": "http",
+      "enabled": true,
+      "label": "Spark12Cont",
+      "cost": "cheap",
+      "model": "muse-spark-1.2-contributor",
+      "_added": "2026-08-06, the operator: «добавь новый muse-spark-1.2-contributor параллельно с spark 1.1». PARALLEL is the requirement, not a replacement - one channel runs one model per round, so a second voice needs a second entry. This is the first channel added purely by editing this file, and it is therefore also the test of the dispatch fix above.",
+      "_renamed": "2026-08-06 (round 23) from `spark12`, the operator: «spark12 в Spark12Cont - что бы если кто-то использует не muse-spark-1.2-contributor мы визуально это увидели». The name carries the TIER, which is the thing that matters and the thing a bare version number hides. Lower case on disk because the name is also a filesystem path component and Windows would collide `Spark12Cont.md` with `spark12cont.md`; the display label keeps the operator's capitalisation.",
+      "_catalogue": "VERIFIED 2026-08-06 against GET /v1/models on the live endpoint: it returns exactly three ids - muse-spark-1.2-contributor, muse-spark-1.2, muse-spark-1.1 - and a 16-token probe of the contributor id came back with model=muse-spark-1.2-contributor. Confirmed independently the same day from dev.meta.ai/docs/models.md.",
+      "🔴_CONTRIBUTOR_TIER_TRAINS_ON_YOUR_DATA": "READ THIS BEFORE SENDING ANYTHING CONFIDENTIAL. Meta's own documentation, verbatim (dev.meta.ai/docs/models.md, opened 2026-08-06): «muse-spark-1.2-contributor - the muse-spark-1.2 checkpoint on the discounted Contributor tier, where your prompts and completions may be used to train future Meta models.» and «Contributor (muse-spark-1.2-contributor) - heavily discounted pricing in exchange for permission to use your prompts and completions to train future Meta models.» So 'contributor' is a DATA-RIGHTS tier, not a smarter checkpoint: the weights are the same as plain muse-spark-1.2. The discount is real and large - $0.10/M in and $0.20/M out against Standard's $1.25 and $4.25, i.e. ~12x and ~21x - and it is paid for with the payload. Rate limits also differ sharply: Contributor 60 RPM / 2,100,000 TPM against Standard 3,000 RPM / 4,000,000 TPM. 🔴 THE WAY OUT IS `--skip spark12cont`, NOT A DIFFERENT MODEL. This sentence used to read «a brief containing case material ... should go to spark11 or to muse-spark-1.2 (Standard), NOT here» - and on 2026-08-06 a session read exactly that and did exactly that, on a 161,824-char immigration brief. The advice was sound and the outcome was still wrong, because it silently converted the channel the operator had named for its tier into a channel running a different tier. Drop the voice for that round instead: one fewer reviewer is a visible loss, a substituted model is an invisible one.",
+      "_locked_to_contributor": "2026-08-07, the operator: «указать в коде только эту модель: muse-spark-1.2-contributor», «лучше вообще из кода временно удалить модель не contributor». TEMPORARY BY HIS OWN WORD - restoring is one object, pasted back into `models` below, and nothing else changes because every guard reads this table rather than a literal: {\"muse-spark-1.2\": {\"label\": \"Muse Spark 1.2\", \"data_policy\": \"Standard tier - prompts and completions are NOT used for training. Same weights as the Contributor id, ~12x the input price.\", \"aliases\": [\"muse-spark-1.2\", \"spark 1.2\", \"спарк 1.2\"]}}. What the removal COSTS, stated so the trade is not rediscovered as a surprise: this channel now has no route that avoids the training grant, so any round including it sends its brief to a tier where Meta may train on it. `--skip spark12cont` is the only lever left. Rejected alternative: a separate `spark12std` channel carrying the Standard checkpoint - that is the removed model under a new name, which is what «удалить» excludes, and it would also re-open the substitution path one alias away.",
+      "models": {
+        "muse-spark-1.2-contributor": {
+          "label": "Muse Spark 1.2 Contributor",
+          "data_policy": "🔴 CONTRIBUTOR TIER - Meta MAY TRAIN on your prompts and completions. Cheap because of that, not despite it. This channel has NO non-training model: use --skip spark12cont for a confidential brief.",
+          "aliases": [
+            "muse-spark-1.2-contributor",
+            "spark 1.2 contributor",
+            "1.2-contributor",
+            "контрибьютор"
+          ]
+        }
+      },
+      "aliases": [
+        "spark12cont",
+        "spark12",
+        "спарк12",
+        "http12"
+      ],
+      "notes": "Same endpoint, same key, same verification as spark11. Runs as an independent voice, not a replacement: the value of a panel is disagreement, and two variants of one family disagreeing is a cheaper signal than any single one being right. 🔴 ONE MODEL ONLY since 2026-08-07 - `--set spark12cont=<anything>` is refused by routing, and the name is now a guarantee rather than a description. A confidential brief drops the channel (`--skip spark12cont`); it does not re-point it."
     },
     "codex": {
       "kind": "codex",
       "enabled": true,
-      "label": "Codex CLI",
+      "label": "Codex",
+      "_label_carries_no_model_ON_PURPOSE": "2026-08-07, the operator: «пусть ИИ выводит codex и название модели, а не просто Codex». Done - but NOT by putting the model in this string, which is the one way of doing it that would rot. This channel is the only one whose model is DELIBERATELY variable (three ids in its table) because an exhausted weekly limit is answered by switching model, so a label reading `CodexGPT54` would be wrong the first time that happens and would go on being wrong silently. The model is therefore resolved at RUN time and printed everywhere the channel is named: the plan, the status line, diagnostics.json, and the channel column of REPORT.md, which is the artifact another chat actually reads. kimik3 and qwen38max CAN carry the model in the name, and do, because their model cannot change - the registry refuses it.",
       "cost": "expensive",
-      "model": "gpt-5.5",
+      "model": "gpt-5.4",
       "effort": "xhigh",
+      "_model_changed": "2026-08-02, указание оператор: «поменяй модель 5.5 на 5.4». С этого дня ЭТО значение и есть действующее: orchestrate.call_codex читает его отсюда (_registry_default), а не из своего литерала. До 2026-08-02 запись здесь была ДЕКОРАТИВНОЙ — действовал литерал в коде, и правка одного только реестра не изменила бы ни одного вызова, вопреки обещанию _comment выше. Подтверждено оператор 2026-08-06: 5.4 Extra High временно, потому что мало осталось недельного лимита подписки.",
+      "_reports_its_model": "2026-08-06, the operator: «Codex пусть отображает модель, если я в другом чате попрошу аналитику по тому, как сработала оркестрация». It does now - but the real defect that request uncovered was worse and was in the REPORTING layer, not here: main() printed per-channel telemetry behind `if name == \"http\"` / `== \"agy\"` / `== \"kimi\"` literals, so after the round-22 rename the HTTPS channel's token and tool-call line silently stopped printing. Measured in a real run log: [agy] and [kimi] printed their lines, [spark] printed none. Now keyed on `kind`, and every channel prints its resolved model.",
+      "_subscription": "Runs on the operator's ChatGPT SUBSCRIPTION through the CLI, not on a metered API key. Never offer an API-key path to route around an exhausted weekly limit - switch channel instead.",
       "models": {
         "gpt-5.5": {
+          "label": "GPT-5.5",
           "aliases": [
             "gpt-5.5",
             "5.5",
@@ -42,6 +129,7 @@
           ]
         },
         "gpt-5.6-sol": {
+          "label": "GPT-5.6 Sol",
           "aliases": [
             "gpt-5.6-sol",
             "5.6 sol",
@@ -52,6 +140,7 @@
           ]
         },
         "gpt-5.4": {
+          "label": "GPT-5.4",
           "aliases": [
             "gpt-5.4",
             "5.4"
@@ -63,18 +152,21 @@
         "кодекс",
         "openai"
       ],
-      "notes": "Strategic questions and final line-level audits only. Never send it a lookup."
+      "notes": "Strategic questions and final line-level audits only. Never send it a lookup. Reports no tool telemetry of any kind, so the citation-existence audit is the only instrument that works on it."
     },
-    "agy": {
+    "agy31pro": {
       "kind": "agy",
       "enabled": true,
-      "label": "Antigravity CLI (Gemini)",
+      "label": "agy 3.1 Pro",
       "cost": "mid",
       "model": "gemini-3.1-pro",
       "agent": "deep-researcher",
+      "_named_for_the_channel_not_the_vendor": "2026-08-06, the operator: «Лучше называть agy 3.6 Flash а не gemini, так мы поймем, что идет через подписку agy а не через api, потому что потом добавим и их». The label names the TRANSPORT first and the model second, because the same Gemini model will later be reachable two ways - through this subscription binary and through a metered Google API key - and by then 'gemini' would name neither.",
+      "_subscription": "Runs on the operator's Antigravity SUBSCRIPTION through the agy binary, NOT through the Gemini API. There is no API key in this path and none should be introduced.",
       "_model_form": "Base slugs only, never the -high/-low suffixed form. Suffix and --effort are two spellings of one setting and a disagreement is a HARD failure: '--model gemini-3.1-pro-high --effort low' exits 1 in 3 seconds with 'conflicts with --effort=low'. With a base slug, --effort is the single source of truth. 'efforts' below is not decoration: gemini-3.1-pro genuinely has no medium, and asking for one is the same hard failure.",
       "models": {
         "gemini-3.1-pro": {
+          "label": "Gemini 3.1 Pro",
           "aliases": [
             "gemini-3.1-pro",
             "3.1 pro",
@@ -84,8 +176,27 @@
             "low",
             "high"
           ]
-        },
+        }
+      },
+      "aliases": [
+        "agy31pro",
+        "agypro",
+        "аджипро"
+      ],
+      "notes": "The DEEP Gemini voice. Reports no tool telemetry in text mode - always run it through stream-json and count the tool calls."
+    },
+    "agy36flash": {
+      "kind": "agy",
+      "enabled": true,
+      "label": "agy 3.6 Flash",
+      "cost": "mid",
+      "model": "gemini-3.6-flash",
+      "agent": "deep-researcher",
+      "_added": "2026-08-06 (round 23), the operator: «там должно сразу проверять у двух моделей, если нельзя параллельно, то можно и последовательно, потому что gemini отвечают очень быстро». Parallel IS possible and is what happens: the dispatcher is a thread pool keyed on `kind`, so two channels of kind agy launch simultaneously with no code change. This entry is the second proof that the registry is now genuinely authoritative - the first was spark12cont.",
+      "_one_model_per_call": "The agy CLI runs ONE model per invocation. That is why hearing both Gemini models needs two channel entries rather than a list inside one, and it is why the channel name carries the model: here the two are the same fact.",
+      "models": {
         "gemini-3.6-flash": {
+          "label": "Gemini 3.6 Flash",
           "aliases": [
             "gemini-3.6-flash",
             "3.6 flash",
@@ -98,34 +209,167 @@
           ]
         }
       },
-      "_models_removed": "claude-sonnet-4-6, claude-opus-4-6-thinking and gemini-3.1-pro-low are deliberately absent (the operator, 2026-07-31): routing a Claude model through agy spends the Gemini weekly subscription on a model already reachable directly, and Pro Low is the shallow variant this channel exists to avoid.",
       "aliases": [
-        "agy",
-        "gemini",
-        "джемини",
-        "гемини",
-        "antigravity",
-        "антигравити"
+        "agy36flash",
+        "agyflash",
+        "аджифлеш"
       ],
-      "notes": "Reports no tool telemetry in text mode - always run it through stream-json and count the tool calls."
+      "notes": "The FAST Gemini voice - the operator's reason for adding it is that Gemini answers quickly, so a second opinion from this family costs almost no wall-clock. Unlike 3.1 Pro it does have a 'medium' effort, so the standard tier reaches it unclamped."
+    },
+    "kimik3": {
+      "kind": "openrouter",
+      "enabled": true,
+      "label": "KimiK3",
+      "_renamed": "2026-08-07 (round 25) from `kimi`, the operator: «аналогично для qwen и kimi, что бы было понятно: KimiK3, Qwen38Max». Same rule as spark11/spark12cont/agy31pro/agy36flash - the channel name must identify the MODEL, and here it can, because one channel runs one model and the registry refuses any other. The bare vendor name stopped being an identity the moment a second OpenRouter model joined. The old name survives as an ALIAS below, so every `--only kimi` in an existing script keeps working: renaming a channel must not break the commands people already have.",
+      "cost": "metered",
+      "_pricing": "RE-VERIFIED 2026-08-06 against the public models API: $3/M prompt, $15/M completion, ctx 1,048,576 - identical to the 2026-08-03 reading, no drift in three days. A typical review round (~6K in / ~16K out) is ~$0.26, billed on the SAME OpenRouter account the Hermes path was already spending from.",
+      "model": "moonshotai/kimi-k3",
+      "role": "code",
+      "reasoning": {
+        "max_tokens": 24000
+      },
+      "max_tokens": 64000,
+      "_reasoning_budget": "🔴 On OpenRouter the top-level max_tokens covers REASONING AND ANSWER TOGETHER. Documented verbatim (openrouter.ai/docs/guides/best-practices/reasoning-tokens, read 2026-08-06): «max_tokens must be strictly higher than the reasoning budget to ensure there are tokens available for the final response after thinking», with budget_tokens = max(min(max_tokens * effort_ratio, 128000), 1024) and a ratio of 0.95 for max/xhigh, 0.8 for high. That is exactly the 2026-08-03 failure on a 51KB brief: out=32000 exactly, 132,471 reasoning chars, zero answer tokens, no end marker. The mitigation is a GENEROUS max_tokens (the ceiling), not a lowered effort (the depth) - see the probe note on the qwen channel, which tested the alternative and found no evidence for it.",
+      "web": {
+        "enabled": true,
+        "engine": "exa",
+        "max_results": 5,
+        "_added": "2026-08-06, the operator: «Про интернет я имел ввиду для Qwen и Kimi». SUPERSEDES the _web_lost_on_purpose note this key replaced, which recorded a deliberate choice to keep this channel text-only. OpenRouter carries search as a request-level plugin, so it is a body field here rather than a different endpoint or a ':online' model id - the suffix form is documented as «exactly equivalent» to plugins:[{id:web}] and is avoided because it hides the setting inside the model name, where --set and the printed plan cannot see it, and because the suffix accepts no parameters at all.",
+        "_engines": "Documented values: native, exa, firecrawl, parallel, perplexity, or undefined. «The web search plugin is powered by native search for Anthropic, Google, OpenAI, Perplexity, and SpaceXAI models. For other models, the web search plugin is powered by Exa.» Moonshot and Alibaba are not in that list, so exa is what these channels get whether or not it is named - naming it keeps the cost visible.",
+        "_cost": "Verbatim: «the web plugin uses your OpenRouter credits and charges $0.005 per request. This includes up to 10 results; additional results are charged at $0.001 each, in addition to the LLM usage for the search result prompt tokens.» At max_results 5 that is the flat $0.005 per search the model chooses to run. Set enabled:false to go back to pure analysis.",
+        "_measured": "VERIFIED END TO END 2026-08-06 through the harness (--only kimi, 10.6s, in=2179 out=582). It returned facts it cannot hold from training - Claude Code 2.1.220 on npm and 2.1.223 on GitHub releases with a publish timestamp - and 2.1.220 matches what `claude --version` printed on this machine in the same session, so the search result is real and not confabulated.",
+        "_snippets_not_pages": "🔴 THE PLUGIN RETURNS SEARCH-RESULT EXCERPTS, NOT PAGE FETCHES - and the vendor's own wording is sharper than the measurement was. Verbatim: «OpenRouter requests Exa highlights - extractive excerpts drawn from the page that Exa selects as most relevant to the search query, sized adaptively (typically ~2,000-4,000 characters per result) ... with Exa's [...] markers separating excerpts that come from different parts of the same page.» So the model sees 2-4 KB of query-selected fragments per URL, with elisions marked. A quotation that spans an elision is two disjoint fragments spliced into one sentence that never existed - which is the exact failure this whole project was built to catch. Kimi said as much itself in the live round: «I did not have a working page-fetch tool on this channel, so nothing here is [OPENED].» This channel can be CURRENT but never GROUNDED. Keep spark/codex/agy as the arms that read sources.",
+        "_caveat": "Treat every URL it prints as unverified until the run's citation audit has resolved it - which is exactly what the audit is for.",
+        "_superseded_by_fetch_tool": "🔴 2026-08-07: `_snippets_not_pages` above described a LIMIT that has now been lifted, and is kept because it still describes what the SEARCH PLUGIN returns. the operator: «я думал, ты так же добавишь им инструмент открытия сайта, типа Scrape, как дополнительный инструмент к нативному». Done - see `fetch_tool` below. Search finds the page, the fetch tool reads it. So «this channel can be CURRENT but never GROUNDED» is no longer true, and the sentence is corrected rather than deleted so nobody re-derives the old conclusion from the surviving half."
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8,
+        "_added": "2026-08-07, the operator. A `fetch_url` function tool offered ALONGSIDE the Exa search plugin, not instead of it: search decides WHICH page, the tool reads it in full. It closes the splice risk documented in `_snippets_not_pages` - Exa returns 2-4 KB of query-selected excerpts with `[...]` markers, so a quotation spanning an elision is two disjoint fragments in one sentence that never existed.",
+        "_second_payoff_is_telemetry": "THE HARNESS executes the fetch, so for these two channels 'which URLs did the model actually open' becomes a LIST rather than an inference - the grounding evidence codex structurally cannot provide and agy provides only through stream-json. n_grounded is now real here.",
+        "_ssrf_fence": "The MODEL picks the URL and the brief it is reasoning about is untrusted text, so this is a request-forgery primitive unless fenced. _safe_fetch_url refuses non-http(s) schemes and any host resolving to loopback, RFC1918, link-local (incl. 169.254.169.254, the cloud metadata address), CGNAT, multicast or reserved ranges - checked after DNS AND again after every redirect, because a public hostname can resolve to 127.0.0.1 and a public URL can redirect there. Same lesson as the agy toolset fence: a reviewer needs the public web and nothing else, and the restriction must be mechanical rather than written in the brief.",
+        "_budget": "max_calls is a CEILING, not a target. When it is reached the model is TOLD so through a tool result and asked to answer from what it has; silently dropping an unanswered tool call leaves it waiting for a result that never arrives, and the observed outcome of that is an empty answer with no end marker. Set enabled:false to go back to search-only."
+      },
+      "_kind_changed": "2026-08-03, the operator: «почему Hermes, если другие чаты используют оркестрацию напрямую через openrouter». Verified, not assumed: Hermes's own config.yaml names OPENROUTER_API_KEY and it caches openrouter_model_metadata.json - the CLI was a second layer over the SAME key and billing. The layer is what failed: 2x2400s timeouts with zero output on the T52 panel, an agentic tool surface that had to be fenced, a Windows argv ceiling, exit 0 on provider errors. kind 'hermes' still works as an explicit fallback (the field below is read only by that path) and its lore is preserved in _hermes_fallback.",
+      "toolsets": "web",
+      "_hermes_fallback": "Everything below this line about Hermes applies ONLY when kind is set back to 'hermes': toolsets 'web' only (terminal/file/code_execution/browser are RCE-by-prompt), --ignore-rules always, never --yolo, argv ceiling ~30K, exit 0 on provider errors, and the 2400s timeout that a 13.5KB strategic brief blew through twice. 🔴 Hermes is NOT needed for this channel's internet: web search is an OpenRouter REQUEST PLUGIN, not a capability of any CLI.",
+      "_model_form": "MEASURED 2026-08-01, all three spellings tried against the live CLI. `moonshotai/kimi-k3` WORKS. Bare `kimi-k3` does NOT: Hermes resolves it to provider 'kimi-coding' and dies with `No usable credentials found for provider 'kimi-coding'`. And `kimi-k3-max` is rejected upstream with `HTTP 400: kimi-k3-max is not a valid model ID` - 'K3 Max' is Moonshot's MARKETING variant name, not an API id. Always keep the `moonshotai/` prefix.",
+      "models": {
+        "moonshotai/kimi-k3": {
+          "label": "Kimi K3",
+          "data_policy": "Metered API. OpenRouter documents `provider.data_collection: deny` and `provider.zdr: true` as per-request controls; NEITHER IS SET HERE - see _data_controls_not_wired at the end of this file.",
+          "aliases": [
+            "moonshotai/kimi-k3",
+            "kimi-k3",
+            "kimi k3",
+            "k3",
+            "kimi k3 max",
+            "k3 max",
+            "кими к3"
+          ]
+        }
+      },
+      "aliases": [
+        "kimik3",
+        "kimi",
+        "hermes",
+        "гермес",
+        "кими",
+        "moonshot",
+        "муншот",
+        "к3"
+      ],
+      "_toolsets": "`web` ONLY, deliberately. Hermes ships terminal, file, code_execution, browser and computer_use ENABLED by default; handing those to a channel whose entire input is an untrusted review brief is remote code execution on the operator's own machine by way of a prompt. A reviewer needs search and nothing else. Never add --yolo, which bypasses the approval prompts that are the remaining backstop.",
+      "_ignore_rules": "The call passes --ignore-rules so SOUL.md, AGENTS.md and Hermes's own memory are NOT injected. A reviewer that inherits the persona of the setup it is reviewing is not independent, and the injected context also makes runs irreproducible between machines. 🔴 It does NOT stop a CLI injecting the launch directory's CLAUDE.md - that needs a neutral cwd, which the harness sets.",
+      "notes": "The CODE channel: 2.8T-param MoE, 1M context, reasoning=true. Send it diffs, build failures and API-contract questions - the things Spark answers from prose and Codex charges strategic rates for."
+    },
+    "qwen38max": {
+      "kind": "openrouter",
+      "enabled": true,
+      "label": "Qwen38Max",
+      "_renamed": "2026-08-07 (round 25) from `qwen`, the operator's own spelling. See kimik3._renamed for the rule; `qwen` remains an alias.",
+      "cost": "metered",
+      "model": "qwen/qwen3.8-max",
+      "role": "analysis",
+      "reasoning": {
+        "effort": "xhigh"
+      },
+      "max_tokens": 64000,
+      "_added": "2026-08-06 (round 23), the operator: «А почему ты не добавил еще и Qwen через openrouter?» - a fair question with no good answer: the previous round added web search to the OpenRouter path and stopped there. Third channel added by editing this file alone.",
+      "_model_chosen": "SELECTED FROM THE LIVE CATALOGUE, not from memory. GET https://openrouter.ai/api/v1/models on 2026-08-06 returned 399 models, 49 of them qwen/*. qwen3.8-max is the only one combining: context_length 1,000,000; created 2026-08-01 (the newest max-tier); GA rather than preview («the general-availability successor to the Qwen3.8 Max Preview»); supported_parameters carrying reasoning, include_reasoning, reasoning_effort, tools and structured_outputs; and a full reasoning ladder {mandatory: true, default_enabled: true, supported_efforts: [xhigh, high, medium, low, minimal], default_effort: xhigh}. The near-peer qwen/qwen3.7-max is ~26% cheaper with the same 1M context but exposes no effort ladder at all. Pricing here: $2/M in, $6/M out - CHEAPER than Kimi K3's $3/$15, while 1M vs 1,048,576 context keeps the two genuinely independent rather than redundant.",
+      "_no_variants": "Positive evidence of absence, not a failed search: a census of all 399 catalogue ids found only three suffixes anywhere on the platform - :batch (60), :free (13), :thinking (1) - and filtering qwen/* and moonshotai/* for a colon returned exactly two ids, neither of them this one. So there is no :free, :thinking or :nitro variant of qwen3.8-max. ':online' is a request-time routing shortcut rather than a catalogued id, so its absence here says nothing; it is not used anyway, for the reason given under kimi.web._added.",
+      "_reasoning_is_mandatory": "🔴 `reasoning.mandatory: true` on this model, documented as «hide disable controls and do not send effort: \"none\" - the model rejects it». Reasoning cannot be switched off here, and default_effort is xhigh. That is stated because it looks like a cost risk and is in fact the reason this channel is worth having: it is a forced-depth reviewer.",
+      "_starvation_probe": "🔴 A REVIEWER'S RECOMMENDATION WAS REJECTED BY EXECUTION, and the recommendation was the plausible one. The documented budget formula predicts that at xhigh (ratio 0.95) reasoning claims ~95% of max_tokens and starves the answer, so the advice was to drop to effort=high and set max_tokens=96000. PROBED 2026-08-06, four arms, max_tokens deliberately tiny (2000) so the ceiling would bite: default, high, xhigh, and high@8000. ALL FOUR returned a complete answer with the end marker, finish_reason=stop, reasoning 215-384 chars. So the ratio is a CEILING, not a reservation - nothing is withheld from the answer in advance, and lowering effort would have bought nothing while costing depth, which is the one thing the operator's standing instruction never trades away. What the probe does NOT settle: no arm actually reached its budget, so the ceiling's behaviour when genuinely exhausted is still only inferred from the 2026-08-03 kimi failure. Mitigation is therefore the ceiling: max_tokens 64000, well clear of the 131,072 max_completion_tokens this model reports.",
+      "web": {
+        "enabled": true,
+        "engine": "exa",
+        "max_results": 5,
+        "_added": "2026-08-06, the operator named Qwen and Kimi together: «Про интернет я имел ввиду для Qwen и Kimi». Same request-level plugin, same $0.005 per search, same Exa engine (Alibaba is not on OpenRouter's native-search list).",
+        "_snippets_not_pages": "🔴 IDENTICAL CAVEAT TO KIMI, and it was argued against enabling this at all: Exa returns 2-4 KB of query-selected excerpts per URL with [...] elision markers, so a verbatim quotation from this channel can silently splice two disjoint fragments. the operator's instruction is explicit and wins. 🔴 SUPERSEDED IN PART 2026-08-07: the mitigation is no longer only «its quotations are never treated as grounded» - see `fetch_tool` below, which lets this channel open the page the search found. The caveat still describes the PLUGIN accurately; it no longer describes the channel."
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8,
+        "_added": "2026-08-07, the operator: «типа Scrape, как дополнительный инструмент к нативному». Identical wiring, guard and budget to kimi.fetch_tool - read the notes there. Both channels get it because the splice risk was identical on both and fixing one would have left the same defect wearing a different channel name."
+      },
+      "models": {
+        "qwen/qwen3.8-max": {
+          "label": "Qwen3.8 Max",
+          "data_policy": "Metered API. See _data_controls_not_wired at the end of this file.",
+          "aliases": [
+            "qwen/qwen3.8-max",
+            "qwen3.8-max",
+            "3.8 max"
+          ]
+        },
+        "qwen/qwen3.7-max": {
+          "label": "Qwen3.7 Max",
+          "data_policy": "Metered API. ~26% cheaper, no effort ladder.",
+          "aliases": [
+            "qwen/qwen3.7-max",
+            "qwen3.7-max",
+            "3.7 max"
+          ]
+        }
+      },
+      "aliases": [
+        "qwen38max",
+        "qwen",
+        "квен",
+        "alibaba",
+        "алибаба",
+        "3.8max"
+      ],
+      "notes": "The fourth independent family in the panel (Meta, OpenAI, Google, Moonshot, Alibaba). Forced reasoning at xhigh and a 1M context make it a cheap deep reader; like kimi it searches in snippets and must not be asked for a verbatim quotation."
     }
   },
+  "_models_removed_from_agy": "claude-sonnet-4-6, claude-opus-4-6-thinking and gemini-3.1-pro-low are deliberately absent from both agy channels (the operator, 2026-07-31): routing a Claude model through agy spends the Gemini weekly subscription on a model already reachable directly, and Pro Low is the shallow variant this channel exists to avoid. 🔴 This note lives at TOP LEVEL and not inside `channels`, and that is not cosmetic: every other object in this file takes `_`-prefixed prose keys, so putting one inside `channels` is the natural habit - and there it would be iterated AS A CHANNEL. Written there first, in this very edit. routing.py now skips `_`-prefixed keys inside `channels` (the declared convention) and refuses any other non-object entry by name, so the trap costs a clear error instead of a confusing one.",
+  "_data_controls_not_wired": "🔴 KNOWN AND DELIBERATELY NOT IMPLEMENTED, recorded so it is a decision rather than an oversight. OpenRouter documents two per-request data controls: `provider.data_collection: \"deny\"` («use only providers which do not collect user data») and `provider.zdr: true` («the request will only be routed to endpoints that have a Zero Data Retention policy»). Neither is sent. Two reasons: enabling zdr can make a request FAIL outright when no ZDR endpoint serves the model, and which providers serve qwen3.8-max was not checked - so switching it on untested would trade a known state for an unknown one; and a knob nobody has exercised looks exactly like a free change until the day it silently drops a channel. The honest position is that briefs sent through kimi and qwen reach a metered third party under its default retention terms, the same as any API call, and that spark12cont is materially worse than that because its discount IS the training grant. the operator decides whether to wire it; the fields are named here so the next session does not have to re-research them.",
+  "_tiers_doc": "🔴 codex_timeout added 2026-08-05. Before that ONLY agy had a per-tier timeout, so codex fell through to the 3000-second default hard-coded in orchestrate._run - and when a run was killed the harness advised 'raise the timeout for that channel', naming a lever that did not exist. 🔴 http_effort added 2026-08-06 for the same class of reason, one level subtler: the tier varied `thinking.budget_tokens` for the Spark channels, but Meta's own docs say that field is «accepted for compatibility but not translated into an effort value» and depth is set ONLY by output_config.effort - which the code pinned at xhigh for every tier. So the tier ladder was, for this channel, a setting that did nothing. PROBED 2026-08-06 on both Spark models: low, medium, high and xhigh all return 200; `max` returns 400 «unsupported output_config.effort value `max`» on BOTH models, and so does the invented value `ultra`, which is the negative control that proves the endpoint validates the field. So xhigh is genuinely the ceiling here, even though the vendor's own OpenAPI schema lists `max` in its enum - the schema is aspirational and the prose page is right.",
   "tiers": {
     "quick": {
       "agy_effort": "low",
-      "agy_timeout": "10m"
+      "agy_timeout": "10m",
+      "codex_timeout": "20m",
+      "http_effort": "high"
     },
     "standard": {
       "agy_effort": "medium",
-      "agy_timeout": "15m"
+      "agy_timeout": "15m",
+      "codex_timeout": "35m",
+      "http_effort": "high"
     },
     "strategic": {
       "agy_effort": "high",
-      "agy_timeout": "25m"
+      "agy_timeout": "25m",
+      "codex_timeout": "50m",
+      "http_effort": "xhigh"
     },
     "deep": {
       "agy_effort": "high",
-      "agy_timeout": "40m"
+      "agy_timeout": "40m",
+      "codex_timeout": "75m",
+      "http_effort": "xhigh"
     }
   }
 }

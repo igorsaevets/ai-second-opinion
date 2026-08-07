@@ -76,11 +76,19 @@ document number against the register genuinely is research.
 You write the question in a plain text file, then run one command. A few minutes later:
 
 ```
-[spark] OK  97s    22 sources cited, 0 dead
-[codex] OK  407s   32 sources cited, 1 dead (deliberate negative check - correct)
-[agy]   OK  44s    11 sources cited, 3 dead  <- PROBLEM: cited pages it never opened
-2/3 channels returned a verified review.
+[spark11]     OK  155s  model=Muse Spark 1.1 [muse-spark-1.1]
+[spark12cont] OK  279s  model=Muse Spark 1.2 Contributor
+[codex]       OK  407s  model=GPT-5.4    32 sources cited, 1 dead (deliberate check - correct)
+[agy31pro]    OK   44s  model=Gemini 3.1 Pro    11 cited, only 2 actually opened  <- PROBLEM
+[agy36flash]  OK   25s  model=Gemini 3.6 Flash
+[kimik3]      OK  185s  model=Kimi K3     4 cited, 1 opened
+[qwen38max]   OK  814s  model=Qwen3.8 Max 7 cited, 5 opened
+6/7 channels returned a verified review.
 ```
+
+Every line names the **model**, not just the channel, because two of these channels are two
+checkpoints of one family and one of them deliberately rotates between models when a weekly
+limit runs out. "Codex answered" is not a fact you can act on; "Codex answered on GPT-5.4" is.
 
 Plus one file per model containing the actual review, and a diagnostics file if anything went
 wrong.
@@ -90,27 +98,60 @@ wrong.
 **Put a claim you know is false into every document you send for review.**
 
 It costs nothing. A model that "confirms" your planted falsehood has just told you exactly what
-all its other confirmations are worth. In the runs behind this tool, all three models caught both
-planted claims — which is the only reason to believe the things they *did* confirm.
+all its other confirmations are worth. In the three-channel rounds this test was built on, all
+three models caught both planted claims — which is the only reason to believe the things they
+*did* confirm. (Scope stated on purpose: that measurement is from a three-channel round and has
+not been repeated across all seven. A number is worth only the run it came from.)
 
 ## What it costs, honestly
 
-Three separate accounts, none of which this tool provides:
+Seven channels, three accounts, none of which this tool provides:
 
-| Channel | What you need | Rough cost |
+| Channels | What you need | Rough cost |
 |---|---|---|
-| **Spark** | An API key | Metered per use — you pay per review |
-| **Codex** | A paid OpenAI plan that includes Codex | Included in the subscription, with weekly limits |
-| **Antigravity (Gemini)** | An eligible Google account | Included, with limits |
+| **`spark11`, `spark12cont`** | `MODEL_API_KEY` | Metered per use — you pay per review |
+| **`kimik3`, `qwen38max`** | `OPENROUTER_API_KEY` | Metered per token, **plus per web search** |
+| **`codex`** | A paid OpenAI plan that includes Codex | Subscription, with a weekly limit |
+| **`agy31pro`, `agy36flash`** | An eligible Google account | Subscription, with limits |
 
-**You do not need all three.** Missing a key or a CLI is a normal condition, not an error — the
+**You do not need all seven.** Missing a key or a CLI is a normal condition, not an error — the
 tool runs whatever is available and tells you plainly what it skipped. You can start with one.
 
+🔴 **One channel deserves a warning before you run it.** `spark12cont` runs the vendor's
+*Contributor* tier, which is heavily discounted **because the vendor may train on your prompts
+and completions**. The discount is real and so is the price. The tool prints that policy in the
+plan before it spends anything, and there is no non-training model on that channel by design —
+if a brief is confidential, drop the channel with `--skip spark12cont` rather than quietly
+swapping its model.
+
 **Do not share one API key across a team.** It bills to whoever owns it, nobody can be
-attributed, and revoking it cuts everyone off at once. One key per person, or have those people
-run the other two channels.
+attributed, and revoking it cuts everyone off at once. One key per person — which is the whole
+reason this is a repository you clone rather than a service you log into.
 
 ## Install
+
+### The fastest way: hand this repository to your AI assistant
+
+Paste this into Claude Code (or any coding assistant with shell access), replacing the URL:
+
+```
+Set up this tool for me: https://github.com/igorsaevets/ai-second-opinion
+Read its INSTALL.md and follow it. I will set my own API keys myself —
+do not ask me to paste a key into this chat, and do not run the key
+commands for me. When you are done, run doctor.py and show me the output.
+```
+
+Those last two sentences are not politeness, they are the security model. An assistant that sets
+the key for you must first *receive* the key, and the conversation is written to disk, replayed
+into later context, and often archived. **A key that has appeared in a chat transcript is leaked
+and must be rotated, not deleted.** The tool is built around this: it never prints a key,
+`doctor.py` reports only presence and length, and `orchestrate.py` refuses to send a payload
+containing anything secret-shaped even if you ask it to.
+
+`INSTALL.md` contains an explicit instruction block addressed to the assistant itself, so a
+competent one will decline to touch your keys without being told twice.
+
+### Or do it yourself
 
 Three ways, in order of how much you want to think about it. Full detail in
 **[INSTALL.md](INSTALL.md)**.

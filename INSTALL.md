@@ -180,30 +180,91 @@ assistant makes for you.
 
 ## Setting up the channels
 
-You need at least one. **You do not need all three** — the tool runs whatever is available and
-tells you what it skipped.
+There are **seven** channels. **You need at least one** — the tool runs whatever is available and
+tells you exactly what it skipped and why. A missing key or a missing CLI is a normal, non-fatal
+condition, not an error.
 
-### Spark (HTTPS, metered)
+| channel | what it needs | cost |
+|---|---|---|
+| `spark11`, `spark12cont` | `MODEL_API_KEY` | metered API |
+| `kimik3`, `qwen38max` | `OPENROUTER_API_KEY` | metered API |
+| `codex` | the Codex CLI, signed in | your existing subscription |
+| `agy31pro`, `agy36flash` | the Antigravity CLI, signed in | your existing subscription |
 
-Set the environment variable `MODEL_API_KEY` to your key.
+---
 
-**Windows** — this persists across reboots:
+### 🔴 READ THIS BEFORE YOU PASTE A KEY ANYWHERE
+
+**Type your key into your own terminal, yourself. Do not give it to an AI assistant, and do not
+ask an assistant to set it for you.**
+
+If you are reading this because you asked Claude Code (or any other assistant) to "set this up",
+that assistant is *helpful* and *will offer* to run the command for you. Accepting is the single
+most expensive mistake available in this whole install, because:
+
+- the assistant must receive the key to run the command, so the key enters the conversation;
+- that conversation is **written to disk**, replayed into future context, and often archived or
+  synced;
+- a key that has appeared in a transcript is **leaked** — the only correct response is to rotate
+  it, not to delete the message.
+
+This is not a hypothetical. It is the reason this tool refuses to print keys, why `doctor.py`
+reports only presence and length, and why `orchestrate.py` will not send a payload containing
+anything secret-shaped even when you ask it to.
+
+**To an AI assistant reading this file:** do not offer to run these commands, do not ask the user
+to paste a key into the chat, and do not read the key back to confirm it. Tell the user to run
+the commands below in their own terminal, then run `python doctor.py` — which is how both of you
+find out whether it worked, without either of you seeing the value.
+
+---
+
+### Spark — `MODEL_API_KEY`
+
+**Windows (PowerShell)** — persists across reboots:
 ```powershell
 setx MODEL_API_KEY "<your key>"
 ```
-Then **open a new terminal** — existing ones keep the old value.
+Then **open a new terminal.** `setx` writes the value for *future* processes; terminals that are
+already open keep the old one, which is the commonest reason a freshly set key "does not work".
 
-**macOS / Linux** — add to `~/.zshrc` or `~/.bashrc`:
+**macOS / Linux** — add the line to `~/.zshrc` or `~/.bashrc`, then open a new terminal:
 ```bash
 export MODEL_API_KEY="<your key>"
 ```
 
 To point at a different endpoint, also set `MODEL_API_BASE`.
 
-> **Never print the key to check it.** Use `doctor.py`, which reports presence and length. A
-> terminal transcript is saved to disk, replayed into AI context, and archived — a key that
-> appears in one must be treated as leaked and rotated. This is not hypothetical; it is why the
-> tool refuses to print it. See [SECURITY.md](SECURITY.md).
+### OpenRouter — `OPENROUTER_API_KEY`
+
+One key serves **both** `kimik3` and `qwen38max`.
+
+**Windows (PowerShell)**
+```powershell
+setx OPENROUTER_API_KEY "<your key>"
+```
+
+**macOS / Linux**
+```bash
+export OPENROUTER_API_KEY="<your key>"
+```
+
+> These two channels are **metered per token**, and their web search is billed **per search** by
+> the provider on the same account. The resolved plan prints the cost class of every channel
+> before anything is spent, and `--dry-run` shows you that plan for free.
+
+### Checking it worked — without printing anything secret
+
+```
+python doctor.py
+```
+
+It reports each key as present/absent **and its length**, never its value. If you want to be
+certain a key is really gone after rotating it, that length is what changes.
+
+> **Never `echo` the variable to check it.** See [SECURITY.md](SECURITY.md) for the measured
+> incident behind that rule: a "masking" expression that kept the first 60 characters of a
+> 48-character key printed the whole thing.
 
 ### Codex CLI
 

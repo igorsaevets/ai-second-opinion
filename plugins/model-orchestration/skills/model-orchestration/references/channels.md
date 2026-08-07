@@ -89,11 +89,23 @@ Soft-policy companion: `~/.codex/AGENTS.md`.
 | `-C` at a non-repo dir | git repo check failure | `--skip-git-repo-check` |
 | ~~passing `-m` or an effort override~~ | **superseded 2026-07-26** | see the box below — the override is now REQUIRED |
 
-> 🔴 **Model override is mandatory. Since 2026-07-30: `gpt-5.5` at effort `xhigh`** (2026-07-26 it
-> was gpt-5.4; before that gpt-5.6-sol/max — the channel rotates, check `codex-model-current` in
-> auto-memory and probe an unfamiliar name cheaply first). `orchestrate.py` already does this
-> (`CODEX_MODEL` / `CODEX_EFFORT`, defaulting to `gpt-5.5` / `xhigh`); if you hand-roll a call,
-> pass `-m gpt-5.5 -c model_reasoning_effort="xhigh"` yourself.
+> 🔴🔴 **Model override is mandatory, and the model has ONE home: `channels.json` →
+> `channels.codex.model`.** `orchestrate.call_codex` reads it there (`_registry_default`) since
+> 2026-08-02; env `CODEX_MODEL` / `CODEX_EFFORT` still override per invocation. Hand-rolling a
+> call? **Open `channels.json` and pass what it says** — never copy a version out of prose,
+> including this line. Current value **2026-08-02: `gpt-5.4` / `xhigh`** (the operator: «поменяй модель
+> 5.5 на 5.4»; 07-30 gpt-5.5, 07-26 gpt-5.4, before that gpt-5.6-sol/max — it rotates).
+>
+> 🔴 Two traps, both found 2026-08-02 while making that one-word change:
+> * the value lived in **two** places, the registry entry and a literal in `orchestrate.py`, and
+>   **the literal won** — so editing the registry alone changed nothing, while its own `_comment`
+>   promised "exactly one place to edit when a weekly limit runs out";
+> * `codex-model-current` in **auto-memory** was named canonical here and in the global
+>   `CLAUDE.md`. Auto-memory is **per project**: there were copies in two projects, none in a
+>   third, and nothing keeps them in step. A machine-wide setting cannot have a per-project home.
+> Until 2026-08-02 `call_codex` also never returned which model it ran on, so `АНАЛИТИКА.md`
+> could not show it. **A setting invisible in the output is indistinguishable from one that never
+> applied** — which is exactly how the decorative registry entry survived unnoticed.
 >
 > This reverses the older "never pass `-m`" rule, which existed only to stop the configured profile
 > being *downgraded* by accident. `~/.codex/config.toml` still declares `gpt-5.6-sol` + `max` and is

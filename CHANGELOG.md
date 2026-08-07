@@ -4,6 +4,61 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-08-07
+
+### Added
+
+- **Seven channels, and every one of them names its model.** `spark11`, `spark12cont`, `codex`,
+  `agy31pro`, `agy36flash`, `kimik3`, `qwen38max`. A channel name used to be a vendor (`spark`,
+  `agy`, `kimi`); it is now a model, because the panel grew past the point where a vendor name
+  identified anything — two Spark checkpoints and two Gemini models run in the same round.
+  **One channel = one model, enforced at load**: pointing a channel at a different model is
+  refused, not warned about. The old names survive as aliases and as group words, so existing
+  commands keep working.
+- **A page-fetch tool for the OpenRouter channels.** Web *search* returns query-selected excerpts
+  with elision markers, so a verbatim quotation assembled from them can splice two disjoint
+  fragments into a sentence no page ever contained. `kimik3` and `qwen38max` can now open a page
+  and quote the fetched text. Because the harness performs the fetch, "which URLs did the model
+  actually open" becomes a list rather than an inference. The tool refuses non-http(s) schemes and
+  any host resolving to a loopback, private, link-local (including the cloud metadata address),
+  CGNAT, multicast or reserved address — re-checked after **every redirect**, because a public
+  hostname can resolve to `127.0.0.1` and a public URL can redirect there.
+- **`REPORT.md`, rendered from `diagnostics.json` on every run**, leading with the depth tier and
+  flagging any model that differs from its channel's default. A tier is invisible in the output —
+  a shallow review reads exactly like a deep one — so it must not depend on whoever writes the
+  summary remembering to mention it. If the tier is missing, the report says so loudly instead of
+  printing a tidy placeholder.
+- **Token usage and subscription state for the Codex channel.** It reports no *tool* telemetry —
+  it never says which pages it opened — and that had been written down as reporting nothing at
+  all. It emits full token usage, and the weekly subscription window can be read before a run
+  without spending a token.
+
+### Fixed
+
+- 🔴 **A URL-parsing bug in the verification layer was billed as a network failure and retried a
+  paid call.** The citation checker could raise on a bracketed IPv6 URL — which happens as soon as
+  a review discusses IPv6 at all — and the caller reported it as a transport error and re-ran the
+  whole streaming request. An accounting step that runs *after* a paid call must not be able to
+  fail that call.
+- 🔴 **A counter named for the rarest cause was fed every cause.** One channel's failure counter
+  was documented as "a permission denial discarded the run", and it counted ordinary fetch
+  timeouts too — so a failed download was reported as the catastrophic bug and sent readers to the
+  wrong fix. Denials and tool errors are now separate, and the channel's own stated reason for
+  stopping is surfaced instead of being parsed past.
+- **A shared helper reported every OpenRouter failure under the first channel's name**, so a
+  `qwen38max` error announced itself as a `kimik3` error.
+
+### Changed
+
+- Documentation now states which claims are **measurements from a three-channel round** rather
+  than quietly restating them as if they covered all seven. A number is worth the run it came
+  from.
+- `INSTALL.md` carries an instruction block addressed to AI assistants: do not offer to set the
+  user's API keys, do not ask for a key in chat, do not read one back. An assistant that sets a
+  key must first receive it, and the conversation is written to disk, replayed into later context
+  and often archived — a key that has appeared in a transcript is leaked and must be rotated, not
+  deleted.
+
 ## [1.2.1] — 2026-08-02
 
 ### Fixed

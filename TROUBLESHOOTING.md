@@ -50,6 +50,37 @@ That is what makes the intended workflow safe:
 
 ## Faults you are most likely to hit
 
+### Windows: Codex runs for the whole timeout and returns nothing
+
+Run `python doctor.py` and read the **`codex sandbox`** line. If it says it cannot spawn a
+`pwsh.exe` under `C:\Program Files\WindowsApps\...`, this is your fault and it is not subtle:
+
+**PowerShell 7 installed from the Microsoft Store cannot be launched inside Codex's sandbox.** A
+WindowsApps package is ACL-locked to its own package identity, so the lowered token Codex uses gets
+`CreateProcessAsUserW failed: 5` (access denied) on every command the model tries to run. Codex
+still answers `--version` normally, still accepts the brief, still reasons — it just cannot execute
+anything, so it flails until the timeout.
+
+`winget install Microsoft.PowerShell` will **not** fix it: the default installer for that package id
+is the same msix.
+
+Fix, no admin required and nothing machine-wide changes:
+
+```powershell
+# download PowerShell-<version>-win-x64.zip from github.com/PowerShell/PowerShell/releases
+Expand-Archive PowerShell-7.6.4-win-x64.zip -DestinationPath $HOME\pwsh7
+python doctor.py        # the `codex sandbox` line should now say "spawns ...\pwsh7\pwsh.EXE"
+```
+
+The Store copy keeps working and stays what `pwsh` means for every other program; the harness puts
+`~\pwsh7` first **on the Codex child process only**. Set `CODEX_SHELL_DIR` to override the location.
+The MSI installer (which lands in `C:\Program Files\PowerShell\7`) works equally well if you have
+admin.
+
+Measured 2026-08-05, and worth knowing because none of the obvious signals point at it: the run
+burned 50 minutes, the model's own analysis was finished after 8, and the failure was reported as
+"timed out".
+
 ### "It says my API key is not set, but I just set it"
 
 On Windows, `setx` writes the variable for *future* processes. Terminals that were already open

@@ -172,6 +172,63 @@ def check_cli(r, mod, name, resolver, version_args):
     return b
 
 
+def check_codex_sandbox(r, mod, binary):
+    """Can codex's sandbox SPAWN A SHELL - the thing it will actually try to do?
+
+    🔴🔴 THE OLD PREFLIGHT ASKED THE BINARY FOR ITS VERSION AND CALLED THAT "ok". On 2026-08-05
+    codex answered `--version` perfectly and its shell tool was 100 % dead: every command the model
+    issued came back `CreateProcessAsUserW failed: 5`, because PowerShell 7 was installed from the
+    Microsoft Store and a WindowsApps package cannot be launched under a lowered token. The run
+    burned ~50 minutes and produced nothing, and the doctor would have said READY throughout.
+
+    🔴 The prose preflight in the skill was `codex sandbox cmd /c echo SANDBOX_OK` - and it PASSES
+    on a machine in exactly this state, because `cmd.exe` spawns fine and the real run uses `pwsh`.
+    A probe that does not travel the path the real call travels measures nothing. So this tests the
+    shell codex will actually reach for, through the same PATH the harness hands it.
+    """
+    if os.name != "nt":
+        r.ok("codex sandbox", "not Windows - the WindowsApps spawn failure cannot apply")
+        return
+    shell_dir = mod.sandbox_shell_dir()
+    env = mod._codex_env() or os.environ
+    exe = shutil.which("pwsh", path=env.get("PATH")) or shutil.which("pwsh")
+    if not exe:
+        r.warn("codex sandbox", "no pwsh found at all",
+               "codex falls back to another shell; if reviews come back empty, install "
+               "PowerShell 7 outside WindowsApps and re-run this check")
+        return
+    # 🔴 THE SENTINEL IS ASSEMBLED BY THE SHELL, NEVER WRITTEN IN THE COMMAND. The first version of
+    # this check ran `-Command "echo SANDBOX_OK"` and looked for SANDBOX_OK in the output - and it
+    # PASSED on the broken Store shell, because the sandbox's failure message quotes the command
+    # line back at you, and the command line contains the sentinel. The probe was reading its own
+    # input as the program's answer. Caught by a negative control, which is the only thing that
+    # could have caught it: every positive run agreed with it.
+    say = "[string]::Join('_','SANDBOX','OK')"
+    try:
+        p = subprocess.run([binary, "sandbox", exe, "-NoProfile", "-Command", say],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=120, env=env)
+        out = (p.stdout or "") + (p.stderr or "")
+    except Exception as e:                                                # noqa: BLE001
+        r.warn("codex sandbox", "probe failed: %r" % (e,), "run the command by hand to see why")
+        return
+    if p.returncode == 0 and "SANDBOX_OK" in out:
+        r.ok("codex sandbox", "spawns %s%s"
+             % (exe, "" if not shell_dir else "  (via %s, ahead of any Store build)" % shell_dir))
+        return
+    store = "windowsapps" in exe.lower() or "WindowsApps" in out
+    r.warn("codex sandbox",
+           "cannot spawn %s - %s" % (exe, out.strip().splitlines()[0][:150] if out.strip() else
+                                     "no output"),
+           "PowerShell 7 from the Microsoft Store cannot be launched under codex's sandbox "
+           "(CreateProcessAsUserW error 5). `winget install Microsoft.PowerShell` will NOT fix it "
+           "- its default installer for that id is the same msix. Install the MSI, or unzip "
+           "PowerShell-*-win-x64.zip into ~/pwsh7 (no admin, nothing machine-wide changes), then "
+           "re-run. Codex's shell tool is dead until then and reviews will burn the full timeout."
+           if store else
+           "codex's shell tool cannot run commands; reviews will burn the full timeout")
+
+
 def check_agy_permissions(r, mod):
     problem = mod.agy_permission_preflight()
     if problem:
@@ -293,8 +350,11 @@ def main():
         except Exception as e:
             r.fail("harness import", repr(e), "orchestrate.py could not be imported")
     if mod:
-        check_cli(r, mod, "codex", mod.codex_bin, ["--version"])
+        codex_b = check_cli(r, mod, "codex", mod.codex_bin, ["--version"])
         check_cli(r, mod, "agy", mod.agy_bin, ["--version"])
+        # A version string is not a capability. See check_codex_sandbox.
+        if codex_b:
+            check_codex_sandbox(r, mod, codex_b)
         check_agy_permissions(r, mod)
         check_pii_gate(r, mod)
 
@@ -314,13 +374,24 @@ def main():
     print("-" * 78)
     dead = [row["check"].split()[0] for row in r.rows
             if row["level"] and row["check"].split()[0] in ("codex", "agy", "spark")]
+    # COUNTED FROM THE REGISTRY, never written as a word. This line said "All three channels can
+    # run" while seven were configured - a status line asserting a number that another file owns,
+    # which is the same defect this doctor exists to catch elsewhere. Degrades to "every channel"
+    # rather than guessing if the registry cannot be read, because a wrong number is worse than none.
+    try:
+        import routing
+        n = len([c for c, ch in routing.load_registry()["channels"].items()
+                 if ch.get("enabled", True)])
+        howmany = "All %d configured channels" % n
+    except Exception:
+        howmany = "Every configured channel"
     if r.worst == 0:
-        print("READY. All three channels can run.")
+        print("READY. %s can run." % howmany)
     elif r.worst == 1 and dead:
         print("USABLE WITH GAPS. These channels cannot run: %s - exclude them with --skip, or "
               "fix the arrows above." % ", ".join(sorted(set(dead))))
     elif r.worst == 1:
-        print("READY, with housekeeping warnings above. All three channels can run.")
+        print("READY, with housekeeping warnings above. %s can run." % howmany)
     else:
         print("NOT READY. Fix the [FAIL] lines above first.")
     print('  python "%s" --brief BRIEF.md --marker DONE-01 --out reviews --dry-run'

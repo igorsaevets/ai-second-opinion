@@ -1,11 +1,12 @@
 ---
 name: model-orchestration
 description: >
-  Run a question past the three external reviewer models — Muse Spark over HTTPS, the Codex CLI,
-  and the Antigravity CLI (agy / Gemini) — in parallel, at maximum depth, with verification that
-  each one actually did the work. Use this EVERY TIME the user asks for a "second opinion",
-  «второе мнение», a review or verification of a document, plan or analysis by an external model,
-  or names Spark / Codex / Gemini / Antigravity. Run doctor.py once per machine to check prerequisites;
+  Run a question past SEVEN external reviewer voices at once — Muse Spark 1.1 and 1.2 Contributor
+  over HTTPS, the Codex CLI on a ChatGPT subscription, Gemini 3.1 Pro and 3.6 Flash through the
+  Antigravity CLI, and Kimi K3 and Qwen3.8 Max over OpenRouter — in parallel, at maximum depth,
+  with verification that each one actually did the work. Use this EVERY TIME the user asks for a
+  "second opinion", «второе мнение», a review or verification of a document, plan or analysis by
+  an external model, or names Spark / Codex / Gemini / Antigravity / Kimi / Qwen. Run doctor.py once per machine to check prerequisites;
   §0 is then a single command. Also contains the exact wire parameters, the CLI flag traps,
   the streaming and retry rules, and the checks that catch a model which silently did nothing.
 user_invocable: true
@@ -98,8 +99,15 @@ python "<SKILL_DIR>\orchestrate.py" `
   --out "$env:TEMP\reviews"
 ```
 
-That runs **all three channels in parallel** and writes `HTTP.md`, `CODEX.md`, `AGY.md` into
-`--out`, plus a verification block on the console.
+That runs **every enabled channel in parallel** and writes one `<CHANNEL>.md` per channel into
+`--out` — today `SPARK.md`, `SPARK12.md`, `CODEX.md`, `AGY.md`, `KIMI.md` — plus a verification
+block on the console.
+
+🔴 **Do not count the channels from this file.** The number is whatever `channels.json` enables,
+and it changed from three to five inside two weeks. `python routing.py` prints the live list and
+spends nothing. The output filename is the registry key, upper-cased: the HTTPS channel wrote
+`HTTP.md` until 2026-08-06 and now writes `SPARK.md`, because two channels share that endpoint
+and one of them had to stop being called "the HTTP one".
 
 | flag | what it does |
 |---|---|
@@ -108,7 +116,7 @@ That runs **all three channels in parallel** and writes `HTTP.md`, `CODEX.md`, `
 | `--marker` | literal string the reply must end with. If it is absent the output is incomplete |
 | `--out` | output directory. Default `./reviews` |
 | `--system` | preset name or path (§0.2). The harness **appends the no-non-existence rule** to whatever you pass — end the file with a newline or that sentence collides with your last word |
-| `--only` | restrict channels. Any alias in `channels.json` works: `spark`/`http`, `codex`, `agy`/`gemini`. Omit to run all three |
+| `--only` | restrict channels. Channel names, aliases and **group** words from `channels.json` all work: `spark11`, `spark12cont`, `codex`, `agy31pro`, `agy36flash`, `kimi`, `qwen` — plus the groups `spark` (both Spark voices), `agy`/`gemini` (both Gemini models) and `openrouter`. Omit to run every enabled one |
 | `--skip` | the inverse of `--only` |
 | `--set` | pin a model without editing anything: `--set codex=gpt-5.4` |
 | `--route` | **paste what the operator typed, verbatim** — see §0.1 |
@@ -130,11 +138,14 @@ the alias table in **`channels.json`**, which is the single place any model name
 The resolved plan is **always printed before anything is spent**, with a reason line per channel:
 
 ```
-  [skip] spark  Spark (Messages API)      model=muse-spark-1.1
+  [skip] spark11     Spark11              model=Muse Spark 1.1 [muse-spark-1.1]  effort=xhigh
            - route: excluded by name
-  [RUN ] codex  Codex CLI                 model=gpt-5.5  effort=xhigh
-           - route: gpt-5.6-sol -> gpt-5.5
+  [RUN ] spark12cont Spark12Cont          model=Muse Spark 1.2 Contributor [muse-spark-1.2-contributor]  effort=xhigh
+           - data: 🔴 CONTRIBUTOR TIER - Meta MAY TRAIN on your prompts and completions.
+  [RUN ] codex       Codex CLI            model=GPT-5.4 [gpt-5.4]  effort=xhigh
+           - route: gpt-5.6-sol -> gpt-5.4
            - cost: EXPENSIVE channel
+  [RUN ] agy36flash  agy 3.6 Flash        model=Gemini 3.6 Flash [gemini-3.6-flash]  effort=high
 ```
 
 Rules that matter: an unparseable route is a **hard stop**, never a guess — a router that
@@ -173,7 +184,7 @@ and do not add the grey-routes line to the legal preset "for consistency".
 preset fails loudly and lists what exists.
 
 **Timing.** `agy` ~1 min · Spark 2–5 min · **Codex 25–35 min**. Run the full set in the background
-and do other work; do not sit and wait on Codex. If you only need a sanity check, `--only agy` is
+and do other work; do not sit and wait on Codex. If you only need a sanity check, `--only agy36flash` is
 the fastest useful answer on this machine.
 
 ---
@@ -198,10 +209,10 @@ What is stable and worth knowing:
 | thing | value |
 |---|---|
 | `MODEL_API_KEY` | the **only** environment variable that must be set. Everything else has a working default |
-| HTTPS endpoint / model | `https://api.meta.ai/v1` + `muse-spark-1.1`, defaults inside `orchestrate.py`; override with `MODEL_API_BASE` / `MODEL_NAME` |
+| HTTPS endpoint / model | `https://api.meta.ai/v1`; the model comes from `channels.json` and the **registry wins over `MODEL_NAME`** — one process-wide variable cannot address one of two channels on one endpoint. Docs: `dev.meta.ai/docs` (public; the login wall is the console, not the docs) |
 | Codex CLI | resolved via `CODEX_BIN` → PATH → known install dirs |
 | Antigravity CLI | `agy`, **not on PATH** on Windows; resolved via `AGY_BIN` → PATH → `%LOCALAPPDATA%\agy\bin\agy.exe` |
-| agy model | base slug **`gemini-3.1-pro`** plus `--effort`. **Not** `gemini-3.1-pro-high` — a suffixed slug plus a disagreeing `--effort` is exit 1 in 3 seconds, and `gemini-3.1-pro` has no `medium` at all (`references/channels.md` §6.3) |
+| agy models | two channels, one model each: **`gemini-3.1-pro`** (agy31pro) and **`gemini-3.6-flash`** (agy36flash), base slug plus `--effort`. **Not** `gemini-3.1-pro-high` — a suffixed slug plus a disagreeing `--effort` is exit 1 in 3 seconds, and `gemini-3.1-pro` has no `medium` at all (`references/channels.md` §6.3) |
 | harness | `orchestrate.py`, standard library only, no `pip install`, Python 3.8+ |
 
 > ⚠️ An earlier version of this file listed five environment variables to configure. Only

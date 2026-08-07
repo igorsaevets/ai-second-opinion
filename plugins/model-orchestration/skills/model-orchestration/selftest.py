@@ -105,7 +105,12 @@ def suite_degradation():
         "import orchestrate as o\n"
         "r = o.call_http_reviewer('brief', 'system', 'strategic', 'REVIEW-COMPLETE')\n"
         "print('OK=%r ERR=%r' % (r.get('ok'), r.get('error')))\n"
-        "print('PRE=%r' % list(o.channel_preflight({'http'}, '.')))\n"
+        "print('PRE=%r' % list(o.channel_preflight({'spark11'}, '.')))\n"
+        # Same fault, a channel name the code has never seen - `newvoice` is in no registry and
+        # never will be. The advice must name THAT channel: four channels now share two shared
+        # transports, so "run with --skip spark" is actively wrong guidance when the one that
+        # failed is a different voice on the same endpoint.
+        "print('PRE2=%r' % list(o.channel_preflight({'newvoice'}, '.', {'newvoice': 'http'})))\n"
     )
     pf = Path(tempfile.gettempdir()) / "orch_selftest_nokey.py"
     pf.write_text(probe, encoding="utf-8")
@@ -116,7 +121,11 @@ def suite_degradation():
         check("Traceback (most recent call last)" not in b, "no API key: does not raise")
         check("OK=False" in b, "no API key: returns a failed result instead of throwing")
         check("MODEL_API_KEY not set" in b, "no API key: the variable is named")
-        check("--skip spark" in b, "no API key: tells the user how to run without it")
+        check("--skip spark11" in b, "no API key: tells the user how to run without it")
+        check("--skip newvoice" in b,
+              "no API key: the advice names the channel that failed, not a hard-coded one")
+        check("newvoice: MODEL_API_KEY is not set" in b,
+              "preflight checks a channel it has never heard of, by kind")
     finally:
         pf.unlink(missing_ok=True)
 
@@ -130,25 +139,50 @@ def suite_routing():
     # into the test as a literal pair. Channel names have one home - channels.json - and a test that
     # copies them is a second home that rots exactly like any other. An inclusion case (--only X)
     # can name X, because X is the input; an exclusion case must compute the complement.
+    # `_`-prefixed keys are prose, not entries - the file's own convention, honoured here too
+    # because this suite reads the raw JSON on purpose rather than through the loader it tests.
     with open(HERE / "channels.json", encoding="utf-8") as fh:
-        ALL = {k for k, v in json.load(fh)["channels"].items() if v.get("enabled", True)}
+        ALL = {k for k, v in json.load(fh)["channels"].items()
+               if not k.startswith("_") and v.get("enabled", True)}
     check(len(ALL) >= 3, "the registry declares at least the three documented channels",
           f"registry={sorted(ALL)}")
 
     def without(*names):
         return ALL - set(names)
 
+    # GROUPS are derived too. `--only agy` has to keep working now that one Gemini channel became
+    # two, and the set it expands to is a registry fact - writing {agy31pro, agy36flash} here
+    # would freeze today's membership into the test and go red the day a third one is added,
+    # which is the same rot the exclusion cases above were rewritten to avoid.
+    with open(HERE / "channels.json", encoding="utf-8") as fh:
+        GROUPS = {g: set(v["channels"]) for g, v in (json.load(fh).get("groups") or {}).items()
+                  if not g.startswith("_")}
+    check(len(GROUPS.get("agy", ())) == 2,
+          "the registry groups both Gemini models under one word", f"groups={GROUPS}")
+
     cases = [
-        (["--only", "spark"], {"spark"}, "--only spark"),
-        (["--only", "http"], {"spark"}, "--only http (alias)"),
+        (["--only", "spark11"], {"spark11"}, "--only spark11"),
+        (["--only", "http11"], {"spark11"}, "--only http11 (channel alias)"),
         (["--only", "codex"], {"codex"}, "--only codex"),
-        (["--only", "gemini"], {"agy"}, "--only gemini (alias)"),
-        (["--only", "spark", "codex"], {"spark", "codex"}, "--only with two channels"),
-        (["--skip", "spark"], without("spark"), "--skip spark"),
-        (["--skip", "codex", "agy"], without("codex", "agy"), "--skip both CLIs"),
-        (["--route", "только spark"], {"spark"}, "route: только spark"),
+        # 🔴 A RENAME MUST NOT BREAK THE COMMANDS PEOPLE ALREADY HAVE. `qwen` and `kimi` were the
+        # channel NAMES until 2026-08-07 and are now aliases of the model-bearing names, so these
+        # two cases are the regression test for that promise, not decoration.
+        (["--only", "qwen"], {"qwen38max"}, "--only qwen (OLD NAME, now an alias)"),
+        (["--only", "kimi"], {"kimik3"}, "--only kimi (OLD NAME, now an alias)"),
+        (["--only", "qwen38max"], {"qwen38max"}, "--only qwen38max"),
+        (["--only", "agy36flash"], {"agy36flash"}, "--only agy36flash"),
+        (["--only", "spark11", "codex"], {"spark11", "codex"}, "--only with two channels"),
+        # The group cases. Each expands to SEVERAL channels from one word.
+        (["--only", "agy"], GROUPS["agy"], "--only agy (GROUP -> both Gemini)"),
+        (["--only", "gemini"], GROUPS["agy"], "--only gemini (group alias)"),
+        (["--only", "spark"], GROUPS["spark"], "--only spark (GROUP -> both Spark)"),
+        (["--skip", "spark"], without(*GROUPS["spark"]), "--skip spark (GROUP)"),
+        (["--skip", "codex", "agy"], without("codex", *GROUPS["agy"]), "--skip codex + agy group"),
+        (["--route", "только spark11"], {"spark11"}, "route: только spark11"),
         (["--route", "не используй codex"], without("codex"), "route: RU negation"),
-        (["--route", "кроме gemini"], without("agy"), "route: кроме gemini"),
+        (["--route", "кроме gemini"], without(*GROUPS["agy"]), "route: кроме gemini (GROUP)"),
+        (["--route", "не используй spark"], without(*GROUPS["spark"]),
+         "route: RU negation of a GROUP"),
         (["--route", "only codex"], {"codex"}, "route: EN only"),
         ([], ALL, "no flags: every enabled channel runs"),
     ]
@@ -254,6 +288,137 @@ def suite_contract():
               (cause or "unrecognised")[:44])
 
 
+def suite_dispatch():
+    """
+    Every channel the registry ENABLES is actually launched, and with its own settings.
+
+    🔴 This suite exists because the opposite was true and nothing noticed. channels.json has
+    always promised that "adding a channel is a change HERE, never in the code"; main() then
+    dispatched on four literal names, so a fifth entry loaded, resolved, printed in the plan as
+    [RUN ] - and was never launched. Every existing check passed throughout, because every one
+    of them was written when there were exactly four channels. Correctness about the cases you
+    thought of is not coverage.
+
+    So the assertion is deliberately derived from the registry rather than from a list written
+    here: a list written here would be updated by the same person who forgot the dispatcher.
+    """
+    section("6. Every channel the registry enables is really launched, with its own settings")
+    probe = (
+        "import json, os, sys, tempfile\n"
+        f"sys.path.insert(0, r'{HERE}')\n"
+        "import orchestrate as o, routing\n"
+        "L = []\n"
+        "def stub(kind):\n"
+        "    def f(*a, **k):\n"
+        "        L.append({'kind': kind, 'name': k.get('name'), 'model': k.get('model'),\n"
+        "                  'effort': k.get('effort'), 'timeout': k.get('timeout'),\n"
+        "                  'web': bool((k.get('web') or {}).get('enabled'))})\n"
+        "        return {'ok': True, 'text': 'stub\\nREVIEW-COMPLETE', 'seconds': 0.0}\n"
+        "    return f\n"
+        "o.call_http_reviewer = stub('http'); o.call_codex = stub('codex')\n"
+        "o.call_agy = stub('agy'); o.call_openrouter_reviewer = stub('openrouter')\n"
+        "o.call_hermes = stub('hermes')\n"
+        "t = tempfile.mkdtemp(prefix='orchdisp-')\n"
+        "b = os.path.join(t, 'b.md')\n"
+        "open(b, 'w', encoding='utf-8').write('Review.\\nREVIEW-COMPLETE\\n')\n"
+        "sys.argv = ['o', '--brief', b, '--out', os.path.join(t, 'o'), '--tier', 'strategic',\n"
+        "            '--no-citecheck', '--no-log']\n"
+        "o.main()\n"
+        f"reg = routing.load_registry(os.path.join(r'{HERE}', 'channels.json'))\n"
+        "en = sorted(c for c, ch in reg['channels'].items() if ch.get('enabled', True))\n"
+        "print('RESULT=' + json.dumps({'enabled': en, 'launched': L}))\n"
+    )
+    pf = Path(tempfile.gettempdir()) / "orch_selftest_dispatch.py"
+    pf.write_text(probe, encoding="utf-8")
+    try:
+        p = subprocess.run([PY, str(pf)], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=180)
+        b = blob_of(p)
+        line = next((l for l in b.splitlines() if l.startswith("RESULT=")), None)
+        check(bool(line), "the dispatch probe produced a result", b[-200:])
+        if not line:
+            return
+        data = json.loads(line[len("RESULT="):])
+        enabled, launched = data["enabled"], data["launched"]
+        check(len(launched) == len(enabled),
+              "every enabled registry channel was launched",
+              "enabled=%s launched=%d" % (enabled, len(launched)))
+        https = [r for r in launched if r["kind"] == "http"]
+        if len(https) > 1:
+            models = {r["model"] for r in https}
+            check(len(models) == len(https),
+                  "channels sharing one endpoint each ran their OWN model",
+                  "models=%s" % sorted(models))
+        for kind, field in (("codex", "timeout"), ("agy", "effort")):
+            rows = [r for r in launched if r["kind"] == kind]
+            if rows:
+                check(all(r[field] for r in rows),
+                      "the tier delivered %s to every %s channel" % (field, kind))
+        webbed = [c for c, ch in json.loads(
+            Path(HERE, "channels.json").read_text(encoding="utf-8"))["channels"].items()
+            if not c.startswith("_") and (ch.get("web") or {}).get("enabled")]
+        for c in webbed:
+            check(any(r["name"] == c and r["web"] for r in launched),
+                  "the registry's web setting reached the %s call" % c)
+    finally:
+        pf.unlink(missing_ok=True)
+
+    # --- One channel's failure must cost exactly one channel -------------------------------
+    # Found by an external reviewer, 2026-08-06. `results = {k: f.result() ...}` re-raises, so
+    # ONE channel throwing aborted the comprehension and discarded every other channel's result
+    # - work that had already run and already been billed - leaving a traceback instead of four
+    # good reviews. The sibling case: a registry `kind` the dispatcher cannot launch produced a
+    # log line and no entry in `results`, which downstream is indistinguishable from a channel
+    # nobody asked for, while the plan printed [RUN ] for it.
+    probe2 = (
+        "import json, os, shutil, sys, tempfile\n"
+        f"sys.path.insert(0, r'{HERE}')\n"
+        f"REG = os.path.join(r'{HERE}', 'channels.json')\n"
+        "shutil.copy(REG, REG + '.selftest-bak')\n"
+        "try:\n"
+        "    d = json.load(open(REG, encoding='utf-8'))\n"
+        "    d['channels']['ghost'] = {'kind': 'https', 'enabled': True, 'label': 'Ghost',\n"
+        "        'cost': 'cheap', 'model': 'nothing',\n"
+        "        'models': {'nothing': {'aliases': ['nothing-model']}}, 'aliases': ['ghost']}\n"
+        "    json.dump(d, open(REG, 'w', encoding='utf-8'), ensure_ascii=False)\n"
+        "    import orchestrate as o\n"
+        "    def ok(*a, **k): return {'ok': True, 'text': 'x\\nREVIEW-COMPLETE'}\n"
+        "    def boom(*a, **k): raise RuntimeError('simulated wrapper crash')\n"
+        "    o.call_http_reviewer = ok; o.call_codex = ok; o.call_openrouter_reviewer = ok\n"
+        "    o.call_hermes = ok; o.call_agy = boom\n"
+        "    t = tempfile.mkdtemp(); b = os.path.join(t, 'b.md')\n"
+        "    open(b, 'w', encoding='utf-8').write('hi\\nREVIEW-COMPLETE\\n')\n"
+        "    out = os.path.join(t, 'out')\n"
+        "    sys.argv = ['o', '--brief', b, '--out', out, '--no-citecheck']\n"
+        "    o.main()\n"
+        "    ch = json.load(open(os.path.join(out, 'diagnostics.json'),\n"
+        "                        encoding='utf-8'))['channels']\n"
+        "    print('RESULT2=' + json.dumps({k: bool(v.get('ok')) for k, v in ch.items()}))\n"
+        "finally:\n"
+        "    shutil.move(REG + '.selftest-bak', REG)\n"
+    )
+    pf2 = Path(tempfile.gettempdir()) / "orch_selftest_dispatch2.py"
+    pf2.write_text(probe2, encoding="utf-8")
+    try:
+        p = subprocess.run([PY, str(pf2)], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=180)
+        b = blob_of(p)
+        line = next((l for l in b.splitlines() if l.startswith("RESULT2=")), None)
+        check(bool(line), "the failure-isolation probe produced a result", b[-200:])
+        if line:
+            st = json.loads(line[len("RESULT2="):])
+            check(st.get("agy31pro") is False,
+                  "a channel that RAISES is recorded as a failed channel, not a traceback")
+            check(st.get("ghost") is False,
+                  "a channel with an undispatchable `kind` gets a failed RESULT, not only a log")
+            survivors = [n for n in st if n not in ("agy31pro", "agy36flash", "ghost") and st[n]]
+            check(len(survivors) >= 3,
+                  "one channel's crash does not discard the other paid-for results",
+                  "survivors=%s" % sorted(survivors))
+    finally:
+        pf2.unlink(missing_ok=True)
+
+
 def suite_citations():
     section("5. The citation check must be honest about what it did and did not check")
 
@@ -333,7 +498,7 @@ def main():
     _quiet = a.quiet
 
     for suite in (suite_degradation, suite_routing, suite_redaction, suite_contract,
-                  suite_citations):
+                  suite_citations, suite_dispatch):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
