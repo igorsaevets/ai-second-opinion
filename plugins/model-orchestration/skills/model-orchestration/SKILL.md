@@ -1,10 +1,10 @@
 ---
 name: model-orchestration
 description: >
-  Run a question past SEVEN external reviewer voices at once — Muse Spark 1.1 and 1.2 Contributor
-  over HTTPS, the Codex CLI on a ChatGPT subscription, Gemini 3.1 Pro and 3.6 Flash through the
-  Antigravity CLI, and Kimi K3 and Qwen3.8 Max over OpenRouter — in parallel, at maximum depth,
-  with verification that each one actually did the work. Use this EVERY TIME the user asks for a
+  Run a question past every external reviewer voice at once — Muse Spark, the Codex CLI, Gemini
+  (both through the Antigravity subscription and through the OpenRouter API), Kimi and Qwen — in
+  parallel, at maximum depth, with verification that each one actually did the work. `--ask` is
+  the cheap one-shot form. Use this EVERY TIME the user asks for a
   "second opinion", «второе мнение», a review or verification of a document, plan or analysis by
   an external model, or names Spark / Codex / Gemini / Antigravity / Kimi / Qwen. Run doctor.py once per machine to check prerequisites;
   §0 is then a single command. Also contains the exact wire parameters, the CLI flag traps,
@@ -64,7 +64,15 @@ kept **under** that budget (~4.3K tokens, ~300 lines) and is never clipped; the 
   machine-read, and Russian costs ~2× the tokens (§0.2 below).
 - **Choosing models is config, not code.** `--route "не используй 5.6 Sol, вместо нее 5.5"`,
   `--skip`, `--set`; check free with `--dry-run` (§0.1 below).
-- **Codex is expensive and slow (~6-25 min).** Never send it a lookup — that is Spark's job.
+- **Codex is expensive and slow (~6-25 min).** Never send it a lookup — that is Spark's job, and
+  since 2026-08-07 a lookup is one command: `--ask "…"`.
+- 🔴 **CONTEXT IS ALMOST FREE; SEARCHING IS NOT.** Measured on the round-26 legal brief:
+  `spark12cont` consumed **2,026,852** input tokens (≈ $0.20 at the Contributor tier, which has
+  **no long-context premium**) and issued **128 web searches** at $2.50/1,000 — **$0.32, i.e. 60 %
+  of that channel's bill was search.** Caching is automatic on this endpoint and cached input is
+  **$0.002/M — 50× cheaper**; `cache_control` breakpoints are accepted, validated, and change
+  nothing. So sending more material is the cheap lever and asking for more searching is the
+  expensive one, which is the opposite of how both feel.
 
 ## 0.3 Reference files — read on demand
 
@@ -99,19 +107,18 @@ python "<SKILL_DIR>\orchestrate.py" `
   --out "$env:TEMP\reviews"
 ```
 
-That runs **every enabled channel in parallel** and writes one `<CHANNEL>.md` per channel into
-`--out` — today `SPARK.md`, `SPARK12.md`, `CODEX.md`, `AGY.md`, `KIMI.md` — plus a verification
-block on the console.
+That runs **every enabled channel in parallel**, writes one `<CHANNEL>.md` per channel into
+`--out`, renders `REPORT.md`, and prints a verification block.
 
-🔴 **Do not count the channels from this file.** The number is whatever `channels.json` enables,
-and it changed from three to five inside two weeks. `python routing.py` prints the live list and
-spends nothing. The output filename is the registry key, upper-cased: the HTTPS channel wrote
-`HTTP.md` until 2026-08-06 and now writes `SPARK.md`, because two channels share that endpoint
-and one of them had to stop being called "the HTTP one".
+🔴 **Do not count the channels from this file, and do not list them.** The number is whatever
+`channels.json` enables; it went three → five → eight inside three weeks, and every prose copy of
+that list has been wrong within days. `python routing.py` prints the live set and spends nothing.
+Output filenames are the registry key, upper-cased.
 
 | flag | what it does |
 |---|---|
-| `--brief` | file with the question. **Required.** Its last line should instruct the model to end with your marker |
+| `--brief` | file with the question. Required unless you pass `--ask`. Its last line should instruct the model to end with your marker |
+| `--ask` | **one-shot question instead of a round.** `--ask "text"` or `--ask @file`. Defaults to `spark12cont`, prints the ANSWER to stdout, skips the citation audit. ~20 s. 🔴 Its default channel is the CONTRIBUTOR tier — Meta may train on it; use `--ask-channel spark11` for anything you would not publish |
 | `--tier` | depth: `quick` · `standard` · `strategic` · `deep`. Default `strategic`. See §2 |
 | `--marker` | literal string the reply must end with. If it is absent the output is incomplete |
 | `--out` | output directory. Default `./reviews` |
@@ -121,7 +128,7 @@ and one of them had to stop being called "the HTTP one".
 | `--set` | pin a model without editing anything: `--set codex=gpt-5.4` |
 | `--route` | **paste what the operator typed, verbatim** — see §0.1 |
 | `--dry-run` | full preflight — plan, brief, preset, key, binaries, agy permissions, PII gate — then exit, spending nothing |
-| `--allow-pii` | send personal identifiers anyway. **Secrets can never be sent**, with or without it |
+| `--strict-pii` | refuse to send when the payload holds personal identifiers. **Off by default since 2026-08-07** (the operator: «правила ослабляй, кроме паролей и api ключей») — identifiers now produce a loud itemised warning and go. `--allow-pii` still parses and is a no-op. **Secrets can never be sent, at any setting** |
 
 ### 0.1 Choosing channels and models without editing code
 
@@ -183,28 +190,24 @@ and do not add the grey-routes line to the legal preset "for consistency".
 `--dry-run` validates the preset name and the brief path before anything is spent; a mistyped
 preset fails loudly and lists what exists.
 
-**Timing.** `agy` ~1 min · Spark 2–5 min · **Codex 25–35 min**. Run the full set in the background
-and do other work; do not sit and wait on Codex. If you only need a sanity check, `--only agy36flash` is
-the fastest useful answer on this machine.
+**Timing** (round 26, 8 channels, 59 KB brief): `orgemini36flash` 78 s · `spark11` 85 s ·
+`agy36flash` 143 s · `agy31pro` 304 s · `spark12cont` 604 s · `qwen38max` 677 s · `kimik3` 884 s ·
+**Codex 25–35 min**. Run in the background. Sanity check: `--ask`, ~20 s.
 
 ---
 
 ## 1. What is on this machine — ask, do not assume
 
 
-**Never pin a version in this file.** Both CLIs moved under it inside one week (`codex` 0.144.6 →
-0.146.0, `agy` 1.1.7 → 1.1.9), and a document that asserts a version reads as current long after
-it stops being true. Ask instead — it takes two seconds and it is never stale:
+**Never pin a version here.** Both CLIs moved inside one week; a document asserting a version
+reads as current long after it stops being true. Ask instead:
 
 ```powershell
 python "<SKILL_DIR>\doctor.py"
 ```
 
-It prints each prerequisite with its live version, resolves both CLI paths the same way
-`orchestrate.py` does, checks that `MODEL_API_KEY` exists **without printing it**, verifies the
-agy permission patch, and compiles the harness. `--json` for a machine-readable form.
-
-What is stable and worth knowing:
+Live versions, both CLI paths, key presence **without printing it**, the agy permission patch,
+and a compile check. `--json` for machine form. What is stable and worth knowing:
 
 | thing | value |
 |---|---|
@@ -215,19 +218,10 @@ What is stable and worth knowing:
 | agy models | two channels, one model each: **`gemini-3.1-pro`** (agy31pro) and **`gemini-3.6-flash`** (agy36flash), base slug plus `--effort`. **Not** `gemini-3.1-pro-high` — a suffixed slug plus a disagreeing `--effort` is exit 1 in 3 seconds, and `gemini-3.1-pro` has no `medium` at all (`references/channels.md` §6.3) |
 | harness | `orchestrate.py`, standard library only, no `pip install`, Python 3.8+ |
 
-> ⚠️ An earlier version of this file listed five environment variables to configure. Only
-> `MODEL_API_KEY` was ever set; the rest fell back to defaults, which is why it worked. Do not
-> "restore" a config table describing state that never existed.
-
 **Secrets.** Never `Read`, `cat`, `echo` or `Write-Output` the key. The script reads it from the
-environment itself, and `doctor.py` reports presence and length only. Printing the value is a hard
-failure.
-
-**Nothing personal leaves without passing the gate.** `orchestrate.py` refuses to send a payload
-containing a key or token (no override exists), and blocks one containing A-numbers, receipt
-numbers, SSNs, emails, phones or a labelled date of birth unless you pass `--allow-pii`. It reports
-kind and line number and never the value — printing it here would leak it into the transcript,
-which is the same mistake one step earlier. `--dry-run` runs the gate, so checking is free.
+environment; `doctor.py` reports presence and length only. Printing the value is a hard failure —
+and `orchestrate.py` refuses to SEND one, with no override at any setting. Identifiers warn and go
+(`--strict-pii` to block); both report kind and line, never the value. `--dry-run` runs the gate free.
 
 ---
 

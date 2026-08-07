@@ -20,25 +20,42 @@
       ]
     },
     "agy": {
-      "label": "both Antigravity/Gemini models",
+      "label": "both Antigravity SUBSCRIPTION models",
       "channels": [
         "agy31pro",
         "agy36flash"
       ],
+      "_lost_the_gemini_aliases_2026_08_07": "🔴 This group used to answer to `gemini` / `джемини` / `гемини`, and on 2026-08-07 that became a lie the moment a Gemini arrived on a different transport. «не используй gemini» would have dropped two of three Gemini channels and left the third running - the failure mode where a word keeps working, keeps printing a plan, and silently means less than it used to. The vendor words now belong to the `gemini` group below, which is the family; `agy` stays the TRANSPORT. Same disease as `_model_was_decorative` and the dispatch literals: a name that used to describe the thing and no longer does.",
       "aliases": [
         "agy",
+        "antigravity",
+        "антигравити",
+        "подписка gemini"
+      ]
+    },
+    "gemini": {
+      "label": "every Gemini, all three transports",
+      "channels": [
+        "agy31pro",
+        "agy36flash",
+        "orgemini36flash",
+        "goog36flash"
+      ],
+      "_added": "2026-08-07 with orgemini36flash. A human who says «gemini» means the MODEL FAMILY, not the billing path - and after this round the family spans a subscription CLI and a metered API. Two words are needed and they are not synonyms: `gemini` = all three, `agy` = the two that spend the Antigravity subscription, `openrouter` = the three that spend the OpenRouter key. `orgemini36flash` is deliberately in both `gemini` and `openrouter`, because it genuinely belongs to both sets - overlapping groups are fine, a group whose name misdescribes its contents is not.",
+      "aliases": [
         "gemini",
         "джемини",
         "гемини",
-        "antigravity",
-        "антигравити"
+        "google",
+        "гугл"
       ]
     },
     "openrouter": {
-      "label": "both metered OpenRouter models",
+      "label": "all metered OpenRouter models",
       "channels": [
         "kimik3",
-        "qwen38max"
+        "qwen38max",
+        "orgemini36flash"
       ],
       "aliases": [
         "openrouter",
@@ -341,6 +358,96 @@
         "3.8max"
       ],
       "notes": "The fourth independent family in the panel (Meta, OpenAI, Google, Moonshot, Alibaba). Forced reasoning at xhigh and a 1M context make it a cheap deep reader; like kimi it searches in snippets and must not be asked for a verbatim quotation."
+    },
+    "orgemini36flash": {
+      "kind": "openrouter",
+      "enabled": true,
+      "label": "OR Gemini 3.6 Flash",
+      "cost": "metered",
+      "model": "google/gemini-3.6-flash",
+      "role": "analysis",
+      "_added": "2026-08-07, the operator: «Теперь давай добавим Gemini через openrouter api. Сравним ее со всеми моделями ... и особенный фокус и анализ в сравнении с gemini через agy». This is the moment agy31pro._named_for_the_channel_not_the_vendor was written to anticipate, on 2026-08-06: «the same Gemini model will later be reachable two ways - through this subscription binary and through a metered Google API key - and by then 'gemini' would name neither.» It arrived one day later and through OpenRouter rather than Google directly, which is why the prefix is `or` and not `api`: a third transport (Google AI Studio) is still plausible, and `apigemini36flash` would then name two things.",
+      "_why_THIS_model_and_not_the_pro": "🔴 CHOSEN AS A CONTROLLED EXPERIMENT, not as the best available Gemini. `google/gemini-3.6-flash` is the SAME model id agy36flash already runs, so pairing them leaves the TRANSPORT as the only variable: Gemini inside Google's own deep-researcher agent harness against Gemini inside ours (Exa search + our fetch_url + our brief + our verification). Any other pairing confounds transport with model. Verified against the live catalogue 2026-08-07: OpenRouter carries NO general-availability `google/gemini-3.1-pro` at all - only `-preview` and `-preview-customtools` - so agy31pro's model has no matched partner here and a `orgemini31pro` channel would be comparing a GA checkpoint against a preview one and calling the difference 'transport'. Rejected for that reason, plus a pricing trap worth recording: gemini-3.1-pro-preview carries `overrides: [{min_prompt_tokens: 200000, prompt: $4/M, completion: $18/M}]`, i.e. the price DOUBLES above a 200K-token prompt. That is the first per-request price cliff anywhere in this registry, and it would fire exactly on the long-context briefs the operator now wants to send.",
+      "_catalogue": "READ FROM THE LIVE CATALOGUE 2026-08-07, not from memory: GET https://openrouter.ai/api/v1/models (public, no key) returned 400 models, 28 of them google/gemini*. This id: context_length 1,048,576, top_provider.max_completion_tokens 65,536, $1.50/M prompt and $7.50/M completion, input_cache_read $0.15/M, input_cache_write $0.083/M, created 1784646733. So it is ~2x kimi's input price and half its output price, and it is the ONLY non-preview 3.6-class Gemini on the platform.",
+      "reasoning": {
+        "effort": "high"
+      },
+      "_effort_ladder_has_no_xhigh": "🔴 `reasoning_config` on this model, verbatim from the catalogue: {mandatory: true, default_enabled: true, supported_efforts: [high, medium, low, minimal], default_effort: medium}. There is NO `xhigh` here - qwen38max has one and this does not, so copying qwen's `{\"effort\": \"xhigh\"}` would have asked for a value the ladder does not contain. `high` is both this channel's ceiling and, deliberately, the exact effort the `deep` and `strategic` tiers give agy36flash (`agy_effort: high`) - which keeps the matched pair matched on depth as well as on model. Reasoning cannot be disabled (`mandatory: true`), so this is a forced-depth reviewer like qwen.",
+      "max_tokens": 60000,
+      "_max_tokens_below_the_others": "60000, not the 64000 kimi and qwen use, and the difference is not cosmetic: this model reports max_completion_tokens 65,536 against qwen's 131,072, so 64000 would sit ~2% under a hard ceiling that also has to hold the reasoning. OpenRouter's top-level max_tokens covers REASONING AND ANSWER TOGETHER (see kimik3._reasoning_budget), which is the 2026-08-03 failure mode: budget exhausted by thinking, zero answer tokens, no end marker.",
+      "web": {
+        "enabled": true,
+        "max_results": 5,
+        "_engine_deliberately_unset": "🔴 THE ONE PLACE THIS CHANNEL IS NOT A COPY OF KIMI/QWEN, and it changes what its citations mean. OpenRouter's own words, quoted in kimik3.web._engines: «The web search plugin is powered by native search for Anthropic, Google, OpenAI, Perplexity, and SpaceXAI models. For other models, the web search plugin is powered by Exa.» Google IS on that list, so leaving `engine` unset gets NATIVE Google grounding here, where kimi and qwen fall back to Exa. Naming `exa` explicitly - the habit copied from the other two entries - would have DOWNGRADED this channel to the excerpt-splicing surface those entries exist to warn about. Cost differs accordingly: the catalogue prices `web_search` at $0.014 for this model against Exa's flat $0.005, so native grounding is ~2.8x the fee and is not the same product.",
+        "_unverified": "That the native path is what actually runs is INFERRED from the vendor's list plus the catalogue's web_search price, not yet observed in a response. The first real round is the test: native grounding should return page-level citations rather than the 2-4 KB `[...]`-elided highlights Exa returns."
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8,
+        "_added": "2026-08-07. Same wiring, same SSRF fence and same per-CALL budget as kimik3/qwen38max - read the notes there. Kept ON even though this channel may have native search, precisely because that makes the comparison sharper: agy36flash gets Google's agent tools, this gets ours, and `n_grounded` is a LIST on both sides rather than an inference on either."
+      },
+      "models": {
+        "google/gemini-3.6-flash": {
+          "label": "Gemini 3.6 Flash",
+          "data_policy": "Metered API through OpenRouter. See _data_controls_not_wired at the end of this file. NOTE the asymmetry worth knowing before choosing between the two Gemini transports: agy36flash spends a subscription and this spends per token, so they differ in billing AND in who holds the data, not only in speed.",
+          "aliases": [
+            "google/gemini-3.6-flash",
+            "or gemini 3.6",
+            "3.6 flash api"
+          ]
+        }
+      },
+      "aliases": [
+        "orgemini36flash",
+        "orgemini",
+        "оргемини",
+        "gemini-api",
+        "gemini api",
+        "джемини апи"
+      ],
+      "notes": "The SAME model as agy36flash, reached the other way. Its whole reason for existing is the comparison: if it matches agy36flash the Antigravity subscription is a billing path, and if it loses the difference is Google's agent harness, which is a thing we could copy. Do not 'simplify' the two into one channel - one channel = one model AND one transport, and collapsing them destroys the only control in the panel."
+    },
+    "goog36flash": {
+      "kind": "gemini",
+      "enabled": true,
+      "label": "Google 3.6 Flash",
+      "cost": "metered",
+      "model": "gemini-3.6-flash",
+      "role": "analysis",
+      "_added": "2026-08-07, the operator: «для моей локальной оркестрации добавь еще gemini 3.6 Flash напрямую, ключ в системе есть. Обычно напрямую если работать по api то больше функционала есть». He is right, and the extra functionality turned out to be the answer to a question round 26 could not settle. THIRD transport to ONE model: `agy36flash` (Antigravity subscription CLI), `orgemini36flash` (OpenRouter resale), `goog36flash` (Google's own API). Same model id all three times, which is what makes the set an experiment instead of a crowd.",
+      "_it_is_the_infrastructure_not_the_harness": "🔴🔴 THE FINDING THIS CHANNEL EXISTS TO HAVE PINNED DOWN. Round 26: agy read `uscis.gov/policy-manual/volume-7-part-b-chapter-4` in 1.12 s while our own fetcher was refused HTTP 403 there three times, across two channels. That left two candidate explanations - Google's retrieval INFRASTRUCTURE, or Antigravity's agent HARNESS - and no way to tell them apart. PROBED 2026-08-07 on this plain API key: `tools:[{\"type\":\"url_context\"}]` opened that same USCIS page and returned three url_citation annotations pointing at it. So it is the infrastructure, it comes with a $-per-token API key, and no subscription CLI is needed to get it.",
+      "_endpoint": "POST https://generativelanguage.googleapis.com/v1beta/interactions with header `x-goog-api-key`. This is the INTERACTIONS API, not generateContent - a different shape from every other channel, which is why it needed its own `kind` rather than another `http` entry.",
+      "_wire_shape_probed_not_read": "The docs show only {model, input, tools}; everything a reviewer channel actually needs was established by probing, 2026-08-07. System prompt is `system_instruction` - `instructions`, `system` and `developer_instruction` each return HTTP 400 `Unknown parameter`. Output ceiling is `generation_config.max_output_tokens`; a bare `max_output_tokens` is a 400. 🔴 THERE IS NO EFFORT KNOB: `thinking_level`, `thinking_config` and `reasoning_effort` are ALL rejected outright, so the tier ladder genuinely cannot reach this channel. That is stated here rather than faked with a field that parses and does nothing - the `thinking.budget_tokens` mistake this registry already made once on the Spark channels.",
+      "_citations_carry_character_spans": "🟢 UNIQUE IN THE PANEL, AND THE REASON THIS CHANNEL IS WORTH ITS FEE. Each `url_citation` annotation carries `start_index` and `end_index` into the answer text, so «which sentence does this source actually support» is a lookup rather than a judgement. Every other channel forces us to infer the mapping, and inferring it is exactly where a plausible-but-unsupported sentence survives review.",
+      "_redirect_trap": "🔴 MEASURED, AND IT WOULD HAVE FOOLED THE CITATION AUDIT. `google_search` citations come back as `vertexaisearch.cloud.google.com/grounding-api-redirect/<opaque>` - NOT the publisher's URL. `url_context` citations are the real URL. So a redirect citation that resolves LIVE proves only that Google's redirector is up; it says nothing about the source. The channel counts the two separately (`n_grounded` counts only real URLs) and warns when every citation is a wrapper.",
+      "tools": [
+        "google_search",
+        "url_context"
+      ],
+      "_no_harness_fetch_tool_here_on_purpose": "kimik3/qwen38max/orgemini36flash get our `fetch_url`, and this channel deliberately does not. `url_context` is Google's own retrieval - an internal index cache with live fetch fallback, up to 20 URLs per request, 34 MB each, and it reads PDFs. Two fetchers on one channel would make «who opened this page» ambiguous, and that answer is the single thing this channel is best at. Bonus: Google refuses localhost, private ranges and tunnelling services at THEIR end, so here the SSRF fence is theirs and our attack surface is smaller, not larger.",
+      "max_tokens": 60000,
+      "_pricing": "🔴 NOT VERIFIED FROM THE VENDOR'S PRICE PAGE IN THIS SESSION - the model list and every wire parameter were read from the live API, the per-token rate was not. Google bills grounding PER SEARCH QUERY on Gemini 3 (their docs, verbatim: «this counts as two billable uses of the tool for that request»), which is the same shape as Meta's $2.50/1,000 and Exa's $0.005 - so the round-26 lesson applies here too: searching is what costs, context is not. Read the price page before assuming a number.",
+      "models": {
+        "gemini-3.6-flash": {
+          "label": "Gemini 3.6 Flash",
+          "data_policy": "Metered Google API on a personal key. Read Google's own terms for the paid tier before sending client material; this project has not verified them.",
+          "_aliases_must_be_transport_qualified": "🔴 THE BARE `gemini-3.6-flash` IS DELIBERATELY ABSENT, and routing REFUSED to load the registry until it was. agy36flash already claims it, and once a second channel runs the same model id the bare name stops identifying anything - `--route \"используй gemini-3.6-flash\"` would have to guess between the Antigravity subscription and a metered Google key, which is exactly the guess this registry is built to make impossible. The guard caught it at load time, by design and on the first try. Note what the collision actually reveals: the alias namespace mixes «which MODEL» with «which CHANNEL», and that only works while the two are one-to-one. They no longer are. Channel aliases (`goog36flash`, `напрямую`) select the transport; `--set goog36flash=gemini-3.6-flash` still resolves inside this channel's own table and is regression-tested.",
+          "aliases": [
+            "google gemini-3.6-flash",
+            "goog 3.6 flash",
+            "gemini напрямую",
+            "3.6 flash direct"
+          ]
+        }
+      },
+      "aliases": [
+        "goog36flash",
+        "google36flash",
+        "гугл36флеш",
+        "gemini-direct",
+        "напрямую"
+      ],
+      "notes": "Google's own API, no reseller and no CLI in between. Its edge is auditable grounding: character-span citations plus Google-side retrieval that reaches pages our fetcher is refused. No effort knob, so the tier ladder does not apply - do not add one."
     }
   },
   "_models_removed_from_agy": "claude-sonnet-4-6, claude-opus-4-6-thinking and gemini-3.1-pro-low are deliberately absent from both agy channels (the operator, 2026-07-31): routing a Claude model through agy spends the Gemini weekly subscription on a model already reachable directly, and Pro Low is the shallow variant this channel exists to avoid. 🔴 This note lives at TOP LEVEL and not inside `channels`, and that is not cosmetic: every other object in this file takes `_`-prefixed prose keys, so putting one inside `channels` is the natural habit - and there it would be iterated AS A CHANNEL. Written there first, in this very edit. routing.py now skips `_`-prefixed keys inside `channels` (the declared convention) and refuses any other non-object entry by name, so the trap costs a clear error instead of a confusing one.",

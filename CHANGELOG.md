@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.4.0 — 2026-08-07
+
+**A ninth channel, and the finding that made it worth building.**
+
+- **`goog36flash`** — Gemini 3.6 Flash on Google's **own** Interactions API (`GEMINI_API_KEY`).
+  That is now three transports to one Gemini: the Antigravity CLI, OpenRouter, and Google direct.
+  Not redundancy — a control. Same model id, so any difference is the transport.
+- 🔴 **Measured: the transport decides the grounding, and the advantage is Google's
+  infrastructure.** `agy36flash` read `uscis.gov/policy-manual/volume-7-part-b-chapter-4` in
+  1.12 s — a URL that returned HTTP 403 to a plain fetch three times. Probing `url_context` on a
+  bare API key opened the same page, which settles it: the reach ships with the API, not with the
+  subscription CLI.
+- 🟢 **Citations with character spans.** Google's `url_citation` annotations carry `start_index`
+  and `end_index` into the answer, so "which sentence does this source support" is mechanical.
+  No other channel offers this. 🔴 Caveat: `google_search` citations are
+  `vertexaisearch.../grounding-api-redirect/...` wrappers, not publisher URLs — only
+  `url_context` citations are real, and the harness counts them separately.
+- **`--ask "question"`** — one-shot lookup, answer printed to stdout, ~20 s, cheapest channel by
+  default. The full round was previously the minimum unit of work.
+- **The PII gate now warns and sends**; `--strict-pii` restores the refusal. `--allow-pii` still
+  parses and is a no-op so existing commands keep working. **Secrets are refused always, with no
+  override at any setting** — that has not changed and will not.
+- **Cached input is reported.** Vendors disagree on whether their `input_tokens` field already
+  contains the cached part (Meta: no, OpenAI: yes), so every channel now states its own rule and
+  no report applies one rule to another's row.
+- 🔴 **`billed in` is a billing meter, not a prompt size.** On a channel with server-side search
+  the vendor re-runs inference per search and reports the SUM, so the figure routinely exceeds
+  the model's context window. Relabelled after a 2 026 852 reading against a 1 048 576 window was
+  correctly challenged as impossible.
+- **Fixes:** bare shortness was graded as a refusal, failing correct short answers; a blocked
+  host drained the page-fetch budget one URL at a time; `report.py` read a flag that had been
+  renamed and would have printed a false reassurance on every future run.
+
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).

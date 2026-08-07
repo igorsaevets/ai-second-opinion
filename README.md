@@ -101,7 +101,7 @@ It costs nothing. A model that "confirms" your planted falsehood has just told y
 all its other confirmations are worth. In the three-channel rounds this test was built on, all
 three models caught both planted claims — which is the only reason to believe the things they
 *did* confirm. (Scope stated on purpose: that measurement is from a three-channel round and has
-not been repeated across all seven. A number is worth only the run it came from.)
+not been repeated across all nine. A number is worth only the run it came from.)
 
 ## What it costs, honestly
 
@@ -110,11 +110,12 @@ Seven channels, three accounts, none of which this tool provides:
 | Channels | What you need | Rough cost |
 |---|---|---|
 | **`spark11`, `spark12cont`** | `MODEL_API_KEY` | Metered per use — you pay per review |
-| **`kimik3`, `qwen38max`** | `OPENROUTER_API_KEY` | Metered per token, **plus per web search** |
+| **`kimik3`, `qwen38max`, `orgemini36flash`** | `OPENROUTER_API_KEY` | Metered per token, **plus per web search** |
+| **`goog36flash`** | `GEMINI_API_KEY` | Metered per token, **plus per search query**. Google's own API — the only channel whose citations carry character spans |
 | **`codex`** | A paid OpenAI plan that includes Codex | Subscription, with a weekly limit |
 | **`agy31pro`, `agy36flash`** | An eligible Google account | Subscription, with limits |
 
-**You do not need all seven.** Missing a key or a CLI is a normal condition, not an error — the
+**You do not need all nine.** Missing a key or a CLI is a normal condition, not an error — the
 tool runs whatever is available and tells you plainly what it skipped. You can start with one.
 
 🔴 **One channel deserves a warning before you run it.** `spark12cont` runs the vendor's

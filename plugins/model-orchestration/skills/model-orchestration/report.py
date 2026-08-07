@@ -71,7 +71,14 @@ def _rows(d):
             "effort": r.get("effort") or p.get("effort") or _UNKNOWN,
             "seconds": r.get("seconds"),
             "bytes": r.get("bytes"),
-            "in_tokens": r.get("in_tokens"),
+            # `in_tokens_total` when the channel computed one, else the raw field. The two are
+            # not interchangeable: on Meta/Messages `input_tokens` EXCLUDES cached tokens (so the
+            # raw field under-reports a warm prefix by orders of magnitude), while on OpenAI it
+            # INCLUDES them (so adding would double-count). Each channel states its own rule in
+            # `cache_convention`; this report never applies one channel's arithmetic to another.
+            "in_tokens": r.get("in_tokens_total", r.get("in_tokens")),
+            "cached_in": r.get("cached_in_tokens"),
+            "cache_convention": r.get("cache_convention"),
             "out_tokens": r.get("out_tokens"),
             "reasoning": r.get("reasoning_tokens") or r.get("thinking"),
             "tools": r.get("tool_calls"),
@@ -142,8 +149,21 @@ def render(d):
     if inv.get("sets"):
         L.append("| **--set** | **%s** | 🔴 a model was overridden away from the registry default. |"
                  % ", ".join(inv["sets"]))
-    L.append("| PII gate | %s | |"
-             % ("BYPASSED (--allow-pii)" if inv.get("allow_pii") else "enforced"))
+    # 🔴 This row read `BYPASSED (--allow-pii)` against a key that no longer exists, so after the
+    # 2026-08-07 change it would have printed "enforced" on every run - a false reassurance in the
+    # one artifact another chat quotes. A renamed flag whose reader was not renamed with it is the
+    # same shape as the four-literal dispatch and the decorative `spark.model`: the code moved and
+    # the thing that reports on the code did not. `allow_pii` is still read so that OLD
+    # diagnostics files keep rendering truthfully rather than silently re-labelling history.
+    if "strict_pii" in inv:
+        pii = ("enforced (--strict-pii)" if inv.get("strict_pii")
+               else "WARN-AND-SEND (default since 2026-08-07) — identifiers were listed and sent; "
+                    "secrets are refused at every setting")
+    elif "allow_pii" in inv:
+        pii = "BYPASSED (--allow-pii)" if inv.get("allow_pii") else "enforced (pre-2026-08-07 run)"
+    else:
+        pii = "not recorded"
+    L.append("| PII gate | %s | |" % pii)
     L.append("")
 
     # ---- model identity. The thing a name can lie about. ----
@@ -166,8 +186,9 @@ def render(d):
     # ---- telemetry ----
     L.append("## What each channel actually did")
     L.append("")
-    L.append("| channel · model | verdict | s | in tok | out tok | reasoning | tools | searches | bytes |")
-    L.append("|---|---|---|---|---|---|---|---|---|")
+    L.append("| channel · model | verdict | s | billed in | cached in | out tok | reasoning "
+             "| tools | searches | bytes |")
+    L.append("|---|---|---|---|---|---|---|---|---|---|")
     for r in rows:
         if not r["ran"]:
             verdict = "not run"
@@ -183,11 +204,30 @@ def render(d):
         who = "`%s`" % r["name"]
         if r["label"] and r["label"] != _UNKNOWN:
             who += " · %s" % r["label"]
-        L.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s |"
+        L.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |"
                  % (who, verdict, _fmt_int(r["seconds"]), _fmt_int(r["in_tokens"]),
-                    _fmt_int(r["out_tokens"]), _fmt_int(r["reasoning"]), _fmt_int(r["tools"]),
+                    _fmt_int(r.get("cached_in")), _fmt_int(r["out_tokens"]),
+                    _fmt_int(r["reasoning"]), _fmt_int(r["tools"]),
                     _fmt_int(r["searches"]), _fmt_int(r["bytes"])))
     L.append("")
+    # The conventions differ per vendor and the difference is a factor of the cached share, so it
+    # is stated under the table rather than assumed. "in tok" is always the FULL prompt.
+    convs = sorted({r["cache_convention"] for r in rows if r.get("cache_convention")})
+    if convs:
+        L.append("🔴 **`billed in` is a BILLING total, not the size of one prompt.** On a channel "
+                 "with server-side web search the vendor re-runs inference once per search and "
+                 "reports the SUM across those internal passes, so this figure routinely exceeds "
+                 "the model's context window — round 26 recorded 2 026 852 against a 1 048 576 "
+                 "window, over 128 searches. It is not a contradiction and it is not context "
+                 "overflow: no single prompt came close to the limit. Divide by `searches` for "
+                 "the rough per-pass size. `cached in` is the part served from a cached prefix, "
+                 "priced far lower (Meta Contributor: $0.002/M against $0.10/M — 50×). Vendors "
+                 "disagree on whether their raw `input_tokens` field already contains the cached "
+                 "part, so each channel states its own rule and this table applies each rule only "
+                 "to its own row:")
+        for c in convs:
+            L.append("- %s" % c)
+        L.append("")
     L.append("`-` means the channel does not report that number, which is different from zero. "
              "Codex reports tokens but never which pages it opened; the Spark channels report "
              "tokens and tool-call counts; the agy channels report everything; the OpenRouter "

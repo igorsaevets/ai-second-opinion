@@ -180,14 +180,15 @@ assistant makes for you.
 
 ## Setting up the channels
 
-There are **seven** channels. **You need at least one** — the tool runs whatever is available and
+There are **nine** channels. **You need at least one** — the tool runs whatever is available and
 tells you exactly what it skipped and why. A missing key or a missing CLI is a normal, non-fatal
 condition, not an error.
 
 | channel | what it needs | cost |
 |---|---|---|
 | `spark11`, `spark12cont` | `MODEL_API_KEY` | metered API |
-| `kimik3`, `qwen38max` | `OPENROUTER_API_KEY` | metered API |
+| `kimik3`, `qwen38max`, `orgemini36flash` | `OPENROUTER_API_KEY` | metered API |
+| `goog36flash` | `GEMINI_API_KEY` | metered API, free tier available |
 | `codex` | the Codex CLI, signed in | your existing subscription |
 | `agy31pro`, `agy36flash` | the Antigravity CLI, signed in | your existing subscription |
 
@@ -234,6 +235,33 @@ export MODEL_API_KEY="<your key>"
 ```
 
 To point at a different endpoint, also set `MODEL_API_BASE`.
+
+### Google — `GEMINI_API_KEY`
+
+Powers `goog36flash` (Gemini 3.6 Flash on Google's own API). Get one at
+**aistudio.google.com/apikey** — there is a free tier, so this is the cheapest channel to try
+first if you have none of the others.
+
+**Windows (PowerShell):**
+
+```powershell
+setx GEMINI_API_KEY "<your key>"
+```
+
+**macOS / Linux:**
+
+```bash
+export GEMINI_API_KEY="<your key>"   # add to ~/.zshrc or ~/.bashrc to persist
+```
+
+Close and reopen the terminal afterwards — `setx` and shell profiles only affect new sessions.
+
+This channel is worth having even beside the OpenRouter one that runs the *same model*: it uses
+Google's own retrieval (`google_search` + `url_context`), which reaches pages a plain HTTP fetch
+is refused, and its citations carry `start_index`/`end_index` into the answer text — so "which
+sentence does this source support" is a lookup rather than a judgement. One caveat measured:
+citations produced by `google_search` come back as `vertexaisearch.../grounding-api-redirect/...`
+wrappers rather than the publisher's URL; only `url_context` citations are the real address.
 
 ### OpenRouter — `OPENROUTER_API_KEY`
 

@@ -140,7 +140,7 @@ sent to three external vendors cannot be recalled. Remove or redact it in the do
 
 If it found personal identifiers: replace them with placeholders in the *sent copy only* — never
 edit your source of record — and tell the model the placeholders are expected. A reviewer never
-needs real identifiers to review reasoning. If they genuinely belong, pass `--allow-pii`
+needs real identifiers to review reasoning. To make this a hard stop again, pass `--strict-pii`
 deliberately.
 
 Either way the tool reports **kind and line number, never the value**, because printing it would

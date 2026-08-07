@@ -24,7 +24,7 @@ subprocess support depends on the event-loop policy. Threads just work.
 **The point is not redundancy, it is disagreement.** Measured across two rounds on real work the
 ordering inverted: once the 55-second channel found the item both slower ones missed, once the
 25-minute one did. Which channel wins is not predictable from cost, from speed, or from the
-previous round. That is the entire argument for running all seven.
+previous round. That is the entire argument for running all nine.
 
 ### Files
 
@@ -53,7 +53,7 @@ call. Only permission rules worked. So everything that must not happen is a chec
 
 - **A payload containing a key, token or private key is never sent. There is no override flag.**
   Nine detectors: private-key blocks, vendor key formats, labelled assignments, bearer tokens.
-- **A payload containing personal identifiers is blocked** unless `--allow-pii` is passed
+- **A payload containing personal identifiers is reported, itemised by kind and line, and sent** — pass `--strict-pii` to refuse instead. Secrets are refused always, with no override
   deliberately. Seven detectors: national ID numbers, case/receipt numbers, SSNs, emails, phone
   numbers, labelled dates of birth, labelled passport numbers.
 - **The gate reports kind and line number, never the value.** Printing the value would leak it

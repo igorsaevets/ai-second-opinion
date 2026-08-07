@@ -17,7 +17,7 @@ example — rename the variable or redact the value in the document.
 
 **Personal identifiers — blocked by default.** National ID numbers, case and receipt numbers,
 SSNs, email addresses, phone numbers, labelled dates of birth and passport numbers. Pass
-`--allow-pii` to override, deliberately.
+`--strict-pii` to refuse instead of warning, deliberately.
 
 The recommended handling is to tokenize in the **sent copy only** — never edit your source of
 record — and tell the model the placeholders are expected. A reviewer never needs real identifiers

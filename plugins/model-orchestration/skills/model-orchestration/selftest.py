@@ -155,10 +155,30 @@ def suite_routing():
     # would freeze today's membership into the test and go red the day a third one is added,
     # which is the same rot the exclusion cases above were rewritten to avoid.
     with open(HERE / "channels.json", encoding="utf-8") as fh:
-        GROUPS = {g: set(v["channels"]) for g, v in (json.load(fh).get("groups") or {}).items()
-                  if not g.startswith("_")}
-    check(len(GROUPS.get("agy", ())) == 2,
-          "the registry groups both Gemini models under one word", f"groups={GROUPS}")
+        _groups_raw = {g: v for g, v in (json.load(fh).get("groups") or {}).items()
+                       if not g.startswith("_")}
+    GROUPS = {g: set(v["channels"]) for g, v in _groups_raw.items()}
+
+    # 🔴 THE WORD -> GROUP MAP HAS TO BE DERIVED TOO, and not deriving it is what broke this file
+    # on 2026-08-07. Membership was already read from the registry - the comment above says why -
+    # but the CASES below still spelled out WHICH group a word belongs to: `gemini` was written as
+    # GROUPS["agy"] because it was an alias of that group at the time. The day a Gemini appeared on
+    # a second transport, `gemini` became its own group covering all three, both cases went red,
+    # and the code under test was correct. Half a derivation freezes the other half.
+    def group_of(word):
+        """Which channels does a human word expand to? Answered by the registry, never by memory."""
+        for g, v in _groups_raw.items():
+            if word == g or word in (v.get("aliases") or []):
+                return GROUPS[g]
+        raise AssertionError("no group answers to %r - this test names a word the registry lost"
+                             % word)
+
+    # Properties, not counts. `len(GROUPS["agy"]) == 2` was true for exactly one day.
+    check(all(len(v) >= 2 for v in GROUPS.values()),
+          "every group expands to at least two channels (a group of one is just a channel)",
+          "sizes=%s" % {g: len(v) for g, v in GROUPS.items()})
+    check(all(c in ALL for v in GROUPS.values() for c in v),
+          "every channel named by a group is an enabled registry channel", f"groups={GROUPS}")
 
     cases = [
         (["--only", "spark11"], {"spark11"}, "--only spark11"),
@@ -173,14 +193,15 @@ def suite_routing():
         (["--only", "agy36flash"], {"agy36flash"}, "--only agy36flash"),
         (["--only", "spark11", "codex"], {"spark11", "codex"}, "--only with two channels"),
         # The group cases. Each expands to SEVERAL channels from one word.
-        (["--only", "agy"], GROUPS["agy"], "--only agy (GROUP -> both Gemini)"),
-        (["--only", "gemini"], GROUPS["agy"], "--only gemini (group alias)"),
-        (["--only", "spark"], GROUPS["spark"], "--only spark (GROUP -> both Spark)"),
-        (["--skip", "spark"], without(*GROUPS["spark"]), "--skip spark (GROUP)"),
-        (["--skip", "codex", "agy"], without("codex", *GROUPS["agy"]), "--skip codex + agy group"),
+        (["--only", "agy"], group_of("agy"), "--only agy (GROUP -> the subscription transport)"),
+        (["--only", "gemini"], group_of("gemini"), "--only gemini (GROUP -> the model family)"),
+        (["--only", "spark"], group_of("spark"), "--only spark (GROUP -> both Spark)"),
+        (["--skip", "spark"], without(*group_of("spark")), "--skip spark (GROUP)"),
+        (["--skip", "codex", "agy"], without("codex", *group_of("agy")),
+         "--skip codex + agy group"),
         (["--route", "только spark11"], {"spark11"}, "route: только spark11"),
         (["--route", "не используй codex"], without("codex"), "route: RU negation"),
-        (["--route", "кроме gemini"], without(*GROUPS["agy"]), "route: кроме gemini (GROUP)"),
+        (["--route", "кроме gemini"], without(*group_of("gemini")), "route: кроме gemini (GROUP)"),
         (["--route", "не используй spark"], without(*GROUPS["spark"]),
          "route: RU negation of a GROUP"),
         (["--route", "only codex"], {"codex"}, "route: EN only"),
@@ -317,6 +338,12 @@ def suite_dispatch():
         "    return f\n"
         "o.call_http_reviewer = stub('http'); o.call_codex = stub('codex')\n"
         "o.call_agy = stub('agy'); o.call_openrouter_reviewer = stub('openrouter')\n"
+        # Every entry in KNOWN_KINDS needs a stub here, or this very check reports the new
+        # channel as unlaunched. It did exactly that on 2026-08-07, one minute after `kind:
+        # gemini` was written — which is the check working. It is the regression test built
+        # after four literal channel names silently swallowed a fifth channel, and it caught
+        # the sixth kind by the same mechanism.
+        "o.call_gemini_direct = stub('gemini')\n"
         "o.call_hermes = stub('hermes')\n"
         "t = tempfile.mkdtemp(prefix='orchdisp-')\n"
         "b = os.path.join(t, 'b.md')\n"
@@ -385,7 +412,7 @@ def suite_dispatch():
         "    def ok(*a, **k): return {'ok': True, 'text': 'x\\nREVIEW-COMPLETE'}\n"
         "    def boom(*a, **k): raise RuntimeError('simulated wrapper crash')\n"
         "    o.call_http_reviewer = ok; o.call_codex = ok; o.call_openrouter_reviewer = ok\n"
-        "    o.call_hermes = ok; o.call_agy = boom\n"
+        "    o.call_hermes = ok; o.call_gemini_direct = ok; o.call_agy = boom\n"
         "    t = tempfile.mkdtemp(); b = os.path.join(t, 'b.md')\n"
         "    open(b, 'w', encoding='utf-8').write('hi\\nREVIEW-COMPLETE\\n')\n"
         "    out = os.path.join(t, 'out')\n"
@@ -411,10 +438,17 @@ def suite_dispatch():
                   "a channel that RAISES is recorded as a failed channel, not a traceback")
             check(st.get("ghost") is False,
                   "a channel with an undispatchable `kind` gets a failed RESULT, not only a log")
-            survivors = [n for n in st if n not in ("agy31pro", "agy36flash", "ghost") and st[n]]
-            check(len(survivors) >= 3,
-                  "one channel's crash does not discard the other paid-for results",
-                  "survivors=%s" % sorted(survivors))
+            # 🔴 COVERAGE, NOT JUST CORRECTNESS. `>= 3` was true with three channels and stayed
+            # true at nine, so it kept passing while silently covering less and less: on
+            # 2026-08-07 it read six survivors out of a possible seven and said PASS, because the
+            # newly added `gemini` channel had no stub and failed for a reason that had nothing to
+            # do with the crash being tested. A floor cannot detect a channel quietly dropping out
+            # of the sample. Demand EVERY non-crashing channel, computed from the registry.
+            expected = {n for n in st if n not in ("agy31pro", "agy36flash", "ghost")}
+            survivors = {n for n in expected if st[n]}
+            check(survivors == expected,
+                  "one channel's crash does not discard ANY other paid-for result",
+                  "survived=%s missing=%s" % (sorted(survivors), sorted(expected - survivors)))
     finally:
         pf2.unlink(missing_ok=True)
 

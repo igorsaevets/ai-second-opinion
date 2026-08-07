@@ -316,9 +316,7 @@ def _verify_http(data, marker, floor, secs, tier):
         fail.append("END MARKER ABSENT - output is incomplete, do not parse it as a finished review")
     if not text.strip():
         fail.append("EMPTY ANSWER despite a successful HTTP call")
-    refusal = refusal_check(text, marker)
-    if refusal:
-        fail.append(refusal)
+    record_refusal(refusal_check(text, marker), fail, note)
 
     # SOFT signals: the answer exists and may be fine; judge it yourself.
     # Kept out of `ok` because a false alarm here trains you to ignore the real ones.
@@ -358,8 +356,34 @@ def _verify_http(data, marker, floor, secs, tier):
                     "model under-allocated: raise budget_tokens or split into more sub-questions."
                     % (out_tok, floor, tier))
 
+    # 🔴 ON THIS ENDPOINT CACHED INPUT IS DISJOINT FROM `input_tokens`; ON THE OTHER ONE IT IS A
+    # SUBSET. Measured 2026-08-07 against the live Messages API with the real 59,408-char round-26
+    # brief: an identical repeat call returned `input_tokens: 8` alongside
+    # `cache_read_input_tokens: 13937`. Were cached tokens a subset, `input_tokens` would have read
+    # ~13,945. So here the true prompt size is the SUM - while OpenAI's convention (which the codex
+    # channel parses) is that `cached_input_tokens` is contained IN `input_tokens`. The same field
+    # name means two opposite things two channels apart, so the arithmetic is done here, per
+    # vendor, instead of being left to whoever reads the report.
+    #
+    # The reason this is a defect and not bookkeeping: `in_tokens` alone reported 8 for a 58 KB
+    # brief. Every "how big was the payload" figure printed for a Spark channel after a cache hit
+    # has been the UNCACHED REMAINDER wearing the name of the total - and the harness's own
+    # probe-then-real-call design guarantees the real call is a hit. On a warm prefix the number
+    # was not slightly wrong, it was wrong by three orders of magnitude.
+    #
+    # What was NOT wired, deliberately: `cache_control: {"type":"ephemeral"}` breakpoints. They
+    # are ACCEPTED and VALIDATED here (an invalid type is a 400, which is the control proving the
+    # field is real) and they change nothing - caching on this endpoint is automatic, and
+    # `cache_creation_input_tokens` stayed 0 in every arm. Adding them would have been a knob
+    # wired to nothing that looks exactly like a saving.
+    cached_in = usage.get("cache_read_input_tokens") or 0
+    raw_in = usage.get("input_tokens") or 0
     return {"channel": "http", "ok": not fail, "text": text, "seconds": round(secs, 1),
-            "in_tokens": usage.get("input_tokens"), "out_tokens": out_tok,
+            "in_tokens": raw_in, "out_tokens": out_tok,
+            "cached_in_tokens": cached_in,
+            "in_tokens_total": raw_in + cached_in,
+            "cache_convention": "disjoint (total = input_tokens + cache_read_input_tokens); "
+                                "MEASURED 2026-08-07 on api.meta.ai/v1/messages",
             "tool_calls": searches, "stop_reason": data.get("stop_reason"),
             "block_types": sorted({b.get("type") for b in blocks if b.get("type")}),
             "warnings": fail, "notes": note}
@@ -386,13 +410,48 @@ REFUSAL_TELLS = [
 ]
 
 
+# A returned message starting with this is a SOFT signal - the answer exists and may be perfectly
+# good; judge it yourself. Anything else is HARD: the answer is unusable.
+SOFT = "~soft~ "
+
+
+def is_soft(msg):
+    return bool(msg) and msg.startswith(SOFT)
+
+
+def record_refusal(msg, hard, soft):
+    """Route a refusal_check result to the list matching its severity, sentinel stripped.
+
+    One helper rather than five copies of the same two-line branch: this check is applied by
+    every channel, and 'the same test graded differently per channel' is precisely the shape that
+    left the reporting layer keyed on stale literal names for four days.
+    """
+    if not msg:
+        return
+    if is_soft(msg):
+        soft.append(msg[len(SOFT):])
+    else:
+        hard.append(msg)
+
+
 def refusal_check(text, marker=None, min_chars=800):
     """
     Return a warning string if this looks like a decline rather than a review, else None.
+    Prefixed with SOFT when the answer is merely short; see `is_soft`.
 
     Two independent signals, deliberately both required for the phrase branch: a refusal tell
     AND a short body. A long review may legitimately contain "I cannot provide a date for X"
     somewhere in the middle; a 200-character answer that opens with one is a refusal.
+
+    🔴 BARE SHORTNESS IS NOT A REFUSAL, and grading it as one was a false alarm in the harness's
+    own taxonomy - SKILL.md §3 splits HARD failures ("the answer is unusable") from SOFT signals
+    ("the answer exists, judge it yourself"), and "this is shorter than 800 characters" is plainly
+    the second. Found by running it 2026-08-07: a probe that said "answer in under 200 words" got
+    a correct, fully-cited, verbatim-quoted answer and was reported `0/1 channels returned a
+    verified review`; then --ask, whose whole purpose is a one-line lookup, failed the same way on
+    a correct statutory citation. A check that cries wolf on a good answer trains you to ignore
+    the alarm that matters - which is a sentence already in this project's own documentation, and
+    this function was the counter-example to it.
     """
     body = (text or "").strip()
     if marker and body.endswith(marker):
@@ -406,8 +465,9 @@ def refusal_check(text, marker=None, min_chars=800):
                 "channel; re-scope the brief for it or drop it from this round."
                 % body[:200])
     if len(body) < min_chars:
-        return ("SUSPICIOUSLY SHORT (%d chars excluding the marker) - a review this size is "
-                "usually a decline, a truncation, or a misread brief. Read it before counting it."
+        return (SOFT + "SHORT ANSWER (%d chars excluding the marker). If the brief asked a "
+                "narrow question this is correct; if it asked for a full review, read it before "
+                "counting it - a decline, a truncation and a misread brief all look like this."
                 % len(body))
     return None
 
@@ -924,12 +984,19 @@ def _binary_version(binary):
         return None
 
 
-def pii_gate(parts, allow_pii):
+def pii_gate(parts, strict_pii=False):
     """
     parts: list of (label, text). Returns an exit code to propagate, or 0 to continue.
 
     Runs before --dry-run returns, so --dry-run is a complete preflight: the whole point of a
     free check is that it tells you everything a paid run would have told you.
+
+    Two severities, and they are deliberately not symmetric. SECRETS are a hard refusal with no
+    override at any setting - a key sent to three vendors cannot be recalled and its blast radius
+    is everything that key opens. PERSONAL IDENTIFIERS warn loudly and send, unless --strict-pii
+    restores the block. The argument used to be spelled `allow_pii` and defaulted to blocking;
+    it is inverted here rather than renamed in place so that a stale caller passing the old
+    positional value fails visibly instead of silently flipping the policy.
     """
     secrets, pii = [], []
     for label, text in parts:
@@ -945,8 +1012,8 @@ def pii_gate(parts, allow_pii):
             "    is no --allow flag for this: remove it from the brief. If it is a false positive\n"
             "    (a placeholder, a documented example), rename the variable or redact the value.")
         return 3
-    if pii and not allow_pii:
-        log("\n*** PERSONAL IDENTIFIERS IN THE PAYLOAD - NOT SENT ***")
+    if pii and strict_pii:
+        log("\n*** PERSONAL IDENTIFIERS IN THE PAYLOAD - NOT SENT (--strict-pii) ***")
         for h in pii:
             log("    " + h)
         log("    Tokenize these in the SENT copy only - never edit the source of record. Replace\n"
@@ -955,11 +1022,32 @@ def pii_gate(parts, allow_pii):
             "    Line numbers are given without the values on purpose - this console output is\n"
             "    read by the orchestrating model, and printing them here would leak them into the\n"
             "    transcript, which is the same mistake one step earlier.\n"
-            "    If they genuinely belong in the brief, re-run with --allow-pii.")
+            "    Drop --strict-pii to send anyway.")
         return 3
-    if pii and allow_pii:
-        log("  [preflight] --allow-pii: sending %d personal identifier(s) to every enabled "
-            "channel. This cannot be undone." % len(pii))
+    if pii:
+        # 🔴 WARN, DO NOT BLOCK - changed 2026-08-07 on Igor's explicit instruction: «если данные
+        # и утекут, это не критично, поэтому правила ослабляй, кроме паролей и api ключей».
+        # Secrets above are untouched and still have no override, because that is the exception
+        # he named.
+        #
+        # There is a second reason, independent of the instruction, and it is the stronger one.
+        # A gate that blocks on identifiers has a high false-positive rate on real legal and
+        # medical material, and this project has already measured what that does: «a false
+        # positive in a safety gate is worse than a miss - it teaches you to pass the override by
+        # reflex, which disables the class.» The override had become automatic, and an override
+        # applied without reading is not a decision. Worse, it was measured doing exactly that:
+        # 15 refused spans were fictional, which made --allow-pii look obvious, and 5 REAL ones
+        # were sitting in the same diff. A loud, unavoidable, itemised warning that cannot be
+        # switched off is a better instrument than a block with a habitual bypass.
+        log("\n  ⚠ PERSONAL IDENTIFIERS ARE BEING SENT - %d found, listed by kind and line, "
+            "never by value:" % len(pii))
+        for h in pii:
+            log("      " + h)
+        log("    Sending publishes them to every enabled channel and cannot be undone. Some "
+            "channels\n"
+            "    are worse than others: a CONTRIBUTOR-tier channel may train on this. Re-run with "
+            "--strict-pii\n"
+            "    to make this a hard stop again, or --dry-run to see the list without sending.")
     return 0
 
 
@@ -1146,6 +1234,18 @@ def _parse_codex_events(path):
         out["out_tokens"] = usage.get("output_tokens")
         out["reasoning_tokens"] = usage.get("reasoning_output_tokens")
         out["cached_in_tokens"] = usage.get("cached_input_tokens")
+        # The counterpart to the note in _verify_http. Here `cached_input_tokens` is documented by
+        # OpenAI as a SUBSET of `input_tokens`, so the total is input_tokens and adding the two
+        # would double-count - the exact opposite of the Meta/Messages channel, where they are
+        # disjoint and MUST be added. Both conventions are stated on the record they belong to so
+        # that a report comparing channels cannot quietly pick one rule for both.
+        # 🔴 SUBSET is INFERRED from the vendor's documented convention, not measured here; the
+        # Meta side WAS measured. To settle it, send one codex turn with a prefix known to be
+        # cached and check whether in_tokens stays at the full prompt size or collapses.
+        out["in_tokens_total"] = usage.get("input_tokens")
+        out["cache_convention"] = ("subset (total = input_tokens, which already contains "
+                                   "cached_input_tokens); INFERRED from OpenAI's documented "
+                                   "convention, not measured on this channel")
     return out
 
 
@@ -1300,15 +1400,37 @@ def codex_quota_snapshot(timeout=12):
                 pass
         creds = rl.get("credits") or {}
         has = creds.get("hasCredits", creds.get("has_credits"))
-        line = ("subscription quota %.0f%% used of a %dh window%s (plan=%s, credits=%s) "
-                "- cached snapshot from the last call, not live"
-                % (used, round(mins / 60.0), when,
-                   rl.get("planType", rl.get("plan_type")), has))
+
+        # 🔴 A STALE SNAPSHOT IS ASYMMETRIC, AND THIS DISPLAY USED TO TREAT IT AS SYMMETRIC.
+        # Accepted from three channels independently in the round-24 panel: telling an operator
+        # they have headroom on a reading that may be hours old is worse than telling them
+        # nothing, because "12% used" reads as permission while "100% used" reads as a warning.
+        # Only one of those two errors costs money. So the number is SUPPRESSED when it would
+        # grant confidence and kept when it would withhold it - the asymmetry is deliberate and
+        # is the whole fix. This value never comes from a live call: it is whatever the last
+        # codex invocation happened to record, and the maintainer states the real limits ride on
+        # the HTTP headers of an actual request.
+        # No age is shown, and that absence is itself measured rather than an oversight: the
+        # app-server returns a snapshot with no timestamp in it, so "how old is this" is not
+        # answerable from the data. Inventing a freshness indicator would be the same mistake in
+        # a nicer font. What CAN be said honestly is where the number comes from.
+        head = "subscription quota, from codex's own cached snapshot - not a live reading"
         if used >= 95:
-            line += ("  ⚠ WEEKLY LIMIT EXHAUSTED - this run will draw on credits. Consider "
-                     "--skip codex, or switch channel. Never open a metered API path to route "
-                     "around a subscription limit.")
-        return line
+            return ("%s: %.0f%% used of a %dh window%s (plan=%s, credits=%s)"
+                    "  ⚠ WEEKLY LIMIT EXHAUSTED - this run will draw on credits. Consider "
+                    "--skip codex, or switch channel. Never open a metered API path to route "
+                    "around a subscription limit."
+                    % (head, used, round(mins / 60.0), when,
+                       rl.get("planType", rl.get("plan_type")), has))
+        # Below the alarm line the exact percentage is withheld on purpose. A band plus the reset
+        # time is everything an operator can act on; the decimal is precision this reading does
+        # not have, and printing it manufactures a confidence the source cannot support.
+        band = "under half" if used < 50 else "over half" if used < 80 else "most"
+        return ("%s: %s of the %dh window used%s (plan=%s, credits=%s). The exact figure is not "
+                "shown because it is a cached value and could be hours out of date - if the "
+                "headroom matters, the only honest test is to run and watch."
+                % (head, band, round(mins / 60.0), when,
+                   rl.get("planType", rl.get("plan_type")), has))
     except Exception:
         return None
     finally:
@@ -1396,9 +1518,8 @@ def call_codex(brief, marker, workdir, outfile, model=None, effort=None, system=
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip():
         warn.append("EMPTY OUTPUT (exit=%d) %s" % (p.returncode, (p.stderr or "")[:200]))
-    refusal = refusal_check(text, marker)
-    if refusal:
-        warn.append(refusal)
+    note = []
+    record_refusal(refusal_check(text, marker), warn, note)
     # 🔴 model/effort ВОЗВРАЩАЮТСЯ с 2026-08-02. До этого дня канал не сообщал, на чём он
     # отработал, и в АНАЛИТИКА.md колонка «усилие» у codex всегда стояла «—». Значит просьбу
     # «поменяй 5.5 на 5.4» нельзя было проверить по артефактам прогона — только чтением кода.
@@ -1406,7 +1527,7 @@ def call_codex(brief, marker, workdir, outfile, model=None, effort=None, system=
     # применилась: ровно так декоративная запись в channels.json и прожила незамеченной.
     out = {"channel": "codex", "ok": not warn, "text": text, "seconds": round(secs, 1),
            "bytes": len(text.encode("utf-8")), "exit": p.returncode, "warnings": warn,
-           "model": model, "effort": effort}
+           "notes": note, "model": model, "effort": effort}
     out.update(_parse_codex_events(progress))
     rl = codex_rate_limits(workdir, started_after=t0)
     if rl:
@@ -1504,12 +1625,11 @@ def call_hermes(brief, marker, outfile, model=None, toolsets=None, system=None, 
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip():
         warn.append("EMPTY OUTPUT (exit=%d) %s" % (p.returncode, (p.stderr or "")[:200]))
-    refusal = refusal_check(text, marker)
-    if refusal:
-        warn.append(refusal)
+    note = []
+    record_refusal(refusal_check(text, marker), warn, note)
     return {"channel": "kimi", "ok": not warn, "text": text, "seconds": round(secs, 1),
             "bytes": len(text.encode("utf-8")), "exit": p.returncode,
-            "model": model, "warnings": warn}
+            "model": model, "warnings": warn, "notes": note}
 
 
 OPENROUTER_URL = os.environ.get("OPENROUTER_BASE",
@@ -1545,6 +1665,20 @@ FETCH_TOOL_SCHEMA = {
 # public web and nothing else, and the restriction has to be mechanical.
 FETCH_MAX_BYTES = 400_000
 FETCH_MAX_REDIRECTS = 3
+
+
+def _fetch_host(url):
+    """Lower-cased hostname, or "" when the URL will not parse.
+
+    Parsed with urlsplit rather than sliced out of the string. A substring test on a URL is the
+    defect this project already measured at label-boundary level, where `.mil` matched inside
+    `milano` and promoted a typosquat to an official source; the same shortcut here would retire
+    the wrong host and silently stop a channel fetching something legitimate.
+    """
+    try:
+        return (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
 
 
 def _fetch_guard_host(host):
@@ -1647,6 +1781,151 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
+
+
+def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=2400,
+                       name="gemini36flash", tools=None, max_tokens=None):
+    """Gemini on Google's OWN Interactions API - the third way to reach this family.
+
+    Why a third Gemini transport is not redundancy. Round 26 measured `agy36flash` and
+    `orgemini36flash` on the IDENTICAL model id and found the transport, not the model, decided
+    the grounding: agy read `uscis.gov/policy-manual/volume-7-part-b-chapter-4` in 1.12 s, the
+    exact URL our own fetcher was refused with HTTP 403 three times. That raised a question the
+    pair could not answer - is the advantage Google's INFRASTRUCTURE or Antigravity's agent
+    harness? This channel answers it: same model, Google's own API, our brief.
+
+    🔴 PROBED 2026-08-07 AND IT IS THE INFRASTRUCTURE. `tools:[{"type":"url_context"}]` opened
+    that same USCIS page and returned three `url_citation` annotations pointing at it. So the
+    reach comes with Google's own retrieval stack and is available on a plain API key - it is not
+    a property of the subscription CLI.
+
+    Two capabilities here exist nowhere else in the panel:
+
+    * **Citations carry CHARACTER SPANS.** Every `url_citation` annotation has `start_index` and
+      `end_index` into the answer text, so "which sentence does this source actually support" is
+      mechanical rather than a judgement. Every other channel makes us infer it.
+    * **`url_context` is Google's retrieval, not ours** - an internal index cache with a live
+      fetch fallback, 20 URLs per request, 34 MB per URL, and PDFs. It also refuses localhost and
+      private ranges *at their end*, so on this channel the SSRF fence is Google's, not
+      `_safe_fetch_url`'s. That is a genuine reduction in our attack surface and it is also the
+      reason the harness's own fetch tool is NOT offered here: two fetchers would make
+      "who opened this page" ambiguous, which is the one thing this channel is best at.
+
+    🔴 THE TRAP, MEASURED: `google_search` citations come back as
+    `vertexaisearch.cloud.google.com/grounding-api-redirect/...` - opaque redirect wrappers, NOT
+    the publisher's URL. `url_context` citations are the real URL. So a citation audit on this
+    channel must treat the two annotation sources differently, and a redirect URL that resolves
+    LIVE proves only that Google's redirector is up.
+
+    Wire shape, established by probing because the docs show only the happy path: the system
+    prompt is `system_instruction` (`instructions`, `system` and `developer_instruction` are all
+    HTTP 400); the output ceiling is `generation_config.max_output_tokens` (a bare
+    `max_output_tokens` is 400). **There is no effort or thinking knob at all** - `thinking_level`,
+    `thinking_config` and `reasoning_effort` are each rejected outright, so the tier ladder cannot
+    reach this channel and pretending otherwise would be one more lever wired to nothing.
+    """
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key and os.name == "nt":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg:
+                key = winreg.QueryValueEx(reg, "GEMINI_API_KEY")[0]
+        except OSError:
+            pass
+    if not key:
+        return {"channel": name, "ok": False,
+                "error": "GEMINI_API_KEY is not set - this channel needs it. Set it (see "
+                         "INSTALL.md), or run with --skip %s." % name}
+    model = model or _registry_default(name, "model", "gemini-3.6-flash")
+    tool_list = [{"type": t} for t in (tools or ["google_search", "url_context"])]
+    body = {"model": model, "input": brief,
+            "generation_config": {"max_output_tokens": max_tokens or 60000},
+            "tools": tool_list}
+    if system:
+        body["system_instruction"] = system
+    log("  [%s] tools=%s (Google's own retrieval - no harness fetch tool on this channel)"
+        % (name, ",".join(t["type"] for t in tool_list)))
+
+    t0 = time.time()
+    try:
+        rq = urllib.request.Request(GEMINI_URL, data=json.dumps(body).encode("utf-8"),
+                                    headers={"x-goog-api-key": key,
+                                             "Content-Type": "application/json"})
+        with urllib.request.urlopen(rq, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:400]
+        return {"channel": name, "ok": False, "seconds": round(time.time() - t0, 1),
+                "error": "HTTP %d: %s" % (e.code, detail)}
+    except Exception as e:
+        return {"channel": name, "ok": False, "seconds": round(time.time() - t0, 1),
+                "error": "transport: %r" % (e,)}
+    secs = time.time() - t0
+
+    parts, cites, queries, opened, redirect_cites = [], [], [], [], 0
+    for step in data.get("steps") or []:
+        st = step.get("type")
+        if st == "google_search_call":
+            queries += list((step.get("arguments") or {}).get("queries") or [])
+        elif st == "url_context_result":
+            # Google reports each retrieval attempt here; `status` is the honest signal.
+            for r in (step.get("result") or []) if isinstance(step.get("result"), list) else []:
+                if isinstance(r, dict) and r.get("retrieved_url"):
+                    opened.append(r["retrieved_url"])
+        elif st == "model_output":
+            for cb in step.get("content") or []:
+                if cb.get("type") == "text":
+                    parts.append(cb.get("text") or "")
+                for a in cb.get("annotations") or []:
+                    u = a.get("url")
+                    if not u:
+                        continue
+                    if "grounding-api-redirect" in u:
+                        redirect_cites += 1     # opaque: proves nothing about the publisher
+                    else:
+                        cites.append(u)
+                        opened.append(u)        # url_context citations ARE the page it read
+    text = "\n\n".join(p for p in parts if p).strip()
+    try:
+        with open(outfile, "w", encoding="utf-8") as f:
+            f.write(text)
+    except OSError as exc:
+        log("  [%s] could not write %s (%s)" % (name, outfile, exc))
+
+    u = data.get("usage") or {}
+    warn, note = [], []
+    if marker and marker not in text:
+        warn.append("END MARKER ABSENT - output is incomplete, do not parse it as a finished review")
+    if not text:
+        warn.append("EMPTY ANSWER despite a successful call")
+    if data.get("status") and data["status"] != "completed":
+        warn.append("status=%s (not 'completed')" % data["status"])
+    record_refusal(refusal_check(text, marker), warn, note)
+    if redirect_cites and not cites:
+        note.append("All %d citations are vertexaisearch grounding-api-redirect wrappers, not "
+                    "publisher URLs. They came from google_search, not from a page this channel "
+                    "opened - resolving one proves Google's redirector is up and nothing else. "
+                    "Ask for url_context when you need an auditable source." % redirect_cites)
+    opened = sorted(set(_norm_url(u2) for u2 in opened))
+    return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
+            "bytes": len(text.encode("utf-8")), "model": data.get("model") or model,
+            "in_tokens": u.get("total_input_tokens"),
+            "cached_in_tokens": u.get("total_cached_tokens"),
+            "in_tokens_total": u.get("total_input_tokens"),
+            "cache_convention": "subset (total_input_tokens already contains "
+                                "total_cached_tokens); Google reports both plus "
+                                "total_tool_use_tokens for retrieved page content",
+            "out_tokens": u.get("total_output_tokens"),
+            "reasoning_tokens": u.get("total_thought_tokens"),
+            "tool_tokens": u.get("total_tool_use_tokens"),
+            "searches": len(queries), "tool_calls": len(queries) + len(opened),
+            "opened_urls": len(opened), "fetched_urls": opened,
+            "n_cited": len(cites) + redirect_cites, "n_grounded": len(cites),
+            "redirect_citations": redirect_cites,
+            "warnings": warn, "notes": note}
 
 
 def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, timeout=2400,
@@ -1810,6 +2089,7 @@ def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, ti
     text_parts, reasoning_chars, usage = [], 0, {}
     opened, fetch_failures, fetches = [], [], 0
     tried = {}          # url -> first outcome; a repeat is answered, not re-fetched, not charged
+    blocked_hosts = {}  # host -> consecutive failures; 2 retires the host for this review
     in_tot = out_tot = 0
     start = time.time()
     try:
@@ -1876,6 +2156,26 @@ def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, ti
                               "and it did not cost you a fetch. Do not request it again; either "
                               "use a different source or say the page could not be opened.\n\n"
                               + tried[url])
+                elif blocked_hosts.get(_fetch_host(url), 0) >= 2:
+                    # 🔴 SAME CLASS AS THE REPEATED-URL FIX ABOVE, ONE LEVEL UP: a HOST that
+                    # refuses automated traffic refuses all of it, so the budget drains a
+                    # different URL at a time while the model reads each 403 as news. Measured on
+                    # the round-26 legal brief, 2026-08-07: uscis.gov returned 403 to every
+                    # request, and it cost qwen 2 fetches and kimi 3 - on the USCIS Policy Manual,
+                    # which was one of the primary sources the brief specifically asked for.
+                    #
+                    # We already send an honest User-Agent and this is NOT an attempt to get past
+                    # the refusal: a host that says no has answered. What is fixed is only that
+                    # its answer should cost one fetch, not eight, and that the model should be
+                    # told to change SOURCE rather than to try the same wall again.
+                    result = ("HOST REFUSED EARLIER IN THIS REVIEW (%s). It has already declined "
+                              "automated requests here more than once, so this attempt was not "
+                              "made and did not cost you a fetch. Do not try this host again. "
+                              "Find the same authority somewhere that serves it - for US federal "
+                              "law, uscode.house.gov and www.ecfr.gov and www.govinfo.gov all "
+                              "work from here - or state plainly that the page could not be "
+                              "opened and tag the claim accordingly."
+                              % _fetch_host(url))
                 else:
                     fetches += 1
                     result = _safe_fetch_url(url)
@@ -1883,6 +2183,8 @@ def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, ti
                     failed = result.startswith(("REFUSED:", "HTTP ", "could not fetch"))
                     if failed:
                         fetch_failures.append(url)
+                        h = _fetch_host(url)
+                        blocked_hosts[h] = blocked_hosts.get(h, 0) + 1
                     else:
                         opened.append(_norm_url(url))
                     log("  [%s] fetch %d/%d %s -> %s"
@@ -1915,9 +2217,8 @@ def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, ti
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip():
         warn.append("EMPTY OUTPUT from stream")
-    refusal = refusal_check(text, marker)
-    if refusal:
-        warn.append(refusal)
+    note = []
+    record_refusal(refusal_check(text, marker), warn, note)
     # Tokens are SUMMED across tool rounds, not taken from the last response. Each round re-sends
     # the whole conversation, so the final call's prompt_tokens is only the last leg and reading
     # it as the total under-reports the round - on a fetch-heavy review, by most of the bill.
@@ -1934,7 +2235,7 @@ def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, ti
             "fetch_failures": len(fetch_failures) or None,
             "n_cited": n_cited or None,
             "n_grounded": len(grounded) if opened else None,
-            "warnings": warn}
+            "warnings": warn, "notes": note}
 
 
 AGY_AGENT = "deep-researcher"   # written into the run's own workspace; see _write_agy_agent
@@ -2079,7 +2380,7 @@ def agy_bin():
 # this, because they used to share a blind spot by construction - each had its own copy of the
 # same five literals, so a kind unknown to one was unknown to the other, and a misspelled kind
 # produced neither a preflight warning nor a result, only a log line that scrolls away.
-KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "hermes")
+KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "gemini", "hermes")
 
 # The degraded path only. When channels.json cannot be loaded there is no `kind` field to read,
 # so these are the names the harness has used, mapped to what they were. Both the historical
@@ -2173,6 +2474,15 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
                    "or exclude the channel." % c)
         else:
             yield "%s: OpenRouter key present (len %d), direct /chat/completions" % (c, len(k))
+    for c in sorted(by_kind.get("gemini", [])):
+        k = _env_key("GEMINI_API_KEY")
+        if not k:
+            yield ("%s: GEMINI_API_KEY is not set. Get one free at aistudio.google.com/apikey, "
+                   "then `setx GEMINI_API_KEY \"<your key>\"` and restart the shell - or exclude "
+                   "the channel with --skip %s." % (c, c))
+        else:
+            yield ("%s: Google key present (len %d), /v1beta/interactions with Google's own "
+                   "retrieval (google_search + url_context)" % (c, len(k)))
     if by_kind.get("agy"):
         problem = agy_permission_preflight()
         if problem:
@@ -2539,10 +2849,8 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
         elif ev["errors"]:
             why = " Last tool error seen: %r." % ev["errors"][-1]
         warn.append("END MARKER ABSENT - output is incomplete, do not parse it as a review." + why)
-    refusal = refusal_check(text, marker, min_chars=500)
-    if refusal:
-        warn.append(refusal + " Never validate this channel on the exit code or the status field.")
     note = []
+    record_refusal(refusal_check(text, marker, min_chars=500), warn, note)
     # status lies in BOTH directions, both observed on 2026-07-31: "SUCCESS" on an empty answer
     # after a permission denial, and "ERROR" on a complete, marker-terminated 1,417-char answer
     # because one late MCP call got a transient HTTP 503. The marker is the only honest gate.
@@ -2586,7 +2894,28 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
 
 def main():
     ap = argparse.ArgumentParser(description="Run one brief past several reviewer models at once.")
-    ap.add_argument("--brief", required=True, help="path to the brief sent to every channel")
+    ap.add_argument("--brief", help="path to the brief sent to every channel (or use --ask)")
+    # 🔴 THE CHEAP PATH. Igor, 2026-08-07: «Можно наверное у нее всегда спрашивать сейчас, даже
+    # когда явно не вызвали оркестрацию» - about muse-spark-1.2-contributor, whose input is
+    # $0.10/M and whose CACHED input is $0.002/M.
+    #
+    # It is deliberately a FLAG and not a rule in a document, and that distinction is the whole
+    # design. This project measured the alternative: rules fire by TOPIC, not by rule - a bolded
+    # instruction was obeyed while the task was about it and 0 times across 16 turns that were
+    # not. "Always ask Spark" written in prose would be obeyed on the day it was written and then
+    # never again. What actually decides whether a cheap channel gets consulted is whether asking
+    # costs one command or six decisions, so the minimum unit of work stops being
+    # brief-file + marker + tier + out-dir + a round, and becomes a string.
+    ap.add_argument("--ask", metavar="TEXT",
+                    help="one-shot question instead of a brief. Prints the answer to stdout. "
+                         "Defaults to the cheapest channel and a temp output dir; `@path` reads "
+                         "the question from a file. Everything else (--only, --tier, --system) "
+                         "still applies")
+    ap.add_argument("--ask-channel", default="spark12cont", metavar="CHANNEL",
+                    help="which channel --ask uses when --only is not given (default: "
+                         "spark12cont, the cheapest). 🔴 That default is the CONTRIBUTOR tier: "
+                         "Meta may train on what you send it. Pass --ask-channel spark11 for "
+                         "anything you would not publish")
     ap.add_argument("--system", help="path to the system prompt for the HTTPS channel")
     ap.add_argument("--tier", default="strategic", choices=list(TIERS))
     ap.add_argument("--marker", default="REVIEW-COMPLETE",
@@ -2607,8 +2936,17 @@ def main():
     ap.add_argument("--set", dest="sets", nargs="*", help="channel=model, e.g. codex=gpt-5.4")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the resolved plan and exit without spending anything")
+    ap.add_argument("--strict-pii", action="store_true",
+                    help="refuse to send when the payload contains personal identifiers. Off by "
+                         "default since 2026-08-07: identifiers now produce a loud itemised "
+                         "warning and are sent. SECRETS are refused always and have no override "
+                         "at any setting")
+    # Kept so that every existing script and habit keeps working. It is now a no-op, and says so
+    # once rather than failing: a flag that vanishes turns a working command into an argparse
+    # error at the worst moment, and this one appears in briefs, notes and other chats' history.
     ap.add_argument("--allow-pii", action="store_true",
-                    help="send personal identifiers anyway. Secrets are never sendable")
+                    help="accepted and ignored (identifiers are sent by default now). Kept so "
+                         "existing commands do not break")
     ap.add_argument("--no-log", action="store_true",
                     help="do not write run.log / diagnostics.json into the output directory")
     # Default ON. A verification step you have to remember is one that runs least often when the
@@ -2618,6 +2956,45 @@ def main():
                          "nothing at any vendor and never changes the exit code; it is on by "
                          "default because it is the only citation check that works on Codex")
     a = ap.parse_args()
+
+    # --- one-shot ask: assemble a real brief from a string, then fall through to the normal path.
+    # Everything downstream (routing, the secret gate, verification, the citation audit) is reused
+    # rather than bypassed. A cheap path that skips the checks is how a cheap path becomes the one
+    # that leaks - and the checks are what make an answer worth having.
+    ask_mode = bool(a.ask)
+    if ask_mode:
+        if a.brief:
+            ap.error("pass either --ask or --brief, not both")
+        question = a.ask
+        if question.startswith("@"):
+            src = os.path.expanduser(question[1:])
+            if not os.path.isfile(src):
+                log("--ask @%s: file not found" % src)
+                return 2
+            with open(src, encoding="utf-8") as fh:
+                question = fh.read()
+        if a.marker == "REVIEW-COMPLETE":
+            a.marker = "ASK-DONE"
+        if not a.only:
+            a.only = [a.ask_channel]
+        if a.out == "./reviews":
+            a.out = os.path.join(tempfile.gettempdir(), "orchestrate-ask")
+        a.no_citecheck = True        # a lookup is not a review; the audit is for cited briefs
+        tmp = os.path.join(a.out, "ask-brief.md")
+        try:
+            os.makedirs(a.out, exist_ok=True)
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(
+                    "# Question\n\n%s\n\n---\n\n"
+                    "Answer directly and completely. If the answer depends on something that "
+                    "changes, search the web and give the URL and the date you accessed it. "
+                    "If your search finds nothing, write exactly \"my search found no "
+                    "confirmation\" and do NOT conclude the thing does not exist. Do not pad: "
+                    "there is no length requirement here, in either direction.\n" % question)
+        except OSError as exc:
+            log("--ask: could not write the temporary brief (%s)" % exc)
+            return 2
+        a.brief = tmp
 
     # Start the file log before anything can fail, so a failure in validation is still recorded.
     started = time.time()
@@ -2634,6 +3011,10 @@ def main():
     # Validate every input BEFORE the dry-run exit, so --dry-run is a real preflight. A mistyped
     # --system used to surface only after the expensive channels had already been launched.
     _resolve_system(a.system or "base-depth")
+    if not a.brief:
+        log("nothing to send: pass --brief <file> for a full round, or --ask \"<question>\" for "
+            "a one-shot question on the cheapest channel.")
+        return 2
     if not os.path.isfile(a.brief):
         log("brief not found: %s" % a.brief)
         return 2
@@ -2698,7 +3079,10 @@ def main():
 
     # Last point at which anything can still be stopped for free. Both files are scanned: a
     # hand-written --system file is just as capable of carrying a name or a key as the brief.
-    gate = pii_gate([("brief", brief), ("system", system)], a.allow_pii)
+    if a.allow_pii:
+        log("  note: --allow-pii is now a no-op - personal identifiers are sent by default and "
+            "warned about. Use --strict-pii to refuse instead.")
+    gate = pii_gate([("brief", brief), ("system", system)], strict_pii=a.strict_pii)
     if gate:
         return gate
 
@@ -2781,6 +3165,10 @@ def main():
                                         reasoning=p.get("reasoning"),
                                         max_tokens=p.get("max_tokens"),
                                         fetch_tool=p.get("fetch_tool"))
+            elif kind == "gemini":
+                jobs[cname] = ex.submit(call_gemini_direct, brief, a.marker, outfile,
+                                        model=p.get("model"), system=system, name=cname,
+                                        tools=p.get("tools"), max_tokens=p.get("max_tokens"))
             else:
                 # Named in the registry, unknown to the code. A log line is NOT enough: a log
                 # line scrolls, and every downstream consumer - the "N/M channels returned"
@@ -2842,9 +3230,27 @@ def main():
         if r.get("error"):
             log("    error: " + str(r["error"]))
         if kind == "http" and r.get("out_tokens") is not None:
-            log("    tokens in=%s out=%s | tool_calls=%s | stop=%s | effort=%s | blocks=%s"
-                % (r.get("in_tokens"), r.get("out_tokens"), r.get("tool_calls"),
-                   r.get("stop_reason"), r.get("effort"), r.get("block_types")))
+            # `in=` is the TOTAL prompt, with the cached share broken out. Printing only
+            # `input_tokens` here reported 8 for a 58 KB brief, because this endpoint excludes
+            # cached tokens from that field and the harness's own probe warms the cache before
+            # every real call. The two numbers are also priced 50x apart on the Contributor tier
+            # ($0.10/M against $0.002/M), so the split is the cost breakdown, not trivia.
+            # 🔴 "in" IS A BILLING METER, NOT A CONTEXT-OCCUPANCY METER, and the old label invited
+            # exactly the wrong reading. Igor caught it on 2026-08-07: the round-26 line said
+            # `in=2026852` for a model whose context window is 1 048 576 - a number that cannot be
+            # a prompt. It is not: on a turn with server-side web search the endpoint re-runs
+            # inference once per search and reports the SUM across those internal passes. With 128
+            # searches the largest single prompt was on the order of tens of thousands of tokens,
+            # about 4% of the window. Same shape on the --ask probe: 280 445 reported for a
+            # one-sentence question with 11 searches. Naming it `in` made it read as "how big was
+            # the input", which is the counter-named-for-the-wrong-cause defect this project keeps
+            # measuring - and the physical impossibility is what exposed it.
+            log("    tokens billed_in=%s across %s search turn(s) - CUMULATIVE over internal "
+                "passes, NOT one prompt (of which cached %s, ~50x cheaper) | out=%s | stop=%s | "
+                "effort=%s | blocks=%s"
+                % (r.get("in_tokens_total"), r.get("tool_calls") or 0, r.get("cached_in_tokens"),
+                   r.get("out_tokens"), r.get("stop_reason"), r.get("effort"),
+                   r.get("block_types")))
         if kind == "openrouter" and r.get("out_tokens") is not None:
             # The direct channel finally has real usage numbers; Hermes reported none.
             log("    tokens in=%s out=%s | reasoning_chars=%s | web=%s"
@@ -2952,7 +3358,8 @@ def main():
         "total_channels": len(results),
         "invocation": {"tier": a.tier, "marker": a.marker, "system": a.system or "base-depth",
                        "only": a.only, "skip": a.skip, "route": a.route, "sets": a.sets,
-                       "brief_chars": len(brief), "allow_pii": a.allow_pii},
+                       "brief_chars": len(brief), "strict_pii": a.strict_pii,
+                       "ask_mode": ask_mode},
         "environment": environment_report(want),
         "plan": plan,
         "preflight": preflight,
@@ -2980,6 +3387,21 @@ def main():
         log("\nDiagnostics: %s" % diag)
         log("If something went wrong, hand that file to an AI assistant and ask it to fix the "
             "cause - it is scrubbed of keys and personal data and contains everything needed.")
+
+    # In --ask mode the ANSWER is the product, not the round summary. Printing the path to a file
+    # and stopping there is what makes a cheap channel expensive to consult: the cost that decides
+    # whether a lookup happens is the number of steps, not the number of cents.
+    if ask_mode:
+        for name, r in results.items():
+            body = (r.get("text") or "").strip()
+            if a.marker and body.endswith(a.marker):
+                body = body[:-len(a.marker)].rstrip()
+            print("\n" + "=" * 78)
+            print("ANSWER  [%s]%s" % (name, "" if r.get("ok") else "   ⚠ the channel reported a "
+                                                                  "problem - read the log above"))
+            print("=" * 78)
+            print(body if body else "(empty answer - see the warnings above)")
+        return 0 if ok_count else 1
 
     log("Now report, per channel: accepted / rejected with proof / where they disagreed. "
         "The disagreement is the product.")
