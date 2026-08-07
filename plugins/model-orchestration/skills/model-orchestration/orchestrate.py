@@ -308,7 +308,15 @@ def _verify_http(data, marker, floor, secs, tier):
                        if b.get("type") in ("server_tool_use", "web_search_tool_result"))
 
     # HARD failures: the answer is unusable. Never report one of these as a review.
+    #
+    # `note` is created HERE, above its first reader. It used to be initialised after the
+    # record_refusal() call below, so _verify_http raised UnboundLocalError on every Spark
+    # answer. The generic `except Exception` in the retry loop then relabelled a pure Python bug
+    # as "transport: ...", slept through four attempts and reported the channel as a network
+    # failure - on the channel the cost ladder makes the default for every lookup. Measured
+    # 2026-08-07: spark11 returned nothing at all, three times, with a message pointing at DNS.
     fail = []
+    note = []
     if data.get("stop_reason") not in (None, "end_turn"):
         fail.append("stop_reason=%s (TRUNCATED - the tail of the analysis is missing)"
                     % data.get("stop_reason"))
@@ -320,7 +328,6 @@ def _verify_http(data, marker, floor, secs, tier):
 
     # SOFT signals: the answer exists and may be fine; judge it yourself.
     # Kept out of `ok` because a false alarm here trains you to ignore the real ones.
-    note = []
     if not searches:
         note.append("ZERO tool invocations - every dated fact in this answer is from training data, "
                     "not from the web. Treat dated claims as unverified.")
@@ -2926,14 +2933,22 @@ def main():
     # that only knew the registry names - so a documented flag died with "unknown channel 'http'".
     # routing.canon_channel now resolves any alias in channels.json (http, gemini, кодекс...) and
     # raises with the full list on a miss, which is a better error than argparse's anyway.
-    ap.add_argument("--only", nargs="*",
+    # `action="extend"` on all three, not the default `store`. With plain nargs="*" a repeated
+    # flag OVERWRITES: `--skip codex --skip spark12cont` kept only spark12cont, so codex ran -
+    # and it ran on a channel whose own preflight had just printed "WEEKLY LIMIT EXHAUSTED, this
+    # run will draw on credits". Measured 2026-08-07, round 27, and it cost a Codex round. The
+    # spelling that looks most obviously safe (one flag per channel) was the broken one; the
+    # spelling that worked (`--skip a b`) is the one people reach for less.
+    ap.add_argument("--only", action="extend", nargs="*", default=None,
                     help="restrict to some channels; any alias in channels.json works "
-                         "(spark/http, codex, agy/gemini). Default: all three")
+                         "(spark/http, codex, agy/gemini). Repeatable. Default: every enabled one")
     # Channel and model selection without touching code: the registry holds every model name,
     # and --route takes whatever Igor typed in chat, verbatim, in Russian or English.
     ap.add_argument("--route", help='free text, e.g. "не используй 5.6 Sol, вместо нее 5.5"')
-    ap.add_argument("--skip", nargs="*", help="channels to exclude")
-    ap.add_argument("--set", dest="sets", nargs="*", help="channel=model, e.g. codex=gpt-5.4")
+    ap.add_argument("--skip", action="extend", nargs="*", default=None,
+                    help="channels to exclude. Repeatable")
+    ap.add_argument("--set", dest="sets", action="extend", nargs="*", default=None,
+                    help="channel=model, e.g. codex=gpt-5.4. Repeatable")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the resolved plan and exit without spending anything")
     ap.add_argument("--strict-pii", action="store_true",

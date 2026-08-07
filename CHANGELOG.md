@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.4.1 — 2026-08-07
+
+**Two defects that a code review does not find, because both of them look like something else.**
+
+- 🔴 **Spark could not answer at all, and said the network was down.** `_verify_http` read `note`
+  one line before creating it, so every Spark reply raised `UnboundLocalError`. The retry loop's
+  general `except Exception` caught it, wrote `transport: UnboundLocalError(...)`, slept through
+  four backoffs and reported the channel unreachable. The symptom pointed at DNS; the cause was a
+  variable ordering. Both Spark channels were dead - and the cost ladder makes Spark the default
+  for every lookup, so the recommended-cheap path was the broken one. Fixed and verified with a
+  live `--ask`, not by reading the diff.
+- 🔴 **`--skip` silently kept the channel you asked it to drop.** `--only`, `--skip` and `--set`
+  used bare `nargs="*"`, which **overwrites** on a repeated flag, so
+  `--skip codex --skip spark12cont` skipped only the second one and ran Codex - immediately after
+  its own preflight had printed `WEEKLY LIMIT EXHAUSTED - this run will draw on credits`. All
+  three are now `action="extend"` and repeatable. Note which spelling failed: `--skip a b` always
+  worked, and one-flag-per-channel, the form that looks more careful, was the broken one.
+
+Neither was found by reading. Both were found by running a round and reading what the log
+actually said instead of what it was supposed to say.
+
 ## 1.4.0 — 2026-08-07
 
 **A ninth channel, and the finding that made it worth building.**
