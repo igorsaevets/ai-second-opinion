@@ -931,6 +931,12 @@ def suite_settings_and_upgrade():
         # one-shot question. Found by testing a reviewer's general frame rather than his example.
         check("cost" not in routing.OVERLAY_QUIET_FIELDS,
               "`cost` is SHARP: it drives the spend warning and --ask's fan-out set")
+        # 🔴 The response says which model answered; nothing compared it to what we asked for, so
+        # "this model lowered its effort" and "the router served something smaller" were the same
+        # observation. Two fields, never one - collapsing them is how it stayed invisible.
+        osrc2 = Path(HERE, "orchestrate.py").read_text(encoding="utf-8")
+        check("MODEL SUBSTITUTION" in osrc2 and '"model_served"' in osrc2,
+              "the served model is recorded separately from the requested one, and mismatch warns")
         import orchestrate as _o
         m = _o.meter_source({"completion_tokens_details": {"reasoning_tokens": 7}},
                             "completion_tokens_details", "reasoning_tokens")

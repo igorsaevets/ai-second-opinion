@@ -2364,6 +2364,7 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         rq = urllib.request.Request(prov["url"],
                                     data=json.dumps(payload).encode("utf-8"), headers=headers)
         parts, rchars, use, calls = [], 0, {}, {}
+        served = set()
         with urllib.request.urlopen(rq, timeout=timeout) as resp:
             for raw in resp:
                 line = raw.decode("utf-8", "replace").strip()
@@ -2390,6 +2391,16 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                 # an exotic one. Captured here and surfaced in the channel's error field.
                 if ev.get("error"):
                     stream_error.append(ev["error"])
+                # 🔴🔴 WHAT THE VENDOR SAYS IT RAN, not what we asked for. qwen38max, reviewing
+                # round 31: the whole release worries that a DOCUMENT could be redirected, while
+                # at the inference layer - where the substitution would actually happen - the
+                # harness is blind. Every verdict attaches to a channel label, and nothing checked
+                # that the thing answering behind a router is the model that label names. So
+                # "Kimi dialled its effort down" and "the router served something smaller" were
+                # the same observation. Same rule as this round's other half, one layer up: judge
+                # by what came BACK, never by what was sent.
+                if ev.get("model"):
+                    served.add(ev["model"])
                 for ch in ev.get("choices") or []:
                     if ch.get("error"):
                         stream_error.append(ch["error"])
@@ -2423,10 +2434,12 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                             slot["args"].append(fn["arguments"])
         return ("".join(parts), rchars,  use,
                 [{"id": v["id"], "name": v["name"], "args": "".join(v["args"])}
-                 for _, v in sorted(calls.items())])
+                 for _, v in sorted(calls.items())],
+                sorted(served))
 
     vendor_cites, stream_error = [], []
     text_parts, reasoning_chars, usage = [], 0, {}
+    served_models = set()
     opened, fetch_failures, fetches = [], [], 0
     tried = {}          # url -> first outcome; a repeat is answered, not re-fetched, not charged
     blocked_hosts = {}  # host -> consecutive failures; 2 retires the host for this review
@@ -2435,7 +2448,8 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     start = time.time()
     try:
         for _round in range(max_rounds + 1):
-            chunk, rch, use, calls = _stream_once(body)
+            chunk, rch, use, calls, served = _stream_once(body)
+            served_models.update(served)
             reasoning_chars += rch
             in_tot += (use or {}).get("prompt_tokens") or 0
             out_tot += (use or {}).get("completion_tokens") or 0
@@ -2593,6 +2607,17 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
     warn = []
+    # 🔴🔴 DID THE MODEL WE ASKED FOR ACTUALLY ANSWER? qwen38max named the blind spot: every
+    # verdict in this harness attaches to a channel LABEL, and nothing verified that the thing
+    # answering behind a router is the model that label names. "Kimi lowered its effort" and "the
+    # router served something smaller" produced identical evidence. The response carries a `model`
+    # field on every chunk; comparing it to what we asked for costs nothing and is the same rule
+    # as the rest of this release - judge by what came BACK.
+    served = [m for m in served_models if m]
+    if served and model and not any(m == model for m in served):
+        warn.append("MODEL SUBSTITUTION: we asked for %r and the provider's own response says it "
+                    "served %s. Every finding below belongs to THAT model, not to this channel's "
+                    "name." % (model, ", ".join(repr(m) for m in served)))
     if marker and not text.strip().endswith(marker):
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip():
@@ -2623,6 +2648,9 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     wsu = (usage or {}).get("web_search_usage") or {}
     return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
             "bytes": len(text.encode("utf-8")), "exit": 0, "model": model,
+            # What we ASKED for is `model`; what the provider SAYS it ran is this. Two fields on
+            # purpose - collapsing them into one is how the substitution stayed invisible.
+            "model_served": served or None,
             "provider": provider,
             "in_tokens": in_tot or usage.get("prompt_tokens"),
             "out_tokens": out_tot or usage.get("completion_tokens"),

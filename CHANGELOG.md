@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.8.1 — 2026-08-08
+
+Two findings from the last reviewers of 1.8.0, which arrived after it was tagged.
+
+- 🔴🔴 **The harness now checks WHICH MODEL actually answered.** Every verdict it produces attaches
+  to a channel *label*, and nothing verified that the thing answering behind a router is the model
+  that label names — so "this model lowered its effort" and "the router served something smaller"
+  were the same observation. The provider states the model on every response chunk; that is now
+  recorded as `model_served`, separately from the one we asked for, and a mismatch is a warning on
+  the result. Same rule as the rest of this release, one layer up: judge by what came back.
+  Verified live: requested `nvidia/nemotron-3-ultra-550b-a55b:free`, served the same, no warning.
+- 🔴 **The registry-drift report is described honestly now.** Its reference copy sits under exactly
+  the write permission it exists to monitor, so anyone who can edit `channels.json` can update the
+  reference and silence it. No location fixes that, and a signature would need a key on the same
+  disk. So: **it detects an edit you forgot, not an edit someone is hiding.** The gate against a
+  hostile write is the acceptance step, which does not detect — it stops the spend.
+
 ## 1.8.0 — 2026-08-08
 
 **A depth knob you have only sent is not a depth knob — and the settings file stops treating its

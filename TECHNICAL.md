@@ -41,6 +41,8 @@ patch_agy_permissions.py  mandatory post-install step for the agy channel
 echocheck.py              proves a depth knob from the counter the vendor returns
 VERSION                   the release this tree is; generated at build time
 channels.shipped.json     reference copy of the registry, so edits to it are named field by field
+                          (an edit you FORGOT, not one someone is hiding: it sits under the same
+                          write permission as the file it describes - see §5b)
 references/*.md           detail read on demand
 systems/*.md              system-prompt presets
 ```
@@ -282,6 +284,15 @@ require accepting it first.
 warning and the set `--ask` fans out to. That one was found by taking a reviewer's general frame
 seriously and then checking his example, which turned out to be harmless — verify the finding,
 discard the proof.
+
+🔴 **What the registry-drift report is NOT.** A fourth reviewer pointed out the circularity: the
+reference copy lives under exactly the write permission the drift check exists to monitor, so
+anyone who can edit `channels.json` can update the reference and silence the detector. That is
+true, and no location fixes it — a signature would need a key on the same disk. So the claim is
+scoped honestly: **it detects an edit you forgot, not an edit someone is hiding.** Its job is to
+stop your own change dying at the next update, which is the failure this project actually
+measured. The gate against a hostile write is the acceptance step above, and that one is not a
+detector — it stops the spend.
 
 Four properties make it safe to have a second source of truth at all, and each exists because the
 alternative was measured or reasoned to be worse:
