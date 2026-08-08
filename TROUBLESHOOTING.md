@@ -112,7 +112,9 @@ The model stopped before finishing, or never emitted the agreed end-of-review ma
 
 The tool appends the marker instruction to your document automatically when your document does
 not already contain it, so this should be rare. When it does happen it usually means the model hit
-a length or time limit on a large document. Re-run that channel alone, or lower `--tier`.
+a length or time limit on a large document. Re-run that channel alone, or split the brief.
+(Do not reach for a lower `--tier`: there are two, the lower one is already the default, and on
+several vendors it changes nothing but the clock.)
 
 **Why this check exists at all:** a truncated review looks exactly like a finished one until you
 notice the argument stops mid-sentence. The marker proves the model reached the end of its own

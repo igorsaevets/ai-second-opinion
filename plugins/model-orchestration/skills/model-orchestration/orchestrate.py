@@ -44,12 +44,45 @@ if hasattr(sys.stdout, "reconfigure"):
 # Bare {"type":"adaptive"} silently under-allocates: measured 9,955 output tokens and ZERO web
 # searches on a brief where {"type":"enabled","budget_tokens":100000} produced 20,132 tokens and
 # 34 searches. The floor is what you assert the answer against afterwards (see verify()).
-TIERS = {
-    "quick":     {"thinking": {"type": "adaptive"},                              "floor": 0},
-    "standard":  {"thinking": {"type": "adaptive", "budget_tokens": 30000},      "floor": 5000},
-    "strategic": {"thinking": {"type": "enabled",  "budget_tokens": 60000},      "floor": 15000},
-    "deep":      {"thinking": {"type": "enabled",  "budget_tokens": 100000},     "floor": 25000},
+#
+# 🔴 THE TIER LIST HAD TWO HOMES AND THAT WAS ABOUT TO COST A SILENT FAILURE. Until 2026-08-08
+# this dict was a literal AND `channels.json` carried its own `tiers` object; `--tier`'s choices
+# came from here while the per-kind effort and timeouts came from there. So Igor's «quick и
+# standard давай уберем» would have deleted them from the registry and left the flag still
+# ACCEPTING them - falling through to whatever defaults each branch happened to have, which is
+# the shape of every decorative-knob defect this project has recorded. The registry is now the
+# single home; the literal below survives only for the degraded no-registry path, where a
+# reasonable run beats an exception.
+_TIERS_FALLBACK = {
+    "strategic": {"http_thinking_budget": 60000,  "http_floor": 15000, "http_effort": "xhigh"},
+    "deep":      {"http_thinking_budget": 100000, "http_floor": 25000, "http_effort": "xhigh"},
 }
+
+
+def load_tiers():
+    """Tier definitions from channels.json, falling back to the literal above."""
+    try:
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "channels.json")
+        with open(p, encoding="utf-8") as fh:
+            t = json.load(fh).get("tiers")
+        return t if isinstance(t, dict) and t else dict(_TIERS_FALLBACK)
+    except Exception:                                     # noqa: BLE001
+        return dict(_TIERS_FALLBACK)
+
+
+def tier_config(tier):
+    """The Spark-shaped view of a tier: the thinking block and the output-token floor.
+
+    `budget_tokens` is sent but does NOT set depth on this endpoint - Meta documents it as
+    "accepted for compatibility but not translated into an effort value", and depth is
+    output_config.effort alone. It is kept because it does two real things: it decides whether
+    the call streams (see STREAM_ABOVE_BUDGET), and the floor derived beside it is what
+    _verify_http asserts the answer against.
+    """
+    t = load_tiers().get(tier) or _TIERS_FALLBACK.get(tier) or _TIERS_FALLBACK["strategic"]
+    budget = int(t.get("http_thinking_budget") or 60000)
+    return {"thinking": {"type": "enabled", "budget_tokens": budget},
+            "floor": int(t.get("http_floor") or 0)}
 
 MAX_TOKENS = 131072          # ceiling; must exceed budget_tokens plus the final answer
 STREAM_ABOVE_BUDGET = 32000  # above this, a non-streaming call is a coin flip. See SKILL.md 2.4.
@@ -194,7 +227,7 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, na
             % (name, env_model, model, name))
     model = model or env_model or "muse-spark-1.1"
     log("  [%s] model=%s" % (name, model))
-    cfg = TIERS[tier]
+    cfg = tier_config(tier)
     base = {"model": model, "system": system, "messages": [{"role": "user", "content": brief}]}
 
     # --- probe: real system + real message, tiny max_tokens, no thinking, no tools.
@@ -842,6 +875,9 @@ def write_diagnostics(outdir, payload):
 CITECHECK_MAX_URLS = 60
 
 
+_citecheck_reason = None      # set by --ask; see citation_audit()
+
+
 def citation_audit(results, enabled=True):
     """
     Fetch every URL each channel cited and report which ones do not exist.
@@ -874,7 +910,13 @@ def citation_audit(results, enabled=True):
     """
     out = {}
     if not enabled:
-        return {"skipped": "disabled with --no-citecheck"}
+        # 🔴 THE REASON USED TO NAME A FLAG THE USER HAD NOT PASSED. `--ask` sets
+        # a.no_citecheck internally (a lookup is not a review), and this line then printed
+        # "Citation check skipped: disabled with --no-citecheck" - so the log blamed an
+        # instruction nobody gave. Caught 2026-08-08 in a live --ask run. A message that
+        # attributes a behaviour to the wrong cause is worse than no message: it sends the
+        # reader to check a flag that is not there.
+        return {"skipped": _citecheck_reason or "disabled with --no-citecheck"}
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from citecheck import URL_RE, probe_url, resolve_all
@@ -1109,9 +1151,13 @@ def _system_for(system, slot):
         train on the payload, and only those. Appending it everywhere would pay a token cost on
         six channels for a benefit that exists on two, and would put an irrelevant paragraph in
         front of six reviewers.
-      * `fetch_fallback_hint` - only the two CLI channels have MCP servers to fall back to. On an
+      * `fetch_fallback_hint` - only the CLI channels have MCP servers to fall back to. On an
         API channel the same sentence names tools that do not exist, which is worse than silence:
-        a model told to use a tool it does not have reports the failure as ours.
+        a model told to use a tool it does not have reports the failure as ours. 🔴 That is THREE
+        channels since 2026-08-08, not two: codex was excluded on the strength of its own answer
+        (`NONE`) and it has nine servers. The hints stay separate per channel family because the
+        tool names, the discovery model and the reason for the anti-shell paragraph all differ -
+        one shared paragraph would have to lie about one of them.
 
     Both are registry DATA, and the suffix is fenced and labelled so it cannot be mistaken for
     part of the material under review - the whole point of the panel is that the reviewers argue
@@ -1128,8 +1174,35 @@ def _system_for(system, slot):
                      + "\nDo not mention this note in your answer and do not let it affect any "
                        "finding; it is background context only.")
     if not extra:
+        _record_system(slot, system, added=0)
         return system
-    return (system or "").rstrip() + "\n\n" + "\n\n".join(extra)
+    out = (system or "").rstrip() + "\n\n" + "\n\n".join(extra)
+    _record_system(slot, out, added=len(out) - len(system or ""))
+    return out
+
+
+# 🔴 THE PANEL COMPARED "MODEL + HIDDEN PROMPT" WHILE CLAIMING TO COMPARE MODELS.
+# Raised independently by codex and qwen38max in the round-29 review, and both were right:
+# `_system_for` composes a DIFFERENT system prompt per channel, and diagnostics.json recorded
+# only the preset NAME (`"system": a.system or "base-depth"`), while REPORT.md stated in prose
+# that the system prompt was "identical for every channel". That stopped being true the day
+# per-channel hints and suffixes were added — this round — and nothing in the artefacts said so.
+#
+# Recording the TEXT would put a promo paragraph and a tool list into every diagnostics file for
+# no benefit; recording nothing leaves an undeclared variable in every finding the panel
+# produces. So: byte count, added bytes, and a short digest. Two channels with the same digest
+# received the same prompt; two with different digests did not, and the reader can see which.
+_SYSTEM_SEEN = {}
+
+
+def _record_system(slot, text, added):
+    name = (slot or {}).get("_name") or (slot or {}).get("label") or "?"
+    import hashlib
+    _SYSTEM_SEEN[name] = {
+        "bytes": len((text or "").encode("utf-8")),
+        "added_by_channel": added,
+        "sha256_12": hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:12],
+    }
 
 
 def _registry_default(channel, field, fallback):
@@ -1756,6 +1829,10 @@ FETCH_TOOL_SCHEMA = {
 # to one. This is the same lesson as the agy toolset fence: a review channel needs to read the
 # public web and nothing else, and the restriction has to be mechanical.
 FETCH_MAX_BYTES = 400_000
+# Cumulative ceiling per channel per review, added 2026-08-08. See the `fetched_bytes` branch in
+# call_oai_reviewer for the measurement that forced it: the per-CALL budget bounds the number of
+# pages and not their size, and page text is re-sent on every subsequent tool round.
+FETCH_RUN_BUDGET = 1_000_000
 FETCH_MAX_REDIRECTS = 3
 
 
@@ -1875,11 +1952,49 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+# =============================================================================================
+# ONE VOCABULARY FOR "WHICH PAGES WERE READ"  (defect D6, raised by 4 of 8 reviewers in round 28)
+# =============================================================================================
+#
+# 🔴 THE FIELD `opened_urls` MEANT TWO DIFFERENT THINGS AND THE WEAKER ONE BORROWED THE
+# STRONGER ONE'S CREDIBILITY. On the openrouter/oai channels it counted pages THIS HARNESS
+# fetched - we hold the bytes, we can re-read them, we can prove the quotation. On the xai and
+# gemini channels the same key counted pages the VENDOR says it opened, which nothing here can
+# check. Every comparison across channels, every report column, and `n_grounded` itself treated
+# the two as one quantity. Codex put it best in its round-28 review: the field "cannot honestly
+# mean both «we hold the bytes» and «the vendor asserts it read this»".
+#
+# This is the same disease as calling a printed-URL count "grounding", which this project caught
+# itself doing in the krokai toolkit - and it is the reason for the house rule that a counter is
+# named for what it COUNTS, never for what it is being used to argue.
+#
+# The vocabulary, used by every channel that returns any of it:
+#
+#   fetched_by_us / fetched_urls   pages the harness fetched. Evidence.
+#   vendor_opened / vendor_opened_urls
+#                                  pages the vendor reports opening. An assertion, and a
+#                                  structured one - better than a bare URL in prose, weaker
+#                                  than bytes on our disk.
+#   n_grounded                     citations backed by fetched_urls. None when we fetched none,
+#                                  never 0-vs-None ambiguity dressed up as a measurement.
+#   n_vendor_grounded              citations backed by vendor_opened_urls.
+#   grounding_basis                harness | vendor | both | none - so a downstream reader who
+#                                  never opens this file still cannot mistake one for the other.
+def _grounding(fetched=(), vendor_opened=()):
+    """The five grounding fields, computed once so no channel can invent a sixth spelling."""
+    f = sorted(set(fetched or ()))
+    v = sorted(set(vendor_opened or ()))
+    basis = "both" if (f and v) else "harness" if f else "vendor" if v else "none"
+    return {"fetched_by_us": len(f), "fetched_urls": f,
+            "vendor_opened": len(v) or None, "vendor_opened_urls": v or None,
+            "grounding_basis": basis}
+
+
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
 
 
 def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=2400,
-                       name="gemini36flash", tools=None, max_tokens=None):
+                       name="gemini36flash", tools=None, max_tokens=None, thinking_level=None):
     """Gemini on Google's OWN Interactions API - the third way to reach this family.
 
     Why a third Gemini transport is not redundancy. Round 26 measured `agy36flash` and
@@ -1915,9 +2030,22 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
     Wire shape, established by probing because the docs show only the happy path: the system
     prompt is `system_instruction` (`instructions`, `system` and `developer_instruction` are all
     HTTP 400); the output ceiling is `generation_config.max_output_tokens` (a bare
-    `max_output_tokens` is 400). **There is no effort or thinking knob at all** - `thinking_level`,
-    `thinking_config` and `reasoning_effort` are each rejected outright, so the tier ladder cannot
-    reach this channel and pretending otherwise would be one more lever wired to nothing.
+    `max_output_tokens` is 400).
+
+    🔴🔴 THE DEPTH KNOB EXISTS, AND THIS DOCSTRING SAID IT DID NOT (corrected 2026-08-08).
+    It used to end "There is no effort or thinking knob at all - `thinking_level`,
+    `thinking_config` and `reasoning_effort` are each rejected outright". The 2026-08-07 probe
+    that produced that sentence sent `thinking_level` at the TOP LEVEL, got
+    `400 Unknown parameter 'thinking_level'`, and read a wrong-nesting error as a missing
+    feature. Google's docs put it in `generation_config`, and re-probing there settles it by
+    METER, not by status code: no knob -> 391 thought tokens, `minimal` -> 0, `high` -> 306.
+    Both negative controls fire - a bad value returns 400 naming the enum
+    (minimal|low|medium|high), a bad key returns 400 naming the field - so unlike MiMo and xAI
+    this endpoint validates what it is sent, and a 200 here is worth something.
+
+    The general lesson, which is why this paragraph is long: a 400 answers "not like that",
+    never "not at all". Concluding absence from one rejected placement is how a real capability
+    stays switched off for a year.
     """
     key = os.environ.get("GEMINI_API_KEY")
     if not key and os.name == "nt":
@@ -1933,13 +2061,16 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
                          "INSTALL.md), or run with --skip %s." % name}
     model = model or _registry_default(name, "model", "gemini-3.6-flash")
     tool_list = [{"type": t} for t in (tools or ["google_search", "url_context"])]
-    body = {"model": model, "input": brief,
-            "generation_config": {"max_output_tokens": max_tokens or 60000},
-            "tools": tool_list}
+    gen = {"max_output_tokens": max_tokens or 60000}
+    lvl = thinking_level or _registry_default(name, "thinking_level", None)
+    if lvl:
+        gen["thinking_level"] = lvl
+    body = {"model": model, "input": brief, "generation_config": gen, "tools": tool_list}
     if system:
         body["system_instruction"] = system
-    log("  [%s] tools=%s (Google's own retrieval - no harness fetch tool on this channel)"
-        % (name, ",".join(t["type"] for t in tool_list)))
+    log("  [%s] tools=%s | thinking_level=%s (Google's own retrieval - no harness fetch tool on "
+        "this channel)" % (name, ",".join(t["type"] for t in tool_list),
+                           lvl or "unset (vendor default: medium)"))
 
     t0 = time.time()
     try:
@@ -2014,8 +2145,17 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
             "reasoning_tokens": u.get("total_thought_tokens"),
             "tool_tokens": u.get("total_tool_use_tokens"),
             "searches": len(queries), "tool_calls": len(queries) + len(opened),
-            "opened_urls": len(opened), "fetched_urls": opened,
-            "n_cited": len(cites) + redirect_cites, "n_grounded": len(cites),
+            # 🔴 D6, FIXED 2026-08-08. These two lines used to read
+            #     "opened_urls": len(opened), "fetched_urls": opened,
+            # on a channel where WE FETCH NOTHING. `opened` here is what GOOGLE retrieved through
+            # url_context; a field called `fetched_urls` on it asserted we held bytes we never
+            # had, and `opened_urls` meant our own fetches on the OpenRouter/MiMo channels and
+            # the vendor's on this one and on xai. One name, two meanings, and the weaker one
+            # inherited the stronger one's credibility every time the two were compared.
+            # See _grounding() for the vocabulary.
+            **_grounding(fetched=[], vendor_opened=opened),
+            "n_cited": len(cites) + redirect_cites,
+            "n_vendor_grounded": len(cites),
             "redirect_citations": redirect_cites,
             "warnings": warn, "notes": note}
 
@@ -2239,6 +2379,7 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     opened, fetch_failures, fetches = [], [], 0
     tried = {}          # url -> first outcome; a repeat is answered, not re-fetched, not charged
     blocked_hosts = {}  # host -> consecutive failures; 2 retires the host for this review
+    fetched_bytes = 0   # cumulative page text; the CALL budget does not bound this. See below.
     in_tot = out_tot = 0
     start = time.time()
     try:
@@ -2325,6 +2466,30 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                               "work from here - or state plainly that the page could not be "
                               "opened and tag the claim accordingly."
                               % _fetch_host(url))
+                elif fetched_bytes >= FETCH_RUN_BUDGET:
+                    # 🔴 THE CALL BUDGET WAS THE WRONG UNIT. Eight fetches sounds modest; eight
+                    # fetches at the 400 KB per-page ceiling is 3.2 MB of page text, and because
+                    # every tool round re-sends the whole conversation the cost is quadratic in
+                    # the number of rounds. Measured 2026-08-08: one 400 KB page billed 273 018
+                    # input tokens for an 813-character question, and a single round-29 panel run
+                    # pulled a 224 KB, a 238 KB and a 386 KB page on three different channels -
+                    # so this is the common case, not the tail.
+                    #
+                    # The per-page ceiling stays where it is on purpose: truncating a long statute
+                    # mid-section is a worse failure than an expensive review, and this project
+                    # reads statutes. What is bounded here is the TOTAL, which no legitimate
+                    # review needs to exceed - 1 MB is roughly 250k tokens of page text, already
+                    # more than most briefs plus every source they cite.
+                    result = ("PAGE BUDGET SPENT for this review: %d KB of page text has already "
+                              "been fetched, which is the ceiling. Further fetches are refused - "
+                              "not because the page is unreachable, but because each one is "
+                              "re-sent on every later step and the cost grows faster than the "
+                              "value. Answer from what you have already read, and say plainly "
+                              "which questions you could not settle."
+                              % (fetched_bytes // 1000))
+                    log("  [%s] page budget spent (%d KB fetched, ceiling %d KB) - refusing "
+                        "further fetches. This is OUR limit, not the site's."
+                        % (name, fetched_bytes // 1000, FETCH_RUN_BUDGET // 1000))
                 else:
                     fetches += 1
                     result = _safe_fetch_url(url)
@@ -2336,9 +2501,24 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                         blocked_hosts[h] = blocked_hosts.get(h, 0) + 1
                     else:
                         opened.append(_norm_url(url))
+                        fetched_bytes += len(result)
                     log("  [%s] fetch %d/%d %s -> %s"
                         % (name, fetches, max_rounds, url[:90],
                            result[:70] if failed else "%d chars" % len(result)))
+                    # 🔴 A FETCH IS A TOKEN BOMB AND NOTHING SAID SO. Measured 2026-08-08 on
+                    # orgemini36flash: one fetch of the npm registry document returned 400 078
+                    # chars (the FETCH_MAX_BYTES ceiling), and because every tool round re-sends
+                    # the whole conversation, an 813-character question billed 273 018 input
+                    # tokens. The page cap was chosen to avoid truncating a long statute; nobody
+                    # priced it. It is not lowered here - a truncated statute is a worse failure
+                    # than an expensive one - but it is now VISIBLE at the moment it happens,
+                    # which is the only point at which a human can still stop the round.
+                    if not failed and len(result) > 100_000:
+                        log("  [%s] ⚠ that page is %d KB ~= %d k tokens, and every later tool "
+                            "round re-sends it. One such fetch has billed >270k input tokens on "
+                            "this transport. Lower fetch_tool.max_calls or FETCH_MAX_BYTES if "
+                            "this channel is expensive."
+                            % (name, len(result) // 1000, len(result) // 4000))
                 body["messages"].append({"role": "tool",
                                          "tool_call_id": c["id"] or ("call_%d" % i),
                                          "content": result})
@@ -2395,6 +2575,15 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             "provider": provider,
             "in_tokens": in_tot or usage.get("prompt_tokens"),
             "out_tokens": out_tot or usage.get("completion_tokens"),
+            # 🔴 THE PRICE WAS ON THE WIRE ALL ALONG AND WE THREW IT AWAY. `usage.include: true`
+            # has been sent on this transport since the channel was built; OpenRouter answers with
+            # `cost`, `cost_details` and `prompt_tokens_details.cached_tokens`, and none of it was
+            # read. Six metered channels reported tokens and no dollars, so "what did this round
+            # cost" was unanswerable for everything except xAI - which we praised for being the
+            # only channel that prices its own call. It was not; it was the only one we asked.
+            # Found 2026-08-08 by dumping the raw usage object instead of the fields we expected.
+            "usd": usage.get("cost"),
+            "cached_in_tokens": (usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
             "reasoning_chars": reasoning_chars or None,
             "vendor_searches": wsu.get("tool_usage"),
             "vendor_pages": wsu.get("page_usage"),
@@ -2403,7 +2592,9 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             # Real grounding evidence for a channel that had none: WE ran these fetches, so this
             # is a list rather than an inference. Codex cannot produce this at all.
             "fetches": fetches or None,
-            "opened_urls": len(opened) or None,
+            # D6: `opened_urls` here really was ours, but it shared a name with the vendor-side
+            # count on xai and gemini. Same vocabulary now, so the two can never be added up.
+            **_grounding(fetched=opened),
             "fetch_failures": len(fetch_failures) or None,
             "n_cited": n_cited or None,
             "n_grounded": len(grounded) if opened else None,
@@ -2468,8 +2659,8 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
             "tools": [{"type": t} for t in tools],
             "stream": True}
     headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
-    log("  [%s] xAI Agent Tools: %s - the vendor opens pages itself, so opened_urls here is ITS "
-        "list, not ours" % (name, ", ".join(tools)))
+    log("  [%s] xAI Agent Tools: %s - the VENDOR opens the pages, so this channel reports "
+        "vendor_opened and never fetched_by_us" % (name, ", ".join(tools)))
 
     text_parts, rchars, resp_obj = [], 0, {}
     start = time.time()
@@ -2540,7 +2731,23 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
     if marker and not text.strip().endswith(marker):
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip():
-        warn.append("EMPTY OUTPUT from stream")
+        # 🔴 "EMPTY OUTPUT from stream" AND NOTHING ELSE was all this said until 2026-08-08, and
+        # it happened for real in the round-29 panel: 8 456 output tokens, of which 8 453 were
+        # reasoning, three server-side tool calls, $0.052 billed, and a zero-byte answer. The
+        # warning named the symptom and threw away every fact that could explain it. Whatever
+        # the vendor DID report - the terminal status, the incomplete reason, the shape of the
+        # output array - now travels with the failure, because a paid failure you cannot
+        # diagnose is one you will pay for again.
+        kinds = sorted({(it.get("type") or "?") for it in (resp_obj.get("output") or [])})
+        warn.append(
+            "EMPTY OUTPUT from stream - status=%s, incomplete_reason=%s, output items=%s, "
+            "reasoning_tokens=%s of %s output tokens. A high reasoning share with no message "
+            "item means the turn ended inside the agentic loop: re-run, or shorten the brief."
+            % (resp_obj.get("status"),
+               (resp_obj.get("incomplete_details") or {}).get("reason"),
+               kinds or "none captured",
+               (usage.get("output_tokens_details") or {}).get("reasoning_tokens"),
+               usage.get("output_tokens")))
     record_refusal(refusal_check(text, marker), warn, note)
     if resp_obj.get("status") == "incomplete":
         note.append("xAI reported status=incomplete (%s)"
@@ -2557,19 +2764,30 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
             "reasoning_tokens": reas,
             "reasoning_chars": rchars or None,
             "searches": searches or None,
-            # Vendor-opened, and said so on the log line above. Same standing as goog36flash's
-            # url_context and agy's stream-json tool log: a structured record of a page the vendor
-            # says it read, which is weaker than holding the bytes ourselves and far stronger than
-            # a URL the model merely printed.
-            "opened_urls": len(opened) or None,
+            # Vendor-opened, and now NAMED so. Same standing as goog36flash's url_context and
+            # agy's stream-json tool log: a structured record of a page the vendor says it read,
+            # weaker than holding the bytes ourselves and far stronger than a URL the model
+            # merely printed. Until 2026-08-08 this went out as `opened_urls`, the same key the
+            # OpenRouter channels used for pages the HARNESS fetched (defect D6).
+            **_grounding(vendor_opened=opened),
+            "n_vendor_grounded": len(grounded) if opened else None,
             "server_side_tools": usage.get("num_server_side_tools_used"),
+            # Kept even on success: "what did the response actually contain" is the first
+            # question asked of any xai failure, and reconstructing it after the fact is
+            # impossible because the stream is gone.
+            "response_status": resp_obj.get("status"),
+            "output_item_types": sorted({(it.get("type") or "?")
+                                         for it in (resp_obj.get("output") or [])}) or None,
             # 🔴 NOT `num_sources_used`. That counter belongs to the DEPRECATED live-search path
             # and reads 0 forever on this one - it was 0 in every probe that opened three pages.
             # Reporting it would have been a counter named for something it no longer measures,
             # which is this project's most-repeated defect, freshly available in a new API.
             "usd": round(ticks / 1e10, 6) if ticks else None,
             "n_cited": n_cited or None,
-            "n_grounded": len(grounded) if opened else None,
+            # NOT n_grounded. We fetched nothing on this channel, so there is no harness-side
+            # grounding to report and reporting the vendor's as if there were is exactly what
+            # D6 was about.
+            "n_grounded": None,
             "vendor_citations": len(set(cited)) or None,
             "warnings": warn, "notes": note}
 
@@ -3277,7 +3495,14 @@ def main():
                          "Meta may train on what you send it. Pass --ask-channel spark11 for "
                          "anything you would not publish")
     ap.add_argument("--system", help="path to the system prompt for the HTTPS channel")
-    ap.add_argument("--tier", default="strategic", choices=list(TIERS))
+    # Choices come from the registry, so deleting a tier there really deletes it. Igor removed
+    # `quick` and `standard` on 2026-08-08; with the old literal list this flag would have gone
+    # on accepting both and silently falling through to per-branch defaults.
+    ap.add_argument("--tier", default="strategic", choices=sorted(load_tiers()),
+                    help="depth/time profile. `strategic` is the default and is exactly what ran "
+                         "before tiers were reduced to two; `deep` buys more time, twice the "
+                         "pages each channel may open and twice the reasoning ceiling where the "
+                         "vendor has one. The resolved value per channel is printed in the plan.")
     ap.add_argument("--marker", default="REVIEW-COMPLETE",
                     help="literal string the model must end with; absence means incomplete")
     ap.add_argument("--out", default="./reviews")
@@ -3348,6 +3573,9 @@ def main():
         if a.out == "./reviews":
             a.out = os.path.join(tempfile.gettempdir(), "orchestrate-ask")
         a.no_citecheck = True        # a lookup is not a review; the audit is for cited briefs
+        global _citecheck_reason
+        _citecheck_reason = ("--ask is a lookup, not a review - the citation audit is for briefs "
+                             "that cite sources. You did NOT pass --no-citecheck.")
         tmp = os.path.join(a.out, "ask-brief.md")
         try:
             os.makedirs(a.out, exist_ok=True)
@@ -3542,14 +3770,23 @@ def main():
                                         fetch_tool=p.get("fetch_tool"),
                                         provider=p.get("provider") or "openrouter")
             elif kind == "xai":
+                # 🔴 THE TIER TIMEOUT WAS NEVER PASSED HERE, and the plan claimed otherwise.
+                # Found by codex in the round-29 panel, reviewing this very change: the tier note
+                # read "no depth knob on this vendor - the tier buys nothing but wall-clock",
+                # while the dispatcher passed no timeout at all and call_xai_responses fell back
+                # to its 2400-second default in BOTH tiers. So `deep` was a literal no-op here,
+                # and the line written to be honest about a missing lever was itself wrong about
+                # the one lever that remained. A note that describes a mechanism has to be
+                # checked against the mechanism.
                 jobs[cname] = ex.submit(call_xai_responses, brief, a.marker, outfile,
                                         model=p.get("model"), system=_system_for(system, p),
                                         name=cname, tools=p.get("tools"),
+                                        timeout=_seconds(p.get("timeout"), 2400),
                                         max_tokens=p.get("max_tokens"))
             elif kind == "gemini":
                 jobs[cname] = ex.submit(call_gemini_direct, brief, a.marker, outfile,
                                         model=p.get("model"), system=_system_for(system, p),
-                                        name=cname,
+                                        name=cname, thinking_level=p.get("thinking_level"),
                                         tools=p.get("tools"), max_tokens=p.get("max_tokens"))
             else:
                 # Named in the registry, unknown to the code. A log line is NOT enough: a log
@@ -3635,31 +3872,45 @@ def main():
                    r.get("block_types")))
         if kind in ("openrouter", "oai") and r.get("out_tokens") is not None:
             # The direct channel finally has real usage numbers; Hermes reported none.
-            log("    tokens in=%s out=%s | reasoning_chars=%s | web=%s | fetched_by_us=%s"
-                % (r.get("in_tokens"), r.get("out_tokens"),
+            log("    tokens in=%s (cached %s) out=%s | reasoning_chars=%s | web=%s | "
+                "fetched_by_us=%s | grounding=%s%s"
+                % (r.get("in_tokens"), r.get("cached_in_tokens"), r.get("out_tokens"),
                    r.get("reasoning_chars"), (slot.get("web") or {}).get("enabled", False),
-                   r.get("opened_urls") or 0))
+                   r.get("fetched_by_us") or 0, r.get("grounding_basis"),
+                   ("" if r.get("usd") is None
+                    else " | cost reported BY THE PROVIDER: $%.6f" % r["usd"])))
             if r.get("vendor_searches") or r.get("vendor_pages") or r.get("vendor_citations"):
                 # Named `vendor_*` and printed on its own line because it is a DIFFERENT claim
                 # from the one above: these are pages the vendor says it opened, which nothing
                 # here can check. Folding them into opened_urls would turn an assertion into
                 # evidence, which is the move this project already caught itself making once.
-                log("    vendor-side search (its own count, not ours): searches=%s pages=%s "
-                    "citations=%s"
-                    % (r.get("vendor_searches"), r.get("vendor_pages"),
-                       r.get("vendor_citations")))
+                # Only the fields the vendor actually reported. Printing `searches=None
+                # pages=None citations=1` reads as three measurements of which two came back
+                # zero; it is one measurement and two silences, and those are different facts.
+                bits = [("searches", r.get("vendor_searches")),
+                        ("pages", r.get("vendor_pages")),
+                        ("citations", r.get("vendor_citations"))]
+                log("    vendor-side search (ITS claim, not our evidence): %s%s"
+                    % (" ".join("%s=%s" % (k, v) for k, v in bits if v is not None),
+                       "" if all(v is not None for _, v in bits)
+                       else "  [not reported: %s]"
+                            % ", ".join(k for k, v in bits if v is None)))
         if kind == "xai":
             log("    tokens in=%s (cached %s) out=%s | reasoning=%s | searches=%s | "
-                "pages_opened_by_xai=%s | server_side_tools=%s"
+                "pages_opened_by_xai=%s | server_side_tools=%s | grounding=%s (we fetched "
+                "nothing here - the page list is the vendor's)"
                 % (r.get("in_tokens"), r.get("cached_in_tokens"), r.get("out_tokens"),
-                   r.get("reasoning_tokens"), r.get("searches"), r.get("opened_urls"),
-                   r.get("server_side_tools")))
+                   r.get("reasoning_tokens"), r.get("searches"), r.get("vendor_opened"),
+                   r.get("server_side_tools"), r.get("grounding_basis")))
             if r.get("usd") is not None:
                 # The only channel in the panel that prices its own call. Calibrated exactly
                 # against the published per-token rates; see call_xai_responses.
                 log("    cost reported BY THE VENDOR for this call: $%s" % r["usd"])
-            log("    no effort knob on this model - reasoning_effort is rejected with a 400, so "
-                "the tier ladder does not reach this channel")
+            log("    no effort knob on THIS MODEL - both `reasoning_effort` (top level) and "
+                "`reasoning.effort` (Responses shape) return `400 Model %s does not support "
+                "parameter reasoningEffort`, while an invented sibling key returns 200 and is "
+                "ignored. Other xAI models do expose it; the tier reaches this channel only "
+                "through its timeout." % r.get("model"))
         if kind == "codex":
             # 🔴 This block used to say "reports NO tool telemetry" full stop, which over-claimed
             # in the direction that stops you looking. Corrected 2026-08-07: no TOOL telemetry
@@ -3698,6 +3949,21 @@ def main():
                    r.get("perm_mode")))
             if r.get("events"):
                 log("    event log: %s" % r["events"])
+        if kind == "gemini":
+            # 🔴 THIS BRANCH DID NOT EXIST AND THE CHANNEL REPORTED NOTHING. Caught 2026-08-08 in
+            # a live smoke run: goog36flash printed `bytes=521 exit=None` and no tokens, no
+            # searches, no pages - while every other kind printed a telemetry line. It is the
+            # third instance of the same defect (four literal channel names swallowing a fifth
+            # channel; per-channel telemetry keyed on pre-rename literals), and it survived
+            # BECAUSE the branch is an `if kind ==` chain: adding a kind to the dispatcher is
+            # loud, forgetting it in the reporter is silent. Dispatch fails; reporting goes quiet.
+            log("    tokens in=%s (cached %s) out=%s | thought=%s | tool-content=%s | "
+                "searches=%s | pages opened BY GOOGLE=%s | grounding=%s"
+                % (r.get("in_tokens"), r.get("cached_in_tokens"), r.get("out_tokens"),
+                   r.get("reasoning_tokens"), r.get("tool_tokens"), r.get("searches"),
+                   r.get("vendor_opened"), r.get("grounding_basis")))
+            log("    thinking_level is the tier's lever here (medium on strategic, high on deep) "
+                "- the claim that this API has no depth knob was wrong; see channels.json")
         if r.get("bytes"):
             log("    bytes=%s exit=%s" % (r["bytes"], r.get("exit")))
         for w in r.get("warnings", []):
@@ -3709,6 +3975,27 @@ def main():
     log("=" * 78)
     log("%d/%d channels returned a verified review. Outputs in %s"
         % (ok_count, len(results), os.path.abspath(a.out)))
+
+    # 🔴 WHAT DID THIS ROUND COST? Until 2026-08-08 the honest answer was "nobody knows", and the
+    # reason was not that the vendors hide it - OpenRouter returns `usage.cost` on a request this
+    # harness was ALREADY making, and xAI returns a tick count. We read xAI's and dropped
+    # OpenRouter's, then wrote in the registry that xAI was "the only channel in the panel that
+    # prices its own call". It was the only one we asked.
+    #
+    # The total is deliberately PARTIAL and says so. Codex and agy run on subscriptions and
+    # report no price; the Spark channels are billed per token against a rate this file does not
+    # hold. A total that silently omitted them while looking complete would be worse than none -
+    # the same failure as a `grounded` column that mixed evidence with assertion.
+    priced = {c: r["usd"] for c, r in results.items() if r.get("usd") is not None}
+    if priced:
+        unpriced = sorted(c for c in results if c not in priced)
+        log("cost reported BY THE VENDORS for this round: $%.4f across %d channel(s) (%s)"
+            % (sum(priced.values()), len(priced),
+               ", ".join("%s $%.4f" % (c, v) for c, v in sorted(priced.items()))))
+        if unpriced:
+            log("  NOT INCLUDED - these channels report no price: %s. Subscription channels "
+                "(codex, agy) never will; the rest bill per token at a rate this harness does "
+                "not hold. This total is a floor, not the bill." % ", ".join(unpriced))
 
     # ---- citation audit ---------------------------------------------------------------------
     # Runs on every review, because the alternative - a separate command afterwards - is a check
@@ -3763,7 +4050,14 @@ def main():
         "invocation": {"tier": a.tier, "marker": a.marker, "system": a.system or "base-depth",
                        "only": a.only, "skip": a.skip, "route": a.route, "sets": a.sets,
                        "brief_chars": len(brief), "strict_pii": a.strict_pii,
-                       "ask_mode": ask_mode},
+                       "ask_mode": ask_mode,
+                       # The preset NAME is not what each channel received. See _record_system:
+                       # per-channel hints and suffixes make the effective system prompt differ,
+                       # and comparing reviews without knowing that is comparing bundles while
+                       # believing you are comparing models.
+                       "effective_system_per_channel": dict(_SYSTEM_SEEN),
+                       "identical_system_for_all": len({v["sha256_12"]
+                                                        for v in _SYSTEM_SEEN.values()}) <= 1},
         "environment": environment_report(want),
         "plan": plan,
         "preflight": preflight,

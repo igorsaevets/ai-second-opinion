@@ -453,6 +453,15 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None):
             % (", ".join(clash), " and ".join(clash),
                " | ".join("%s: %s" % (c, "; ".join(plan[c]["why"])) for c in clash)))
 
+    # 🔴 DECORATE BEFORE APPLYING THE TIER, not after. The tier now SCALES per-channel values
+    # (`reasoning.max_tokens`, `fetch_tool.max_calls`) and OVERRIDES one (`thinking_level`), and
+    # all three arrive in the plan through _decorate. Run the other way round - which is how this
+    # function read until 2026-08-08 - the tier would have scaled fields that were still None and
+    # then had its own values silently overwritten by the registry defaults a line later: a knob
+    # that resolves, prints and does nothing, which is the single most repeated defect in this
+    # repository. Caught while writing it, by asking what _decorate does rather than assuming.
+    plan = _decorate(plan, reg)
+
     if tier and tier in (reg.get("tiers") or {}):
         t = reg["tiers"][tier]
         # Keyed on KIND, not on the channel name. Named lookups meant a second Gemini channel
@@ -464,6 +473,8 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None):
                 want = t.get("agy_effort", p.get("effort"))
                 p["effort"] = _clamp_effort(reg, cname, p["model"], want, p)
                 p["timeout"] = t.get("agy_timeout", "25m")
+                p["_tier_note"] = ("effort %s (this model's ceiling), timeout %s"
+                                   % (p["effort"], p["timeout"]))
         # 🔴 CODEX HAD NO TIER TIMEOUT AT ALL, AND NOTHING SAID SO. Only agy's was wired, so
         # `call_codex` fell through to the 3000-second default hard-coded in `_run` - and when a
         # run was killed the harness advised "raise the timeout for that channel", naming a lever
@@ -473,6 +484,9 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None):
         # pointed at the copy that was not in play.
             elif p.get("kind") == "codex":
                 p["timeout"] = t.get("codex_timeout", "50m")
+                p["_tier_note"] = ("timeout %s only - effort stays %s, pinned in this channel's "
+                                   "own block because the subscription has no cheaper setting "
+                                   "worth having" % (p["timeout"], p.get("effort")))
         # 🔴 THE TIER DID NOTHING TO THE SPARK CHANNELS, and it looked like it did. The tier
         # varied `thinking.budget_tokens`, but Meta documents that field as "accepted for
         # compatibility but not translated into an effort value" - depth on this endpoint is set
@@ -484,7 +498,57 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None):
         # OpenAPI enum listing `max`.
             elif p.get("kind") == "http":
                 p["effort"] = t.get("http_effort", "xhigh")
-    return _decorate(plan, reg)
+                p["_tier_note"] = ("thinking budget %s, output floor %s"
+                                   % (t.get("http_thinking_budget"), t.get("http_floor")))
+        # 🔴 THE TIER USED TO REACH 4 OF 11 RUNNING CHANNELS AND READ LIKE A GLOBAL CONTROL.
+        # Igor, 2026-08-08: «не понятно визуально, чем отличается strategic от Deep» - and the
+        # true answer was "a timeout", because these three families were never wired at all.
+        # They are now, as MULTIPLIERS on each channel's own registry values rather than as
+        # absolute numbers, so `strategic` (scale 1) is bit-for-bit what ran before and only
+        # `deep` costs anything new. An absolute value here would have quietly DOWNGRADED
+        # qwen38max, whose registry effort is already xhigh.
+            elif p.get("kind") in ("openrouter", "oai"):
+                changed = []
+                rs = float(t.get("or_reasoning_scale") or 1)
+                if rs != 1 and isinstance(p.get("reasoning"), dict):
+                    r = dict(p["reasoning"])
+                    if r.get("max_tokens"):
+                        r["max_tokens"] = int(r["max_tokens"] * rs)
+                        changed.append("reasoning cap %s" % r["max_tokens"])
+                    p["reasoning"] = r
+                fs = float(t.get("fetch_scale") or 1)
+                if fs != 1 and isinstance(p.get("fetch_tool"), dict) \
+                        and p["fetch_tool"].get("enabled"):
+                    ftl = dict(p["fetch_tool"])
+                    ftl["max_calls"] = int((ftl.get("max_calls") or 8) * fs)
+                    p["fetch_tool"] = ftl
+                    changed.append("page-fetch budget %s" % ftl["max_calls"])
+                p["_tier_note"] = ", ".join(changed) if changed else \
+                    "nothing this tier can raise on this channel"
+            elif p.get("kind") == "gemini":
+                # Believed impossible until 2026-08-08: the 08-07 probe sent `thinking_level` at
+                # the top level, got "Unknown parameter", and concluded the knob did not exist.
+                # It lives in `generation_config`. See the goog36flash block in channels.json.
+                lvl = t.get("gemini_thinking_level")
+                if lvl:
+                    p["thinking_level"] = lvl
+                    p["_tier_note"] = "thinking_level=%s" % lvl
+            elif p.get("kind") == "xai":
+                # 🔴 "no depth knob on this VENDOR" was the first wording and it was wrong in a
+                # way that mattered: xAI's own docs document `reasoning_effort` on grok-4.5 and
+                # `reasoning.effort` on grok-4.20-multi-agent. It is THIS MODEL that refuses it -
+                # `400 Model grok-4.20-0309-reasoning does not support parameter reasoningEffort`,
+                # returned identically for the top-level and the nested placement on
+                # /v1/responses, while an invented sibling key returns 200 and is ignored. So the
+                # refusal is model-level, not a placement mistake (which is what it WAS for
+                # Gemini). Probed 2026-08-08 after qwen38max objected, correctly, that a single
+                # 400 from one placement is the exact error this round had just fixed elsewhere.
+                # It also gets the tier's TIMEOUT now; before 2026-08-08 the dispatcher passed
+                # none, so `deep` was a literal no-op here while this line said "wall-clock".
+                p["timeout"] = t.get("codex_timeout", "50m")
+                p["_tier_note"] = ("no depth knob on THIS MODEL (other xAI models have one) - "
+                                   "the tier buys wall-clock only: timeout %s" % p["timeout"])
+    return plan
 
 
 def _decorate(plan, reg):
@@ -500,6 +564,9 @@ def _decorate(plan, reg):
     for cname, p in plan.items():
         ch = reg["channels"].get(cname, {})
         m = (ch.get("models") or {}).get(p.get("model")) or {}
+        # The slot travels alone into the dispatcher and into _system_for; anything that has to
+        # answer "which channel is this" without a surrounding dict has to be IN it.
+        p["_name"] = cname
         p["model_label"] = m.get("label") or p.get("model")
         p["data_policy"] = m.get("data_policy")
         # 🔴 THE NAME IS NOT THE GUARANTEE. Igor asked for `Spark12Cont` so that running a
@@ -527,7 +594,7 @@ def _decorate(plan, reg):
         # time anyone edited the registry to drop url_context. Both homes still exist (the literal
         # is a deliberate fallback for a corrupt registry) but the registry now actually wins.
         for extra in ("reasoning", "max_tokens", "toolsets", "role", "fetch_tool", "tools",
-                      "provider", "prompt_suffix", "distribution"):
+                      "provider", "prompt_suffix", "distribution", "thinking_level"):
             if ch.get(extra) is not None:
                 p[extra] = ch[extra]
         # Hints are stored ONCE at top level and referenced, because the same 1.5 KB paragraph
@@ -575,6 +642,52 @@ def _clamp_effort(reg, cname, model, want, slot):
     return best
 
 
+# 🔴 "IS THE INTERNET ON FOR ALL OF THEM?" HAD TO BE ANSWERED BY A HUMAN READING SOURCE CODE.
+# Igor asked it on 2026-08-08 and the honest reason he had to ask is that the plan printed a web
+# line for exactly one FAMILY - the channels carrying a `web` object, i.e. openrouter and oai.
+# grok420 (server-side agent tools), goog36flash (google_search + url_context), codex
+# (-c tools.web_search=true) and both Spark channels (the web_search tool block) all had live
+# web access and printed NOTHING about it, so the plan read as "these four are offline".
+# A capability that is on but invisible gets asked about, doubted, and eventually re-implemented.
+# Keyed on `kind`, like the dispatcher, so a new channel of a known kind inherits the line.
+def _web_line(p):
+    """One line describing this channel's live-web access, for every kind. None = no access."""
+    kind = p.get("kind")
+    if kind in ("openrouter", "oai"):
+        w = p.get("web") or {}
+        if not w.get("enabled"):
+            base = None
+        elif p.get("provider") == "mimo":
+            base = ("web: the VENDOR's own search tool - it opens whole pages itself, so its "
+                    "citations are page-level rather than search excerpts")
+        else:
+            base = ("web: OpenRouter search plugin via %s, max %s results - billed PER SEARCH"
+                    % (w.get("engine", "provider default"), w.get("max_results", "default")))
+        ft = p.get("fetch_tool") or {}
+        if ft.get("enabled"):
+            add = ("harness page-fetch tool, up to %s pages (WE run these, so they are the only "
+                   "grounding this channel can prove)" % (ft.get("max_calls") or 8))
+            base = base + " + " + add if base else "web: " + add
+        return base
+    if kind == "gemini":
+        return ("web: Google's own retrieval - %s. url_context reaches pages a plain fetch is "
+                "refused; google_search citations are redirect wrappers, not publisher URLs"
+                % ", ".join(p.get("tools") or ["google_search", "url_context"]))
+    if kind == "xai":
+        return ("web: xAI Agent Tools (%s) on /v1/responses - the vendor runs the loop and OPENS "
+                "pages itself; chat/completions has had no search since live_search went 410"
+                % ", ".join(p.get("tools") or ["web_search"]))
+    if kind == "http":
+        return ("web: the vendor's web_search tool is granted on every call - but a grant is "
+                "PERMISSION, not instruction; the search count in the run log is the only proof "
+                "it was used")
+    if kind == "codex":
+        return "web: built-in search via `-c tools.web_search=true`, plus its MCP page readers"
+    if kind == "agy":
+        return "web: the CLI's own agent tools plus its MCP servers (search, fetch, browser)"
+    return None
+
+
 def format_plan(plan, reg):
     lines = ["RESOLVED PLAN", "-" * 78]
     for c, p in plan.items():
@@ -599,11 +712,19 @@ def format_plan(plan, reg):
         # train on the payload, and that is a fact about the BRIEF, not about the budget.
         if p["enabled"] and p.get("data_policy"):
             lines.append("           - data: %s" % p["data_policy"])
-        if p["enabled"] and (p.get("web") or {}).get("enabled"):
-            w = p["web"]
-            lines.append("           - web search ON via %s, max %s results - billed PER SEARCH "
-                         "by the provider" % (w.get("engine", "default"),
-                                              w.get("max_results", "default")))
+        if p["enabled"]:
+            wl = _web_line(p)
+            lines.append("           - %s" % wl if wl
+                         else "           - web: NONE - this channel answers from training data "
+                              "only, treat every dated claim as unverified")
+            # What the chosen tier actually did to THIS channel. Igor: «не понятно визуально,
+            # чем отличается strategic от Deep». It was not visible because it was not printed,
+            # and on four of eleven channels there was nothing to print because the tier was
+            # never wired to them. Both halves are fixed; where a tier still changes nothing,
+            # the line says so rather than being omitted, because an omitted line reads as
+            # "not applicable" and an absent lever reads the same way.
+            if p.get("_tier_note"):
+                lines.append("           - tier: %s" % p["_tier_note"])
     live = [c for c, p in plan.items() if p["enabled"]]
     lines.append("-" * 78)
     lines.append("  running %d channel(s): %s" % (len(live), ", ".join(live) or "NONE"))

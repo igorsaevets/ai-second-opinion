@@ -357,8 +357,14 @@ def suite_dispatch():
         "L = []\n"
         "def stub(kind):\n"
         "    def f(*a, **k):\n"
+        # 🔴 CAPTURE WHAT THE TIER SCALES, NOT ONLY WHAT IT USED TO SET. The plan can print
+        # `reasoning cap 48000` and the dispatcher can still hand the call something else - that
+        # is exactly how `tools` stayed decorative on goog36flash for a day, agreeing with a
+        # hard-coded default. Asserting the PLAN is asserting the printout; this asserts the CALL.
         "        L.append({'kind': kind, 'name': k.get('name'), 'model': k.get('model'),\n"
         "                  'effort': k.get('effort'), 'timeout': k.get('timeout'),\n"
+        "                  'reasoning': k.get('reasoning'), 'fetch_tool': k.get('fetch_tool'),\n"
+        "                  'thinking_level': k.get('thinking_level'),\n"
         "                  'web': bool((k.get('web') or {}).get('enabled'))})\n"
         "        return {'ok': True, 'text': 'stub\\nREVIEW-COMPLETE', 'seconds': 0.0}\n"
         "    return f\n"
@@ -394,9 +400,14 @@ def suite_dispatch():
         "sys.argv = ['o', '--brief', b, '--out', os.path.join(t, 'o'), '--tier', 'strategic',\n"
         "            '--no-citecheck', '--no-log']\n"
         "o.main()\n"
+        "S = list(L); L.clear()\n"
+        "sys.argv = ['o', '--brief', b, '--out', os.path.join(t, 'o2'), '--tier', 'deep',\n"
+        "            '--no-citecheck', '--no-log']\n"
+        "o.main()\n"
+        "D = list(L)\n"
         f"reg = routing.load_registry(os.path.join(r'{HERE}', 'channels.json'))\n"
         "en = sorted(c for c, ch in reg['channels'].items() if ch.get('enabled', True))\n"
-        "print('RESULT=' + json.dumps({'enabled': en, 'launched': L}))\n"
+        "print('RESULT=' + json.dumps({'enabled': en, 'launched': S, 'deep': D}))\n"
     )
     pf = Path(tempfile.gettempdir()) / "orch_selftest_dispatch.py"
     pf.write_text(probe, encoding="utf-8")
@@ -441,6 +452,34 @@ def suite_dispatch():
                   "the registry's web setting reached the %s call" % c)
         check(bool(webbed), "at least one launched channel has web search on",
               "webbed=%s" % webbed)
+        # 🔴 THE TIER MUST REACH THE CALL, NOT ONLY THE PRINTOUT. Compared arg-for-arg between a
+        # strategic and a deep dispatch of the same registry: a knob that resolves and prints but
+        # never reaches the function is the defect class this repository has now recorded seven
+        # times (`channels.spark.model`, the four dispatch literals, the telemetry keyed on old
+        # names, `tools` on goog36flash, the renamed flag that missed its own reporter, ...).
+        deep = {r["name"]: r for r in data.get("deep") or []}
+        for r in launched:
+            d = deep.get(r["name"])
+            if not d:
+                continue
+            if (r.get("fetch_tool") or {}).get("enabled"):
+                check((d.get("fetch_tool") or {}).get("max_calls")
+                      == (r["fetch_tool"].get("max_calls") or 8) * 2,
+                      "deep's doubled fetch budget REACHES the %s call" % r["name"],
+                      "%s -> %s" % (r["fetch_tool"].get("max_calls"),
+                                    (d.get("fetch_tool") or {}).get("max_calls")))
+            if (r.get("reasoning") or {}).get("max_tokens"):
+                check((d.get("reasoning") or {}).get("max_tokens")
+                      == r["reasoning"]["max_tokens"] * 2,
+                      "deep's doubled reasoning ceiling REACHES the %s call" % r["name"],
+                      "%s -> %s" % (r["reasoning"]["max_tokens"],
+                                    (d.get("reasoning") or {}).get("max_tokens")))
+            if r["kind"] == "gemini":
+                check(r.get("thinking_level") == "medium"
+                      and d.get("thinking_level") == "high",
+                      "the tier's thinking_level REACHES the %s call" % r["name"],
+                      "strategic=%s deep=%s" % (r.get("thinking_level"),
+                                                d.get("thinking_level")))
     finally:
         pf.unlink(missing_ok=True)
 
@@ -579,6 +618,213 @@ def suite_citations():
         check(ok, f"the printer survives {payload!r}"[:70])
 
 
+def suite_tiers_and_grounding():
+    """
+    Round 29's two structural changes, each guarded by the failure it would otherwise repeat.
+
+    The tier had TWO homes - a literal in orchestrate.py feeding `--tier`'s choices, and the
+    registry feeding the per-kind values - so deleting a tier from the registry would have left
+    the flag accepting it and falling through to defaults. And `opened_urls` had TWO meanings,
+    "pages we fetched" and "pages the vendor says it opened", which every cross-channel
+    comparison silently added together.
+    """
+    section("7. One home for tiers; one meaning per grounding field")
+    reg = json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))
+    reg_tiers = set(reg.get("tiers") or {})
+
+    # --- the tier list has ONE home -------------------------------------------------------
+    probe = (
+        "import json, sys\n"
+        f"sys.path.insert(0, r'{HERE}')\n"
+        "import orchestrate as o\n"
+        "print('RESULT=' + json.dumps(sorted(o.load_tiers())))\n"
+    )
+    pf = Path(tempfile.gettempdir()) / "orch_selftest_tiers.py"
+    pf.write_text(probe, encoding="utf-8")
+    try:
+        p = subprocess.run([PY, str(pf)], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=120)
+        line = next((l for l in blob_of(p).splitlines() if l.startswith("RESULT=")), None)
+        code_tiers = set(json.loads(line[len("RESULT="):])) if line else set()
+    finally:
+        pf.unlink(missing_ok=True)
+    check(code_tiers == reg_tiers,
+          "orchestrate derives its tiers from the registry, with no second list",
+          "registry=%s code=%s" % (sorted(reg_tiers), sorted(code_tiers)))
+
+    # A tier the registry does not define must be REFUSED, not quietly defaulted.
+    gone = subprocess.run([PY, str(Path(HERE, "orchestrate.py")), "--brief", os.devnull,
+                           "--tier", "quick", "--dry-run"],
+                          capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=120)
+    check(gone.returncode != 0 and "invalid choice" in blob_of(gone),
+          "a tier that no longer exists is refused by name, not silently defaulted")
+
+    # --- the tier reaches every kind that HAS a lever --------------------------------------
+    sys.path.insert(0, HERE)
+    import routing                                                       # noqa: E402
+    r = routing.load_registry(str(Path(HERE, "channels.json")))
+    strat = routing.resolve(r, tier="strategic")
+    deep = routing.resolve(r, tier="deep")
+    live = [c for c, p in strat.items() if p["enabled"]]
+    # 🔴 Derived from the plan, not from a list written here: a hand-written list of "channels
+    # the tier should reach" would be updated by the same person who forgot to wire the tier.
+    missing = [c for c in live if not strat[c].get("_tier_note")]
+    check(not missing,
+          "every running channel says what the tier did to it (or that it did nothing)",
+          "silent: %s" % missing)
+
+    for c in live:
+        ft_s = (strat[c].get("fetch_tool") or {})
+        ft_d = (deep[c].get("fetch_tool") or {})
+        if ft_s.get("enabled"):
+            check((ft_d.get("max_calls") or 0) == (ft_s.get("max_calls") or 8) * 2,
+                  "deep doubles the page-fetch budget on %s" % c,
+                  "%s -> %s" % (ft_s.get("max_calls"), ft_d.get("max_calls")))
+    g = [c for c in live if strat[c].get("kind") == "gemini"]
+    for c in g:
+        check(strat[c].get("thinking_level") == "medium"
+              and deep[c].get("thinking_level") == "high",
+              "the Gemini depth knob moves with the tier on %s" % c,
+              "strategic=%s deep=%s" % (strat[c].get("thinking_level"),
+                                        deep[c].get("thinking_level")))
+    # 🔴 THE REGRESSION THAT MADE THIS CHECK NECESSARY. The tier used to be applied BEFORE
+    # _decorate copied per-channel registry values into the plan, so it scaled fields that were
+    # still None and then had its own value overwritten a line later. Both symptoms are
+    # invisible in a passing run: the knob resolves, prints, and does nothing.
+    check(all(strat[c].get("max_tokens") for c in live if strat[c].get("kind") in
+              ("openrouter", "oai", "gemini", "xai")),
+          "registry values still reach the plan after the tier is applied")
+
+    # --- one meaning per grounding field ---------------------------------------------------
+    src = Path(HERE, "orchestrate.py").read_text(encoding="utf-8")
+    # Comment lines are stripped first. The retired name is quoted all over the prose that
+    # explains WHY it was retired, and a check that cannot tell an explanation from a live
+    # dict key fails on its own documentation - which is how a green suite gets edited into a
+    # silent one. What must not exist is the KEY.
+    code = [l for l in src.splitlines() if not l.lstrip().startswith("#")]
+    offenders = [l.strip()[:90] for l in code if '"opened_urls":' in l]
+    check(not offenders,
+          "no channel returns `opened_urls` any more - the name that meant two things",
+          "; ".join(offenders))
+    fields = {"fetched_by_us", "fetched_urls", "vendor_opened", "vendor_opened_urls",
+              "grounding_basis"}
+    probe2 = (
+        "import json, sys\n"
+        f"sys.path.insert(0, r'{HERE}')\n"
+        "import orchestrate as o\n"
+        "ours = o._grounding(fetched=['https://a/x'])\n"
+        "theirs = o._grounding(vendor_opened=['https://b/y'])\n"
+        "both = o._grounding(fetched=['https://a/x'], vendor_opened=['https://b/y'])\n"
+        "none = o._grounding()\n"
+        "print('RESULT=' + json.dumps({'ours': ours, 'theirs': theirs, 'both': both,\n"
+        "                              'none': none}))\n"
+    )
+    pf2 = Path(tempfile.gettempdir()) / "orch_selftest_grounding.py"
+    pf2.write_text(probe2, encoding="utf-8")
+    try:
+        p2 = subprocess.run([PY, str(pf2)], capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", timeout=120)
+        line2 = next((l for l in blob_of(p2).splitlines() if l.startswith("RESULT=")), None)
+        d = json.loads(line2[len("RESULT="):]) if line2 else {}
+    finally:
+        pf2.unlink(missing_ok=True)
+    check(bool(d), "the grounding-vocabulary probe produced a result")
+    if d:
+        check(set(d["ours"]) == fields, "one vocabulary, always the same five fields",
+              str(sorted(d["ours"])))
+        check(d["ours"]["grounding_basis"] == "harness"
+              and d["theirs"]["grounding_basis"] == "vendor"
+              and d["both"]["grounding_basis"] == "both"
+              and d["none"]["grounding_basis"] == "none",
+              "the basis names WHO opened the page, in all four combinations")
+        check(d["theirs"]["fetched_by_us"] == 0 and d["theirs"]["vendor_opened"] == 1,
+              "a vendor-only channel reports zero harness fetches, not a borrowed count")
+
+    # --- every kind must declare its web access -------------------------------------------
+    # A new `kind` that forgets this prints "web: NONE", which is a false statement about a
+    # channel that has search. The check is derived from KNOWN_KINDS for the same reason the
+    # dispatch suite is derived from the registry.
+    probe3 = (
+        "import json, sys\n"
+        f"sys.path.insert(0, r'{HERE}')\n"
+        "import orchestrate as o, routing\n"
+        "miss = [k for k in o.KNOWN_KINDS\n"
+        "        if k != 'hermes' and not routing._web_line({'kind': k, 'web': {'enabled': True},\n"
+        "                                                    'tools': ['t'], 'fetch_tool': {}})]\n"
+        "print('RESULT=' + json.dumps(miss))\n"
+    )
+    pf3 = Path(tempfile.gettempdir()) / "orch_selftest_web.py"
+    pf3.write_text(probe3, encoding="utf-8")
+    try:
+        p3 = subprocess.run([PY, str(pf3)], capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", timeout=120)
+        line3 = next((l for l in blob_of(p3).splitlines() if l.startswith("RESULT=")), None)
+        miss = json.loads(line3[len("RESULT="):]) if line3 else ["<probe failed>"]
+    finally:
+        pf3.unlink(missing_ok=True)
+    check(not miss, "every dispatchable kind describes its web access in the plan",
+          "silent kinds: %s" % miss)
+
+    # --- the cumulative fetch budget must exist and must not fire on one honest page -------
+    probe4 = (
+        "import json, sys\n"
+        f"sys.path.insert(0, r'{HERE}')\n"
+        "import orchestrate as o\n"
+        "print('RESULT=' + json.dumps({'page': o.FETCH_MAX_BYTES, 'run': o.FETCH_RUN_BUDGET}))\n"
+    )
+    pf4 = Path(tempfile.gettempdir()) / "orch_selftest_budget.py"
+    pf4.write_text(probe4, encoding="utf-8")
+    try:
+        p4 = subprocess.run([PY, str(pf4)], capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", timeout=120)
+        line4 = next((l for l in blob_of(p4).splitlines() if l.startswith("RESULT=")), None)
+        bud = json.loads(line4[len("RESULT="):]) if line4 else {}
+    finally:
+        pf4.unlink(missing_ok=True)
+    check(bool(bud), "the fetch-budget probe produced a result")
+    if bud:
+        # A run budget at or below the per-page ceiling would refuse the SECOND half of the first
+        # long statute - turning a cost control into a truncation, which is the failure the
+        # per-page ceiling was set high to avoid in the first place.
+        check(bud["run"] > bud["page"] * 2,
+              "the run budget leaves room for more than one full-size page",
+              "page=%s run=%s" % (bud["page"], bud["run"]))
+        # Grounded in a real run: the heaviest honest channel in the round-29 panel fetched
+        # 706 KB across 8 pages. The ceiling has to sit above that or it bites legitimate work.
+        check(bud["run"] >= 900_000,
+              "the run budget sits above the heaviest measured honest run (706 KB)",
+              "run=%s" % bud["run"])
+
+    # --- every kind must print telemetry, not only be dispatchable -------------------------
+    # 🔴 THIRD INSTANCE OF ONE DEFECT, so this time it gets a check rather than a fix. Adding a
+    # `kind` to the dispatcher is LOUD (the channel does not run). Forgetting it in the
+    # reporting block is SILENT: goog36flash ran fine for a day printing `bytes=... exit=None`
+    # and no tokens at all, because the reporter is an `if kind ==` chain and nothing asserts it
+    # covers the same set. Previous two: four literal channel names swallowing a fifth channel,
+    # and per-channel telemetry keyed on names that a rename had retired.
+    tail = src.split("def main(", 1)[-1]
+    decl = src.split("KNOWN_KINDS = (", 1)[1].split(")", 1)[0]
+    kinds = [k.strip().strip("\"' ") for k in decl.split(",") if k.strip()]
+    nolog = [k for k in kinds
+             if k != "hermes" and ('kind == "%s"' % k) not in tail and ('"%s"' % k) not in tail]
+    check(not nolog, "every dispatchable kind prints a telemetry line, not only a byte count",
+          "silent in the reporter: %s" % nolog)
+
+    # --- the codex hint is wired, and reaches the prompt -----------------------------------
+    ch = reg["channels"]["codex"]
+    ref = ch.get("fetch_fallback_hint_ref")
+    check(bool(ref) and ref in (reg.get("hints") or {}),
+          "codex references a hint that exists in `hints`", str(ref))
+    hint = (reg.get("hints") or {}).get(ref) or ""
+    # The one line that makes the rest of the hint usable: codex loads tools lazily, so naming a
+    # tool without telling it to search first names a lever it cannot see.
+    check("lazy" in hint.lower() or "tool search" in hint.lower(),
+          "the codex hint tells it to DISCOVER its tools before naming any")
+    check(bool(routing.resolve(r, tier="strategic")["codex"].get("fetch_fallback_hint")),
+          "the hint survives routing and is attached to the codex slot")
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -587,7 +833,7 @@ def main():
     _quiet = a.quiet
 
     for suite in (suite_degradation, suite_routing, suite_redaction, suite_contract,
-                  suite_citations, suite_dispatch):
+                  suite_citations, suite_dispatch, suite_tiers_and_grounding):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

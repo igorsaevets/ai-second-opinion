@@ -154,10 +154,22 @@ channel is an edit to that file, never to `orchestrate.py`.
 --skip gemini               exclude
 --set codex=gpt-5.4         pin a specific model
 --route "<free text>"       parse an instruction as written, in Russian or English
---tier quick|standard|strategic|deep
+--tier strategic|deep       two only; the plan prints what it resolved to, per channel
 --system legal-research     system-prompt preset
 --dry-run                   complete preflight, spends nothing
 ```
+
+**Why two tiers and not four.** There were four; the two at the top differed by a *timeout* and
+nothing else, so the word "deep" advertised a depth the configuration did not contain. `deep`
+now buys more time, **twice** the pages each channel may fetch, twice the reasoning ceiling where
+the vendor exposes one, and a higher Gemini `thinking_level`. It does not buy "more effort",
+because several vendors are already at their maximum on `strategic` — and where that is true the
+plan says so in the channel's own line rather than leaving you to infer it. `strategic` is
+bit-for-bit the old default, so upgrading changes no cost until you ask for `deep`.
+
+A tier that no longer exists is refused by name (`invalid choice: 'quick'`). The tier list lives
+in `channels.json` only; before that it lived in two places, and deleting one entry would have
+left the flag accepting it and quietly falling through to defaults.
 
 `--route` is deterministic rule-based parsing, not a model call. It handles negation
 («не использовать», «без», «кроме», "don't use"), substitution («вместо», including the «вместо

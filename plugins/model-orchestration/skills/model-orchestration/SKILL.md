@@ -123,7 +123,7 @@ which. A channel that is off is one `enabled: true` away, not a missing feature.
 |---|---|
 | `--brief` | file with the question. Required unless you pass `--ask`. Its last line should instruct the model to end with your marker |
 | `--ask` | **one-shot question instead of a round.** `--ask "text"` or `--ask @file`. Defaults to `spark12cont` (cheapest); `--ask-channel <name>` picks another. Prints the ANSWER to stdout, skips the citation audit. ~20 s |
-| `--tier` | depth: `quick` · `standard` · `strategic` · `deep`. Default `strategic`. See §2 |
+| `--tier` | `strategic` (default) · `deep`. Two only. See §2 |
 | `--marker` | literal string the reply must end with. If it is absent the output is incomplete |
 | `--out` | output directory. Default `./reviews` |
 | `--system` | preset name or path (§0.2). The harness **appends the no-non-existence rule** to whatever you pass — end the file with a newline or that sentence collides with your last word |
@@ -228,24 +228,21 @@ and `orchestrate.py` refuses to SEND one, with no override at any setting. Ident
 
 ---
 
-## 2. Depth tiers
+## 2. Depth tiers — there are two
 
+| tier | what it buys |
+|---|---|
+| **`strategic`** (default) | every vendor at the depth it supports; agy 25m, codex 50m; Spark budget 60k, floor ≥15,000 |
+| **`deep`** | agy 40m, codex 75m; Spark budget 100k, floor ≥25,000; Gemini `thinking_level` medium→high; **reasoning cap and page-fetch budget DOUBLED** on every OpenRouter/MiMo channel |
 
-| tier | `thinking` sent | expected reasoning | output-token floor |
-|---|---|---|---|
-| `quick` | `{"type":"adaptive"}` | 2–8k | none |
-| `standard` | `{"type":"adaptive","budget_tokens":30000}` | 15–30k | ≥5,000 |
-| **`strategic`** — turn-level, multi-question, "what did we miss" | `{"type":"enabled","budget_tokens":60000}` | 40–60k | **≥15,000** |
-| **`deep`** — architecture pivot, high-stakes audit | `{"type":"enabled","budget_tokens":100000}` | 60–100k | **≥25,000** |
-
-**Bare `adaptive` silently under-allocates on questions that look small.** Same brief, same model,
-same day: `adaptive` → **9,955** output tokens and **0** searches; `{"type":"enabled",
-"budget_tokens":100000}` → **20,132** and **34**. Demand depth with a floor; do not hope for it.
+`quick`/`standard` are gone (argparse error). **Read the tier from the plan, not this table** — it
+prints per channel what the tier resolved to, including "nothing this tier can raise here". `deep`
+costs money: double the fetch budget is double the context, and context is the bill.
 
 **The floor is waived when your brief caps the length.** "Under 250 words" makes a short reply
 correct — the floor only means "under-allocated" when the brief did not ask for brevity.
 
-Streaming is automatic above a 32,000 budget and is not optional — why, in `references/channels.md`.
+Streaming is automatic above a 32,000 budget — why, in `references/channels.md`.
 
 ---
 

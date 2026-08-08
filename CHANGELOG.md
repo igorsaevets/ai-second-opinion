@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.6.0 — 2026-08-08
+
+**Two tiers instead of four, one meaning per field, and a capability we had written off.**
+
+- **`--tier` now takes `strategic` (default) or `deep`. `quick` and `standard` are gone** and are
+  refused by name rather than silently defaulted. The reason is worth stating plainly: the two
+  tiers that survived used to differ by a **timeout and nothing else** — identical effort on every
+  channel — so the word "deep" advertised a depth the configuration did not contain. `deep` now
+  doubles the reasoning ceiling and the page-fetch budget on every OpenRouter/MiMo channel, raises
+  the direct Gemini channel's `thinking_level`, and extends timeouts. `strategic` is bit-for-bit
+  the previous default, so nothing you already run costs more.
+- **The plan now tells you, per channel, what the tier resolved to** — including
+  `nothing this tier can raise on this channel`, which is the honest line for a vendor already at
+  its ceiling. Before this, a control that reached four of eleven channels read as global.
+- **The plan also tells you, per channel, how it reaches the live web.** Four channels with real
+  search used to print nothing at all about it, because the line was only emitted for channels
+  carrying a particular config block. A capability that is on but invisible gets doubted and
+  eventually reimplemented.
+- 🔴 **`opened_urls` meant two different things and has been split.** On some channels it counted
+  pages **the tool fetched** — bytes on your disk, quotable, checkable. On others it counted pages
+  **the vendor says it opened**, which nothing can verify. Reports compared them as one number.
+  Now: `fetched_by_us` / `fetched_urls`, `vendor_opened` / `vendor_opened_urls`, `n_grounded`
+  (backed by our fetches only), `n_vendor_grounded`, and `grounding_basis` ∈ *harness · vendor ·
+  both · none*. If you have automation reading `diagnostics.json`, this is the breaking change.
+- 🔴 **A large page fetch is a token bomb. There is now a ceiling on the total.** One 400 KB page
+  pulled into a review billed **273,018 input tokens** for an 813-character question, because each
+  tool round re-sends the whole conversation — the cost is quadratic in the number of steps, and
+  the old budget counted *pages*, not bytes. A single panel run then pulled a 224 KB, a 238 KB and
+  a 386 KB page on three different channels, so this is the common case, not the tail. Two
+  changes: a page over 100 KB is called out at the moment it is fetched, and a channel may now
+  fetch **1 MB of page text per review** in total, after which further fetches are refused with an
+  explanation the model can act on. The per-page ceiling is deliberately unchanged — truncating a
+  long statute mid-section is a worse failure than an expensive review. The ceiling is set above
+  the heaviest honest run measured here (706 KB across 8 pages), not at a round number.
+- 🔴 **The Gemini direct channel does have a depth knob after all.** The previous release stated
+  it did not. That conclusion came from sending `thinking_level` at the top level of the request,
+  getting `400 Unknown parameter`, and reading it as "the feature does not exist". It belongs
+  inside `generation_config`. Measured by the token meter, one sample per arm: no knob → 391
+  thought tokens, `minimal` → 0, `high` → 306. **A 400 answers "not like that", never "not at
+  all".**
+- **Codex gets the same page-opening fallback the Gemini CLI channel already had.** The previous
+  release said this was impossible because codex had no MCP tools — a conclusion drawn by *asking
+  the model*, which answered `NONE`. Codex loads its tools lazily and only sees them after a tool
+  search, so the question was answered from an empty list. It has nine servers and can call them.
+- **Two reporting corrections.** The one-shot `--ask` path said the citation check was "disabled
+  with `--no-citecheck`", naming a flag you never passed. And the direct Gemini channel printed no
+  telemetry at all — no tokens, no searches, no grounding — because the reporting block is keyed
+  on channel kind and that kind was never added to it.
+- Self-test grew to **115 checks**, including: the tier list has exactly one home, a removed tier
+  is refused, `deep` really doubles what it claims to double, no channel returns the retired
+  field name, and every dispatchable channel kind both describes its web access and prints
+  telemetry.
+
 ## 1.5.0 — 2026-08-08
 
 **Three new vendors, and a documented switch that does nothing.**

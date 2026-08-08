@@ -86,7 +86,15 @@ def _rows(d):
             "denied": r.get("denied"),
             "tool_errors": r.get("tool_errors"),
             "cited": c.get("cited"),
+            # 🔴 D6. `grounded` used to be one column fed by a field that meant "pages WE
+            # fetched" on some channels and "pages the VENDOR says it opened" on others, so the
+            # column silently compared evidence against assertion. Three fields now, and
+            # `basis` is the one that stops a reader adding them up.
             "grounded": r.get("n_grounded"),
+            "vendor_grounded": r.get("n_vendor_grounded"),
+            "grounding_basis": r.get("grounding_basis"),
+            "fetched_by_us": r.get("fetched_by_us"),
+            "vendor_opened": r.get("vendor_opened"),
             "live": tally.get("LIVE"),
             "dead": c.get("dead"),
             "data_policy": p.get("data_policy"),
@@ -290,8 +298,29 @@ def render(d):
     L.append("- **Whether the models agreed for independent reasons.** Same-family voices "
              "(the two Spark channels, the two Gemini channels) share training data and blind "
              "spots, so their agreement is one vote counted twice, not corroboration.")
-    L.append("- **What a channel was sent beyond the brief.** Nothing here records the system "
-             "preset, which is identical for every channel.")
+    # 🔴 THIS BULLET USED TO END "...the system preset, which is identical for every channel."
+    # It stopped being true on 2026-08-08, when per-channel fetch hints and prompt suffixes were
+    # added, and the sentence went on asserting it. Both codex and qwen38max caught it in the
+    # same review round, independently, and both called it the panel's most dangerous remaining
+    # self-deception: a harness that compares model-plus-hidden-prompt bundles while its own
+    # report says the prompt was the same. The fix is not a promise, it is a measurement -
+    # `diagnostics.invocation.effective_system_per_channel` carries the byte count and a digest
+    # per channel, so "was it the same?" is a lookup.
+    inv = d.get("invocation") or {}
+    eff = inv.get("effective_system_per_channel") or {}
+    if eff:
+        same = inv.get("identical_system_for_all")
+        L.append("- **What a channel was sent beyond the brief.** The system prompt is **%s** "
+                 "across channels this run%s. Per-channel bytes and digests are in "
+                 "`diagnostics.invocation.effective_system_per_channel`; two channels received "
+                 "the same prompt only if their digests match."
+                 % ("IDENTICAL" if same else "NOT identical",
+                    "" if same else " - per-channel fetch hints and standing notes differ, and a "
+                                    "review is a reaction to the whole prompt, not to the brief "
+                                    "alone"))
+    else:
+        L.append("- **What a channel was sent beyond the brief.** This run predates per-channel "
+                 "system-prompt recording, so it cannot be reconstructed. Assume it differed.")
     return "\n".join(L) + "\n"
 
 
