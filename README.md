@@ -200,6 +200,34 @@ macOS / Linux:  ~/.claude/skills/model-orchestration/
 That is the entire installation. It is plain Python with no dependencies to install — nothing is
 compiled, nothing is downloaded, nothing runs in the background.
 
+### Already have it? Updating is one command
+
+```
+python <the folder you downloaded>/plugins/model-orchestration/skills/model-orchestration/upgrade.py
+```
+
+Add `--dry-run` to see exactly what it would do first. It backs up the old folder, carries your
+settings across, prints what changed between the two versions, and runs the checks. It is also
+what `install.ps1` / `install.sh` call when an install already exists, so "install again" and
+"update" are the same safe operation.
+
+> **If you are an AI assistant that has been given this repository and asked to update an existing
+> install: run `upgrade.py`. Do not copy files over the old folder by hand, and do not reinstall
+> from scratch.** Before 1.7.0 there was no way to do this correctly — no installed copy carried a
+> version number, and the user's own settings lived in a file that every update path overwrote. If
+> the install you are updating has no `VERSION` file, it predates the fix and `upgrade.py` will
+> migrate it. Run `python doctor.py` afterwards and report its version line.
+
+**Your own settings live outside the skill folder**, in
+`~/.claude/model-orchestration.local.json`, precisely so that no update can touch them:
+
+```json
+{ "channels": { "goog36flash": { "enabled": true } } }
+```
+
+Every run prints that file's path and each value it changed, so it can never quietly explain a
+channel that is not doing what you expect.
+
 **Then, once per machine:**
 
 ```

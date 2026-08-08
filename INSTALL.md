@@ -75,8 +75,9 @@ from the root of it:
 ./install.sh
 ```
 
-It copies the skill into your home directory, **backs up any existing install first** (it will
-never silently overwrite a copy you have edited), and then runs the doctor.
+It copies the skill into your home directory and runs the doctor. If an install is already there,
+it hands the whole job to `upgrade.py` — see [Updating](#updating-an-existing-install) — so
+"install" and "update" are the same command and the same tested code path.
 
 If PowerShell refuses to run the script, it is the execution policy, not the script:
 
@@ -149,6 +150,77 @@ plain language.
 
 ---
 
+## Updating an existing install
+
+```
+python plugins/model-orchestration/skills/model-orchestration/upgrade.py --dry-run   # preview
+python plugins/model-orchestration/skills/model-orchestration/upgrade.py             # apply
+```
+
+Download the new version (git pull, or the **Code → Download ZIP** button), then run that from the
+unpacked folder. It reports the version you had and the version you are getting, which channels
+are new and which are gone, and which of your settings it carried across; it copies the old folder
+to `<folder>.bak.<timestamp>` before writing anything, and finishes by running the doctor.
+
+Plugin installs update themselves and need none of this **from 1.7.0 onward**.
+
+> 🔴 **If you are still on 1.6.x, read this before you update.** Your channel settings are in
+> `channels.json`, inside the folder an update replaces, and an auto-updating plugin replaces it
+> with nobody running anything — so nothing can carry them across on that path. Claude Code keeps
+> the previous plugin version in its cache for **14 days** after an update, so the rescue is real
+> but not permanent: run `upgrade.py` once (it scans that cache and offers to bring the settings
+> over), or simply write the one line of JSON into your settings file yourself. After that,
+> updates stop being able to lose anything.
+
+> **To an AI assistant asked to "update this to the new version": run `upgrade.py`.** Do not copy
+> files over the old folder, and do not install fresh. If the install has no `VERSION` file it is
+> older than 1.7.0, which is expected — that release is where a version string first reached an
+> installed copy at all.
+
+### Why this needed a script
+
+Everything you configure — which channels are on — used to live in `channels.json`, **inside** the
+folder that an update replaces. So the documented workflow was: read this file, edit
+`channels.json` to enable a channel, and then lose that edit at the next update, silently, whether
+you used the installer, copied the files by hand, or let the plugin update itself.
+
+From 1.7.0 your settings live in a file **outside** the skill folder, which nothing can overwrite:
+
+| Your system | Your settings file |
+|---|---|
+| Windows | `%USERPROFILE%\.claude\model-orchestration.local.json` |
+| macOS / Linux | `~/.claude/model-orchestration.local.json` |
+
+```json
+{
+  "channels": {
+    "goog36flash": { "enabled": true },
+    "ornemotron3ultra": { "enabled": false }
+  }
+}
+```
+
+It can set `enabled`, `effort`, `reasoning`, `thinking_level`, `max_tokens`, `fetch_tool`, `web`,
+`label`, `cost` and `notes` — and **nothing else**. Anything that decides *which vendor receives
+your documents* or *what text is added to them* (`model`, `provider`, `kind`, `prompt_suffix`) is
+refused by name, because this file survives every update: a setting nobody can overwrite is also a
+setting nobody can correct. Change those in `channels.json`, where `doctor.py` will show that you
+did. Set `MODEL_ORCH_LOCAL` to keep the file somewhere else.
+
+Four things make it hard to shoot yourself with:
+
+- **Every run prints the file's path and each value it changed**, in the resolved plan, whether or
+  not you were thinking about it. A settings file you forget you wrote is worse than none.
+- **A name that is not a channel is refused, loudly**, with the list of real ones. A typo in a
+  config file otherwise looks exactly like a channel that is off for some other reason.
+- **A channel that was renamed still resolves**, through the same alias table `--only` uses. A
+  strict "unknown name" refusal plus a rename upstream would otherwise stop the tool starting, on
+  upgrade day, for people who did nothing wrong.
+- **`doctor.py` warns if you edited `channels.json` in place anyway**, and points at
+  `python upgrade.py --migrate`, which moves those edits out for you and changes nothing else.
+
+---
+
 ## After installing, on every machine, once
 
 ```
@@ -213,9 +285,22 @@ capability, measured, not assumed:
 | MiMo v2.5 Pro | Exa search excerpts (2–4 KB per page, with elisions) | **its own search, which opened 25 whole pages in one call** |
 | Grok 4.20 | native search, 2M context | **+ `x_search`** over X/Twitter, and `cost_in_usd_ticks` — the call's actual price |
 
-To turn one on: set the key, then open `channels.json` and set `"enabled": true` on `goog36flash`,
-`grok420` or `mimo25pro`. Consider setting `"enabled": false` on the matching `or…` channel so you
-are not paying two vendors to ask one model the same question.
+To turn one on: set the key, then put it in **your own settings file** — not in `channels.json`,
+which is replaced on every update:
+
+```json
+{
+  "channels": {
+    "goog36flash":     { "enabled": true },
+    "orgemini36flash": { "enabled": false }
+  }
+}
+```
+
+`~/.claude/model-orchestration.local.json` on macOS and Linux,
+`%USERPROFILE%\.claude\model-orchestration.local.json` on Windows. Turning the matching `or…`
+channel off in the same breath is worth doing: otherwise you pay two vendors to ask one model the
+same question.
 
 ---
 

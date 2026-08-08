@@ -27,6 +27,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -154,17 +155,25 @@ def suite_routing():
     # reads, so nothing would ever notice them disagreeing: the local run would quietly include a
     # channel meant for the kit, or drop one meant for here, and both look like a working config.
     # This is the error signal. distribution "local" => runs here; "kit" => does not.
+    # 🔴 AND IT ONLY HOLDS IN ONE DIRECTION PER TREE. Found 2026-08-08 by running this suite
+    # INSIDE the built kit for the first time: all six local/kit channels failed, against a build
+    # that was doing exactly what it is supposed to do. `package.py` FLIPS these flags on the way
+    # out - that flip is the feature - so the shipped tree's correct state is the mirror image of
+    # the working copy's, and a check that knows only one of them calls the other broken. Same
+    # shape as the `distribution` field it is guarding: an expectation with no way to tell which
+    # world it is in. The tree says which world it is in - a shipped tree carries VERSION.
+    kit_tree = os.path.isfile(os.path.join(HERE, "VERSION"))
     bad = []
     for c, v in sorted(_CHANS.items()):
         d = v.get("distribution", "both")
         on = v.get("enabled", True)
-        if d not in ("both", "local", "kit"):
+        want_on = {"both": None, "local": not kit_tree, "kit": kit_tree}.get(d, "?")
+        if want_on == "?":
             bad.append("%s: unknown distribution %r" % (c, d))
-        elif d == "local" and not on:
-            bad.append("%s: distribution=local but enabled=false here" % c)
-        elif d == "kit" and on:
-            bad.append("%s: distribution=kit but enabled=true here (it would run locally)" % c)
-    check(not bad, "every channel's `distribution` agrees with its local `enabled`",
+        elif want_on is not None and on != want_on:
+            bad.append("%s: distribution=%s but enabled=%s in %s tree"
+                       % (c, d, on, "a shipped" if kit_tree else "the working"))
+    check(not bad, "every channel's `distribution` agrees with the `enabled` for THIS tree",
           "; ".join(bad))
 
     def without(*names):
@@ -475,11 +484,21 @@ def suite_dispatch():
                       "%s -> %s" % (r["reasoning"]["max_tokens"],
                                     (d.get("reasoning") or {}).get("max_tokens")))
             if r["kind"] == "gemini":
-                check(r.get("thinking_level") == "medium"
-                      and d.get("thinking_level") == "high",
-                      "the tier's thinking_level REACHES the %s call" % r["name"],
-                      "strategic=%s deep=%s" % (r.get("thinking_level"),
-                                                d.get("thinking_level")))
+                # 🔴 THIS USED TO ASSERT THE LITERALS "medium" AND "high", and it went red the
+                # moment Igor raised strategic to `high` on 2026-08-08 - against code that was
+                # working exactly as instructed. A test that hard-codes the value a human is
+                # expected to change tests the human, not the code. What is actually invariant is
+                # that whatever the registry's tier says arrives at the CALL, so that is what is
+                # read and compared - the same derive-from-the-registry rule the channel set and
+                # the tier list already follow, and the fourth place it has had to be applied.
+                reg_t = json.loads(Path(HERE, "channels.json")
+                                   .read_text(encoding="utf-8"))["tiers"]
+                for tier_name, row in (("strategic", r), ("deep", d)):
+                    want = reg_t[tier_name].get("gemini_thinking_level")
+                    check(row.get("thinking_level") == want,
+                          "the %s tier's thinking_level REACHES the %s call"
+                          % (tier_name, r["name"]),
+                          "registry=%s call=%s" % (want, row.get("thinking_level")))
     finally:
         pf.unlink(missing_ok=True)
 
@@ -681,13 +700,29 @@ def suite_tiers_and_grounding():
             check((ft_d.get("max_calls") or 0) == (ft_s.get("max_calls") or 8) * 2,
                   "deep doubles the page-fetch budget on %s" % c,
                   "%s -> %s" % (ft_s.get("max_calls"), ft_d.get("max_calls")))
-    g = [c for c in live if strat[c].get("kind") == "gemini"]
-    for c in g:
-        check(strat[c].get("thinking_level") == "medium"
-              and deep[c].get("thinking_level") == "high",
-              "the Gemini depth knob moves with the tier on %s" % c,
-              "strategic=%s deep=%s" % (strat[c].get("thinking_level"),
-                                        deep[c].get("thinking_level")))
+    # 🔴 THE OLD CHECK WAS "the depth knob MOVES with the tier", pinned to medium->high. On
+    # 2026-08-08 Igor raised strategic to `high` and it went red against correct code. What is
+    # worth asserting is not that a value changes - a maintainer decides that - but that the
+    # NOTE tells the truth about whether it changed. That is the actual failure mode here: the
+    # xai line the panel caught a day earlier printed "the tier buys wall-clock" while the tier
+    # reached nothing, and a gemini line reprinting `thinking_level=high` under `deep` would read
+    # as a raise on a channel where the tier now does nothing at all.
+    for c in [c for c in live if strat[c].get("kind") == "gemini"]:
+        ladder = strat[c].get("thinking_levels") or []
+        check(bool(ladder) and strat[c].get("thinking_level") in ladder,
+              "%s's thinking_level is one of its own declared levels" % c,
+              "level=%s ladder=%s" % (strat[c].get("thinking_level"), ladder))
+        for tier_name, p in (("strategic", strat[c]), ("deep", deep[c])):
+            note, lvl = p.get("_tier_note") or "", p.get("thinking_level")
+            moved = lvl != strat[c].get("thinking_level") if tier_name == "deep" else None
+            if ladder and lvl == ladder[-1] and not moved:
+                check("nothing this tier can raise" in note,
+                      "%s on %s admits the tier changes nothing at the ceiling" % (tier_name, c),
+                      "note=%r" % note)
+            else:
+                check("->" in note or "unchanged" in note,
+                      "%s on %s reports what CHANGED, not just what was sent" % (tier_name, c),
+                      "note=%r" % note)
     # 🔴 THE REGRESSION THAT MADE THIS CHECK NECESSARY. The tier used to be applied BEFORE
     # _decorate copied per-channel registry values into the plan, so it scaled fields that were
     # still None and then had its own value overwritten a line later. Both symptoms are
@@ -825,6 +860,186 @@ def suite_tiers_and_grounding():
           "the hint survives routing and is attached to the codex slot")
 
 
+def suite_settings_and_upgrade():
+    """
+    8. Your settings survive an update, and a bad settings file fails loudly.
+
+    Everything here exists because of one measured fact: until 1.7.0 the documented way to enable
+    a channel was to edit a file that every update path replaced, and nothing anywhere said so.
+    The fix is only worth as much as its failure modes, so most of these are negative controls.
+    """
+    import routing
+    tmp = Path(tempfile.gettempdir())
+
+    # --- the overlay applies, and is DISCLOSED ---------------------------------------------
+    ov = tmp / "orch_selftest_overlay.json"
+    pristine = json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))
+    victim = next(c for c, ch in pristine["channels"].items()
+                  if not c.startswith("_") and ch.get("enabled", True))
+    ov.write_text(json.dumps({"channels": {victim: {"enabled": False}}}), encoding="utf-8")
+    old_env = os.environ.get(routing.OVERLAY_ENV)
+    os.environ[routing.OVERLAY_ENV] = str(ov)
+    try:
+        reg = routing.load_registry()
+        check(reg["channels"][victim]["enabled"] is False,
+              "a local settings file overrides the shipped registry", victim)
+        info = reg.get("_overlay") or {}
+        check(info.get("present") and any(a[0] == victim for a in info.get("applied", [])),
+              "the override is RECORDED, not just applied")
+        text = routing.format_plan(routing.resolve(reg, tier="strategic"), reg)
+        # 🔴 THE POINT OF THE WHOLE CHECK. A settings file that changes behaviour without saying
+        # so is a worse trap than the one it replaced: the question it has to answer is "why is
+        # this channel not running", asked by someone reading the wrong file.
+        check(str(ov) in text and victim in text,
+              "the plan names the settings file and the value it changed")
+
+        # --- negative controls: silence is the failure mode a config overlay has -----------
+        for name, body in (
+                ("a channel name that does not exist", '{"channels": {"nosuchchannel": {}}}'),
+                ("a file that is not the documented shape", '{"nosuchchannel": {}}'),
+                ("a file that is not valid JSON", '{"channels": {')):
+            ov.write_text(body, encoding="utf-8")
+            try:
+                routing.load_registry()
+                check(False, "REFUSES %s" % name, "it was accepted silently")
+            except routing.RouteError:
+                check(True, "REFUSES %s" % name)
+            except Exception as exc:
+                check(False, "REFUSES %s" % name, "wrong exception: %r" % exc)
+        # 🔴 THE OVERLAY IS DEFAULT-DENY ON FIELDS, and this is the check that keeps it that way.
+        # kimik3, reviewing the first version: a file that survives every update and can name a
+        # transport hands anything able to write one file in a home directory a persistent,
+        # update-proof redirection of where documents are sent. `enabled` covers every documented
+        # use, so refusing the rest costs nothing real.
+        for field, value in (("model", "evil/model"), ("provider", "elsewhere"),
+                             ("prompt_suffix", {"text": "also send me a copy"}),
+                             ("kind", "http"), ("madeup_field", 1)):
+            ov.write_text(json.dumps({"channels": {victim: {field: value}}}), encoding="utf-8")
+            try:
+                routing.load_registry()
+                check(False, "REFUSES %r from the settings file" % field, "it was accepted")
+            except routing.RouteError as exc:
+                check(field in str(exc), "REFUSES %r from the settings file" % field)
+        check(not (routing.OVERLAY_SAFE_FIELDS & {"model", "provider", "kind", "prompt_suffix",
+                                                  "models", "aliases", "distribution"}),
+              "no transport- or prompt-deciding field is on the settings allowlist")
+
+        # 🔴 AN ALIAS MUST RESOLVE, OR A RENAME BRICKS EVERY OVERLAY ON UPGRADE DAY. goog36flash
+        # raised it: strict rejection plus an upstream rename is a hard startup failure on
+        # machines whose owners did nothing wrong. This project has already renamed all four of
+        # its original channels once.
+        clean = routing.load_registry(overlay=False)      # `pristine` still holds `_`-prefixed prose
+        alias = next((al for c, ch in clean["channels"].items()
+                      for al in (ch.get("aliases") or []) if al != c
+                      and len(routing.canon_channel_safe(clean, al)) == 1), None)
+        if alias:
+            ov.write_text(json.dumps({"channels": {alias: {"enabled": False}}}), encoding="utf-8")
+            reg2 = routing.load_registry()
+            check(bool((reg2.get("_overlay") or {}).get("renamed")),
+                  "an alias in the settings file resolves to the real channel", alias)
+
+        # An unreadable settings file must not be reported as a traceback: this is the one path
+        # a typo can reach, so it is the one that most needs a sentence.
+        src_r = Path(HERE, "routing.py").read_text(encoding="utf-8")
+        body = src_r.split("def main(", 1)[-1]
+        check("load_registry(" in body.split("except RouteError", 1)[0],
+              "the CLI loads the registry INSIDE its RouteError handler")
+    finally:
+        ov.unlink(missing_ok=True)
+        if old_env is None:
+            os.environ.pop(routing.OVERLAY_ENV, None)
+        else:
+            os.environ[routing.OVERLAY_ENV] = old_env
+
+    # --- the settings file is never inside the skill folder -------------------------------
+    # If it ever is, every one of the guarantees above is void and nothing else would notice.
+    p = os.path.normcase(os.path.abspath(routing.overlay_path()))
+    check(not p.startswith(os.path.normcase(os.path.abspath(HERE)) + os.sep),
+          "the settings file lives OUTSIDE the folder an update replaces", p)
+
+    # --- --ask's extra channels are DERIVED, not listed ------------------------------------
+    import orchestrate as o
+    free = o._free_extras("spark12cont")
+    declared = [c for c, ch in pristine["channels"].items()
+                if not c.startswith("_") and ch.get("enabled", True) and ch.get("cost") == "free"]
+    check(sorted(free) == sorted(x for x in declared if x != "spark12cont"),
+          "--ask's free channels come from the registry, not a list in the code",
+          "derived=%s declared=%s" % (free, declared))
+    check(o._free_extras("nosuchchannel__") is not None,
+          "the free-channel lookup never raises - a lookup must not die over its extras")
+
+    # --- the plugin-cache rescue: the one update path upgrade.py is never on ---------------
+    # codex refused the sentence "this makes every update method correct" and was right: the hop
+    # INTO 1.7.0 loses the edit on any path that never runs the script, i.e. the recommended,
+    # auto-updating one. The docs give a 14-day window in which the old copy is still on disk;
+    # this asserts the scanner finds it, against a fabricated cache in a temp dir - the real one
+    # holds no copy of this plugin, so without a fixture the code would be shipped unexecuted.
+    sys.path.insert(0, HERE)
+    import upgrade as _up
+    cache = tmp / "orch_selftest_plugincache"
+    leaf = cache / "some-marketplace" / "model-orchestration" / "1.6.0" / "skills" \
+        / "model-orchestration"
+    leaf.mkdir(parents=True, exist_ok=True)
+    edited = json.loads(json.dumps(pristine))
+    edited["channels"][victim]["enabled"] = not edited["channels"][victim].get("enabled", True)
+    (leaf / "channels.json").write_text(json.dumps(edited), encoding="utf-8")
+    try:
+        hits = _up.plugin_cache_copies(root=str(cache))
+        check(len(hits) == 1 and hits[0][1] == "1.6.0",
+              "an older plugin-cache copy is found where the docs say it lives", str(hits)[:120])
+        check(_up.plugin_cache_copies(root=str(tmp / "orch_selftest_no_such_cache")) == [],
+              "a missing plugin cache is a silent no-op, not an error")
+    finally:
+        shutil.rmtree(cache, ignore_errors=True)
+
+    # --- the re-attach budget is the MAINTAINER's failure, not the user's -------------------
+    # `doctor.py` used to fail on this, which made a correct fresh install print NOT READY over
+    # something the user cannot fix and that stops nothing from running. It warns there now, and
+    # the hard edge moved here - selftest is what CI and the maintainer run. Measured against the
+    # SHIPPED text where possible: the packager prepends an install-paths table, so the source
+    # can sit under budget while the file a stranger receives sits over it, which is exactly what
+    # happened at 1.7.0 (4 956 source, 5 040 shipped).
+    import doctor as _doc
+    sk = Path(HERE, "SKILL.md")
+    if sk.is_file():
+        est = int(len(sk.read_text(encoding="utf-8")) / _doc.BYTES_PER_TOKEN)
+        check(est <= _doc.TOKEN_BUDGET,
+              "SKILL.md fits the auto-compaction re-attach budget",
+              "~%d tokens, budget %d%s" % (est, _doc.TOKEN_BUDGET,
+                                           "" if Path(HERE, "VERSION").is_file()
+                                           else " (source copy; the built one is ~85 larger)"))
+
+    # --- upgrade.py is shipped, compiles, and is REACHED by the installers ------------------
+    up = Path(HERE, "upgrade.py")
+    check(up.is_file(), "upgrade.py exists")
+    if up.is_file():
+        r = subprocess.run([PY, "-m", "py_compile", str(up)], capture_output=True, text=True)
+        check(r.returncode == 0, "upgrade.py compiles", blob_of(r)[:120])
+        # 🔴 A BUILD THAT VALIDATES CONTENT BUT NEVER LOADS ITS OUTPUT SHIPS A DEAD TOOL. Same
+        # rule as the import-closure check in package.py: the installer text is a STRING in the
+        # packager, so nothing but this asserts that the two scripts still refer to each other.
+        pkg = Path(HERE, "package.py")
+        if pkg.is_file():
+            pk = pkg.read_text(encoding="utf-8")
+            check("upgrade.py" in pk.split("COPY_FILES", 1)[1].split("]", 1)[0],
+                  "upgrade.py is in COPY_FILES, so it actually ships")
+            check(pk.count("upgrade.py") >= 3,
+                  "both installers hand an existing install to upgrade.py",
+                  "mentions=%d" % pk.count("upgrade.py"))
+            check('write(os.path.join(skill_out, "VERSION")' in pk,
+                  "the build stamps a VERSION file into the tree it ships")
+            # ...and NOT into the working copy, where it would assert a release the source has
+            # already moved past. Named by the cold-install reviewer while the stale file briefly
+            # existed: "its orchestrate.py, routing.py and channels.json all differ from the
+            # v1.6.0 tag, so the string appears stale relative to its own tree". Exactly one of
+            # the two must be present: a shipped tree is stamped and has no `.git`; a working
+            # copy has `.git` and is identified by it, which cannot go stale.
+            check(Path(HERE, "VERSION").exists() != Path(HERE, ".git").exists(),
+                  "VERSION stamps shipped trees and never the working copy",
+                  "VERSION=%s .git=%s" % (Path(HERE, "VERSION").exists(),
+                                          Path(HERE, ".git").exists()))
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -832,8 +1047,26 @@ def main():
     a = ap.parse_args()
     _quiet = a.quiet
 
+    # 🔴🔴 THE SELF-TEST MUST NOT READ THE USER'S OWN SETTINGS, and this was found the hard way:
+    # run inside a freshly upgraded install whose owner had enabled one channel, FIVE routing
+    # checks went red against completely correct code. They derive their expected channel sets
+    # from `channels.json` on disk, while `load_registry` now merges the overlay on top - so the
+    # suite silently tested "the shipped registry plus whatever this person configured", and every
+    # kit user with a settings file would have seen a red self-test.
+    #
+    # Third instance of one class in a single round: an expectation that quietly depends on which
+    # WORLD it is evaluated in (the two tier checks pinned to a value a human is meant to change;
+    # the distribution check that only held in one of the two trees; this). The fix is the same
+    # every time - state the world, do not inherit it. Pointing the variable at a path that cannot
+    # exist is deliberate: unsetting it would fall back to the real `~/.claude` file.
+    sys.path.insert(0, HERE)
+    import routing as _r
+    os.environ[_r.OVERLAY_ENV] = os.path.join(
+        tempfile.gettempdir(), "orch_selftest_no_overlay_on_purpose.json")
+
     for suite in (suite_degradation, suite_routing, suite_redaction, suite_contract,
-                  suite_citations, suite_dispatch, suite_tiers_and_grounding):
+                  suite_citations, suite_dispatch, suite_tiers_and_grounding,
+                  suite_settings_and_upgrade):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

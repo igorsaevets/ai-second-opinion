@@ -85,6 +85,7 @@ complete instead of clipped.
 | `references/channels.md` | wire parameters and CLI traps per channel; a channel misbehaves, returns empty, or you are changing flags |
 | `references/briefs.md` | building any brief: what goes in it, and the live-web-search demand |
 | `references/verification.md` | judging whether a review actually happened; reviewer signatures; citation spot-checks |
+| `references/when-it-breaks.md` | **anything failed** — symptom → cause → fix, and the status fields that lie |
 | `KIT-README.md` + `package.py` | giving this to somebody else's machine. `package.py --out <dir>` regenerates the distributable (plugin + installers) from this directory, so there is never a second copy to drift |
 
 Paths are relative to this skill's own directory,
@@ -209,8 +210,9 @@ reads as current long after it stops being true. Ask instead:
 python "<SKILL_DIR>\doctor.py"
 ```
 
-Live versions, both CLI paths, key presence **without printing it**, the agy permission patch,
-and a compile check. `--json` for machine form. What is stable and worth knowing:
+Live versions, both CLI paths, key presence **without printing it**, the agy permission patch, the
+installed version, your settings file, and a compile check. `--json` for machine form. What is
+stable and worth knowing:
 
 | thing | value |
 |---|---|
@@ -218,7 +220,7 @@ and a compile check. `--json` for machine form. What is stable and worth knowing
 | HTTPS endpoint / model | `https://api.meta.ai/v1`; the model comes from `channels.json` and the **registry wins over `MODEL_NAME`** — one process-wide variable cannot address one of two channels on one endpoint. Docs: `dev.meta.ai/docs` (public; the login wall is the console, not the docs) |
 | Codex CLI | resolved via `CODEX_BIN` → PATH → known install dirs |
 | Antigravity CLI | `agy`, **not on PATH** on Windows; resolved via `AGY_BIN` → PATH → `%LOCALAPPDATA%\agy\bin\agy.exe` |
-| agy models | two channels, one model each: **`gemini-3.1-pro`** (agy31pro) and **`gemini-3.6-flash`** (agy36flash), base slug plus `--effort`. **Not** `gemini-3.1-pro-high` — a suffixed slug plus a disagreeing `--effort` is exit 1 in 3 seconds, and `gemini-3.1-pro` has no `medium` at all (`references/channels.md` §6.3) |
+| agy models | two channels, one model each: **`gemini-3.1-pro`** (agy31pro) and **`gemini-3.6-flash`** (agy36flash), base slug plus `--effort`. **Not** `gemini-3.1-pro-high` — a suffixed slug plus a disagreeing `--effort` is exit 1 in 3 seconds (`references/channels.md` §6.3) |
 | harness | `orchestrate.py`, standard library only, no `pip install`, Python 3.8+ |
 
 **Secrets.** Never `Read`, `cat`, `echo` or `Write-Output` the key. The script reads it from the
@@ -233,7 +235,7 @@ and `orchestrate.py` refuses to SEND one, with no override at any setting. Ident
 | tier | what it buys |
 |---|---|
 | **`strategic`** (default) | every vendor at the depth it supports; agy 25m, codex 50m; Spark budget 60k, floor ≥15,000 |
-| **`deep`** | agy 40m, codex 75m; Spark budget 100k, floor ≥25,000; Gemini `thinking_level` medium→high; **reasoning cap and page-fetch budget DOUBLED** on every OpenRouter/MiMo channel |
+| **`deep`** | agy 40m, codex 75m; Spark budget 100k, floor ≥25,000; **reasoning cap and page-fetch budget DOUBLED** on every OpenRouter/MiMo channel |
 
 `quick`/`standard` are gone (argparse error). **Read the tier from the plan, not this table** — it
 prints per channel what the tier resolved to, including "nothing this tier can raise here". `deep`
@@ -243,6 +245,10 @@ costs money: double the fetch budget is double the context, and context is the b
 correct — the floor only means "under-allocated" when the brief did not ask for brevity.
 
 Streaming is automatic above a 32,000 budget — why, in `references/channels.md`.
+
+**Your own settings go in `~/.claude/model-orchestration.local.json`, never in `channels.json`** —
+an update replaces the skill folder and cannot reach that file. `{"channels": {"<name>":
+{"enabled": true}}}`. Updating an install: `python upgrade.py` (`--dry-run` first).
 
 ---
 
@@ -265,25 +271,22 @@ A call that ran is not a review that happened. The harness prints all of this; r
    the tier, or split the question into more sub-questions to force more reasoning.
 
 Never let a soft signal mark a run failed. A check that cries wolf on a good answer trains you to
-ignore the alarm that matters — that mistake was made in this harness and fixed.
+ignore the alarm that matters — made twice in this harness, and fixed twice.
 
 ---
 
 ## 9. When it breaks
 
+**The symptom → cause → fix table is `references/when-it-breaks.md`.** Read it before diagnosing
+anything from source. Three that decide what you do next:
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| `gaierror` / `getaddrinfo failed` | transient DNS | the harness retries 3× with backoff. If it persists, check the network, not the code |
-| `FILTERED` / "content management policy" on the probe | cumulative content filter | neutralise sensitive-looking phrasing **in the sent copy only**, never on disk; strip large appendices; re-probe. Do NOT retry unchanged |
-| HTTP 401 | key rotated or expired | run `doctor.py` (§1). Never print the key |
-| `SECRETS IN THE PAYLOAD` / `PERSONAL IDENTIFIERS` | the pre-send gate fired | fix the brief at the reported line. Secrets have no override; PII needs `--allow-pii` |
-| `the route and the flags contradict each other` | `--only`/`--set` re-enabled a channel the route excluded | decide which you meant and pass one, not both |
-| HTTP 400 mentioning `thinking` | wrong thinking form for the host | the harness flips the form and retries once automatically |
-| Codex output empty, exit 0 | still thinking, or buffered through a formatter | check the marker on the last line; check `Get-Process codex` and rollout growth |
-| `agy` returns `jetski ... permission` | it tried to read the brief file | shorten the brief so it goes inline via `-p` |
-| tool_calls = 0 | model never searched | treat all dated facts as unverified; re-run at a higher tier or split the question |
-| `python` not found from another directory | you used a relative path | always use the absolute path in §0 |
+- **A status field is not evidence.** `agy` reports `SUCCESS` on an empty answer; `codex exec`
+  exits 0 on a hard 400; an HTTP 200 can mean only that the request parsed. Judge by the end
+  marker and the counters.
+- **`FILTERED` on the Spark probe**: neutralise the phrasing **in the sent copy only**, never on
+  disk, and strip appendices. Do not retry unchanged.
+- **A channel is off and nothing explains why**: your own settings file, whose path and every
+  changed field the plan prints at the top.
 
 ---
 
@@ -296,14 +299,12 @@ with proof**, and where the channels **disagreed with each other**.
 
 The disagreement is the product. One reviewer is not a second opinion.
 
-Three rounds, three different winners. 07-26: `agy` at 55 s found the item Codex and Spark missed.
-07-27: **Codex** found it, Spark contributed least despite 34 searches. 07-31: **Spark** graded the
-one planted-wrong claim correctly while agy passed it and cited three URLs that 404. The lesson is
-not "the cheap one wins" but the stronger claim: **which channel wins is not predictable from cost,
-or from the last round** — the whole argument for running all three.
+Four rounds, four different winners — `agy`, Codex, Spark, then qwen38max, which refuted a claim
+the two expensive channels accepted. **Which channel wins is not predictable from cost, or from
+the last round**: that is the whole argument for running all of them.
 
-Both rounds share one shape worth naming: the highest-value finding was **not an answer to a
-question that was asked**. It arrived under "what are we missing". Always include that question.
+One shape recurs: the highest-value finding was **not an answer to a question that was asked**. It
+arrived under "what are we missing". Always include that question.
 
 ---
 

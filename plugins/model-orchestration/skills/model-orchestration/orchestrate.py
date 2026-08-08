@@ -3470,6 +3470,37 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
 
 # =============================================================================================
 
+def _free_extras(primary):
+    """
+    Every ENABLED channel this registry prices at `free`, minus the one already chosen.
+
+    Igor, 2026-08-08: «--ask по умолчанию идёт на spark12cont - оставляем на нем. Но можно так же
+    и nemotron параллельно добавить, он же тоже free, и любую другую free если в будущем
+    появится.» The last clause is the design, not a nicety: the set is DERIVED from the registry,
+    so a free channel added in six months joins `--ask` by existing and nobody has to remember to
+    add it here. This repository has now measured four hand-maintained lists that silently stopped
+    matching the thing they described - COPY_FILES, the dispatch literals, the word->group map in
+    the tests, and the tier list. A fifth was not worth writing.
+
+    🔴 ONE CORRECTION TO THE PREMISE, since it changes what is safe to send: `spark12cont` is
+    priced `cheap`, not `free` - $0.10/M in, $0.002/M cached. What it shares with the Nemotron
+    channel is not the price but the REASON for the price: both are contributor/free tiers whose
+    terms allow training on the payload. So the two really do belong together on a lookup path,
+    and neither belongs on an unpublished document.
+
+    Never raises: a lookup must not fail because the registry could not be read. A missing
+    registry costs the extras, not the answer.
+    """
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import routing
+        reg = routing.load_registry()
+    except Exception:                                    # noqa: BLE001 - see the docstring
+        return []
+    return [c for c, ch in reg["channels"].items()
+            if c != primary and ch.get("enabled", True) and ch.get("cost") == "free"]
+
+
 def main():
     ap = argparse.ArgumentParser(description="Run one brief past several reviewer models at once.")
     ap.add_argument("--brief", help="path to the brief sent to every channel (or use --ask)")
@@ -3490,10 +3521,12 @@ def main():
                          "the question from a file. Everything else (--only, --tier, --system) "
                          "still applies")
     ap.add_argument("--ask-channel", default="spark12cont", metavar="CHANNEL",
-                    help="which channel --ask uses when --only is not given (default: "
-                         "spark12cont, the cheapest). 🔴 That default is the CONTRIBUTOR tier: "
-                         "Meta may train on what you send it. Pass --ask-channel spark11 for "
-                         "anything you would not publish")
+                    help="the FIRST channel --ask uses when --only is not given (default: "
+                         "spark12cont, the cheapest). Every channel the registry prices `free` "
+                         "runs alongside it - that set is read from channels.json, so a free "
+                         "channel added later joins on its own. 🔴 The default and the free tiers "
+                         "are contributor tiers: their vendors may train on what you send. Pass "
+                         "--only spark11 for anything you would not publish")
     ap.add_argument("--system", help="path to the system prompt for the HTTPS channel")
     # Choices come from the registry, so deleting a tier there really deletes it. Igor removed
     # `quick` and `standard` on 2026-08-08; with the old literal list this flag would have gone
@@ -3569,7 +3602,13 @@ def main():
         if a.marker == "REVIEW-COMPLETE":
             a.marker = "ASK-DONE"
         if not a.only:
-            a.only = [a.ask_channel]
+            a.only = [a.ask_channel] + _free_extras(a.ask_channel)
+            if len(a.only) > 1:
+                log("--ask goes to %d channels: %s. Everything after the first is priced `free` "
+                    "in channels.json, so a second opinion on a lookup costs nothing but the "
+                    "seconds. 🔴 Free and near-free tiers are usually paid for with your text - "
+                    "the plan below prints each channel's data policy. --only <channel> or "
+                    "--skip <channel> narrows it." % (len(a.only), ", ".join(a.only)))
         if a.out == "./reviews":
             a.out = os.path.join(tempfile.gettempdir(), "orchestrate-ask")
         a.no_citecheck = True        # a lookup is not a review; the audit is for cited briefs
@@ -4090,15 +4129,26 @@ def main():
     # and stopping there is what makes a cheap channel expensive to consult: the cost that decides
     # whether a lookup happens is the number of steps, not the number of cents.
     if ask_mode:
-        for name, r in results.items():
+        # The channel the user actually chose comes first, then the free extras in registry order.
+        # Dict order here follows the registry, which is an arbitrary fact about a config file -
+        # and the answer someone reads first should be the one they asked for.
+        order = sorted(results, key=lambda n: (n != a.ask_channel, n))
+        for name in order:
+            r = results[name]
             body = (r.get("text") or "").strip()
             if a.marker and body.endswith(a.marker):
                 body = body[:-len(a.marker)].rstrip()
+            extra = "" if name == a.ask_channel or len(order) == 1 else "   (free second voice)"
             print("\n" + "=" * 78)
-            print("ANSWER  [%s]%s" % (name, "" if r.get("ok") else "   ⚠ the channel reported a "
-                                                                  "problem - read the log above"))
+            print("ANSWER  [%s]%s%s" % (name, extra,
+                                        "" if r.get("ok") else "   ⚠ the channel reported a "
+                                                               "problem - read the log above"))
             print("=" * 78)
             print(body if body else "(empty answer - see the warnings above)")
+        if len(order) > 1:
+            print("\n" + "-" * 78)
+            print("%d channels answered. Where they DISAGREE is the signal - a lookup both of "
+                  "them get right needed neither of them." % len(order))
         return 0 if ok_count else 1
 
     log("Now report, per channel: accepted / rejected with proof / where they disagreed. "

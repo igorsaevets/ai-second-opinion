@@ -1,5 +1,73 @@
 # Changelog
 
+## 1.7.0 — 2026-08-08
+
+**Updating an install no longer destroys the settings the install guide told you to make.**
+
+- 🔴 **Every update path silently threw your configuration away, and this is the release that
+  admits it.** `INSTALL.md` said: open `channels.json`, set `"enabled": true` on the channel you
+  want. That file lives *inside* the folder an update replaces. So the installer (which moved the
+  old tree to `.bak.<timestamp>` and copied a fresh one), the "just copy the files" instructions,
+  and the plugin path — which the docs recommend, and which updates itself with nobody running
+  anything — all had the same outcome: the channel you turned on was off again, with no message.
+- 🟢 **Your settings now live outside the skill folder**, in
+  `~/.claude/model-orchestration.local.json` (`MODEL_ORCH_LOCAL` to move it). Nothing that updates
+  this tool can reach it, so **every update from 1.7.0 onward is correct on every method**,
+  including the naive ones — the fix is not a smarter merge, it is a file in a different place.
+- 🔴 **The one hop INTO 1.7.0 is the exception, and it is worth reading before you update.** A
+  reviewer of this release refused the sentence "this makes every update method correct", and was
+  right: nothing can rescue a 1.6.x edit on a path that never runs `upgrade.py` — which is the
+  *recommended* path, since a plugin updates itself with nobody running anything. There is a
+  documented rescue window: Claude Code keeps each installed version in a separate cache directory
+  and orphans the previous one for 14 days
+  ([plugins reference](https://code.claude.com/docs/en/plugins-reference), read 2026-08-08), so
+  `upgrade.py` now scans `~/.claude/plugins/cache` for an older copy of this plugin and offers to
+  carry its settings across. **If you are on 1.6.x: run `upgrade.py` once, or write the one line
+  of JSON yourself, before the fortnight is out.**
+- 🔴 **That file is default-deny on fields, because a reviewer of this very release pointed out
+  what the fix had created.** It may set `enabled`, `effort`, `reasoning`, `thinking_level`,
+  `max_tokens`, `fetch_tool`, `web`, `label`, `cost`, `notes`. Anything deciding *which vendor
+  receives your documents* or *what text is added to them* is refused by name: a file that
+  survives every update and can name a transport would hand anything able to write one file in
+  your home directory a persistent, update-proof redirection of where your documents go — and the
+  per-run disclosure only helps if a human reads it, which the auto-updating plugin path removes.
+  A renamed channel still resolves, through the alias table, so a rename upstream cannot stop the
+  tool starting for everyone who named the old one.
+- 🟢 **The resolved plan prints that file's path and every value it changed, on every run**, even
+  when it changed nothing. An invisible settings file would be a worse trap than the one it fixes:
+  the failure it prevents is "why is this channel not running", asked while looking in the wrong
+  file. A name that is not a real channel is **refused with the list of real ones**, because a
+  typo in a config file otherwise looks exactly like a channel that is off for another reason.
+- 🟢 **`upgrade.py`**: back up, copy, carry your settings across, and report the version you had,
+  the version you are getting, which channels are new, which are gone, and what it carried and did
+  not. `--dry-run` shows all of it and writes nothing; `--migrate` only moves in-place edits out
+  of the skill folder. `install.ps1` / `install.sh` now call it whenever an install already
+  exists, so "install" and "update" are one tested path instead of two that drift.
+- 🔴 **An installed copy now carries a version number. Until this release, none did.** The only
+  version string that shipped was in `plugin.json`, which sits *outside* the folder the installer
+  and the manual instructions copy — so on any non-plugin install "am I on the latest?" was
+  unanswerable, and an assistant asked to update one had nothing to read. There is a `VERSION`
+  file now, `doctor.py` prints it, and it is generated from the same constant as the manifest.
+- 🟢 **`doctor.py` warns if `channels.json` has been edited in place** — checked against a
+  fingerprint shipped beside it — and points at `upgrade.py --migrate`. That edit was previously
+  invisible right up until the update that erased it.
+- 🟢 **`--ask` now also runs every channel the registry prices `free`**, alongside the one you
+  chose, and prints both answers. The set is **read from `channels.json`**, so a free channel
+  added in a later release joins on its own rather than waiting for someone to remember a list.
+  `--only` or `--skip` narrows it. Both of today's cheapest channels are contributor tiers whose
+  vendors may train on what you send; the plan prints each channel's data policy before anything
+  is sent.
+- 🔴 **The direct Gemini channel now thinks at `high` on the default tier, and the number behind
+  that changed.** 1.6.0 recorded `high` producing *fewer* thought tokens than the vendor default —
+  one sample per arm, on a question too easy to think about. Re-measured on a question that
+  requires reasoning, 3 interleaved samples per arm: `minimal` 0, `low` 770, `medium` 1 635,
+  `high` 1 963, with medium's maximum below high's minimum. Thought tokens bill as output, so this
+  is a deliberate ~20% increase on that channel — and `deep` now says
+  `nothing this tier can raise on this channel` there rather than reprinting a value it did not
+  change. All 15 answers were correct, so this measures what depth **costs**, not what it buys.
+- Loading the registry from the command line reported failures as a Python traceback instead of
+  the sentence it had prepared. Reachable for the first time by a typo in the new settings file.
+
 ## 1.6.0 — 2026-08-08
 
 **Two tiers instead of four, one meaning per field, and a capability we had written off.**

@@ -36,10 +36,15 @@ channels.json             THE registry - every model name lives here and nowhere
 doctor.py                 "is this machine set up?"      - probes, never asserts
 selftest.py               "does the code still behave?"  - ~50 behavioural checks
 citecheck.py              citation grounding and existence checks
+upgrade.py                install/update in one path; migrates settings out of the tree
 patch_agy_permissions.py  mandatory post-install step for the agy channel
+VERSION                   the release this tree is; generated at build time
+channels.sha256           fingerprint of the shipped registry, so edits to it are detectable
 references/*.md           detail read on demand
 systems/*.md              system-prompt presets
 ```
+
+Everything above is REPLACED by an update. Your own configuration is therefore not in it — see §5b.
 
 ---
 
@@ -201,6 +206,73 @@ Verified by `selftest.py`, which covers: each CLI missing individually, both mis
 the API key absent from *both* the environment and the Windows registry fallback — the trap being
 that emptying the environment variable is not enough, because the code reads `HKCU\Environment`
 next and would find the real key.
+
+---
+
+## 5b. Configuration lives outside the tree, because updates replace the tree
+
+Until 1.7.0 the documented way to enable a channel was to edit `channels.json` — a file inside the
+folder that every update replaces. All four install methods destroyed that edit, and none of them
+mentioned it. The plugin path was the worst of them precisely because it is the one recommended:
+it updates itself, so the loss happened with nobody running a command.
+
+The fix is not a merge algorithm. It is a location — with one honest exception, below:
+
+```
+~/.claude/model-orchestration.local.json        # yours; nothing can reach it
+<skill>/channels.json                           # shipped; replaced wholesale
+```
+
+The overlay is merged over the registry **before** validation, so anything it changes faces exactly
+the same checks as anything shipped — a validated-then-mutated registry is how a config file
+becomes an unchecked code path.
+
+🔴 **It is default-deny on fields, and an external reviewer is the reason.** The first version
+accepted any field valid inside a channel block. One of the review channels named the consequence
+in a sentence: a file that survives every update, is merged before validation, and can name a
+transport hands anything able to write one file in a home directory a *persistent, update-proof
+redirection of where your documents are sent* — "and the per-run print of what the overlay changed
+only helps if a human reads it, which the plugin path specifically removes." That was a regression
+created by the fix itself: out of the update's reach is also out of the maintainer's reach.
+
+So it may set `enabled`, `effort`, `reasoning`, `thinking_level`, `max_tokens`, `fetch_tool`,
+`web`, `label`, `cost`, `notes`. Everything else is refused **by name**, with the reason. There is
+deliberately no environment variable to turn that off: an escape hatch that can be set once and
+forgotten is the same defect as a registry that documents the way around its own gate.
+
+Four properties make it safe to have a second source of truth at all, and each exists because the
+alternative was measured or reasoned to be worse:
+
+| property | why |
+|---|---|
+| The resolved plan prints the file's path and every field it changed, **every run**, even when it changed nothing | A settings file mentioned only when it acts is one people forget they wrote. The question it must answer is "why is this channel not running", asked by someone reading the wrong file |
+| An unknown channel name is **refused**, with the list of real ones | Ignoring it would look identical to a channel that is off for another reason. Silence is a config overlay's characteristic failure |
+| A renamed channel still **resolves**, through the same alias table `--only` uses | Strict rejection plus a rename upstream is a hard startup failure on upgrade day, for people who did nothing wrong. All four original channels here were renamed once already |
+| `doctor.py` fingerprints `channels.json` against a hash shipped beside it | An in-place edit is otherwise invisible right up to the update that erases it |
+
+`upgrade.py` performs the one-time migration and reports it. Three-way where a pristine baseline
+exists (written from 1.7.0 onward, **outside the tree** — a baseline stored inside it is destroyed
+by exactly the thing it exists to survive), two-way and **labelled INFERRED** where it does not:
+comparing an installed file against an incoming one cannot distinguish a user's edit from a default
+the release changed on purpose, so in that mode it restricts itself to the one field the docs ever
+told anyone to change, and says so rather than pretending to know.
+
+### 🔴 The exception: the hop INTO 1.7.0, on a path that never runs the script
+
+The guarantee above is about updates *from* 1.7.0. The one-time migration still needs something to
+run, and the recommended install path — the marketplace plugin — updates itself with nobody running
+anything. A reviewer of this release put it plainly: it "makes future updates correct only after
+the state has already been relocated", and `upgrade.py` "cannot rescue a path that never invoked
+it."
+
+There is a documented window. Claude Code copies marketplace plugins into `~/.claude/plugins/cache`,
+keeps **each installed version in its own directory**, and orphans the previous one for **14 days**
+before deleting it ([plugins reference](https://code.claude.com/docs/en/plugins-reference), read
+2026-08-08; the layout `<cache>/<marketplace>/<plugin>/<version>/` was also confirmed on a real
+machine). So `upgrade.py` scans that cache for an older copy of this plugin, compares its `enabled`
+flags with the incoming release, and offers to carry the difference into the overlay. It is
+best-effort by construction and silent when it finds nothing — a rescue that crashes is worse than
+one that misses.
 
 ---
 

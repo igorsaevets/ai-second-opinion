@@ -53,10 +53,143 @@ class RouteError(Exception):
     """Raised instead of guessing. An ambiguous route must stop the run, not pick a model."""
 
 
-def load_registry(path=DEFAULT_REGISTRY):
+# 🔴🔴 USER CONFIGURATION LIVES OUTSIDE THE SHIPPED TREE. THIS IS WHAT MAKES AN UPGRADE SAFE.
+#
+# INSTALL.md tells people, in so many words, to open `channels.json` and set `"enabled": true` on
+# a channel. Every upgrade path this kit ships then destroyed that edit, and none of them said so:
+# `install.ps1`/`install.sh` MOVE the old tree aside and copy a fresh one; "just copy the files"
+# overwrites it; and the PLUGIN path - the one the docs recommend, the one that updates itself
+# with nobody running anything - replaces the whole cached checkout. Verified on the 1.6.0 tree,
+# 2026-08-08: the shipped registry was the only home for a setting the user was instructed to make.
+#
+# The fix is not a smarter merge, it is a smaller shipped file's worth of responsibility. An
+# overlay outside the skill folder cannot be reached by ANY upgrade method, including the naive
+# ones, so correctness stops depending on which method someone used. `upgrade.py --migrate` moves
+# existing in-tree edits here; `doctor.py` reports the file, and `format_plan` prints every field
+# it changed on every run - an invisible config file would be a worse trap than the one it fixes.
+OVERLAY_ENV = "MODEL_ORCH_LOCAL"
+OVERLAY_NAME = "model-orchestration.local.json"
+
+# 🔴🔴 THE OVERLAY IS DEFAULT-DENY, AND A REVIEWER IS THE REASON. The first version accepted any
+# field valid inside a channel block, and kimik3 named the consequence in one sentence: a file that
+# survives every update, is merged BEFORE validation, and can name a transport, hands anything able
+# to write one file in a home directory a persistent, update-proof redirection of where documents
+# are sent - "and the per-run print of what the overlay changed only helps if a human reads it,
+# which the plugin path specifically removes." Correct, and it was a regression created by moving
+# the file OUT of the update's reach: out of its reach is also out of the maintainer's.
+#
+# So the fields a user is documented to change pass, and everything else is refused BY NAME. The
+# allowlist is what people actually set; `enabled` alone covers every instruction in INSTALL.md, so
+# false positives here are close to nil - which matters, because a gate that fires on correct usage
+# is one people learn to switch off.
+OVERLAY_SAFE_FIELDS = frozenset({
+    "enabled",          # the only field the docs ever told anyone to change
+    "effort", "reasoning", "thinking_level", "max_tokens",   # how hard it thinks
+    "fetch_tool", "web",                                     # how much it may read
+    "label", "cost", "notes",                                # cosmetic / bookkeeping
+})
+# Deliberately NOT an env var. An escape hatch that can be set once and forgotten is the same
+# defect as the registry that "documented" a way round its own tier gate - measured in round 28,
+# where a 161 KB case brief moved tier because the way round was written down. Changing a
+# transport means editing channels.json, in the folder an update replaces, where the change is
+# visible, fingerprinted by doctor.py, and does not silently outlive the person who made it.
+OVERLAY_UNSAFE_HINT = ("This field decides WHERE your documents go or WHAT is added to them, so it "
+                       "is not accepted from a file that survives every update. Set it in "
+                       "channels.json instead - doctor.py will show that you did.")
+
+
+def overlay_path():
+    """Where the user's own settings live. Never inside the skill directory - see above."""
+    return (os.environ.get(OVERLAY_ENV)
+            or os.path.join(os.path.expanduser("~"), ".claude", OVERLAY_NAME))
+
+
+def apply_overlay(reg, path=None):
+    """
+    Merge the user's local settings over the shipped registry, recording every change.
+
+    Deliberately strict. A typo'd channel name is REFUSED rather than ignored, because the failure
+    mode of a config overlay is silence: `"goog36flah": {"enabled": true}` looks exactly like a
+    channel that is off for some other reason, and the user would go looking in the wrong file.
+    """
+    path = path or overlay_path()
+    info = {"path": path, "present": False, "applied": [], "added": [], "renamed": []}
+    reg["_overlay"] = info
+    if not os.path.isfile(path):
+        return reg
+    info["present"] = True
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as exc:
+        raise RouteError(
+            "your local settings file could not be read: %s\n  %s\n"
+            "Fix it or rename it; it is not skipped silently, because a settings file that is "
+            "ignored when malformed is worse than one that is missing." % (path, exc))
+    if not isinstance(data, dict) or not isinstance(data.get("channels"), dict):
+        raise RouteError(
+            "%s must look like {\"channels\": {\"goog36flash\": {\"enabled\": true}}} - a top-level "
+            "\"channels\" object. Nothing else is read from it." % path)
+    known = reg["channels"]
+    for cname, over in data["channels"].items():
+        if not isinstance(over, dict):
+            raise RouteError("%s: channels.%s must be an object, not %s"
+                             % (path, cname, type(over).__name__))
+        # 🔴 RESOLVE THROUGH THE ALIAS TABLE BEFORE CALLING A NAME UNKNOWN. goog36flash raised
+        # this one: strict rejection plus a rename upstream means every overlay naming the old
+        # name STOPS THE TOOL STARTING, for everyone, on upgrade day - a hard failure produced by
+        # a safety check, on machines whose owners did nothing wrong. Channels already carry
+        # `aliases`, and this project has renamed all four of them once already (round 26).
+        target = cname
+        if target not in known:
+            hits = [h for h in canon_channel_safe(reg, cname) if h in known]
+            if len(hits) == 1:
+                target = hits[0]
+                info["renamed"].append((cname, target))
+        if target not in known:
+            raise RouteError(
+                "%s names a channel that does not exist: %r. Known channels: %s.\nIf that channel "
+                "was removed or renamed in this version, delete the line - your other settings "
+                "still apply. Nothing is ignored silently here, because an ignored typo looks "
+                "exactly like a channel that is off for some other reason."
+                % (path, cname, ", ".join(sorted(known))))
+        refused = sorted(f for f in over if not f.startswith("_")
+                         and f not in OVERLAY_SAFE_FIELDS)
+        if refused:
+            raise RouteError(
+                "%s sets %s on channel %r, which this file may not change.\n%s\nIt may change: %s."
+                % (path, ", ".join(repr(f) for f in refused), cname, OVERLAY_UNSAFE_HINT,
+                   ", ".join(sorted(OVERLAY_SAFE_FIELDS))))
+        for field, value in over.items():
+            if field.startswith("_"):
+                continue
+            before = known[target].get(field)
+            if before != value:
+                info["applied"].append((target, field, before, value))
+            known[target][field] = value
+    return reg
+
+
+def canon_channel_safe(reg, name):
+    """`canon_channel` without its raise, for callers that have their own error to give."""
+    try:
+        return canon_channel(reg, name)
+    except RouteError:
+        return []
+
+
+def load_registry(path=DEFAULT_REGISTRY, overlay=True):
     with open(path, encoding="utf-8") as f:
         reg = json.load(f)
     _strip_comment_keys(reg)
+    if overlay:
+        # BEFORE the validators, not after: an overlay can add a channel or repoint a model, and
+        # those must face exactly the same checks as anything shipped. A validated-then-mutated
+        # registry is how a config file becomes an unchecked code path.
+        apply_overlay(reg)
+    else:
+        reg["_overlay"] = {"path": overlay_path(), "present": False,
+                           "applied": [], "added": [], "renamed": []}
     _check_channel_names(reg)
     _check_alias_collisions(reg)
     _check_channel_models(reg)
@@ -529,10 +662,27 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None):
                 # Believed impossible until 2026-08-08: the 08-07 probe sent `thinking_level` at
                 # the top level, got "Unknown parameter", and concluded the knob did not exist.
                 # It lives in `generation_config`. See the goog36flash block in channels.json.
+                #
+                # 🔴 THE NOTE USED TO PRINT THE VALUE AND CALL THAT A DIFFERENCE. With Igor's
+                # 08-08 change both tiers sit at `high`, so "tier: thinking_level=high" would have
+                # appeared under `deep` looking exactly like a raise, on a channel where the tier
+                # now changes nothing. Same defect as the xai line the panel caught a day earlier:
+                # a note that reports what was SENT rather than what was CHANGED. The ceiling is
+                # read from the channel's own `thinking_levels`, so the sentence cannot go stale
+                # if the vendor adds a level.
+                before = p.get("thinking_level")
                 lvl = t.get("gemini_thinking_level")
                 if lvl:
                     p["thinking_level"] = lvl
-                    p["_tier_note"] = "thinking_level=%s" % lvl
+                    ladder = p.get("thinking_levels") or []
+                    if before and before != lvl:
+                        p["_tier_note"] = "thinking_level %s -> %s" % (before, lvl)
+                    elif ladder and lvl == ladder[-1]:
+                        p["_tier_note"] = ("nothing this tier can raise on this channel - "
+                                           "thinking_level is already %s, the top of %s"
+                                           % (lvl, "|".join(ladder)))
+                    else:
+                        p["_tier_note"] = "thinking_level=%s (unchanged by this tier)" % lvl
             elif p.get("kind") == "xai":
                 # 🔴 "no depth knob on this VENDOR" was the first wording and it was wrong in a
                 # way that mattered: xAI's own docs document `reasoning_effort` on grok-4.5 and
@@ -594,7 +744,8 @@ def _decorate(plan, reg):
         # time anyone edited the registry to drop url_context. Both homes still exist (the literal
         # is a deliberate fallback for a corrupt registry) but the registry now actually wins.
         for extra in ("reasoning", "max_tokens", "toolsets", "role", "fetch_tool", "tools",
-                      "provider", "prompt_suffix", "distribution", "thinking_level"):
+                      "provider", "prompt_suffix", "distribution", "thinking_level",
+                      "thinking_levels"):
             if ch.get(extra) is not None:
                 p[extra] = ch[extra]
         # Hints are stored ONCE at top level and referenced, because the same 1.5 KB paragraph
@@ -690,6 +841,22 @@ def _web_line(p):
 
 def format_plan(plan, reg):
     lines = ["RESOLVED PLAN", "-" * 78]
+    # Printed BEFORE the channels, every run, whether or not it changed anything. A settings file
+    # that is only mentioned when it acts is a file people forget they wrote; this project has
+    # measured the same shape twice already (a `--set` that moved a tier, a `data_policy` nobody
+    # re-read). The plan is the one screen a human is guaranteed to look at before spending.
+    ov = reg.get("_overlay") or {}
+    if ov.get("present"):
+        lines.append("  local settings: %s" % ov["path"])
+        for cname, field, before, after in ov.get("applied", []):
+            lines.append("           - %s.%s: %r -> %r (yours, not the shipped default)"
+                         % (cname, field, before, after))
+        for old, new in ov.get("renamed", []):
+            lines.append("           - %r in your file resolved to the channel now called %r"
+                         % (old, new))
+        if not ov.get("applied") and not ov.get("renamed"):
+            lines.append("           - present but changes nothing")
+        lines.append("-" * 78)
     for c, p in plan.items():
         mark = "RUN " if p["enabled"] else "skip"
         cost = reg["channels"][c].get("cost", "?")
@@ -743,8 +910,14 @@ def main():
     ap.add_argument("--tier", default="strategic")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
-    reg = load_registry(a.registry)
+    # 🔴 LOADING WAS OUTSIDE THE HANDLER, so every refusal the loader is designed to produce came
+    # out as a Python traceback. It never showed before because only a corrupt registry could
+    # trigger it and nobody ships one; the local overlay made it reachable by a typo in a config
+    # file - which is the case where a readable sentence matters most. Caught by running the
+    # negative controls, not by reading the code: the three refusals fired correctly and were
+    # unreadable, and "it refused" would have looked like a pass in a log.
     try:
+        reg = load_registry(a.registry)
         plan = resolve(reg, route=a.route, only=a.only, skip=a.skip, sets=a.sets, tier=a.tier)
     except RouteError as e:
         print("ROUTE ERROR: %s" % e)

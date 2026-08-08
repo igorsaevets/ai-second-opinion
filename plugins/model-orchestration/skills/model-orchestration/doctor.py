@@ -20,6 +20,7 @@ Standard library only. Never prints a secret: for the API key it reports presenc
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -138,6 +139,46 @@ def check_registry(r):
         return
     chans = ", ".join("%s=%s" % (c, v.get("model")) for c, v in reg["channels"].items())
     r.ok("registry", "%d channels: %s" % (len(reg["channels"]), chans))
+
+    # Your settings, and whether they are somewhere an update can destroy.
+    ov = reg.get("_overlay") or {}
+    if ov.get("present"):
+        n = len(ov.get("applied", [])) + len(ov.get("added", []))
+        detail = "; ".join("%s.%s=%r" % (c, f, v) for c, f, _b, v in ov.get("applied", [])) or \
+                 "present, changes nothing"
+        r.ok("your settings", "%s  (%d override(s): %s)" % (ov["path"], n, detail))
+    else:
+        r.ok("your settings", "none yet - %s does not exist. Put channel changes THERE, not in "
+                              "channels.json: nothing that updates this skill can reach it"
+                              % ov.get("path", "the local settings file"))
+
+
+def check_registry_pristine(r):
+    """
+    Has the shipped registry been edited in place? That edit dies at the next update.
+
+    The fingerprint ships with a built kit and is deliberately absent from the author's working
+    copy, which is edited every session - a check that always fails on the maintainer's machine is
+    one the maintainer teaches themselves to ignore, and then it is not a check.
+    """
+    stamp = os.path.join(HERE, "channels.sha256")
+    reg = os.path.join(HERE, "channels.json")
+    if not os.path.isfile(stamp) or not os.path.isfile(reg):
+        return
+    try:
+        want = open(stamp, encoding="utf-8").read().strip()
+        got = hashlib.sha256(open(reg, "rb").read().decode("utf-8").encode("utf-8")).hexdigest()
+    except OSError as exc:
+        r.warn("registry edits", "could not be checked (%s)" % exc, "harmless; skip it")
+        return
+    if got == want:
+        r.ok("registry edits", "channels.json is exactly what this version shipped")
+    else:
+        r.warn("registry edits",
+               "channels.json has been changed since it was installed",
+               "that change lives inside the skill folder, and the next update replaces the "
+               "whole folder - so it will be lost without a word. Move it out with:  python "
+               "%s --migrate" % os.path.join(HERE, "upgrade.py"))
 
 
 def check_key(r):
@@ -318,11 +359,19 @@ def check_skill_size(r):
     bits = ["~%d tokens (budget %d)" % (est, TOKEN_BUDGET), "%d lines" % lines,
             "description %d chars (cap %d)" % (len(desc), DESC_LIMIT)]
     if est > TOKEN_BUDGET or len(desc) > DESC_LIMIT:
-        r.fail("skill size", "; ".join(bits),
+        # 🔴 THIS WAS A `fail`, AND IT MADE A CORRECT FRESH INSTALL PRINT "NOT READY". Measured
+        # 2026-08-08 by installing the 1.7.0 build into an empty home: everything worked, every
+        # channel could run, and the last line told the user the tool was broken - over a
+        # maintainer's problem they cannot fix and that stops nothing from running. That is the
+        # same defect this file was written to catch elsewhere: a status line that contradicts
+        # the state it just measured. It stays loud, and it stays a MAINTAINER'S check - selftest
+        # fails on it, because selftest is the tool the maintainer and CI run.
+        r.warn("skill size", "; ".join(bits),
                "over budget: after an auto-compaction the re-attached copy is CLIPPED at the "
                "limit and the tail silently disappears while the file on disk still looks whole. "
-               "Move a section into references/ and leave a pointer - a pointer announces itself, "
-               "a clipped body does not.")
+               "Nothing here stops working - the assistant just sees less of the manual. Move a "
+               "section into references/ and leave a pointer; a pointer announces itself, a "
+               "clipped body does not.")
     elif est > TOKEN_BUDGET * 0.9 or lines > LINE_GUIDE:
         r.warn("skill size", "; ".join(bits),
                "close to the cliff. The next edit may cross it; move a section to references/.")
@@ -340,6 +389,7 @@ def main():
     have = check_files(r)
     check_compile(r)
     check_registry(r)
+    check_registry_pristine(r)
     check_skill_size(r)
     check_key(r)
 
@@ -365,6 +415,16 @@ def main():
     tag = {0: "[ ok ]", 1: "[warn]", 2: "[FAIL]"}
     print("model-orchestration doctor")
     print("  skill dir: %s" % HERE)
+    # 🔴 UNTIL 1.7.0 NOTHING HERE CARRIED A VERSION. The only version string that shipped was in
+    # plugin.json, which sits outside the folder the installer and the manual instructions copy -
+    # so "am I on the latest?" was unanswerable on any non-plugin install, and every upgrade began
+    # by guessing. Read from a file rather than a constant so a half-copied tree cannot claim to
+    # be a release it is not.
+    try:
+        with open(os.path.join(HERE, "VERSION"), encoding="utf-8") as vf:
+            print("  version  : %s" % (vf.read().strip() or "empty VERSION file"))
+    except OSError:
+        print("  version  : not stamped (a working copy, or an install older than 1.7.0)")
     print("-" * 78)
     for row in r.rows:
         print("%s %-16s %s" % (tag[row["level"]], row["check"], row["detail"]))
