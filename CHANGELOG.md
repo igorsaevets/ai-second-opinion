@@ -1,5 +1,63 @@
 # Changelog
 
+## 1.9.0 — 2026-08-08
+
+**The citations that were never in the prose — and a documentation example that was not a schema.**
+
+- 🔴🔴 **`goog36flash`'s sources were auditable all along, and the harness was discarding them.**
+  Its citations arrive as structured annotations pointing at opaque
+  `vertexaisearch.../grounding-api-redirect/` wrappers, so the citation audit — which reads URLs
+  out of the answer *text* — found none of them and printed "cited no URLs" for a channel that had
+  just cited six. Two things fix it, both free:
+  - Every annotation carries `title`, and **`title` is the publisher DOMAIN** (20 of 20
+    domain-shaped when probed). The parser now reports them, guarding on the shape rather than
+    trusting the field. "Cited uscis.gov" and "cited youtube.com" are different reviews.
+  - **The wrapper resolves.** `302 Location: https://en.wikipedia.org/wiki/UEFA_Euro_2024`. The
+    standing note said "resolving one proves Google's redirector is up and nothing else" — true of
+    an EXISTENCE check, false of URL RECOVERY. Two questions had shared one sentence, and while
+    they did, the best-grounded channel in the panel was filed as unauditable.
+- 🔴 **`n_cited` counted annotation SPANS on this channel and distinct URLs on every other.**
+  Measured in one call: 14 annotations, 5 distinct wrappers, 4 distinct publishers — a ~3.5x
+  overstatement that made one channel look better grounded than its neighbours through an artefact
+  of how Google slices citations. Both numbers are kept now, under names that say which is which.
+- 🔴🔴 **AND THEN THE TERMS WERE READ, SO FOLLOWING THOSE LINKS IS OFF BY DEFAULT.**
+  `ai.google.dev/gemini-api/terms`, under *Grounding with Google Search → Use Restrictions*, names
+  the capability by example: *"it is a violation of these terms to use Grounding with Google Search
+  to extract or collect one or more of these components for another purpose (for example, using
+  programmatic or automated means to collect Links, ... or using Links to identify destination
+  pages for crawling or scraping)"* — and defines Links to include *"titles or labels provided with
+  those means to fetch web pages"*. Whether a single-user citation audit is "another purpose" is
+  genuinely arguable, and this kit is public, so the default is what strangers run.
+  - **On by default:** the publisher **domains**, shown beside the answer to the person who asked
+    for it. No fetch, nothing followed, no request at all.
+  - **Off by default:** following the Links. `--resolve-grounding-links` turns it on for someone
+    who has read that paragraph and judged their own use.
+
+  The shape of how this was found is the point: the API's *documentation* was re-read this round
+  and its *terms* were not, and a reviewer citing the terms for an unrelated reason is what sent
+  anyone to look. **Re-reading the docs is not re-reading the contract.**
+- 🟢 **Resolution happens in its own hop.** The single-pass version was tried and lost data: the
+  existence prober follows the redirect and keeps going, so a slow publisher (a `uefa.com` wrapper,
+  TimeoutError) destroyed the identity of the source along with its existence. Two questions, two
+  requests, and the slow half now fails alone. Paced with a fresh random interval per request.
+- 🔴 **Two reporting lies, both caught by running the thing rather than reading it.** With the
+  Links unfollowed, the audit announced that *N wrappers "did not answer and were probed as-is"* —
+  nothing had been asked and nothing probed; it reported our own decision as the vendor failing.
+  And the guard that rejects a non-domain `title` discarded in silence, so a run showing two
+  wrappers and zero publishers could not be told from one where Google sent no titles at all. Both
+  are counted and named now, and **absent** is reported apart from **malformed**, because sending a
+  reader to inspect a value that does not exist wastes the report's only credibility.
+- 🟢 **The response parser is a pure function now** (`parse_gemini_steps`), so it can be tested
+  without spending an API call. It had two defects at once and no test could reach either. 15 new
+  checks including two negative controls — a headline in `title` must not be reported as a
+  publisher, an annotation with no `url` must not be counted. Suite: **229 checks**.
+- 🔴 **The rule worth more than the fix: a response example in vendor documentation is an
+  illustration, not a schema.** Google's page for this endpoint shows publisher URLs in the field
+  that live responses fill with wrappers. Getting a *request* parameter wrong returns HTTP 400,
+  loudly. Getting the *response shape* wrong is silent — your code finds nothing in the field, and
+  an always-empty column looks exactly like a model that cited nothing. Dump one real response
+  before writing the parser.
+
 ## 1.8.1 — 2026-08-08
 
 Two findings from the last reviewers of 1.8.0, which arrived after it was tagged.

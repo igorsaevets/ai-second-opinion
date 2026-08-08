@@ -636,6 +636,120 @@ def suite_citations():
             ok = False
         check(ok, f"the printer survives {payload!r}"[:70])
 
+    # --- round 32: the citations that were never in the prose -------------------------------
+    #
+    # goog36flash returns its sources as structured annotations pointing at opaque vertexaisearch
+    # wrappers. A regex over the answer text finds none of them, so for two rounds the audit
+    # printed "cited no URLs" for a channel that had just cited six, and the registry recorded
+    # the channel as unauditable. Every check below is against the shape MEASURED on the live
+    # endpoint 2026-08-08, not against a shape the docs promise - the docs' own example shows
+    # publisher URLs here and the endpoint returns wrappers.
+    W = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/%s"
+
+    def _ann(tok, title, s=0, e=1):
+        return {"type": "url_citation", "url": W % tok, "title": title,
+                "start_index": s, "end_index": e}
+
+    spans = ([_ann("A", "wikipedia.org")] * 4 + [_ann("B", "thedailystar.net")] * 3
+             + [_ann("C", "youtube.com")] * 3 + [_ann("D", "uefa.com")] * 2
+             + [_ann("E", "wikipedia.org")] * 2)
+    data = {"steps": [
+        {"type": "google_search_call", "arguments": {"queries": ["q1", "q2"]}},
+        {"type": "model_output", "content": [
+            {"type": "text", "text": "Spain won.", "annotations": spans}]}]}
+    p = o.parse_gemini_steps(data)
+    check(p["n_annotations"] == 14, "annotation spans are counted as spans", str(p["n_annotations"]))
+    check(len(p["redirect_urls"]) == 5, "and distinct SOURCES are counted separately - the two "
+          "were one number, and it overstated this channel 3.5x", str(len(p["redirect_urls"])))
+    check(p["redirect_domains"] == ["thedailystar.net", "uefa.com", "wikipedia.org",
+                                    "youtube.com"],
+          "the publisher domain is recovered from `title`, which used to be discarded",
+          str(p["redirect_domains"]))
+    check(p["queries"] == ["q1", "q2"] and p["text"] == "Spain won.",
+          "text and queries still parse")
+
+    # Negative controls. `title` is documented only as a display string, so the code must key on
+    # the SHAPE. Naming a publisher we cannot actually name would be the same failure as the one
+    # being fixed, pointing the other way.
+    odd = {"steps": [{"type": "model_output", "content": [{
+        "type": "text", "text": "x", "annotations": [
+            _ann("F", "Spain wins Euro 2024 in a dramatic final"),   # a headline, not a domain
+            _ann("G", ""),                                           # empty
+            {"type": "url_citation", "title": "example.com"},        # no url at all
+            _ann("H", "uefa.com")]}]}]}
+    q = o.parse_gemini_steps(odd)
+    check(q["redirect_domains"] == ["uefa.com"],
+          "a headline in `title` is NOT reported as a publisher", str(q["redirect_domains"]))
+    check(q["n_annotations"] == 3, "an annotation with no url is not counted at all",
+          str(q["n_annotations"]))
+    for shape in (None, {}, {"steps": None}, {"steps": [{"type": "model_output"}]},
+                  {"steps": [{"type": "url_context_result", "result": "not-a-list"}]}):
+        try:
+            o.parse_gemini_steps(shape)
+            ok = True
+        except Exception:                                # noqa: BLE001
+            ok = False
+        check(ok, f"parse_gemini_steps survives {shape!r}"[:70])
+
+    # The wrapper is resolved in its OWN hop, and only the publisher URL is probed. Doing both in
+    # one pass lost data: probe_url follows the redirect and keeps going, so a slow publisher
+    # (measured: uefa.com timed out) threw away the identity of the source with its existence.
+    real_wrap, real_res = citecheck.resolve_wrappers, citecheck.resolve_all
+    citecheck.resolve_wrappers = lambda urls, timeout=15: (
+        {W % "A": "https://en.wikipedia.org/wiki/UEFA_Euro_2024"})
+    citecheck.resolve_all = lambda urls, workers=10: [
+        ("LIVE", "") if "wikipedia" in u else ("UNKNOWN", "TimeoutError") for u in urls]
+    try:
+        # 🔴 DEFAULT OFF, and the reason is Google's Grounding terms, not a technical limit - they
+        # name "using Links to identify destination pages for crawling or scraping" as a violation
+        # by example, and define Links to include the titles served with them. The default is what
+        # strangers who install this kit run, so it must not be the named behaviour. The channel is
+        # NOT thereby unreported: its publisher domains come from the response and cost no request.
+        off = o.citation_audit({"g": {"text": "", "redirect_urls": [W % "A"],
+                                      "cited_domains": ["uefa.com"]}})["g"]
+        check(off["cited"] == 1 and off["probed"] == 0,
+              "by default a grounding Link is COUNTED but not followed", str(off))
+        check(off.get("domains") == ["uefa.com"],
+              "and the publisher is still named, from the response, with no request", str(off))
+        check("cited no URLs" not in str(off) and off["cited"] != 0,
+              "'cited 0' and 'cited 6, none followed' stay different facts")
+        check(off.get("links_followed") is False,
+              "the record says the Links were not followed, so the printer cannot report our "
+              "own decision as the vendor failing to answer")
+        # The guard that rejects a non-domain title must COUNT what it rejected. A run reported
+        # two wrappers and zero publishers with nothing saying which of the two causes it was.
+        p2 = o.parse_gemini_steps({"steps": [{"type": "model_output", "content": [{
+            "type": "text", "text": "x", "annotations": [
+                _ann("Q", "Spain wins the final"), _ann("R", "uefa.com")]}]}]})
+        check(p2["titles_unusable"] == 1 and p2["redirect_domains"] == ["uefa.com"],
+              "a discarded title is counted, not silently dropped", str(p2["titles_unusable"]))
+        # ABSENT and MALFORMED are different facts about the vendor, and the first version of this
+        # counter reported both as "not domain-shaped" - which sends a reader to inspect a value
+        # that does not exist.
+        p3 = o.parse_gemini_steps({"steps": [{"type": "model_output", "content": [{
+            "type": "text", "text": "x", "annotations": [
+                _ann("S", None), _ann("T", ""), _ann("U", "Spain wins the final")]}]}]})
+        check(p3["titles_missing"] == 2 and p3["titles_not_domain"] == 1,
+              "a missing title and a malformed one are counted apart", str(p3))
+
+        e = o.citation_audit({"g": {"text": "", "redirect_urls": [W % "A", W % "Z"]}},
+                             resolve_links=True)["g"]
+        probed = {d["url"] for d in e["flagged"]}
+        check("https://en.wikipedia.org/wiki/UEFA_Euro_2024" in
+              {d["url"] for d in e["flagged"]} or e["tally"].get("LIVE") == 1,
+              "a resolved wrapper is probed as the PUBLISHER url, not as the opaque token")
+        check(e["wrappers"] == 2 and e["wrappers_resolved"] == 1
+              and e["wrappers_unresolved"] == 1,
+              "resolved and unresolved wrappers are both counted, neither silently", str(e))
+        check(any(W % "Z" == u for u in probed),
+              "a wrapper Google would not resolve is still probed as-is rather than dropped",
+              str(sorted(probed)))
+        check(any("[recovered from a google_search wrapper]" in (d["note"] or "")
+                  for d in e["flagged"]),
+              "and a recovered URL says so, because its provenance is not the answer text")
+    finally:
+        citecheck.resolve_wrappers, citecheck.resolve_all = real_wrap, real_res
+
 
 def suite_tiers_and_grounding():
     """

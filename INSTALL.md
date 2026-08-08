@@ -424,6 +424,11 @@ is refused, and its citations carry `start_index`/`end_index` into the answer te
 sentence does this source support" is a lookup rather than a judgement. One caveat measured:
 citations produced by `google_search` come back as `vertexaisearch.../grounding-api-redirect/...`
 wrappers rather than the publisher's URL; only `url_context` citations are the real address.
+Each wrapper does carry the publisher **domain** in its `title`, and the citation audit follows
+the wrapper's redirect to recover the full URL — so these citations are checkable, which is not
+what this paragraph said before 2026-08-08. Note the documentation's own example shows publisher
+URLs in that field; the live endpoint does not. **A response example in vendor docs is an
+illustration, not a schema.**
 
 ### OpenRouter — `OPENROUTER_API_KEY`
 

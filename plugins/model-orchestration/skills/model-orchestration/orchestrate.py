@@ -907,7 +907,7 @@ CITECHECK_MAX_URLS = 60
 _citecheck_reason = None      # set by --ask; see citation_audit()
 
 
-def citation_audit(results, enabled=True):
+def citation_audit(results, enabled=True, resolve_links=False):
     """
     Fetch every URL each channel cited and report which ones do not exist.
 
@@ -936,6 +936,38 @@ def citation_audit(results, enabled=True):
     gets ignored protects nothing.
 
     Never raises. Costs nothing at either vendor - it is plain HTTP to the cited hosts.
+
+    🔴🔴 `resolve_links` DEFAULTS TO FALSE, AND THE REASON IS GOOGLE'S TERMS, NOT A TECHNICAL ONE.
+    This round taught the harness to turn `google_search`'s opaque wrappers into publisher URLs and
+    then fetch them. Reading `ai.google.dev/gemini-api/terms` afterwards - the primary source, the
+    thing this whole project exists to insist on - found that the capability is named, verbatim,
+    under "Grounding with Google Search / Use Restrictions":
+
+        "You will not ... cache, frame, syndicate, resell, analyze, train on, or otherwise learn
+         from Grounded Results or Search Suggestions. ... it is a violation of these terms to use
+         Grounding with Google Search to extract or collect one or more of these components for
+         another purpose (for example, using programmatic or automated means to collect Links,
+         using Links to build an index, or using Links to identify destination pages for crawling
+         or scraping)."
+
+    and the same page defines the term so that it reaches the `title` field too: "'Links' are any
+    other means to fetch web pages (including hyperlinks and URLs) ... Links also include titles or
+    labels provided with those means to fetch web pages."
+
+    Whether a single-user citation audit is "another purpose" is genuinely arguable - the tool
+    displays results only to the person who submitted the prompt, which is the use the terms
+    contemplate. But this kit is PUBLIC, so the default is what strangers run, and defaulting to
+    the behaviour a vendor's terms name by example is not a risk this project gets to take on
+    someone else's account. So:
+
+      * ON by default: the publisher DOMAINS, taken from `title` and shown beside the answer to
+        the person who asked for it. No fetch, no collection, nothing followed.
+      * OFF by default: following the Links to their destination pages. `--resolve-grounding-links`
+        turns it on for a user who has read the paragraph above and judged their own use.
+
+    Note the shape of how this was found, because it is the round's own rule catching the round's
+    own change: the API's *documentation* was re-read and the *terms* were not, and a reviewer
+    citing the terms for an unrelated point is what sent anyone to look.
     """
     out = {}
     if not enabled:
@@ -948,23 +980,60 @@ def citation_audit(results, enabled=True):
         return {"skipped": _citecheck_reason or "disabled with --no-citecheck"}
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from citecheck import URL_RE, probe_url, resolve_all
+        from citecheck import URL_RE, probe_url, resolve_all, resolve_wrappers
     except Exception as exc:
         # A partial install is a supported state, so this is a note, not a failure.
         return {"skipped": "citecheck.py unavailable (%s)" % type(exc).__name__}
 
     for name, r in results.items():
         text = r.get("text") or ""
-        if not text:
-            continue
         seen, urls = set(), []
         for u in URL_RE.findall(text):
             u = u.rstrip(".,;:")          # prose punctuation is not part of the URL
             if u not in seen:
                 seen.add(u)
                 urls.append(u)
+        # 🔴 A CHANNEL'S CITATIONS ARE NOT ALWAYS IN ITS PROSE, and this audit could only ever see
+        # the ones that were. goog36flash returns its sources as structured annotations pointing at
+        # vertexaisearch wrappers, so a regex over the answer text found nothing and the audit
+        # printed "cited no URLs" for a channel that had just cited six. Added 2026-08-08.
+        #
+        # When resolution IS enabled, the wrapper is resolved FIRST, in its own hop, and only the
+        # recovered publisher URL is probed. One pass looked simpler and lost data: `probe_url`
+        # follows the redirect and keeps going, so a slow publisher (measured: a uefa.com wrapper
+        # timed out) threw away the identity of the source along with its existence. Two questions,
+        # two requests, and the slow half fails alone. See the docstring for why it is off by
+        # default, which is a terms question rather than a technical one.
+        wrappers = list(r.get("redirect_urls") or [])
+        recovered = resolve_wrappers(wrappers) if (wrappers and resolve_links) else {}
+        from_wrapper, unresolved = set(), 0
+        for w in wrappers:
+            pub = recovered.get(w)
+            unresolved += not pub
+            # With resolution off, the wrapper itself is NOT probed either: following it is the
+            # same act the terms describe, just spelled with one request instead of two. The
+            # channel is not left unaudited by that - its publisher domains come from `title`
+            # and are reported without touching the network at all.
+            if not resolve_links:
+                continue
+            target = pub or w
+            if target not in seen:
+                seen.add(target)
+                urls.append(target)
+                if pub:
+                    from_wrapper.add(pub)
         if not urls:
-            out[name] = {"cited": 0}
+            # "cited 0" and "cited 6, none of them followable from here" are different facts, and
+            # collapsing them is the bug this whole block was written to fix. Say which it is.
+            out[name] = {"cited": 0} if not wrappers else {
+                "cited": len(wrappers), "probed": 0, "tally": {}, "dead": 0, "flagged": [],
+                "wrappers": len(wrappers), "wrappers_resolved": 0,
+                "wrappers_unresolved": len(wrappers), "links_followed": bool(resolve_links),
+                "domains": list(r.get("cited_domains") or []),
+                "not_probed_note": "google_search grounding Links were NOT followed - see "
+                                   "--resolve-grounding-links and Google's Grounding terms. The "
+                                   "publisher domains below come from the response itself and "
+                                   "cost no request."}
             continue
         probed, dropped = urls[:CITECHECK_MAX_URLS], max(0, len(urls) - CITECHECK_MAX_URLS)
         try:
@@ -974,11 +1043,27 @@ def citation_audit(results, enabled=True):
             continue
         tally, detail = {}, []
         for u, (v, why) in zip(probed, verdicts):
+            if u in from_wrapper:
+                why = ((why + " ") if why else "") + "[recovered from a google_search wrapper]"
             tally[v] = tally.get(v, 0) + 1
-            if v in ("DEAD", "MOVED", "UNKNOWN"):
+            if v in ("DEAD", "MOVED", "UNKNOWN") or u in from_wrapper:
                 detail.append({"verdict": v, "url": u, "note": why})
         entry = {"cited": len(urls), "probed": len(probed), "tally": tally,
                  "dead": tally.get("DEAD", 0), "flagged": detail}
+        if wrappers:
+            entry["wrappers"] = len(wrappers)
+            entry["wrappers_resolved"] = len(from_wrapper)
+            entry["wrappers_unresolved"] = unresolved
+            entry["links_followed"] = bool(resolve_links)
+            entry["domains"] = list(r.get("cited_domains") or [])
+            # 🔴 THE MAP IS STORED, NOT JUST USED. Raised by the kimik3 reviewer of this change:
+            # third-party reports describe these wrappers as TEMPORARY redirects that expire after
+            # a few days (Google's own grounding page states no lifetime either way, so this is
+            # not asserted as vendor doctrine - it is a reason not to bet on the opposite). If the
+            # run's durable record kept only the opaque tokens, re-resolving an old diagnostics
+            # file would silently return nothing, and the record would look like a channel that
+            # cited unreachable sources. Resolve once, at capture time, and keep the answer.
+            entry["resolved"] = dict(recovered)
         if dropped:
             entry["not_probed"] = dropped
             entry["not_probed_note"] = ("cap of %d per channel; these were NOT checked and are "
@@ -1002,14 +1087,34 @@ def log_citation_audit(audit):
         if not e.get("cited"):
             log("  [%s] cited no URLs" % name)
             continue
+        # `domains` is deliberately NOT printed here: the channel's own telemetry line already
+        # carries it, four lines up and with the span count beside it, and two identical lines in
+        # one screen of output train the reader to skim both. It stays in the DATA, because
+        # diagnostics.json is read on its own by someone who never saw the console.
         counts = "  ".join("%s=%d" % (k, v) for k, v in sorted(e.get("tally", {}).items()))
         log("  [%s] %d cited, %d probed  %s" % (name, e["cited"], e.get("probed", 0), counts))
         if e.get("not_probed"):
             log("      %d URL(s) beyond the per-channel cap were NOT checked" % e["not_probed"])
+        if e.get("wrappers"):
+            # 🔴 "did not answer" WAS A LIE WHEN THE LINKS WERE NEVER FOLLOWED. Caught in the same
+            # session that wrote it, by running it: with resolution off the line reported 2
+            # wrappers that "did not answer and were probed as-is", when nothing had been asked and
+            # nothing probed. Reporting a decision we made as a failure the vendor had is the same
+            # defect as blaming a flag the user never passed, ten lines up in this file.
+            if not e.get("links_followed"):
+                log("      %d google_search grounding Link(s) NOT followed - by default, on "
+                    "Google's terms. --resolve-grounding-links, after reading them."
+                    % e["wrappers"])
+            else:
+                log("      %d of %d google_search wrapper(s) resolved to a publisher URL%s"
+                    % (e["wrappers_resolved"], e["wrappers"],
+                       "" if not e.get("wrappers_unresolved")
+                       else "; %d did not resolve and were probed as-is"
+                            % e["wrappers_unresolved"]))
         for d in e.get("flagged", []):
             # The URL is not truncated. It is the one thing on this line the reader has to be able
             # to copy and open, and a shortened URL that looks whole is its own small lie.
-            log("      %-8s %s %s" % (d["verdict"], d["url"], (d["note"] or "")[:40]))
+            log("      %-8s %s %s" % (d["verdict"], d["url"], (d["note"] or "")[:60]))
         if e.get("dead"):
             log("      %d cited URL(s) return 404/410. A citation to a page that does not exist "
                 "was not read - it was constructed. Check what it was supporting." % e["dead"])
@@ -2044,6 +2149,89 @@ def _grounding(fetched=(), vendor_opened=()):
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
 
 
+def parse_gemini_steps(data):
+    """
+    Pull text, queries, retrieved pages and citations out of an /v1beta/interactions response.
+
+    A pure function on purpose: it used to be a loop inside the caller, which meant the only way
+    to exercise it was to spend a real API call. Round 32 found TWO defects in it at once, and
+    neither was reachable by any test that existed - which is the argument. A parser you cannot
+    run without a vendor is a parser you trust rather than check, and this project's whole thesis
+    is the difference between those two words.
+
+    (1) IT THREW AWAY THE ONE AUDITABLE FIELD GOOGLE SENDS. Each annotation carries `title`
+        beside the opaque wrapper, and `title` is the PUBLISHER DOMAIN - 20 of 20 domain-shaped
+        in the probe ('wikipedia.org', 'uefa.com', 'olympics.com', 'youtube.com',
+        'thedailystar.net'). The old code read `url`, counted a wrapper and dropped the title, so
+        a report said "6 opaque citations, they prove nothing" when it could have named the
+        publishers. A domain is not a URL, but the difference between "cited uscis.gov" and
+        "cited youtube.com" is most of what a reader needs, and it costs zero extra requests.
+    (2) `n_cited` COUNTED ANNOTATION SPANS, NOT SOURCES, while every other channel counted
+        distinct URLs. Measured in one call: 14 annotations, 5 distinct wrappers, 4 distinct
+        publishers - a 3.5x overstatement that made this channel look better grounded than its
+        neighbours through an artefact of how Google slices citations. One name, two meanings,
+        the weaker inheriting the stronger's credibility: D6 again, one floor up.
+
+    Returns a dict; both counts are kept, under names that say which is which.
+    """
+    parts, cites, queries, opened = [], [], [], []
+    redirect_urls, redirect_domains, n_annotations = [], [], 0
+    titles_missing = titles_not_domain = 0
+    for step in (data or {}).get("steps") or []:
+        st = step.get("type")
+        if st == "google_search_call":
+            queries += list((step.get("arguments") or {}).get("queries") or [])
+        elif st == "url_context_result":
+            # Google reports each retrieval attempt here; `status` is the honest signal.
+            res = step.get("result")
+            for r in res if isinstance(res, list) else []:
+                if isinstance(r, dict) and r.get("retrieved_url"):
+                    opened.append(r["retrieved_url"])
+        elif st == "model_output":
+            for cb in step.get("content") or []:
+                if cb.get("type") == "text":
+                    parts.append(cb.get("text") or "")
+                for a in cb.get("annotations") or []:
+                    u = (a or {}).get("url")
+                    if not u:
+                        continue
+                    n_annotations += 1
+                    if "grounding-api-redirect" in u:
+                        redirect_urls.append(u)
+                        t = (a.get("title") or "").strip().lower()
+                        # Guard the SHAPE rather than trusting the field. `title` is documented
+                        # only as a display string; if a future response puts a headline here
+                        # instead of a domain, it must not be reported as a publisher. Naming a
+                        # source we cannot name is the one failure this whole change exists to
+                        # avoid committing in the other direction.
+                        if t and " " not in t and "." in t:
+                            redirect_domains.append(t)
+                        elif not t:
+                            # 🔴 THE REJECTION IS COUNTED, AND BY CAUSE. A guard that discards in
+                            # silence is the same defect one level down: measured 2026-08-08, a run
+                            # reported 2 wrappers and zero publishers with nothing saying whether
+                            # Google had sent no titles or we had thrown them away. Then the first
+                            # version of the counter said "not domain-shaped" for BOTH causes,
+                            # which sends a reader to inspect a value that does not exist. Absent
+                            # and malformed are different facts about the vendor.
+                            titles_missing += 1
+                        else:
+                            titles_not_domain += 1
+                    else:
+                        cites.append(u)
+                        opened.append(u)        # url_context citations ARE the page it read
+    return {"text": "\n\n".join(p for p in parts if p).strip(),
+            "cites": sorted(set(cites)),
+            "queries": queries,
+            "opened": opened,
+            "redirect_urls": sorted(set(redirect_urls)),
+            "redirect_domains": sorted(set(redirect_domains)),
+            "titles_missing": titles_missing,
+            "titles_not_domain": titles_not_domain,
+            "titles_unusable": titles_missing + titles_not_domain,
+            "n_annotations": n_annotations}
+
+
 def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=2400,
                        name="gemini36flash", tools=None, max_tokens=None, thinking_level=None):
     """Gemini on Google's OWN Interactions API - the third way to reach this family.
@@ -2074,9 +2262,22 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
 
     🔴 THE TRAP, MEASURED: `google_search` citations come back as
     `vertexaisearch.cloud.google.com/grounding-api-redirect/...` - opaque redirect wrappers, NOT
-    the publisher's URL. `url_context` citations are the real URL. So a citation audit on this
-    channel must treat the two annotation sources differently, and a redirect URL that resolves
-    LIVE proves only that Google's redirector is up.
+    the publisher's URL, and this holds against the live endpoint even though the documentation's
+    own worked example shows publisher URLs in that field (re-checked 2026-08-08: 0 publisher, 6
+    wrappers). `url_context` citations are the real URL. So a citation audit must treat the two
+    annotation sources differently.
+
+    🔴 SUPERSEDED 2026-08-08 - this paragraph used to end "a redirect URL that resolves LIVE
+    proves only that Google's redirector is up", and that sentence answered a question nobody was
+    asking here. It is TRUE of an existence check: following a wrapper cannot tell you the article
+    is real. It is FALSE of URL recovery - the wrapper answers `302 Location:
+    https://en.wikipedia.org/wiki/UEFA_Euro_2024`, i.e. it hands over the publisher URL. Two
+    questions shared one sentence, and while they did, this channel was recorded as unauditable
+    while being one redirect away from auditable. `citecheck.resolve_wrappers` does that hop now.
+
+    🟢 AND `annotation.title` IS THE PUBLISHER DOMAIN - 20 of 20 domain-shaped in the probe. The
+    sources were nameable all along, for free; the old parser read `url`, counted an opaque token
+    and dropped the title.
 
     Wire shape, established by probing because the docs show only the happy path: the system
     prompt is `system_instruction` (`instructions`, `system` and `developer_instruction` are all
@@ -2139,30 +2340,11 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
                 "error": "transport: %r" % (e,)}
     secs = time.time() - t0
 
-    parts, cites, queries, opened, redirect_cites = [], [], [], [], 0
-    for step in data.get("steps") or []:
-        st = step.get("type")
-        if st == "google_search_call":
-            queries += list((step.get("arguments") or {}).get("queries") or [])
-        elif st == "url_context_result":
-            # Google reports each retrieval attempt here; `status` is the honest signal.
-            for r in (step.get("result") or []) if isinstance(step.get("result"), list) else []:
-                if isinstance(r, dict) and r.get("retrieved_url"):
-                    opened.append(r["retrieved_url"])
-        elif st == "model_output":
-            for cb in step.get("content") or []:
-                if cb.get("type") == "text":
-                    parts.append(cb.get("text") or "")
-                for a in cb.get("annotations") or []:
-                    u = a.get("url")
-                    if not u:
-                        continue
-                    if "grounding-api-redirect" in u:
-                        redirect_cites += 1     # opaque: proves nothing about the publisher
-                    else:
-                        cites.append(u)
-                        opened.append(u)        # url_context citations ARE the page it read
-    text = "\n\n".join(p for p in parts if p).strip()
+    parsed = parse_gemini_steps(data)
+    text = parsed["text"]
+    cites, queries, opened = parsed["cites"], parsed["queries"], parsed["opened"]
+    redirect_urls, redirect_domains = parsed["redirect_urls"], parsed["redirect_domains"]
+    redirect_cites, n_annotations = len(redirect_urls), parsed["n_annotations"]
     try:
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
@@ -2179,10 +2361,21 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
         warn.append("status=%s (not 'completed')" % data["status"])
     record_refusal(refusal_check(text, marker), warn, note)
     if redirect_cites and not cites:
-        note.append("All %d citations are vertexaisearch grounding-api-redirect wrappers, not "
-                    "publisher URLs. They came from google_search, not from a page this channel "
-                    "opened - resolving one proves Google's redirector is up and nothing else. "
-                    "Ask for url_context when you need an auditable source." % redirect_cites)
+        # 🔴 THE OLD WORDING HERE WAS RIGHT ABOUT ONE QUESTION AND WAS APPLIED TO ANOTHER. It said
+        # "resolving one proves Google's redirector is up and nothing else", and that is true of an
+        # EXISTENCE check - following a wrapper cannot tell you the article is real. It is false of
+        # URL RECOVERY: measured 2026-08-08, the wrapper answers `302 Location:
+        # https://en.wikipedia.org/wiki/UEFA_Euro_2024`, i.e. it hands over the publisher URL. Two
+        # different questions shared one sentence, and because they did, this channel was written
+        # off as unauditable while being one redirect away from auditable. The citation audit now
+        # probes these wrappers like any other URL and reports what they resolve to.
+        note.append("All %d distinct citations are vertexaisearch grounding-api-redirect wrappers "
+                    "rather than publisher URLs - they came from google_search, not from a page "
+                    "this channel opened. The publishers ARE named: %s. The wrappers do resolve to "
+                    "the real article URLs, but following them is off by default because Google's "
+                    "Grounding terms name that use; pass --resolve-grounding-links after reading "
+                    "them, or ask for url_context, which returns real URLs and no wrapper at all."
+                    % (redirect_cites, ", ".join(redirect_domains) or "not named by the API"))
     opened = sorted(set(_norm_url(u2) for u2 in opened))
     return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
             "bytes": len(text.encode("utf-8")), "model": data.get("model") or model,
@@ -2205,9 +2398,16 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
             # inherited the stronger one's credibility every time the two were compared.
             # See _grounding() for the vocabulary.
             **_grounding(fetched=[], vendor_opened=opened),
+            # DISTINCT SOURCES, not annotation spans - see the block comment in the parse loop.
             "n_cited": len(cites) + redirect_cites,
+            "n_annotations": n_annotations,
             "n_vendor_grounded": len(cites),
             "redirect_citations": redirect_cites,
+            "redirect_urls": redirect_urls,
+            "cited_domains": redirect_domains,
+            "titles_unusable": parsed["titles_unusable"],
+            "titles_missing": parsed["titles_missing"],
+            "titles_not_domain": parsed["titles_not_domain"],
             "warnings": warn, "notes": note}
 
 
@@ -3676,6 +3876,15 @@ def main():
                     help="skip fetching the cited URLs at the end of the run. The check costs "
                          "nothing at any vendor and never changes the exit code; it is on by "
                          "default because it is the only citation check that works on Codex")
+    ap.add_argument("--resolve-grounding-links", action="store_true",
+                    help="follow google_search grounding Links to their destination pages during "
+                         "the citation audit. OFF by default, and the reason is Google's terms, "
+                         "not a technical limit: ai.google.dev/gemini-api/terms forbids using "
+                         "Links 'to identify destination pages for crawling or scraping', and "
+                         "defines Links to include the titles served with them. A single-user "
+                         "citation audit is arguably not that, but this kit is public and the "
+                         "default is what strangers run. Without it the channel is still reported "
+                         "- its publisher DOMAINS come from the response and cost no request")
     a = ap.parse_args()
 
     # --- one-shot ask: assemble a real brief from a string, then fall through to the normal path.
@@ -4124,6 +4333,22 @@ def main():
                    r.get("vendor_opened"), r.get("grounding_basis")))
             log("    thinking_level is the tier's lever here (medium on strategic, high on deep) "
                 "- the claim that this API has no depth knob was wrong; see channels.json")
+            if r.get("cited_domains") or r.get("n_annotations"):
+                # `n_cited` is DISTINCT sources and `n_annotations` is spans; printing both is the
+                # only way a reader can tell that "14 citations" and "5 sources" describe one call.
+                # `titles_unusable` separates "Google named no publisher" from "we rejected the
+                # name it gave" - measured once as an empty list with no explanation, which is the
+                # shape of a quiet reporting failure.
+                log("    sources=%s (from %s annotation spans) | publishers: %s%s"
+                    % (r.get("n_cited"), r.get("n_annotations"),
+                       ", ".join(r.get("cited_domains") or []) or "none named by the API",
+                       "" if not r.get("titles_unusable")
+                       else "  [not reported as publishers: %s]"
+                            % ", ".join(filter(None, [
+                                "%d annotation(s) carried NO title" % r["titles_missing"]
+                                if r.get("titles_missing") else "",
+                                "%d title(s) were not domain-shaped" % r["titles_not_domain"]
+                                if r.get("titles_not_domain") else ""]))))
         if r.get("bytes"):
             log("    bytes=%s exit=%s" % (r["bytes"], r.get("exit")))
         for w in r.get("warnings", []):
@@ -4161,7 +4386,8 @@ def main():
     # Runs on every review, because the alternative - a separate command afterwards - is a check
     # that gets skipped exactly when the run was rushed. See citation_audit() for why existence
     # rather than grounding, and why it never touches the exit code.
-    audit = citation_audit(results, enabled=not a.no_citecheck)
+    audit = citation_audit(results, enabled=not a.no_citecheck,
+                           resolve_links=a.resolve_grounding_links)
     log_citation_audit(audit)
 
     # ---- diagnostics ------------------------------------------------------------------------

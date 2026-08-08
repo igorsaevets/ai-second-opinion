@@ -24,8 +24,10 @@ correct - as here - but it was not verified, and it must not be reported as if i
 import argparse
 import json
 import os
+import random
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
@@ -185,6 +187,72 @@ def probe_url(u, timeout=20):
         return "UNKNOWN", "HTTP %d" % e.code
     except Exception as e:
         return "UNKNOWN", type(e).__name__
+
+
+WRAPPER_MARK = "grounding-api-redirect"
+
+
+class _StopAtRedirect(urllib.request.HTTPRedirectHandler):
+    """Capture the first Location instead of following it."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise _Redirected(newurl)
+
+
+class _Redirected(Exception):
+    def __init__(self, url):
+        Exception.__init__(self, url)
+        self.url = url
+
+
+def resolve_wrapper(u, timeout=15):
+    """
+    Turn one vertexaisearch grounding-api-redirect wrapper into the publisher URL it points at.
+
+    Returns the URL, or None if this is not a wrapper or Google did not answer.
+
+    WHY THIS IS SEPARATE FROM probe_url, AND WHY IT STOPS AT THE FIRST HOP. Two different
+    questions ride on one wrapper - "which page is this?" and "does that page exist?" - and they
+    have different failure modes. Measured 2026-08-08: probing a wrapper end to end recovered
+    en.wikipedia.org fine and TIMED OUT on a uefa.com wrapper, losing BOTH answers, when the
+    first hop had already carried the URL. Google's redirector answers a 302 in milliseconds; the
+    publisher behind it may be slow, walled, or down, and none of that should cost us the
+    identity of the source. So: resolve here, probe separately, and let the slow half fail alone.
+
+    A wrapper is otherwise unreadable - an opaque token - so this is the difference between a
+    citation a human can check and a citation they cannot. The channel that emits them was
+    written off as unauditable for two rounds on the strength of a sentence that was true about
+    the OTHER question.
+    """
+    if not u or WRAPPER_MARK not in u:
+        return None
+    op = urllib.request.build_opener(_StopAtRedirect)
+    try:
+        op.open(urllib.request.Request(u, headers={"User-Agent": UA}), timeout=timeout)
+    except _Redirected as r:
+        return r.url
+    except Exception:
+        return None
+    return None
+
+
+def resolve_wrappers(urls, timeout=15):
+    """
+    resolve_wrapper over a list, returning {wrapper: publisher}. Only successes are keyed.
+
+    Paced with a FRESH random interval per request, never a fixed one: this is a loop against a
+    single Google host, and a metronome is a fingerprint where human traffic has variance. The
+    range is small because this host just handed us these URLs and the whole point is a cheap
+    first hop - the machine-wide ceiling is 11 s and nothing here needs to approach it.
+    """
+    out = {}
+    for i, u in enumerate(urls):
+        if i:
+            time.sleep(random.uniform(0.3, 1.2))
+        pub = resolve_wrapper(u, timeout=timeout)
+        if pub:
+            out[u] = pub
+    return out
 
 
 def resolve_all(urls, workers=10):

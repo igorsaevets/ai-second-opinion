@@ -1188,7 +1188,8 @@ def _web_line(p):
         return base
     if kind == "gemini":
         return ("web: Google's own retrieval - %s. url_context reaches pages a plain fetch is "
-                "refused; google_search citations are redirect wrappers, not publisher URLs"
+                "refused; google_search citations are redirect wrappers naming the publisher "
+                "domain, resolved to real URLs by the citation audit"
                 % ", ".join(p.get("tools") or ["google_search", "url_context"]))
     if kind == "xai":
         return ("web: xAI Agent Tools (%s) on /v1/responses - the vendor runs the loop and OPENS "
