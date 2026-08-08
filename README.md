@@ -45,8 +45,10 @@ That answer is nearly worthless, for three reasons most people never check:
 - **It catches a model that quietly refused.** A model that declines a task still formats its
   reply correctly, so it passes every naive "did it finish?" check. This catches that.
 - **Nothing with a password or key ever leaves your machine.** Blocked outright, no override.
-  Personal data — ID numbers, SSNs, emails, phone numbers, dates of birth — is blocked by default
-  and requires a deliberate flag.
+  Personal data — ID numbers, SSNs, emails, phone numbers, dates of birth — is **found, itemised
+  and reported, and then SENT**; `--strict-pii` turns that into a hard stop. **Names and street
+  addresses are not detected at all**, at any setting. `PRIVACY.md` has the reasoning and the
+  measurement behind both.
 
 ## Who this is for
 

@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.9.1 — 2026-08-08
+
+**The README promised a block the code does not perform.** Found by a reviewer of 1.9.0, verified
+against the published file, fixed, and now guarded mechanically.
+
+- 🔴🔴 **`README.md` described the personal-data gate as refusing by default and needing a flag to
+  override. `PRIVACY.md` and the code say the opposite: found, itemised, reported — and SENT.** The
+  policy was inverted on 2026-08-07; `PRIVACY.md` was rewritten and the front page was not, so the
+  published README overstated what the tool protects. Corrected, and it now also states the thing
+  that had never been written down anywhere: **names and street addresses are not detected at
+  all**, at any setting. There are seven personal-data detectors and none of them is a name.
+  *(The offending sentence is deliberately not reproduced here. This project has now been bitten
+  three times by writing a matchable string into prose — a credential-shaped example in a comment
+  once got the whole repository refused by three scanners — and the new check below fired on this
+  very changelog when the first draft quoted it. Name the shape, never spell it.)*
+- 🟢 **A new check compares the prose to the behaviour** (`selftest`, section 3b). Every other
+  check in the suite asks whether the code is right; this one asks whether the sentence is, because
+  a reader's belief about what leaves their machine is set by the prose and by nothing else. It
+  asks `pii_gate` what the default actually is rather than trusting a constant, scans the shipped
+  documents for a claim that contradicts it, and carries a positive control plus three negative
+  ones — a check that cannot fail is decoration, and a check that fires on correct text teaches
+  people to delete it. Calibrated against the real published README, where it fires exactly once.
+
+The reviewer's framing is worth keeping: *"the harness audits model citations mechanically, but it
+has no equivalent audit for the human-facing safety story that determines what the operator
+believes will be sent."* That gap is what this release closes.
+
 ## 1.9.0 — 2026-08-08
 
 **The citations that were never in the prose — and a documentation example that was not a schema.**

@@ -27,6 +27,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -324,6 +325,80 @@ def suite_redaction():
     finally:
         sys.argv = argv
         o.main = main
+
+
+def suite_prose_matches_behaviour():
+    section("3b. The human-facing safety story is checked against the code, not against itself")
+    # 🔴🔴 FOUND BY A REVIEWER, LIVE IN THE PUBLIC REPO, AND EXACTLY THE CLASS THIS PROJECT KEEPS
+    # MEASURING. codex, round 32: "the public README says personal data is blocked by default,
+    # while PRIVACY.md and orchestrate.py implement warn-and-send. The harness audits model
+    # citations mechanically, but it has no equivalent audit for the human-facing safety story
+    # that determines what the operator believes will be sent."
+    #
+    # It was true. The policy was inverted on 2026-08-07; PRIVACY.md was rewritten and README.md
+    # was not, so for a day the published front page promised a block that the code does not
+    # perform. PRIVACY.md even carries a warning about a document that "described [a gate] as
+    # blocking by default months after that was inverted" - the file holding the lesson was the
+    # one that got fixed, and its neighbour repeated the error verbatim.
+    #
+    # Every other check in this suite asks whether the CODE is right. This one asks whether the
+    # SENTENCE is, because a reader's belief about what leaves their machine is set by the prose
+    # and by nothing else.
+    import orchestrate as o
+
+    here = Path(__file__).resolve().parent
+    # State the world rather than inheriting one tree: the documents live in `kit/` beside the
+    # source and at the repository root once built, and the built layout nests the skill four
+    # levels down. SEARCH for them rather than counting `.parents[n]` - the first version of this
+    # counted, got the depth wrong, and the built kit failed. Which is the check doing its job:
+    # "not vacuously green" is asserted precisely so a wrong path cannot read as a clean pass.
+    roots = [here / "kit"] + list(here.parents)
+    docs, used = [], None
+    for root in roots:
+        found = sorted(root.glob("*.md")) if root.is_dir() else []
+        names = {p.name for p in found}
+        if {"README.md", "PRIVACY.md"} <= names:
+            docs, used = found, root
+            break
+    check(bool(docs), "the shipped documents were located, so this check is not vacuously green",
+          str(used or [str(r) for r in roots[:5]]))
+
+    # Ask the CODE what the default is. Never a constant, never a doc.
+    with contextlib.redirect_stdout(io.StringIO()):
+        default_blocks = o.pii_gate([("brief", "reach me at probe@example.com")],
+                                    strict_pii=False) != 0
+        strict_blocks = o.pii_gate([("brief", "reach me at probe@example.com")],
+                                   strict_pii=True) != 0
+    check(not default_blocks and strict_blocks,
+          "measured: personal identifiers are SENT by default and blocked only under --strict-pii",
+          "default_blocks=%s strict_blocks=%s" % (default_blocks, strict_blocks))
+
+    # Narrow on purpose. A false positive here trains someone to delete the check, which is the
+    # disease this project already named: it must fire on a real contradiction and nothing else.
+    claims_block = re.compile(
+        r"(?is)(?:personal (?:data|identifier)|\bPII\b)[^.]{0,160}?"
+        r"(?:is|are) blocked by default|"
+        r"blocked by default[^.]{0,80}?(?:personal (?:data|identifier)|\bPII\b)")
+    offenders = []
+    for p in docs:
+        body = p.read_text(encoding="utf-8", errors="replace")
+        for m in claims_block.finditer(body):
+            line = body[:m.start()].count("\n") + 1
+            offenders.append("%s:%d" % (p.name, line))
+    check(not (offenders and not default_blocks),
+          "no shipped document promises a PII block the code does not perform",
+          ", ".join(offenders) or "none")
+
+    # The check must be able to FAIL, or it is decoration. Same reasoning as echocheck's
+    # deliberately-inert calibration knob: a test that can only pass has not been calibrated.
+    planted = "Personal data is blocked by default and requires a deliberate flag."
+    check(bool(claims_block.search(planted)),
+          "positive control: the detector fires on the exact sentence that was published")
+    for benign in ("Secrets are blocked by default, with no override.",
+                   "Personal data warns loudly and is SENT; --strict-pii makes it a hard stop.",
+                   "Personal data - ID numbers, SSNs - is found, itemised and reported, then SENT."):
+        check(not claims_block.search(benign),
+              "negative control: no false positive on %r" % benign[:46])
 
 
 def suite_contract():
@@ -1441,7 +1516,8 @@ def main():
     os.environ[_r.OVERLAY_ENV] = os.path.join(
         tempfile.gettempdir(), "orch_selftest_no_overlay_on_purpose.json")
 
-    for suite in (suite_degradation, suite_routing, suite_redaction, suite_contract,
+    for suite in (suite_degradation, suite_routing, suite_redaction,
+                  suite_prose_matches_behaviour, suite_contract,
                   suite_citations, suite_dispatch, suite_tiers_and_grounding,
                   suite_settings_and_upgrade, suite_echocheck):
         try:
