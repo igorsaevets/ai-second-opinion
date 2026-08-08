@@ -297,32 +297,33 @@ thinking 5 434 → 5 891 while making *fewer* search calls. The permission fix i
 
 ---
 
-### 2026-08-08 (round 28): the T54 verdict on `agy` is falsified — it is the PROFILE, not the model
+## agy31pro cannot finish a headless review under a curated allow-list (measured 2026-08-07, round 27)
 
-T54 concluded *"agy31pro is structurally unusable headless, use agy36flash instead."* Round 28
-killed that: **agy36flash died the same way**, and the event log names the exact step.
+Three runs of `agy31pro` (Gemini 3.1 Pro, agent profile `deep-researcher`) on one 13.7 KB brief,
+three different denied tools, three dead runs:
 
-```
-step_index 10, state ERROR, tool run_command
-  CommandLine: python -c "import urllib.request, json;
-               res=urllib.request.urlopen('https://pypi.org/pypi/scanquorum/json'); print(..."
-```
+| run | denied | what it was doing |
+|---|---|---|
+| 1 | `command(python -c "import re; f=open(...brain/<uuid>...)")` | reading its own brain file |
+| 2 | `mcp(cloakbrowser/cloak_launch)` | fetching a bot-protected page |
+| 3 | `command(python -c "from bs4 import BeautifulSoup; ...")` | stripping HTML from its own step file |
 
-17 events, 15 steps, dead at 10. So the failure does not track the model at all. The
-`deep-researcher` profile **shells out a fresh one-off `python -c` whenever it wants structured
-JSON**, and the script text differs every time - which is why three agy31pro runs in T54 each hit a
-different denied command. An exact-command allow-list cannot cover a generator.
+Run 2 was fixed by adding the cloakbrowser **read path** to `permissions.allow`
+(`cloak_launch`/`navigate`/`read_page`/`snapshot`/`close`, deliberately NOT click/type/evaluate/
+set_cookies) - consistent with `scrapling/stealthy_fetch` and `firecrawl_scrape` already being
+allowed. It got further: **29 tool calls, 24 of them search/fetch**, then died on run 3's command.
 
-**Why T54 got it wrong:** agy36flash survived that round because that brief never pushed it toward
-a JSON API. This brief embedded PyPI JSON URLs, it reached for `python -c`, and it died. The earlier
-"fix" was luck misread as a fix - the failure is conditional on brief content, not on the channel.
+🔴 **This is structural, not a missing rule.** The profile shells out to `python -c` with a
+different one-off script each time, so an allow-list of exact command strings can never cover it.
+The only rules that would are `command(python *)` or `--dangerously-skip-permissions`, and both
+grant arbitrary code execution to an unattended agent. Neither is worth one reviewer voice.
 
-**The only allow-rules that would cover it are `command(python *)` or
-`--dangerously-skip-permissions`**, i.e. arbitrary execution by an unattended agent. Neither is
-authorised, and one vote is not worth it. **Treat `agy` as unavailable in headless runs until the
-profile stops generating commands.** The Gemini perspective is still in the panel through
-`orgemini36flash` and `goog36flash`, which are transport-different and both delivered.
+🔴 **The harness's own failure message is misleading here and should not be followed.** It says
+"Fix it once by running `patch_agy_permissions.py`". That script was already applied and reports
+`nothing to do - already patched`; it addresses a *different* failure (the free read-only web
+tools), not this one. Do not spend a round re-running it.
 
-⚠️ Unchanged from T54 and worth restating: the harness's own failure text advises running
-`patch_agy_permissions.py`. That script reports `nothing to do - already patched` and fixes a
-different thing. The advice is wrong for this failure.
+**Practical rule: use `agy36flash` for the Gemini-via-subscription voice.** It completed the same
+brief normally (23 KB, 10 citations, 9 live). `agy31pro` is the stronger model and is currently
+unusable headless. Before writing it off permanently, the thing worth probing is whether `agy`
+exposes an agent profile other than `deep-researcher` that does not post-process via the shell.

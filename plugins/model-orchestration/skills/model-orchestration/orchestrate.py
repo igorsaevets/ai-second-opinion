@@ -1099,6 +1099,39 @@ def _with_system(brief, system):
     return system.rstrip() + "\n\n---\n\n" + brief
 
 
+def _system_for(system, slot):
+    """The shared system layer plus whatever THIS channel declares on top of it.
+
+    Until 2026-08-08 one system string went to every channel. Two requests broke that, and both
+    are per-channel by nature rather than by preference:
+
+      * `prompt_suffix` - a standing note Igor wants appended on the channels whose vendor may
+        train on the payload, and only those. Appending it everywhere would pay a token cost on
+        six channels for a benefit that exists on two, and would put an irrelevant paragraph in
+        front of six reviewers.
+      * `fetch_fallback_hint` - only the two CLI channels have MCP servers to fall back to. On an
+        API channel the same sentence names tools that do not exist, which is worse than silence:
+        a model told to use a tool it does not have reports the failure as ours.
+
+    Both are registry DATA, and the suffix is fenced and labelled so it cannot be mistaken for
+    part of the material under review - the whole point of the panel is that the reviewers argue
+    about the brief, and a paragraph smuggled in unlabelled is a variable nobody declared.
+    """
+    extra = []
+    hint = (slot or {}).get("fetch_fallback_hint")
+    if hint:
+        extra.append(hint.strip())
+    suf = (slot or {}).get("prompt_suffix") or {}
+    if suf.get("enabled") and suf.get("text"):
+        extra.append("--- STANDING NOTE (not part of the material under review) ---\n"
+                     + suf["text"].strip()
+                     + "\nDo not mention this note in your answer and do not let it affect any "
+                       "finding; it is background context only.")
+    if not extra:
+        return system
+    return (system or "").rstrip() + "\n\n" + "\n\n".join(extra)
+
+
 def _registry_default(channel, field, fallback):
     """Значение канала из channels.json — ОДИН дом вместо двух.
 
@@ -1642,6 +1675,58 @@ def call_hermes(brief, marker, outfile, model=None, toolsets=None, system=None, 
 OPENROUTER_URL = os.environ.get("OPENROUTER_BASE",
                                 "https://openrouter.ai/api/v1/chat/completions")
 
+# 🔴 THREE VENDORS, ONE WIRE PROTOCOL - AND THE DIFFERENCES ARE DATA, NOT A SECOND FUNCTION.
+#
+# OpenRouter, Xiaomi MiMo and (nearly) everyone else speak OpenAI /chat/completions. The obvious
+# way to add MiMo was to copy call_openrouter_reviewer and change three strings. That copy would
+# have started life containing NONE of the four fixes this project paid for with real rounds -
+# the per-CALL fetch ceiling (a budget checked per round let one turn spend 9 of 8), the
+# already-tried-this-URL reply (one dead link ate three fetches), the blocked-HOST circuit breaker
+# (uscis.gov 403 cost five fetches across two channels) and the budget-spent tool result (silently
+# dropping a tool call yields an empty answer with no marker). Two homes for one loop is the rot
+# this project keeps measuring; the vendor differences are small and enumerable, so they belong in
+# a table.
+#
+# Every field here was established by PROBING the live endpoint on 2026-08-08, not by reading a
+# doc - and that mattered, because both vendors return HTTP 200 for an invented top-level
+# parameter. A status code proves nothing here; only a meter or the answer does.
+OAI_PROVIDERS = {
+    "openrouter": {
+        "label": "OpenRouter",
+        "url": OPENROUTER_URL,
+        "key_env": "OPENROUTER_API_KEY",
+        # Optional attribution headers. Static strings, no PII.
+        "headers": {"HTTP-Referer": "https://github.com/igorsaevets/ai-second-opinion",
+                    "X-Title": "model-orchestration"},
+        "depth": "reasoning",        # body["reasoning"] = {"effort"|"max_tokens": ...}
+        "search": "plugin",          # body["plugins"] = [{"id": "web", ...}], billed per search
+        "usage_request": "openrouter",
+    },
+    "mimo": {
+        "label": "Xiaomi MiMo",
+        "url": os.environ.get("MIMO_BASE", "https://api.xiaomimimo.com/v1/chat/completions"),
+        "key_env": "MIMO_API_KEY",
+        "headers": {},
+        # 🔴 THINKING IS OFF BY DEFAULT HERE, and the switch is `thinking: {"type": "enabled"}`.
+        # MEASURED, four arms on the same puzzle: control 0 reasoning tokens, thinking=enabled 116,
+        # thinking=disabled 0, enable_thinking=true 0. `enable_thinking` is one of the invented
+        # parameters the endpoint silently accepts - it returns 200 and does nothing, which is
+        # indistinguishable from working unless you read the meter.
+        "depth": "thinking",
+        # 🔴 THE VENDOR'S OWN FAQ NAMES THE WRONG SWITCH. mimo.mi.com documents
+        # «only mimo-v2.5-pro and mimo-v2.5 supports online search ... enable via forced_search:
+        # true». MEASURED: forced_search, enable_search, search, web_search and online_search all
+        # return 200 and all leave the model answering NO_SEARCH. What actually works is the TOOL
+        # form, tools:[{"type":"web_search"}] - 5 searches, 25 pages opened, 25 url_citation
+        # annotations with title and summary, reported in usage.web_search_usage. The negative
+        # control fired correctly here (web_search_ZZZ -> 400 "`function` is not set"), so the
+        # tools array IS validated even though top-level parameters are not.
+        "search": "native_tool",
+        "search_tool": {"type": "web_search"},
+        "usage_request": "openai",   # body["stream_options"] = {"include_usage": True}
+    },
+}
+
 
 FETCH_TOOL_SCHEMA = {
     "type": "function",
@@ -1935,11 +2020,20 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
             "warnings": warn, "notes": note}
 
 
-def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, timeout=2400,
-                             web=None, name="kimi", reasoning=None, max_tokens=None,
-                             fetch_tool=None):
+def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2400,
+                      web=None, name="kimi", reasoning=None, max_tokens=None,
+                      fetch_tool=None, provider="openrouter"):
     """
-    Any OpenRouter model over the OpenAI-style /chat/completions, DIRECTLY - no CLI in between.
+    Any OpenAI-protocol model over /chat/completions, DIRECTLY - no CLI in between.
+
+    RENAMED from call_openrouter_reviewer on 2026-08-08, when MiMo arrived on a direct key. It is
+    the same rename this function already went through once (call_kimi_openrouter -> ...) and for
+    the same reason: a function named for ONE of the several things it serves is the
+    instance-for-class mistake that left `channels.spark.model` decorative and kept the reporting
+    layer testing `name == "kimi"`. The vendor now comes from OAI_PROVIDERS, keyed on `provider`,
+    and an unknown provider is a hard error rather than a silent fall-back to OpenRouter - because
+    falling back would send a brief, and the bill, to the wrong vendor while printing the right
+    channel name.
 
     Renamed from `call_kimi_openrouter` on 2026-08-06 when Qwen joined: a function named for one
     of the several channels it serves is the same instance-not-class mistake that left
@@ -1974,21 +2068,20 @@ def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, ti
     used when the provider supports it; Moonshot is not on OpenRouter's native-search list, so
     this falls back to Exa.
     """
-    key = os.environ.get("OPENROUTER_API_KEY")
-    if not key and os.name == "nt":
-        try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg:
-                key = winreg.QueryValueEx(reg, "OPENROUTER_API_KEY")[0]
-        except OSError:
-            pass
+    prov = OAI_PROVIDERS.get(provider)
+    if prov is None:
+        return {"channel": name, "ok": False,
+                "error": "channels.json gives this channel provider %r, which this version of "
+                         "orchestrate.py cannot reach. Known providers: %s."
+                         % (provider, ", ".join(sorted(OAI_PROVIDERS)))}
+    key = _env_key(prov["key_env"])
     if not key:
-        # `name`, not a literal. This function serves every openrouter channel, and returning
+        # `name`, not a literal. This function serves every channel on this protocol, and returning
         # a hard-coded "kimi" here made a qwen failure report itself as a kimi failure - the same
         # instance-for-class mistake that this docstring is about, still present three renames on.
         return {"channel": name, "ok": False,
-                "error": "OPENROUTER_API_KEY is not set - this channel needs it. Set it (see "
-                         "INSTALL.md), or run with --skip %s." % name}
+                "error": "%s is not set - this channel needs it. Set it (see INSTALL.md), or run "
+                         "with --skip %s." % (prov["key_env"], name)}
     model = model or _registry_default(name, "model", "moonshotai/kimi-k3")
     msgs = []
     if system:
@@ -2009,17 +2102,36 @@ def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, ti
     # generous max_tokens, and depth is not traded away for a mechanism nothing demonstrated.
     body = {"model": model, "messages": msgs,
             "max_tokens": max_tokens or 64000,
-            "reasoning": dict(reasoning) if reasoning else {"max_tokens": 24000},
-            "stream": True, "usage": {"include": True}}
+            "stream": True}
+    if prov["depth"] == "reasoning":
+        body["reasoning"] = dict(reasoning) if reasoning else {"max_tokens": 24000}
+    elif prov["depth"] == "thinking":
+        # A registry `reasoning` block is meaningless on this vendor - it has one switch and no
+        # ladder. Say so out loud rather than accepting a field that parses and does nothing,
+        # which is the `thinking.budget_tokens` mistake this registry already made on Spark.
+        body["thinking"] = {"type": "enabled"}
+        if reasoning:
+            log("  [%s] note: `reasoning` in the registry is ignored on %s - this vendor has a "
+                "single on/off thinking switch and no effort ladder" % (name, prov["label"]))
+    if prov["usage_request"] == "openrouter":
+        body["usage"] = {"include": True}
+    else:
+        body["stream_options"] = {"include_usage": True}
+    native_search = False
     if (web or {}).get("enabled"):
-        plug = {"id": "web"}
-        for k in ("engine", "max_results", "search_prompt"):
-            if web.get(k) is not None:
-                plug[k] = web[k]
-        body["plugins"] = [plug]
-        log("  [%s] web search ON (%s, max %s results) - billed per search by the provider"
-            % (name, plug.get("engine", "provider default"),
-               plug.get("max_results", "provider default")))
+        if prov["search"] == "plugin":
+            plug = {"id": "web"}
+            for k in ("engine", "max_results", "search_prompt"):
+                if web.get(k) is not None:
+                    plug[k] = web[k]
+            body["plugins"] = [plug]
+            log("  [%s] web search ON (%s, max %s results) - billed per search by the provider"
+                % (name, plug.get("engine", "provider default"),
+                   plug.get("max_results", "provider default")))
+        elif prov["search"] == "native_tool":
+            native_search = True
+            log("  [%s] web search ON (%s native tool - it opens pages itself, so its citations "
+                "are page-level, not search excerpts)" % (name, prov["label"]))
     # 🔴 A PAGE-FETCH TOOL, alongside search rather than instead of it. Igor, 2026-08-07: «я думал,
     # ты так же добавишь им инструмент открытия сайта, типа Scrape, как дополнительный инструмент
     # к нативному». He is identifying the exact hole the registry already documented and had left
@@ -2035,15 +2147,20 @@ def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, ti
     ft = fetch_tool if fetch_tool is not None else {"enabled": True}
     fetch_on = bool((ft or {}).get("enabled"))
     max_rounds = int((ft or {}).get("max_calls") or 8)
+    tools = []
+    if native_search:
+        tools.append(dict(prov["search_tool"]))
     if fetch_on:
-        body["tools"] = [FETCH_TOOL_SCHEMA]
+        tools.append(FETCH_TOOL_SCHEMA)
         log("  [%s] page-fetch tool ON (up to %d fetches, public web only, %d KB per page)"
             % (name, max_rounds, FETCH_MAX_BYTES // 1000))
-    headers = {"Authorization": "Bearer " + key,
-               "Content-Type": "application/json",
-               # OpenRouter's optional attribution headers. Static strings, no PII.
-               "HTTP-Referer": "https://github.com/igorsaevets/ai-second-opinion",
-               "X-Title": "model-orchestration"}
+    if tools:
+        # PROBED 2026-08-08: MiMo accepts a native tool block and a function tool in the same
+        # array. They are not alternatives - the native search finds and reads pages on the
+        # vendor's side, ours reads a page we can then prove was opened.
+        body["tools"] = tools
+    headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
+    headers.update(prov.get("headers") or {})
 
     def _stream_once(payload):
         """One streaming completion. Returns (text, reasoning_chars, usage, tool_calls) or raises.
@@ -2053,7 +2170,7 @@ def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, ti
         correct reading, and treating any single chunk as a whole call yields JSON that almost
         parses, which is worse than JSON that does not.
         """
-        rq = urllib.request.Request(OPENROUTER_URL,
+        rq = urllib.request.Request(prov["url"],
                                     data=json.dumps(payload).encode("utf-8"), headers=headers)
         parts, rchars, use, calls = [], 0, {}, {}
         with urllib.request.urlopen(rq, timeout=timeout) as resp:
@@ -2072,13 +2189,37 @@ def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, ti
                     continue
                 if ev.get("usage"):
                     use = ev["usage"]
+                # 🔴 A MID-STREAM ERROR ARRIVES WITH HTTP 200 AND WAS BEING DROPPED ON THE FLOOR.
+                # Measured 2026-08-08 on the free Nemotron channel: the run came back in 8s with
+                # "EMPTY OUTPUT from stream" and no cause, and every subsequent probe of the same
+                # body succeeded - so the provider had rejected that one call and said why, in an
+                # `error` event this loop never read. The harness then reported the vendor's stated
+                # reason as our own generic emptiness, which sends the next person to debug the
+                # wrong layer. Free and rate-limited endpoints make this the COMMON failure, not
+                # an exotic one. Captured here and surfaced in the channel's error field.
+                if ev.get("error"):
+                    stream_error.append(ev["error"])
                 for ch in ev.get("choices") or []:
+                    if ch.get("error"):
+                        stream_error.append(ch["error"])
                     delta = ch.get("delta") or {}
                     if delta.get("content"):
                         parts.append(delta["content"])
                     # Reasoning deltas are surfaced under a separate key; count, never print.
-                    if delta.get("reasoning"):
-                        rchars += len(delta["reasoning"])
+                    # Two spellings, because the two vendors disagree: OpenRouter normalises to
+                    # `reasoning`, MiMo emits OpenAI's `reasoning_content`. Reading only the first
+                    # would report reasoning_chars=None for a channel that reasoned - a metric
+                    # quietly reading zero, which is this project's most-repeated defect.
+                    for rk in ("reasoning", "reasoning_content"):
+                        if delta.get(rk):
+                            rchars += len(delta[rk])
+                    # Vendor-side citations (MiMo's native search returns url + title + summary
+                    # per opened page). Collected but NEVER counted as our own grounding: we did
+                    # not open these, the vendor says it did.
+                    for an in (delta.get("annotations") or []):
+                        u = (an or {}).get("url") or ((an or {}).get("url_citation") or {}).get("url")
+                        if u:
+                            vendor_cites.append(u)
                     for tc in delta.get("tool_calls") or []:
                         idx = tc.get("index", 0)
                         slot = calls.setdefault(idx, {"id": None, "name": None, "args": []})
@@ -2093,6 +2234,7 @@ def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, ti
                 [{"id": v["id"], "name": v["name"], "args": "".join(v["args"])}
                  for _, v in sorted(calls.items())])
 
+    vendor_cites, stream_error = [], []
     text_parts, reasoning_chars, usage = [], 0, {}
     opened, fetch_failures, fetches = [], [], 0
     tried = {}          # url -> first outcome; a repeat is answered, not re-fetched, not charged
@@ -2223,18 +2365,41 @@ def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, ti
     if marker and not text.strip().endswith(marker):
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip():
-        warn.append("EMPTY OUTPUT from stream")
+        # Say WHOSE failure it was. An empty answer with a provider message attached is a
+        # different problem from an empty answer without one, and only the first tells you
+        # whether to retry, change channel, or look at our own code.
+        if stream_error:
+            e0 = stream_error[0]
+            msg = e0.get("message") if isinstance(e0, dict) else str(e0)
+            code = e0.get("code") if isinstance(e0, dict) else None
+            warn.append("PROVIDER ERROR MID-STREAM (HTTP 200, error event): %s%s"
+                        % (msg or e0, (" [code %s]" % code) if code else ""))
+        else:
+            warn.append("EMPTY OUTPUT from stream, and the provider sent no error event - the "
+                        "connection produced no content and gave no reason")
     note = []
     record_refusal(refusal_check(text, marker), warn, note)
     # Tokens are SUMMED across tool rounds, not taken from the last response. Each round re-sends
     # the whole conversation, so the final call's prompt_tokens is only the last leg and reading
     # it as the total under-reports the round - on a fetch-heavy review, by most of the bill.
     n_cited, grounded, _ung = _cite_check(text, set(opened))
+    # Vendor-side search telemetry, where the vendor reports any. MiMo returns
+    # usage.web_search_usage = {"tool_usage": N, "page_usage": M} - N searches, M pages it opened
+    # itself. Kept in a field named for what it counts (`vendor_*`) and NEVER folded into
+    # `opened_urls`, which means "pages THIS HARNESS fetched and can prove". Merging the two would
+    # manufacture grounding out of the vendor's own assertion, which is the mistake this project
+    # already caught once when it called a printed-URL count "grounding".
+    wsu = (usage or {}).get("web_search_usage") or {}
     return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
             "bytes": len(text.encode("utf-8")), "exit": 0, "model": model,
+            "provider": provider,
             "in_tokens": in_tot or usage.get("prompt_tokens"),
             "out_tokens": out_tot or usage.get("completion_tokens"),
             "reasoning_chars": reasoning_chars or None,
+            "vendor_searches": wsu.get("tool_usage"),
+            "vendor_pages": wsu.get("page_usage"),
+            "vendor_citations": len(set(vendor_cites)) or None,
+            "provider_error": stream_error[0] if stream_error else None,
             # Real grounding evidence for a channel that had none: WE ran these fetches, so this
             # is a list rather than an inference. Codex cannot produce this at all.
             "fetches": fetches or None,
@@ -2242,6 +2407,170 @@ def call_openrouter_reviewer(brief, marker, outfile, model=None, system=None, ti
             "fetch_failures": len(fetch_failures) or None,
             "n_cited": n_cited or None,
             "n_grounded": len(grounded) if opened else None,
+            "warnings": warn, "notes": note}
+
+
+XAI_RESPONSES_URL = os.environ.get("XAI_BASE", "https://api.x.ai/v1/responses")
+
+
+def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=2400,
+                       name="grok420", tools=None, max_tokens=None):
+    """
+    Grok through xAI's own Agent Tools API - /v1/responses, not /chat/completions.
+
+    🔴 WHY A SEPARATE ENDPOINT, ESTABLISHED BY PROBING AND NOT BY READING (2026-08-08). The
+    obvious wiring was chat/completions, which this file already speaks. Measured there:
+
+      * `reasoning_effort` -> HTTP 400 «Model grok-4.20-0309-reasoning does not support parameter
+        reasoningEffort». So this model has NO depth knob, and the tier ladder cannot reach it.
+        That is recorded rather than faked with a field that parses and does nothing.
+      * `tools:[{"type":"web_search"}]` -> 422 «unknown variant `web_search`, expected `function`
+        or `live_search`», and then `live_search` -> HTTP 410 «Live search is deprecated. Please
+        switch to the Agent Tools API». So chat/completions has NO server-side search at all now,
+        and every document describing `search_parameters` is stale.
+      * An INVENTED top-level parameter returns 200. The endpoint silently drops what it does not
+        recognise, so on this vendor a 200 is not evidence that anything was configured. Every
+        claim in this docstring rests on a meter or an error, never on a success.
+
+    What /v1/responses gives that neither chat/completions nor the OpenRouter resale can:
+
+      * `web_search` runs an AGENTIC loop and OPENS PAGES. Measured: action `search`, then two
+        `open_page` calls, one of them straight into an article URL. Those URLs are reported, so
+        "which pages were read" is a list on this channel, as it is for goog36flash.
+      * `x_search` searches X. Nothing else in the panel can see that corpus at all.
+      * `url_citation` annotations carry `start_index`/`end_index` into the answer text, so
+        "which sentence does this source support" is a lookup rather than a judgement. Only
+        goog36flash also does this.
+      * `usage.cost_in_usd_ticks` - the vendor's own price for the call. CALIBRATED, not assumed:
+        a 2192-token prompt (128 cached) with 1 content + 202 reasoning tokens reported 31 131 000
+        ticks, and (2064*$1.25 + 128*$0.20 + 203*$2.50)/1e6 = $0.00311310 = ticks/1e10 exactly.
+        So one tick is 1e-10 USD. Note what that calibration also proves: `completion_tokens`
+        here EXCLUDES `reasoning_tokens` (2192+1+202 = total 2395), so billed output is the sum.
+        Codex reports no cost, Spark reports none, OpenRouter reports none inline - this is the
+        only channel in the panel that prices its own call.
+
+    No harness `fetch_url` here, for the same reason goog36flash has none: two fetchers on one
+    channel make "who opened this page" ambiguous, and that answer is what this channel is for.
+    """
+    key = _env_key("XAI_API_KEY")
+    if not key:
+        return {"channel": name, "ok": False,
+                "error": "XAI_API_KEY is not set - this channel needs it. Set it (see "
+                         "INSTALL.md), or run with --skip %s." % name}
+    model = model or _registry_default(name, "model", "grok-4.20-0309-reasoning")
+    tools = list(tools or ["web_search"])
+    body = {"model": model,
+            # The system layer rides in front of the brief, exactly as it does for codex and agy.
+            # A brief framed one way is refused and framed another way is answered, so the framing
+            # has to reach every channel that can refuse.
+            "input": [{"role": "user", "content": _with_system(brief, system)}],
+            "max_output_tokens": max_tokens or 60000,
+            "tools": [{"type": t} for t in tools],
+            "stream": True}
+    headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
+    log("  [%s] xAI Agent Tools: %s - the vendor opens pages itself, so opened_urls here is ITS "
+        "list, not ours" % (name, ", ".join(tools)))
+
+    text_parts, rchars, resp_obj = [], 0, {}
+    start = time.time()
+    try:
+        rq = urllib.request.Request(XAI_RESPONSES_URL,
+                                    data=json.dumps(body).encode("utf-8"), headers=headers)
+        with urllib.request.urlopen(rq, timeout=timeout) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line.startswith("data:"):
+                    continue          # `event:` lines duplicate ev["type"]; keep-alives are blank
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    ev = json.loads(payload)
+                except ValueError:
+                    continue
+                etype = ev.get("type") or ""
+                if etype == "response.output_text.delta":
+                    text_parts.append(ev.get("delta") or "")
+                elif etype.endswith("reasoning_summary_text.delta"):
+                    rchars += len(ev.get("delta") or "")     # count, never print
+                elif etype in ("response.completed", "response.incomplete", "response.failed"):
+                    resp_obj = ev.get("response") or {}
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", "replace")[:300]
+        except Exception:                                    # noqa: BLE001
+            pass
+        return {"channel": name, "ok": False,
+                "error": "HTTP %s from xAI: %s" % (e.code, detail)}
+    except Exception as e:                                   # noqa: BLE001
+        return {"channel": name, "ok": False, "error": "stream failed: %r" % (e,)}
+    secs = time.time() - start
+
+    text = "".join(text_parts)
+    usage = resp_obj.get("usage") or {}
+    searches, opened, cited = 0, [], []
+    for item in (resp_obj.get("output") or []):
+        itype = item.get("type") or ""
+        if itype.endswith("search_call"):
+            act = item.get("action") or {}
+            if (act.get("type") or "") == "open_page" and act.get("url"):
+                opened.append(_norm_url(act["url"]))
+            else:
+                searches += 1
+        elif itype == "message":
+            for part in (item.get("content") or []):
+                for an in (part.get("annotations") or []):
+                    if an.get("url"):
+                        cited.append(_norm_url(an["url"]))
+    # Fall back to the streamed text if the terminal event carried none - a truncated stream that
+    # still delivered the answer should not be reported as an empty channel.
+    if not text.strip():
+        for item in (resp_obj.get("output") or []):
+            if item.get("type") == "message":
+                for part in (item.get("content") or []):
+                    if part.get("text"):
+                        text_parts.append(part["text"])
+        text = "".join(text_parts)
+    if outfile and text.strip():
+        with open(outfile, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    warn, note = [], []
+    if marker and not text.strip().endswith(marker):
+        warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
+    if not text.strip():
+        warn.append("EMPTY OUTPUT from stream")
+    record_refusal(refusal_check(text, marker), warn, note)
+    if resp_obj.get("status") == "incomplete":
+        note.append("xAI reported status=incomplete (%s)"
+                    % ((resp_obj.get("incomplete_details") or {}).get("reason") or "no reason"))
+    n_cited, grounded, _ung = _cite_check(text, set(opened))
+    ticks = usage.get("cost_in_usd_ticks")
+    out_tok = usage.get("output_tokens")
+    reas = (usage.get("output_tokens_details") or {}).get("reasoning_tokens")
+    return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
+            "bytes": len(text.encode("utf-8")), "exit": 0, "model": model,
+            "in_tokens": usage.get("input_tokens"),
+            "cached_in_tokens": (usage.get("input_tokens_details") or {}).get("cached_tokens"),
+            "out_tokens": out_tok,
+            "reasoning_tokens": reas,
+            "reasoning_chars": rchars or None,
+            "searches": searches or None,
+            # Vendor-opened, and said so on the log line above. Same standing as goog36flash's
+            # url_context and agy's stream-json tool log: a structured record of a page the vendor
+            # says it read, which is weaker than holding the bytes ourselves and far stronger than
+            # a URL the model merely printed.
+            "opened_urls": len(opened) or None,
+            "server_side_tools": usage.get("num_server_side_tools_used"),
+            # 🔴 NOT `num_sources_used`. That counter belongs to the DEPRECATED live-search path
+            # and reads 0 forever on this one - it was 0 in every probe that opened three pages.
+            # Reporting it would have been a counter named for something it no longer measures,
+            # which is this project's most-repeated defect, freshly available in a new API.
+            "usd": round(ticks / 1e10, 6) if ticks else None,
+            "n_cited": n_cited or None,
+            "n_grounded": len(grounded) if opened else None,
+            "vendor_citations": len(set(cited)) or None,
             "warnings": warn, "notes": note}
 
 
@@ -2387,7 +2716,7 @@ def agy_bin():
 # this, because they used to share a blind spot by construction - each had its own copy of the
 # same five literals, so a kind unknown to one was unknown to the other, and a misspelled kind
 # produced neither a preflight warning nor a result, only a log line that scrolls away.
-KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "gemini", "hermes")
+KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "hermes")
 
 # The degraded path only. When channels.json cannot be loaded there is no `kind` field to read,
 # so these are the names the harness has used, mapped to what they were. Both the historical
@@ -2398,7 +2727,11 @@ _LEGACY_KINDS = {"http": "http", "spark": "http", "spark11": "http", "spark12": 
                  "codex": "codex",
                  "agy": "agy", "gemini": "agy", "agy31pro": "agy", "agy36flash": "agy",
                  "kimi": "openrouter", "qwen": "openrouter",
-                 "kimik3": "openrouter", "qwen38max": "openrouter", "hermes": "hermes"}
+                 "kimik3": "openrouter", "qwen38max": "openrouter",
+                 "orgemini36flash": "openrouter", "ormimo25pro": "openrouter",
+                 "orgrok420": "openrouter", "ornemotron3ultra": "openrouter",
+                 "goog36flash": "gemini", "mimo25pro": "oai", "grok420": "xai",
+                 "hermes": "hermes"}
 
 
 def _legacy_slot(cname):
@@ -2472,15 +2805,35 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
         quota = codex_quota_snapshot()
         if quota:
             yield "%s: %s" % (c, quota)
-    for c in sorted(by_kind.get("openrouter", [])):
+    for c in sorted(by_kind.get("openrouter", []) + by_kind.get("oai", [])):
         # Direct OpenRouter since 2026-08-03; the binary check moved to a key check. The Hermes
         # fallback path still exists behind kind:"hermes", and ITS preflight is the binary.
-        k = _env_key("OPENROUTER_API_KEY")
+        #
+        # 🔴 THE KEY VARIABLE COMES FROM THE PROVIDER TABLE, NOT FROM A LITERAL. This loop used to
+        # check OPENROUTER_API_KEY for every channel of this kind, which was true while one vendor
+        # spoke this protocol. The moment a second one did, a hard-coded variable name here would
+        # have told a MiMo user their key was present because an unrelated OpenRouter key was.
+        prov = OAI_PROVIDERS.get(((plan or {}).get(c) or {}).get("provider") or "openrouter")
+        if prov is None:
+            yield ("%s: channels.json names a provider this build cannot reach. Known: %s."
+                   % (c, ", ".join(sorted(OAI_PROVIDERS))))
+            continue
+        k = _env_key(prov["key_env"])
         if not k:
-            yield ("%s: OPENROUTER_API_KEY is not set. The direct channel will fail; set it "
-                   "or exclude the channel." % c)
+            yield ("%s: %s is not set. This channel will fail; set it or exclude the channel "
+                   "with --skip %s." % (c, prov["key_env"], c))
         else:
-            yield "%s: OpenRouter key present (len %d), direct /chat/completions" % (c, len(k))
+            yield "%s: %s key present (len %d), %s" % (c, prov["label"], len(k), prov["url"])
+    for c in sorted(by_kind.get("xai", [])):
+        k = _env_key("XAI_API_KEY")
+        if not k:
+            yield ("%s: XAI_API_KEY is not set. Get one at console.x.ai, then "
+                   "`setx XAI_API_KEY \"<your key>\"` and restart the shell - or exclude the "
+                   "channel with --skip %s." % (c, c))
+        else:
+            yield ("%s: xAI key present (len %d), /v1/responses Agent Tools (server-side "
+                   "web_search / x_search; chat/completions has no search at all since Live "
+                   "Search was retired)" % (c, len(k)))
     for c in sorted(by_kind.get("gemini", [])):
         k = _env_key("GEMINI_API_KEY")
         if not k:
@@ -3157,32 +3510,46 @@ def main():
             outfile = os.path.join(a.out, cname.upper() + ".md")
             workdir = os.path.join(a.out, cname + "-ws")
             if kind == "http":
-                jobs[cname] = ex.submit(call_http_reviewer, brief, system, a.tier, a.marker,
+                jobs[cname] = ex.submit(call_http_reviewer, brief, _system_for(system, p),
+                                        a.tier, a.marker,
                                         model=p.get("model"), name=cname,
                                         effort=p.get("effort"))
             elif kind == "codex":
                 jobs[cname] = ex.submit(call_codex, brief, a.marker, workdir, outfile,
                                         model=p.get("model"), effort=p.get("effort"),
-                                        timeout=p.get("timeout"), system=system)
+                                        timeout=p.get("timeout"),
+                                        system=_system_for(system, p))
             elif kind == "agy":
                 jobs[cname] = ex.submit(call_agy, brief, a.marker, workdir, outfile,
                                         model=p.get("model"),
                                         effort=p.get("effort") or "high",
-                                        timeout=p.get("timeout") or "25m", system=system)
+                                        timeout=p.get("timeout") or "25m",
+                                        system=_system_for(system, p))
             elif kind == "hermes":
                 jobs[cname] = ex.submit(call_hermes, brief, a.marker, outfile,
                                         model=p.get("model"), toolsets=p.get("toolsets"),
-                                        system=system)
-            elif kind == "openrouter":
-                jobs[cname] = ex.submit(call_openrouter_reviewer, brief, a.marker, outfile,
-                                        model=p.get("model"), system=system,
+                                        system=_system_for(system, p))
+            elif kind in ("openrouter", "oai"):
+                # Two kind names, ONE implementation. `openrouter` is kept because it accurately
+                # names the channels that go through OpenRouter and because existing installs
+                # carry it; `oai` names a direct OpenAI-protocol vendor. The vendor itself is
+                # `provider`, and an unknown one is refused inside the call rather than defaulted.
+                jobs[cname] = ex.submit(call_oai_reviewer, brief, a.marker, outfile,
+                                        model=p.get("model"), system=_system_for(system, p),
                                         web=p.get("web"), name=cname,
                                         reasoning=p.get("reasoning"),
                                         max_tokens=p.get("max_tokens"),
-                                        fetch_tool=p.get("fetch_tool"))
+                                        fetch_tool=p.get("fetch_tool"),
+                                        provider=p.get("provider") or "openrouter")
+            elif kind == "xai":
+                jobs[cname] = ex.submit(call_xai_responses, brief, a.marker, outfile,
+                                        model=p.get("model"), system=_system_for(system, p),
+                                        name=cname, tools=p.get("tools"),
+                                        max_tokens=p.get("max_tokens"))
             elif kind == "gemini":
                 jobs[cname] = ex.submit(call_gemini_direct, brief, a.marker, outfile,
-                                        model=p.get("model"), system=system, name=cname,
+                                        model=p.get("model"), system=_system_for(system, p),
+                                        name=cname,
                                         tools=p.get("tools"), max_tokens=p.get("max_tokens"))
             else:
                 # Named in the registry, unknown to the code. A log line is NOT enough: a log
@@ -3266,11 +3633,33 @@ def main():
                 % (r.get("in_tokens_total"), r.get("tool_calls") or 0, r.get("cached_in_tokens"),
                    r.get("out_tokens"), r.get("stop_reason"), r.get("effort"),
                    r.get("block_types")))
-        if kind == "openrouter" and r.get("out_tokens") is not None:
+        if kind in ("openrouter", "oai") and r.get("out_tokens") is not None:
             # The direct channel finally has real usage numbers; Hermes reported none.
-            log("    tokens in=%s out=%s | reasoning_chars=%s | web=%s"
+            log("    tokens in=%s out=%s | reasoning_chars=%s | web=%s | fetched_by_us=%s"
                 % (r.get("in_tokens"), r.get("out_tokens"),
-                   r.get("reasoning_chars"), (slot.get("web") or {}).get("enabled", False)))
+                   r.get("reasoning_chars"), (slot.get("web") or {}).get("enabled", False),
+                   r.get("opened_urls") or 0))
+            if r.get("vendor_searches") or r.get("vendor_pages") or r.get("vendor_citations"):
+                # Named `vendor_*` and printed on its own line because it is a DIFFERENT claim
+                # from the one above: these are pages the vendor says it opened, which nothing
+                # here can check. Folding them into opened_urls would turn an assertion into
+                # evidence, which is the move this project already caught itself making once.
+                log("    vendor-side search (its own count, not ours): searches=%s pages=%s "
+                    "citations=%s"
+                    % (r.get("vendor_searches"), r.get("vendor_pages"),
+                       r.get("vendor_citations")))
+        if kind == "xai":
+            log("    tokens in=%s (cached %s) out=%s | reasoning=%s | searches=%s | "
+                "pages_opened_by_xai=%s | server_side_tools=%s"
+                % (r.get("in_tokens"), r.get("cached_in_tokens"), r.get("out_tokens"),
+                   r.get("reasoning_tokens"), r.get("searches"), r.get("opened_urls"),
+                   r.get("server_side_tools")))
+            if r.get("usd") is not None:
+                # The only channel in the panel that prices its own call. Calibrated exactly
+                # against the published per-token rates; see call_xai_responses.
+                log("    cost reported BY THE VENDOR for this call: $%s" % r["usd"])
+            log("    no effort knob on this model - reasoning_effort is rejected with a 400, so "
+                "the tier ladder does not reach this channel")
         if kind == "codex":
             # 🔴 This block used to say "reports NO tool telemetry" full stop, which over-claimed
             # in the direction that stops you looking. Corrected 2026-08-07: no TOOL telemetry

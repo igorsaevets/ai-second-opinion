@@ -142,10 +142,30 @@ def suite_routing():
     # `_`-prefixed keys are prose, not entries - the file's own convention, honoured here too
     # because this suite reads the raw JSON on purpose rather than through the loader it tests.
     with open(HERE / "channels.json", encoding="utf-8") as fh:
-        ALL = {k for k, v in json.load(fh)["channels"].items()
-               if not k.startswith("_") and v.get("enabled", True)}
+        _CHANS = {k: v for k, v in json.load(fh)["channels"].items() if not k.startswith("_")}
+    ALL = {k for k, v in _CHANS.items() if v.get("enabled", True)}
+    EXISTS = set(_CHANS)
     check(len(ALL) >= 3, "the registry declares at least the three documented channels",
           f"registry={sorted(ALL)}")
+
+    # 🔴 `distribution` MUST AGREE WITH `enabled`, OR IT IS A FIELD THAT DESCRIBES NOTHING.
+    # Added 2026-08-08 with the local/kit split. Two fields naming one decision is how a decorative
+    # field is born - `enabled` is what the dispatcher reads and `distribution` is what package.py
+    # reads, so nothing would ever notice them disagreeing: the local run would quietly include a
+    # channel meant for the kit, or drop one meant for here, and both look like a working config.
+    # This is the error signal. distribution "local" => runs here; "kit" => does not.
+    bad = []
+    for c, v in sorted(_CHANS.items()):
+        d = v.get("distribution", "both")
+        on = v.get("enabled", True)
+        if d not in ("both", "local", "kit"):
+            bad.append("%s: unknown distribution %r" % (c, d))
+        elif d == "local" and not on:
+            bad.append("%s: distribution=local but enabled=false here" % c)
+        elif d == "kit" and on:
+            bad.append("%s: distribution=kit but enabled=true here (it would run locally)" % c)
+    check(not bad, "every channel's `distribution` agrees with its local `enabled`",
+          "; ".join(bad))
 
     def without(*names):
         return ALL - set(names)
@@ -177,8 +197,14 @@ def suite_routing():
     check(all(len(v) >= 2 for v in GROUPS.values()),
           "every group expands to at least two channels (a group of one is just a channel)",
           "sizes=%s" % {g: len(v) for g, v in GROUPS.items()})
-    check(all(c in ALL for v in GROUPS.values() for c in v),
-          "every channel named by a group is an enabled registry channel", f"groups={GROUPS}")
+    # 🔴 EXISTS, not ENABLED. This asserted membership of `ALL` (the enabled set) until
+    # 2026-08-08, which was the same thing while every channel ran here. With the local/kit split
+    # three channels are deliberately off locally and still belong to their groups - `--only
+    # gemini` is precisely how a human turns one of them back on, so a group naming a disabled
+    # channel is the feature, not the fault. The real invariant is that a group never names a
+    # channel that does not exist, and that one still holds.
+    check(all(c in EXISTS for v in GROUPS.values() for c in v),
+          "every channel named by a group exists in the registry", f"groups={GROUPS}")
 
     cases = [
         (["--only", "spark11"], {"spark11"}, "--only spark11"),
@@ -337,7 +363,14 @@ def suite_dispatch():
         "        return {'ok': True, 'text': 'stub\\nREVIEW-COMPLETE', 'seconds': 0.0}\n"
         "    return f\n"
         "o.call_http_reviewer = stub('http'); o.call_codex = stub('codex')\n"
-        "o.call_agy = stub('agy'); o.call_openrouter_reviewer = stub('openrouter')\n"
+        # 🔴 ONE FUNCTION SERVES BOTH `openrouter` AND `oai` SINCE 2026-08-08, so one stub covers
+        # both kinds — and the launched-count assertion below is what would catch it if that ever
+        # stopped being true. The old name `call_openrouter_reviewer` was patched here and the
+        # rename would have left this line silently stubbing NOTHING: setattr on a module happily
+        # creates an attribute that no longer exists, so the test would have made real paid calls
+        # while reporting a clean pass. Same class as the flag rename that missed its own reporter.
+        "o.call_agy = stub('agy'); o.call_oai_reviewer = stub('openrouter')\n"
+        "o.call_xai_responses = stub('xai')\n"
         # Every entry in KNOWN_KINDS needs a stub here, or this very check reports the new
         # channel as unlaunched. It did exactly that on 2026-08-07, one minute after `kind:
         # gemini` was written — which is the check working. It is the regression test built
@@ -345,6 +378,16 @@ def suite_dispatch():
         # the sixth kind by the same mechanism.
         "o.call_gemini_direct = stub('gemini')\n"
         "o.call_hermes = stub('hermes')\n"
+        # 🔴 THE STUBS MUST REPLACE SOMETHING THAT EXISTS. Found while renaming
+        # call_openrouter_reviewer -> call_oai_reviewer on 2026-08-08: `o.old_name = stub(...)`
+        # does not fail on a name the module no longer has, it CREATES it. The dispatcher then
+        # calls the real function, this suite makes real paid calls against live vendors, and
+        # every check still passes. A test whose isolation can evaporate silently is worse than
+        # no test. Asserted BEFORE assignment would need a different structure; asserted here it
+        # still fires on the next rename, which is what matters.
+        "for _n in ('call_http_reviewer','call_codex','call_agy','call_oai_reviewer',\n"
+        "           'call_xai_responses','call_gemini_direct','call_hermes'):\n"
+        "    assert callable(getattr(o, _n, None)), 'stub target missing: ' + _n\n"
         "t = tempfile.mkdtemp(prefix='orchdisp-')\n"
         "b = os.path.join(t, 'b.md')\n"
         "open(b, 'w', encoding='utf-8').write('Review.\\nREVIEW-COMPLETE\\n')\n"
@@ -381,12 +424,23 @@ def suite_dispatch():
             if rows:
                 check(all(r[field] for r in rows),
                       "the tier delivered %s to every %s channel" % (field, kind))
+        # 🔴 ONLY CHANNELS THAT ACTUALLY RUN. `web.enabled` is a property of the channel; "the
+        # setting reached the call" is a property of a LAUNCH, and a channel that is disabled here
+        # never makes one. Before the local/kit split every channel ran, so the two sets were the
+        # same and the difference was invisible; on 2026-08-08 three kit-only channels turned this
+        # into three red checks against working code. That is the same mistake as asserting group
+        # membership against the enabled set, twenty lines up, and it is worth noticing that BOTH
+        # were written by assuming "every channel in the registry runs here" - an assumption no
+        # line of code stated and that stopped being true in one edit.
         webbed = [c for c, ch in json.loads(
             Path(HERE, "channels.json").read_text(encoding="utf-8"))["channels"].items()
-            if not c.startswith("_") and (ch.get("web") or {}).get("enabled")]
+            if not c.startswith("_") and ch.get("enabled", True)
+            and (ch.get("web") or {}).get("enabled")]
         for c in webbed:
             check(any(r["name"] == c and r["web"] for r in launched),
                   "the registry's web setting reached the %s call" % c)
+        check(bool(webbed), "at least one launched channel has web search on",
+              "webbed=%s" % webbed)
     finally:
         pf.unlink(missing_ok=True)
 
@@ -411,8 +465,9 @@ def suite_dispatch():
         "    import orchestrate as o\n"
         "    def ok(*a, **k): return {'ok': True, 'text': 'x\\nREVIEW-COMPLETE'}\n"
         "    def boom(*a, **k): raise RuntimeError('simulated wrapper crash')\n"
-        "    o.call_http_reviewer = ok; o.call_codex = ok; o.call_openrouter_reviewer = ok\n"
-        "    o.call_hermes = ok; o.call_gemini_direct = ok; o.call_agy = boom\n"
+        "    o.call_http_reviewer = ok; o.call_codex = ok; o.call_oai_reviewer = ok\n"
+        "    o.call_hermes = ok; o.call_gemini_direct = ok; o.call_xai_responses = ok\n"
+        "    o.call_agy = boom\n"
         "    t = tempfile.mkdtemp(); b = os.path.join(t, 'b.md')\n"
         "    open(b, 'w', encoding='utf-8').write('hi\\nREVIEW-COMPLETE\\n')\n"
         "    out = os.path.join(t, 'out')\n"

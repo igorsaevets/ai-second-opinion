@@ -518,9 +518,30 @@ def _decorate(plan, reg):
         p["web"] = {k: v for k, v in web.items() if not k.startswith("_")} if web else None
         # Wire-level knobs that belong to the channel rather than to the tier. Passed through so
         # the dispatcher never has to re-open the registry, and so --dry-run shows them.
-        for extra in ("reasoning", "max_tokens", "toolsets", "role", "fetch_tool"):
+        # 🔴 `tools` WAS MISSING FROM THIS LIST AND NOBODY COULD HAVE NOTICED. goog36flash declares
+        # tools:["google_search","url_context"] and the dispatcher reads p.get("tools") - which was
+        # always None, so call_gemini_direct fell through to its own hard-coded default. The
+        # default happened to be the identical pair, so the registry entry produced the right
+        # behaviour while being decorative: the exact shape of `channels.spark.model`, and the
+        # exact reason that one survived for weeks. It would have become a real defect the first
+        # time anyone edited the registry to drop url_context. Both homes still exist (the literal
+        # is a deliberate fallback for a corrupt registry) but the registry now actually wins.
+        for extra in ("reasoning", "max_tokens", "toolsets", "role", "fetch_tool", "tools",
+                      "provider", "prompt_suffix", "distribution"):
             if ch.get(extra) is not None:
                 p[extra] = ch[extra]
+        # Hints are stored ONCE at top level and referenced, because the same 1.5 KB paragraph
+        # belongs to both agy channels and a copy in each is a copy that drifts. Resolved here so
+        # the dispatcher never re-opens the registry, and so --dry-run can show it.
+        hint = ch.get("fetch_fallback_hint")
+        ref = ch.get("fetch_fallback_hint_ref")
+        if ref and not hint:
+            hint = (reg.get("hints") or {}).get(ref)
+            if hint is None:
+                p["why"].append("⚠ fetch_fallback_hint_ref %r is not in `hints` - no hint sent"
+                                % ref)
+        if hint:
+            p["fetch_fallback_hint"] = hint
     return plan
 
 

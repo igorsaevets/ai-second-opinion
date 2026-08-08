@@ -1,25 +1,52 @@
 # Changelog
 
-## 1.4.1 — 2026-08-07
+## 1.5.0 — 2026-08-08
 
-**Two defects that a code review does not find, because both of them look like something else.**
+**Three new vendors, and a documented switch that does nothing.**
 
-- 🔴 **Spark could not answer at all, and said the network was down.** `_verify_http` read `note`
-  one line before creating it, so every Spark reply raised `UnboundLocalError`. The retry loop's
-  general `except Exception` caught it, wrote `transport: UnboundLocalError(...)`, slept through
-  four backoffs and reported the channel unreachable. The symptom pointed at DNS; the cause was a
-  variable ordering. Both Spark channels were dead - and the cost ladder makes Spark the default
-  for every lookup, so the recommended-cheap path was the broken one. Fixed and verified with a
-  live `--ask`, not by reading the diff.
-- 🔴 **`--skip` silently kept the channel you asked it to drop.** `--only`, `--skip` and `--set`
-  used bare `nargs="*"`, which **overwrites** on a repeated flag, so
-  `--skip codex --skip spark12cont` skipped only the second one and ran Codex - immediately after
-  its own preflight had printed `WEEKLY LIMIT EXHAUSTED - this run will draw on credits`. All
-  three are now `action="extend"` and repeatable. Note which spelling failed: `--skip a b` always
-  worked, and one-flag-per-channel, the form that looks more careful, was the broken one.
+- **New channels: MiMo v2.5 Pro (Xiaomi), Grok 4.20 (xAI) and Nemotron 3 Ultra (NVIDIA).** The
+  Nemotron one is **free** — the first channel here whose model costs nothing, so the only reason
+  to drop it is wall-clock. All three are reachable with the `OPENROUTER_API_KEY` you already
+  have; MiMo and Grok can also run on the vendor's own key, which buys more (below).
+- **One key now reaches six model families.** `OPENROUTER_API_KEY` alone gets Kimi, Qwen, Gemini,
+  MiMo, Grok and Nemotron. That is enough of a panel to be useful without opening a single extra
+  account, which is the shape a first install should have.
+- 🔴 **Both new vendors return HTTP 200 for an invented parameter.** Neither validates unknown
+  top-level fields — they silently drop them. So on those APIs a 200 is *not* evidence that a
+  setting took effect, and every wire parameter below was judged by a meter or an error instead.
+  If you are configuring either vendor yourself, assume nothing from a successful response.
+- 🔴 **MiMo's documented search switch does not work.** The vendor's FAQ says online search is
+  enabled with `forced_search: true`. Measured: that and four other spellings all return 200 and
+  all leave the model unable to search. What works is the tool form — and it is strong: one call
+  ran 5 searches and **opened 25 whole pages**, returning a citation with a title and summary for
+  each. MiMo also has thinking **off** by default; the harness switches it on explicitly.
+- 🔴 **xAI has no server-side search on `/chat/completions` at all.** `live_search` there is now
+  `410 Gone`. Search lives on the Agent Tools API (`/v1/responses`), where it runs an agentic loop
+  that opens pages, and its citations carry character offsets into the answer. `x_search` over X
+  is available too, off by default. That model also **rejects `reasoning_effort` outright**, so
+  `--tier` does not reach it — stated rather than faked with a setting that parses and is ignored.
+- 🟢 **One channel now reports what the call cost.** xAI returns a per-call price, calibrated here
+  against the published rates to the cent. No other channel does this.
+- **Channels can now be on here and off in your copy, or the reverse** (`distribution` in
+  `channels.json`). Three models are reachable both through OpenRouter and through the vendor's
+  own API; the direct route is off by default because it needs another account. `--dry-run` shows
+  which is which, and turning one on is one `enabled: true`.
 
-Neither was found by reading. Both were found by running a round and reading what the log
-actually said instead of what it was supposed to say.
+Fixes, all three found while wiring the above:
+
+- **A provider error mid-stream was reported as our own empty output.** OpenRouter delivers such
+  errors as an `error` event inside an HTTP **200** response, and the parser never read them. A
+  rejected request looked like a silent failure with no cause. It now names the provider's reason.
+- **`tools` never reached the call.** One channel's registry entry declared its tool list and the
+  code fell through to a hard-coded default that happened to be identical — so the setting was
+  decorative and editing it would have changed nothing.
+- **The self-test could have stopped isolating the network.** It replaced a function by name, and
+  in Python assigning to a name a module no longer has *creates* it rather than failing — so a
+  rename would have left the suite making real, billable calls while passing. Now asserted.
+
+`PRIVACY.md` is corrected in this release: it described the personal-data gate as blocking by
+default, which stopped being true in 1.4.x. It warns and sends; `--strict-pii` restores the block.
+A privacy document that overstates its protections is worse than one that admits their limits.
 
 ## 1.4.0 — 2026-08-07
 

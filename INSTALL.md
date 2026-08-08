@@ -180,17 +180,42 @@ assistant makes for you.
 
 ## Setting up the channels
 
-There are **nine** channels. **You need at least one** — the tool runs whatever is available and
-tells you exactly what it skipped and why. A missing key or a missing CLI is a normal, non-fatal
-condition, not an error.
+**You need at least one channel** — the tool runs whatever is available and tells you exactly what
+it skipped and why. A missing key or a missing CLI is a normal, non-fatal condition, not an error.
 
-| channel | what it needs | cost |
+**One key gets you most of the panel.** `OPENROUTER_API_KEY` alone reaches five different model
+families from five different vendors, which is enough for the disagreement this tool exists to
+produce. Everything else is optional.
+
+| what it needs | what that unlocks | cost |
 |---|---|---|
-| `spark11`, `spark12cont` | `MODEL_API_KEY` | metered API |
-| `kimik3`, `qwen38max`, `orgemini36flash` | `OPENROUTER_API_KEY` | metered API |
-| `goog36flash` | `GEMINI_API_KEY` | metered API, free tier available |
-| `codex` | the Codex CLI, signed in | your existing subscription |
-| `agy31pro`, `agy36flash` | the Antigravity CLI, signed in | your existing subscription |
+| `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
+| `MODEL_API_KEY` | the two Spark voices | metered API |
+| the Codex CLI, signed in | `codex` | your existing subscription |
+| the Antigravity CLI, signed in | the two `agy` Gemini channels | your existing subscription |
+| `GEMINI_API_KEY` | Gemini on Google's **own** API — the best-grounded channel here, and the only one whose citations carry character spans. **Off by default**, see below | metered, free tier available |
+| `XAI_API_KEY` | Grok on xAI's **own** API — adds X/Twitter search and reports the dollar cost of each call. **Off by default** | metered |
+| `MIMO_API_KEY` | MiMo on Xiaomi's **own** API — its search opens whole pages instead of returning excerpts. **Off by default** | metered |
+
+🔴 **Do not count the channels from this file.** The number is whatever `channels.json` enables,
+and it has changed most weeks. Run `python routing.py` — it prints the live list and spends
+nothing.
+
+### The three channels that are off by default
+
+Three models are reachable **two ways**: through OpenRouter (on by default here) or through the
+vendor's own API (off by default). They are not duplicates — the direct route buys real
+capability, measured, not assumed:
+
+| model | via OpenRouter | via the vendor's own key |
+|---|---|---|
+| Gemini 3.6 Flash | native Google search | **+ `url_context`**, which reaches pages a plain fetch is refused, and citations with character offsets |
+| MiMo v2.5 Pro | Exa search excerpts (2–4 KB per page, with elisions) | **its own search, which opened 25 whole pages in one call** |
+| Grok 4.20 | native search, 2M context | **+ `x_search`** over X/Twitter, and `cost_in_usd_ticks` — the call's actual price |
+
+To turn one on: set the key, then open `channels.json` and set `"enabled": true` on `goog36flash`,
+`grok420` or `mimo25pro`. Consider setting `"enabled": false` on the matching `or…` channel so you
+are not paying two vendors to ask one model the same question.
 
 ---
 

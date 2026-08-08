@@ -111,19 +111,25 @@ That runs **every enabled channel in parallel**, writes one `<CHANNEL>.md` per c
 `--out`, renders `REPORT.md`, and prints a verification block.
 
 🔴 **Do not count the channels from this file, and do not list them.** The number is whatever
-`channels.json` enables; it went three → five → eight inside three weeks, and every prose copy of
-that list has been wrong within days. `python routing.py` prints the live set and spends nothing.
-Output filenames are the registry key, upper-cased.
+`channels.json` enables; it went three → five → eight → fourteen inside four weeks, and every prose
+copy of that list has been wrong within days — including the `--only` row of this very table, which
+listed seven channels three lines under this warning until 2026-08-08. `python routing.py` prints
+the live set and spends nothing. Output filenames are the registry key, upper-cased.
+
+🔴 **Some channels are deliberately off HERE and on in the published kit, and vice versa.** The
+registry's `distribution` field decides: this machine has direct vendor keys (Google, Xiaomi, xAI)
+and the kit's install story is one OpenRouter key to the same models. `--dry-run` shows which are
+which. A channel that is off is one `enabled: true` away, not a missing feature.
 
 | flag | what it does |
 |---|---|
 | `--brief` | file with the question. Required unless you pass `--ask`. Its last line should instruct the model to end with your marker |
-| `--ask` | **one-shot question instead of a round.** `--ask "text"` or `--ask @file`. Defaults to `spark12cont`, prints the ANSWER to stdout, skips the citation audit. ~20 s. 🔴 Its default channel is the CONTRIBUTOR tier — Meta may train on it; use `--ask-channel spark11` for anything you would not publish |
+| `--ask` | **one-shot question instead of a round.** `--ask "text"` or `--ask @file`. Defaults to `spark12cont` (cheapest); `--ask-channel <name>` picks another. Prints the ANSWER to stdout, skips the citation audit. ~20 s |
 | `--tier` | depth: `quick` · `standard` · `strategic` · `deep`. Default `strategic`. See §2 |
 | `--marker` | literal string the reply must end with. If it is absent the output is incomplete |
 | `--out` | output directory. Default `./reviews` |
 | `--system` | preset name or path (§0.2). The harness **appends the no-non-existence rule** to whatever you pass — end the file with a newline or that sentence collides with your last word |
-| `--only` | restrict channels. Channel names, aliases and **group** words from `channels.json` all work: `spark11`, `spark12cont`, `codex`, `agy31pro`, `agy36flash`, `kimi`, `qwen` — plus the groups `spark` (both Spark voices), `agy`/`gemini` (both Gemini models) and `openrouter`. Omit to run every enabled one |
+| `--only` | restrict channels. Channel names, aliases and **group** words all work; `python routing.py` prints every accepted spelling. Groups are the useful form — a vendor family (`gemini`, `grok`, `mimo`, `spark`) or a billing path (`agy`, `openrouter`, `direct`). Omit to run every enabled one. 🔴 One channel per `--only` argument: `--only a b c`, never `--only "a b c"` |
 | `--skip` | the inverse of `--only` |
 | `--set` | pin a model without editing anything: `--set codex=gpt-5.4` |
 | `--route` | **paste what the operator typed, verbatim** — see §0.1 |

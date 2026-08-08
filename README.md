@@ -11,8 +11,7 @@ found, where they contradict each other — and a mechanical check of whether th
 the research or quietly made it up.
 
 [Русская версия](README.ru.md) · [How it works, in technical detail](TECHNICAL.md) ·
-[Install](INSTALL.md) · [When something breaks](TROUBLESHOOTING.md) ·
-[What leaves your machine](PRIVACY.md)
+[Install](INSTALL.md) · [When something breaks](TROUBLESHOOTING.md)
 
 ---
 
@@ -106,25 +105,38 @@ not been repeated across all nine. A number is worth only the run it came from.)
 
 ## What it costs, honestly
 
-Seven channels, three accounts, none of which this tool provides:
+Several accounts, none of which this tool provides — but **one of them gets you most of the way**:
 
-| Channels | What you need | Rough cost |
+| What you need | What it unlocks | Rough cost |
 |---|---|---|
-| **`spark11`, `spark12cont`** | `MODEL_API_KEY` | Metered per use — you pay per review |
-| **`kimik3`, `qwen38max`, `orgemini36flash`** | `OPENROUTER_API_KEY` | Metered per token, **plus per web search** |
-| **`goog36flash`** | `GEMINI_API_KEY` | Metered per token, **plus per search query**. Google's own API — the only channel whose citations carry character spans |
-| **`codex`** | A paid OpenAI plan that includes Codex | Subscription, with a weekly limit |
-| **`agy31pro`, `agy36flash`** | An eligible Google account | Subscription, with limits |
+| **`OPENROUTER_API_KEY`** | The biggest group in one account: Kimi, Qwen, Gemini, MiMo, Grok, **and a free NVIDIA Nemotron** — six vendors' models, five billing lines and one signup | Metered per token, **plus per web search**. The Nemotron model itself is free |
+| **`MODEL_API_KEY`** | The two Spark voices | Metered per use |
+| **A paid OpenAI plan with Codex** | `codex` | Subscription, weekly limit |
+| **An eligible Google account** | The two `agy` Gemini channels | Subscription, with limits |
+| *Optional:* `GEMINI_API_KEY`, `XAI_API_KEY`, `MIMO_API_KEY` | The same Gemini, Grok and MiMo models through the **vendors' own** APIs, which buys real extra capability — see INSTALL.md. Off by default | Metered, free tiers vary |
 
-**You do not need all nine.** Missing a key or a CLI is a normal condition, not an error — the
-tool runs whatever is available and tells you plainly what it skipped. You can start with one.
+**You do not need them all, and you should not start with them all.** Missing a key or a CLI is a
+normal condition, not an error — the tool runs whatever is available and tells you plainly what it
+skipped. Start with one.
 
-🔴 **One channel deserves a warning before you run it.** `spark12cont` runs the vendor's
-*Contributor* tier, which is heavily discounted **because the vendor may train on your prompts
-and completions**. The discount is real and so is the price. The tool prints that policy in the
-plan before it spends anything, and there is no non-training model on that channel by design —
-if a brief is confidential, drop the channel with `--skip spark12cont` rather than quietly
-swapping its model.
+🔴 **Do not count the channels from this file.** The number is whatever `channels.json` enables and
+it has changed most weeks. `python routing.py` prints the live list and spends nothing. (Every
+prose copy of that list in this repository has been wrong within days of being written — including,
+at one point, two different numbers four lines apart in this very file.)
+
+**Two channels are cheap because of their data terms, not despite them.** `spark12cont` runs a
+discounted *Contributor* tier and `ornemotron3ultra` runs a *free* tier; on both, the vendor may
+use prompts and completions for training. That is the trade being made, it is stated in
+[PRIVACY.md](PRIVACY.md) with each vendor named, and the tool prints each channel's data policy in
+the plan **before** it spends anything. If a brief should not be trained on, drop those channels
+for that run: `--skip spark12cont ornemotron3ultra`.
+
+Nothing else in this file will tell you when to avoid a channel, and that is deliberate. An
+earlier version carried a loud warning here and in the registry, and it was obeyed twice in ways
+that were worse than the risk: once a run silently substituted a different model — destroying the
+comparison the panel exists to produce — and once it dropped a reviewer nobody had decided to
+drop. The facts belong in front of the person spending the money; the choice does not belong to a
+sentence in a config file.
 
 **Do not share one API key across a team.** It bills to whoever owns it, nobody can be
 attributed, and revoking it cuts everyone off at once. One key per person — which is the whole
