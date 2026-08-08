@@ -1,5 +1,68 @@
 # Changelog
 
+## 1.8.0 — 2026-08-08
+
+**A depth knob you have only sent is not a depth knob — and the settings file stops treating its
+owner as the threat.**
+
+- 🟢 **`echocheck.py` — new.** Every other check in this kit answers *"was the argument
+  dispatched?"*. This one asks whether the vendor did anything with it, by comparing the
+  `reasoning_tokens` that come back at two settings of the same knob. It samples each arm several
+  times, interleaves and shuffles the arms so a vendor's change of mood cannot masquerade as a
+  knob, and says **CONFIRMED only when the two ranges are disjoint** — overlapping ranges are
+  reported as UNPROVEN with both ranges printed, never rounded up. It exists because an HTTP 200
+  has twice meant "accepted and ignored" in this project's own measurements, and because one
+  earlier round called a working knob inert on a single sample.
+  It also prints the **output**-token counts beside the reasoning ones: a single counter can be
+  *moved* rather than reduced, and reading one column alone made a model that thought out loud look
+  like a model that had stopped thinking.
+- 🔴 **The settings file's trust is now keyed on PROVENANCE, not on which field you set.** 1.7.0
+  refused `model`, `provider`, `kind` and `prompt_suffix` from your own settings file. That was
+  aimed at the wrong axis: your settings file and `channels.json` have identical write permissions,
+  so refusing a field in one only pushed the change into the other — and the other was the file
+  nothing announced at run time. Now:
+  - at `~/.claude/model-orchestration.local.json` you may change **anything**, and **add** channels
+    and tiers (`"_new": true` required, so a typo cannot quietly become a second channel);
+  - under `MODEL_ORCH_LOCAL` only the "how hard does it work" knobs are accepted, because a
+    project's own `.claude/settings.json` can set environment variables for sessions run inside it
+    — so a repository you cloned can choose that path, and cannot choose your home directory;
+  - transport changes are **marked 🔴 in the resolved plan**, in the same list as everything else:
+    a separate "dangerous changes" section reads as a section about somebody else.
+- 🔴🔴 **…and then three reviewers of that change found what it missed, independently, and a paid
+  round now refuses until you accept a transport change once.** The permission-equivalence
+  argument holds for an attacker who is already resident on the machine; it fails for a one-shot
+  one. `channels.json` is *self-healing* — the next update replaces it — while your settings file
+  is update-proof by construction. So opening it up handed the permanent file the powers the
+  ephemeral one had, and a single write (a mistyped command, an AI assistant acting on a poisoned
+  instruction) would have redirected a channel forever, silently. Now:
+  `python routing.py --accept-settings`, once, printing exactly what you accept. Reformat the
+  file, re-order it, or change a quiet field beside a sharp one and the acceptance still holds;
+  change what is sent or where it goes and the refusal returns, naming the change. `--dry-run`
+  works before acceptance on purpose: seeing what *would* happen must never require accepting it.
+- 🔴 **`cost` was filed under "cosmetic / bookkeeping" and is not cosmetic** — it decides whether
+  the plan warns "EXPENSIVE channel" before you spend, and which channels `--ask` fans out to. It
+  is no longer accepted from a relocated settings file.
+- Diagnostics now record **which usage key each meter was read from**, and where the path broke
+  when it was absent. That is the check that would have caught the `output_tokens_details` /
+  `completion_tokens_details` mix-up above on the day it was written, instead of months later.
+- 🟢 **Tiers are settings too.** They were the one knob a user could not reach, and the omission
+  had teeth: `gemini_thinking_level` lives on the tier and *overrides* the channel's own value, so
+  lowering it in your settings file would have watched the tier put it straight back.
+- 🔴 **The plan now reports edits you made to `channels.json`, by field.** 1.7.0 shipped a
+  `channels.sha256` that could answer only yes/no, only inside `doctor.py` — which nobody runs
+  before a round. A reference copy (`channels.shipped.json`) replaces it, so both `doctor` and the
+  plan can name the fields, and `upgrade.py` has a real baseline instead of an inference.
+- 🟢 **`upgrade.py` now carries every edit the new version's loader accepts**, one at a time, and
+  prints the loader's own reason beside each one it cannot. 1.7.0 carried `enabled` and left the
+  rest behind on a "this might not load in the new release" that was answerable by asking.
+  `--carry-all` now means "also re-add whole channels this release removed".
+- 🔴 **Fixed: a broad `except` in the upgrade path swallowed a plain programming error** and
+  degraded silently to "nothing could be validated". It prints now. A tolerant fallback written for
+  a partial install will also tolerate the author's typo.
+- A channel missing `kind`, `label` or `model` is refused at load time with a sentence, rather than
+  printing `[RUN ]` in the plan and failing at dispatch. A tier naming a `gemini_thinking_level` no
+  channel declares is refused for free, instead of costing a paid 400.
+
 ## 1.7.0 — 2026-08-08
 
 **Updating an install no longer destroys the settings the install guide told you to make.**

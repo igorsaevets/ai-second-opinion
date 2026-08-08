@@ -38,8 +38,9 @@ selftest.py               "does the code still behave?"  - ~50 behavioural check
 citecheck.py              citation grounding and existence checks
 upgrade.py                install/update in one path; migrates settings out of the tree
 patch_agy_permissions.py  mandatory post-install step for the agy channel
+echocheck.py              proves a depth knob from the counter the vendor returns
 VERSION                   the release this tree is; generated at build time
-channels.sha256           fingerprint of the shipped registry, so edits to it are detectable
+channels.shipped.json     reference copy of the registry, so edits to it are named field by field
 references/*.md           detail read on demand
 systems/*.md              system-prompt presets
 ```
@@ -227,18 +228,60 @@ The overlay is merged over the registry **before** validation, so anything it ch
 the same checks as anything shipped — a validated-then-mutated registry is how a config file
 becomes an unchecked code path.
 
-🔴 **It is default-deny on fields, and an external reviewer is the reason.** The first version
-accepted any field valid inside a channel block. One of the review channels named the consequence
-in a sentence: a file that survives every update, is merged before validation, and can name a
-transport hands anything able to write one file in a home directory a *persistent, update-proof
-redirection of where your documents are sent* — "and the per-run print of what the overlay changed
-only helps if a human reads it, which the plugin path specifically removes." That was a regression
-created by the fix itself: out of the update's reach is also out of the maintainer's reach.
+🔴 **1.7.0 was default-deny on fields. 1.8.0 keys trust on PROVENANCE instead, and the difference
+is not a relaxation — it is a correction.** One of the review channels had named a real
+consequence of the first design: a file that survives every update, is merged before validation,
+and can name a transport hands anything able to write one file in a home directory a *persistent,
+update-proof redirection of where your documents are sent* — "and the per-run print of what the
+overlay changed only helps if a human reads it, which the plugin path specifically removes."
 
-So it may set `enabled`, `effort`, `reasoning`, `thinking_level`, `max_tokens`, `fetch_tool`,
-`web`, `label`, `cost`, `notes`. Everything else is refused **by name**, with the reason. There is
-deliberately no environment variable to turn that off: an escape hatch that can be set once and
-forgotten is the same defect as a registry that documents the way around its own gate.
+The finding was right; the remedy was aimed at the wrong axis, and looking rather than reasoning
+showed why:
+
+- `~/.claude/model-orchestration.local.json` and `<skill>/channels.json` have **identical write
+  permissions**. Anything that can write the first can write the second. Refusing `model` in the
+  overlay never stopped an attacker; it sent them one file to the left.
+- And that file was **the quiet one**. The plan printed every overlay change on every run, while
+  an in-place edit of `channels.json` was fingerprinted only by `doctor.py`, which nobody runs
+  before a round. The gate was steering the most sensitive class of change into the least visible
+  place. 1.8.0 closes that half: the plan reports registry drift by field, every run.
+- Meanwhile it fired on correct use — and the hand on the keyboard is usually an AI assistant
+  helping its owner configure their own machine. A gate that fires on the intended workflow is one
+  people learn to switch off.
+
+So: **at the home path, anything.** Channels and tiers, edited or added (`"_new": true` required
+for an addition, so a typo cannot become a second channel). Under `MODEL_ORCH_LOCAL`, only the
+"how hard does it work" knobs — `enabled`, `effort`, `reasoning`, `thinking_level`, `max_tokens`,
+`fetch_tool`, `web`, `timeout`, `label`, `notes` — because a project's own `.claude/settings.json`
+can set environment variables for sessions run inside it, so a repository you cloned can choose
+that path, and it cannot choose your home directory. There is deliberately no environment variable
+to turn *that* off: an escape hatch that can be set once and forgotten is the same defect as a
+registry that documents the way around its own gate.
+
+🔴🔴 **And then three reviewers of *that* design, independently, found what it had missed — the
+permission-equivalence argument is true for a RESIDENT attacker and false for a ONE-SHOT one.**
+`channels.json` is **self-healing**: the next update replaces it. That is the defect this release
+fixed and, at the same time, a security property nobody had named. The home settings file is
+update-proof by construction. So opening it up handed the *permanent* file the powers the
+*ephemeral* one had. In their words: a single compromised assistant session writes `model` into
+the home overlay once, and every future run — including after the tool updates — silently
+re-points a channel. That threat is not hypothetical for this product, whose own premise is that
+an AI assistant edits the configuration on the user's behalf.
+
+**So a transport-affecting change is applied but not SPENT against until it is accepted once**, by
+a command the user runs (`routing.py --accept-settings`). The acknowledgement stores a digest of
+the sharp section only: re-order the JSON, reformat it, or edit a quiet field beside a sharp one
+and it still matches; change what is sent or where, and the refusal returns naming the change. A
+file write is no longer sufficient — the attacker would also have to make a human type a second
+command after reading a refusal that describes the redirect.
+
+`--dry-run` deliberately still works before acceptance: seeing what *would* happen must never
+require accepting it first.
+
+`cost` is **not** a quiet field, despite looking cosmetic: it drives the "EXPENSIVE channel"
+warning and the set `--ask` fans out to. That one was found by taking a reviewer's general frame
+seriously and then checking his example, which turned out to be harmless — verify the finding,
+discard the proof.
 
 Four properties make it safe to have a second source of truth at all, and each exists because the
 alternative was measured or reasoned to be worse:

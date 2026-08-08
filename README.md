@@ -228,6 +228,15 @@ what `install.ps1` / `install.sh` call when an install already exists, so "insta
 Every run prints that file's path and each value it changed, so it can never quietly explain a
 channel that is not doing what you expect.
 
+From 1.8.0 that file may change **anything** — repoint a model, add a whole channel or your own
+tier (`"_new": true` marks an addition, so a misspelt name fails loudly instead of quietly becoming
+a second channel). 1.7.0 refused those, and it was wrong to: your settings file and the shipped
+registry have the same write permissions, so refusing a field in one only pushed the change into
+the other — and the other was the file nothing announced before a run. Both are reported now, with
+transport changes marked. The one restriction left is about *provenance*, not about you: if you
+move the file with `MODEL_ORCH_LOCAL`, only the "how hard does it work" knobs are accepted from it,
+because a repository you cloned can set an environment variable and cannot set your home directory.
+
 **Then, once per machine:**
 
 ```

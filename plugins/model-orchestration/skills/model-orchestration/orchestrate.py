@@ -143,7 +143,8 @@ def _read_sse(resp):
     Streaming is MANDATORY for big thinking budgets: idle connections get dropped by
     intermediaries, and a client may refuse a non-streaming request expected to run past ~10 min.
     """
-    out = {"content": [], "usage": {}, "stop_reason": None, "sse_error": None}
+    out = {"content": [], "usage": {}, "stop_reason": None, "sse_error": None,
+           "reasoning_chars": 0}
     text_parts, blocks = [], []
     for raw in resp:
         line = raw.decode("utf-8", errors="replace").strip()
@@ -177,6 +178,17 @@ def _read_sse(resp):
             d = ev.get("delta", {})
             if d.get("type") == "text_delta":
                 text_parts.append(d.get("text", ""))
+            elif d.get("type") == "thinking_delta":
+                # 🔴 THE ONLY DEPTH METER THIS CHANNEL HAS, AND IT WAS BEING DROPPED ON THE FLOOR.
+                # Until 2026-08-08 `thinking_delta` frames fell through this chain unread, so a
+                # Spark result carried no reasoning figure of any kind - while the run summary and
+                # report.py both print a `reasoning_tokens` column, which was therefore blank for
+                # this channel forever, indistinguishable from a model that did not think. That
+                # made every claim about depth on Spark - including the tier ladder's whole reason
+                # for existing - structurally unverifiable. Characters, not tokens, because
+                # characters are what the wire gives us; the unit is reported alongside the number
+                # rather than quietly compared against somebody else's tokens.
+                out["reasoning_chars"] += len(d.get("thinking", "") or "")
         elif t == "message_delta":
             out["stop_reason"] = ev.get("delta", {}).get("stop_reason") or out["stop_reason"]
             # output_tokens only becomes final here; message_start carries a placeholder
@@ -424,6 +436,23 @@ def _verify_http(data, marker, floor, secs, tier):
             "in_tokens_total": raw_in + cached_in,
             "cache_convention": "disjoint (total = input_tokens + cache_read_input_tokens); "
                                 "MEASURED 2026-08-07 on api.meta.ai/v1/messages",
+            # Streamed frames are summed in _read_sse; the non-streaming shape carries whole
+            # `thinking` blocks. Either way this is OUR count of the vendor's trace, in characters
+            # - a unit, stated, rather than a number silently compared against someone's tokens.
+            # 🔴 MEASURED 2026-08-08: on this endpoint it comes back None, and the reason is in
+            # `block_types`: `redacted_thinking`. The trace is ENCRYPTED by the vendor, so no token
+            # count and no character count can exist here, ever - not a gap in the harness, a
+            # property of the transport. What still separates depth arms is `out_tokens`
+            # (effort low 805..854 against xhigh 1245..2236 on the same probe), which is what
+            # echocheck.py falls back to, labelled as the weaker instrument it is.
+            "reasoning_chars": (data.get("reasoning_chars")
+                                or sum(len(b.get("thinking") or "") for b in blocks
+                                       if b.get("type") == "thinking")) or None,
+            "reasoning_meter": {"path": "content[].thinking (streamed thinking_delta)",
+                                "present": bool(data.get("reasoning_chars")),
+                                "note": "redacted_thinking blocks carry no readable trace, so on "
+                                        "this endpoint absence is the vendor's choice, not a "
+                                        "parsing bug - check block_types"},
             "tool_calls": searches, "stop_reason": data.get("stop_reason"),
             "block_types": sorted({b.get("type") for b in blocks if b.get("type")}),
             "warnings": fail, "notes": note}
@@ -1098,6 +1127,28 @@ def pii_gate(parts, strict_pii=False):
             "--strict-pii\n"
             "    to make this a hard stop again, or --dry-run to see the list without sending.")
     return 0
+
+
+def meter_source(usage, *path):
+    """
+    Name the key a number came from, and say plainly when it was absent.
+
+    🔴 CODEX, REVIEWING ROUND 31: once the transport, the prompt and the usage schema all vary by
+    channel, "these two models disagreed" is uninterpretable without a record of *which usage
+    fields were parsed*. That is not a hypothetical: this very round found six channels reading
+    `output_tokens_details.reasoning_tokens` on a `/chat/completions` transport, where the key is
+    `completion_tokens_details.reasoning_tokens`. The value was None for months and looked exactly
+    like a model that did no thinking. Recording the PATH, and whether it resolved, turns that
+    class of defect from invisible into one line in diagnostics.json.
+    """
+    node, seen = usage or {}, []
+    for key in path:
+        seen.append(key)
+        if not isinstance(node, dict) or key not in node:
+            return {"path": ".".join(path), "present": False,
+                    "missing_at": ".".join(seen)}
+        node = node[key]
+    return {"path": ".".join(path), "present": node is not None, "value": node}
 
 
 def _resolve_system(name):
@@ -2584,6 +2635,19 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             # Found 2026-08-08 by dumping the raw usage object instead of the fields we expected.
             "usd": usage.get("cost"),
             "cached_in_tokens": (usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
+            # 🔴🔴 THIS KEY WAS MISSING ENTIRELY, ON SIX OF ELEVEN CHANNELS, AND THE REPORT PRINTED
+            # A COLUMN FOR IT. `report.py` and the run summary both read `r.get("reasoning_tokens")`
+            # - which was None here forever, indistinguishable from a model that did no thinking,
+            # while `reasoning_chars` sat right beside it at 842 and 1056. Found 2026-08-08 by
+            # `echocheck.py`, the first thing that ever tried to USE the number rather than print
+            # it. Note the shape: this transport is OpenAI /chat/completions, so the details live
+            # under `completion_tokens_details`; `output_tokens_details` is the Responses API and
+            # is correct for xAI two hundred lines below. One project, two shapes, one habit of
+            # copying the key that worked last time.
+            "reasoning_tokens": (usage.get("completion_tokens_details") or {})
+                                .get("reasoning_tokens"),
+            "reasoning_meter": meter_source(usage, "completion_tokens_details",
+                                            "reasoning_tokens"),
             "reasoning_chars": reasoning_chars or None,
             "vendor_searches": wsu.get("tool_usage"),
             "vendor_pages": wsu.get("page_usage"),
@@ -2758,6 +2822,9 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
     reas = (usage.get("output_tokens_details") or {}).get("reasoning_tokens")
     return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
             "bytes": len(text.encode("utf-8")), "exit": 0, "model": model,
+            # Correct HERE - this is the Responses API. The identical-looking key is wrong two
+            # hundred lines up, on /chat/completions, and was wrong there for months.
+            "reasoning_meter": meter_source(usage, "output_tokens_details", "reasoning_tokens"),
             "in_tokens": usage.get("input_tokens"),
             "cached_in_tokens": (usage.get("input_tokens_details") or {}).get("cached_tokens"),
             "out_tokens": out_tok,
@@ -3656,6 +3723,7 @@ def main():
 
     # Resolve WHO runs and WITH WHAT before reading the brief, so a bad route costs nothing.
     plan = None
+    reg = None
     routing = None
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -3755,6 +3823,30 @@ def main():
     if a.dry_run:
         log("--dry-run: nothing was called")
         return 0
+
+    # 🔴🔴 THE ONE-SHOT-WRITE GATE. Three reviewers, independently, found the hole in 1.8.0's own
+    # fix: the home settings file survives every update, so a single compromised assistant session
+    # writing `model` or `provider` into it would re-point a channel FOREVER, silently. The plan's
+    # red marker does not answer that - the plugin path removes the human who would read it, which
+    # is the same sentence that killed the 1.7.0 design. So the money stops here until a human has
+    # run one command. `--dry-run` above still works, on purpose: seeing what WOULD happen must
+    # never require accepting it first.
+    ov = (reg or {}).get("_overlay") or {}
+    if ov.get("sharp") and not ov.get("sharp_acked"):
+        log("\n" + "=" * 78)
+        log("REFUSING TO SPEND: your settings file changes where documents go, and that change "
+            "has not been accepted.")
+        log("  file: %s" % ov.get("path"))
+        for cname, field, before, after in ov["sharp"]:
+            log("    %s.%s: %s -> %s" % (cname, field, routing._short(before),
+                                         routing._short(after)))
+        log("  That file survives every update, so one write to it would otherwise redirect a "
+            "channel permanently.")
+        log("  If you made these changes, run once:")
+        log("      python \"%s\" --accept-settings" % os.path.join(SKILL_DIR, "routing.py"))
+        log("  If you did NOT make them, open the file before doing anything else.")
+        log("=" * 78)
+        return 2
 
     os.makedirs(a.out, exist_ok=True)
 
@@ -3904,16 +3996,17 @@ def main():
             # the input", which is the counter-named-for-the-wrong-cause defect this project keeps
             # measuring - and the physical impossibility is what exposed it.
             log("    tokens billed_in=%s across %s search turn(s) - CUMULATIVE over internal "
-                "passes, NOT one prompt (of which cached %s, ~50x cheaper) | out=%s | stop=%s | "
-                "effort=%s | blocks=%s"
+                "passes, NOT one prompt (of which cached %s, ~50x cheaper) | out=%s | "
+                "reasoning_chars=%s | stop=%s | effort=%s | blocks=%s"
                 % (r.get("in_tokens_total"), r.get("tool_calls") or 0, r.get("cached_in_tokens"),
-                   r.get("out_tokens"), r.get("stop_reason"), r.get("effort"),
-                   r.get("block_types")))
+                   r.get("out_tokens"), r.get("reasoning_chars"), r.get("stop_reason"),
+                   r.get("effort"), r.get("block_types")))
         if kind in ("openrouter", "oai") and r.get("out_tokens") is not None:
             # The direct channel finally has real usage numbers; Hermes reported none.
-            log("    tokens in=%s (cached %s) out=%s | reasoning_chars=%s | web=%s | "
+            log("    tokens in=%s (cached %s) out=%s | reasoning=%s tok / %s chars | web=%s | "
                 "fetched_by_us=%s | grounding=%s%s"
                 % (r.get("in_tokens"), r.get("cached_in_tokens"), r.get("out_tokens"),
+                   r.get("reasoning_tokens"),
                    r.get("reasoning_chars"), (slot.get("web") or {}).get("enabled", False),
                    r.get("fetched_by_us") or 0, r.get("grounding_basis"),
                    ("" if r.get("usd") is None

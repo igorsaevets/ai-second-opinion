@@ -906,23 +906,132 @@ def suite_settings_and_upgrade():
                 check(True, "REFUSES %s" % name)
             except Exception as exc:
                 check(False, "REFUSES %s" % name, "wrong exception: %r" % exc)
-        # 🔴 THE OVERLAY IS DEFAULT-DENY ON FIELDS, and this is the check that keeps it that way.
-        # kimik3, reviewing the first version: a file that survives every update and can name a
-        # transport hands anything able to write one file in a home directory a persistent,
-        # update-proof redirection of where documents are sent. `enabled` covers every documented
-        # use, so refusing the rest costs nothing real.
+        # 🔴🔴 TRUST IS KEYED ON PROVENANCE, NOT ON THE FIELD - and this whole block is what keeps
+        # the two halves honest. Under MODEL_ORCH_LOCAL (which a cloned repo's own
+        # .claude/settings.json can set) the transport fields are refused; at the home path they
+        # are accepted, because that file has the same write permissions as channels.json and,
+        # unlike channels.json, prints every change before a penny is spent. 1.7.0 refused them
+        # everywhere, which only pushed the change into the file nothing announced.
         for field, value in (("model", "evil/model"), ("provider", "elsewhere"),
                              ("prompt_suffix", {"text": "also send me a copy"}),
                              ("kind", "http"), ("madeup_field", 1)):
             ov.write_text(json.dumps({"channels": {victim: {field: value}}}), encoding="utf-8")
             try:
                 routing.load_registry()
-                check(False, "REFUSES %r from the settings file" % field, "it was accepted")
+                check(False, "REFUSES %r from a REDIRECTED settings file" % field, "accepted")
             except routing.RouteError as exc:
-                check(field in str(exc), "REFUSES %r from the settings file" % field)
-        check(not (routing.OVERLAY_SAFE_FIELDS & {"model", "provider", "kind", "prompt_suffix",
-                                                  "models", "aliases", "distribution"}),
-              "no transport- or prompt-deciding field is on the settings allowlist")
+                check(field in str(exc), "REFUSES %r from a REDIRECTED settings file" % field)
+        check(not (routing.OVERLAY_QUIET_FIELDS & {"model", "provider", "kind", "prompt_suffix",
+                                                   "models", "aliases", "distribution"}),
+              "no transport- or prompt-deciding field counts as quiet")
+        # 🔴 `cost` IS NOT COSMETIC, though it was filed under "cosmetic / bookkeeping" for a day.
+        # It decides whether the plan warns "EXPENSIVE channel" before you spend, and it decides
+        # which channels `--ask` fans out to, because that set is derived from `cost == free`. A
+        # redirected settings file marking an expensive channel `free` would add it to every
+        # one-shot question. Found by testing a reviewer's general frame rather than his example.
+        check("cost" not in routing.OVERLAY_QUIET_FIELDS,
+              "`cost` is SHARP: it drives the spend warning and --ask's fan-out set")
+        import orchestrate as _o
+        m = _o.meter_source({"completion_tokens_details": {"reasoning_tokens": 7}},
+                            "completion_tokens_details", "reasoning_tokens")
+        check(m["present"] and m["value"] == 7 and m["path"].endswith("reasoning_tokens"),
+              "the meter records WHICH key it read, not only the number")
+        m2 = _o.meter_source({"output_tokens_details": {}}, "output_tokens_details",
+                             "reasoning_tokens")
+        check(not m2["present"] and m2.get("missing_at"),
+              "a missing meter says where the path broke - the defect this round was blind to")
+        # ...and the other half: at the home path the same field is ACCEPTED and marked sharp.
+        # Igor, 2026-08-08: an advanced user must be able to change and improve this, and the hand
+        # on the keyboard is their Claude Code. A gate that fires on the intended workflow is the
+        # class this project has measured twice.
+        base = routing.load_registry(overlay=False)
+        # A model this channel does not currently run, WITH its table entry - re-stating the
+        # shipped value is deliberately not a sharp change, so a fixture that does is a no-op.
+        alt = "vendor/test-only-model"
+        home_data = {"channels": {victim: {
+            "model": alt,
+            "models": dict(base["channels"][victim].get("models") or {},
+                           **{alt: {"label": "Test Only", "data_policy": "test"}})}}}
+        if home_data:
+            reg3 = json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))
+            routing._strip_comment_keys(reg3)
+            routing.apply_overlay(reg3, path="(test)", trust=routing.OVERLAY_TRUST_HOME,
+                                  data=home_data)
+            info3 = reg3["_overlay"]
+            check(reg3["channels"][victim]["model"] == alt,
+                  "the HOME settings file MAY repoint a model - provenance, not field", victim)
+            check(any(f == "model" for _c, f, _b, _a in info3.get("sharp", [])),
+                  "a transport change is recorded as SHARP so the plan can mark it")
+            text3 = routing.format_plan(routing.resolve(reg3, tier="strategic"), reg3)
+            check("🔴" in text3 and "model" in text3,
+                  "the plan MARKS a transport change rather than listing it like any other")
+        # 🔴🔴 A ONE-SHOT WRITE MUST NOT BECOME A PERMANENT REDIRECT. Three reviewers found this
+        # hole in 1.8.0's own fix, independently: the permission-equivalence argument holds for a
+        # RESIDENT attacker and fails for a one-shot one, because `channels.json` is self-healing
+        # (the next update wipes it) while the home settings file is update-proof by construction.
+        # So a sharp change is applied but NOT SPENT AGAINST until a human has accepted it once.
+        reg5 = json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))
+        routing._strip_comment_keys(reg5)
+        alt5 = next((m for m in (reg5["channels"][victim].get("models") or {})), None)
+        routing.apply_overlay(reg5, path="(test)", trust=routing.OVERLAY_TRUST_HOME,
+                              data={"channels": {victim: {"model": alt5, "notes": "quiet"}}})
+        d1 = routing.sharp_digest(reg5["_overlay"])
+        check((d1 is None) == (reg5["channels"][victim].get("model") == alt5
+                               and not reg5["_overlay"]["sharp"]),
+              "a sharp digest exists exactly when something transport-affecting changed")
+        # Re-stating the shipped value is not a redirect and must not demand acceptance.
+        reg6 = json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))
+        routing._strip_comment_keys(reg6)
+        same = reg6["channels"][victim].get("model")
+        routing.apply_overlay(reg6, path="(test)", trust=routing.OVERLAY_TRUST_HOME,
+                              data={"channels": {victim: {"model": same}}})
+        check(not reg6["_overlay"]["sharp"] and routing.sharp_digest(reg6["_overlay"]) is None,
+              "re-stating the shipped value is NOT a sharp change - no false acceptance prompt")
+        # The digest ignores order and quiet neighbours, and moves when the value moves.
+        def _dig(model_value, extra=None):
+            r = json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))
+            routing._strip_comment_keys(r)
+            block = {"model": model_value}
+            block.update(extra or {})
+            routing.apply_overlay(r, path="(test)", trust=routing.OVERLAY_TRUST_HOME,
+                                  data={"channels": {victim: block}})
+            return routing.sharp_digest(r["_overlay"])
+        other = next((m for m in (reg5["channels"][victim].get("models") or {})
+                      if m != same), None) or "vendor/other"
+        check(_dig(other) == _dig(other, {"notes": "reformatted", "enabled": True}),
+              "editing a QUIET field beside a sharp one does not invalidate the acceptance")
+        check(_dig(other) != _dig("vendor/somewhere-else"),
+              "changing WHERE it goes does invalidate the acceptance")
+        # And the refusal is wired into the thing that spends money, not only into the printout.
+        osrc = Path(HERE, "orchestrate.py").read_text(encoding="utf-8")
+        gate = osrc.split("REFUSING TO SPEND", 1)
+        check(len(gate) == 2, "orchestrate.py has a refuse-to-spend branch for unaccepted settings")
+        if len(gate) == 2:
+            check("--dry-run: nothing was called" in gate[0],
+                  "the gate sits AFTER --dry-run, so seeing what would happen never requires "
+                  "accepting it first")
+
+        # Adding a whole channel - the `added` field existed since 1.7.0, was counted by doctor.py,
+        # and no code path could populate it. That is this project's signature defect sitting
+        # inside the instrument built to prevent it.
+        newch = {"_new": True, "kind": "openrouter", "label": "Test Local", "cost": "metered",
+                 "model": "vendor/model", "models": {"vendor/model": {"label": "M"}}}
+        reg4 = json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))
+        routing._strip_comment_keys(reg4)
+        routing.apply_overlay(reg4, path="(test)", trust=routing.OVERLAY_TRUST_HOME,
+                              data={"channels": {"testlocal": newch}})
+        check(reg4["_overlay"]["added"] == ["testlocal"] and "testlocal" in reg4["channels"],
+              "the HOME settings file can ADD a channel, and says that it did")
+        for title, data, trust in (
+                ("without _new (so a typo cannot become a second channel)",
+                 {"channels": {"testlocal": dict(newch, _new=False)}}, routing.OVERLAY_TRUST_HOME),
+                ("from a REDIRECTED file",
+                 {"channels": {"testlocal": newch}}, routing.OVERLAY_TRUST_REDIRECTED),
+                ("missing `kind`, which decides who dispatches it",
+                 {"channels": {"testlocal": {k: v for k, v in newch.items() if k != "kind"}}},
+                 routing.OVERLAY_TRUST_HOME)):
+            err = routing.validate_overlay_data(Path(HERE, "channels.json"), data, trust=trust)
+            check(bool(err), "REFUSES adding a channel %s" % title, (err or "accepted")[:70])
 
         # 🔴 AN ALIAS MUST RESOLVE, OR A RENAME BRICKS EVERY OVERLAY ON UPGRADE DAY. goog36flash
         # raised it: strict rejection plus an upstream rename is a hard startup failure on
@@ -992,6 +1101,66 @@ def suite_settings_and_upgrade():
     finally:
         shutil.rmtree(cache, ignore_errors=True)
 
+    # --- registry drift is FIELD-LEVEL, and the plan is where it is said -------------------
+    # 1.7.0 shipped a sha256 and could answer only yes/no, only inside doctor.py. So the strict
+    # file printed itself every run and the file that can repoint a vendor printed nothing - a
+    # safety rule steering people towards the quiet path. Tested against a fabricated shipped
+    # tree, because the working copy deliberately carries no reference (see the VERSION check).
+    drift_dir = tmp / "orch_selftest_drift"
+    shutil.rmtree(drift_dir, ignore_errors=True)
+    drift_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        ref = json.loads(json.dumps(pristine))
+        (drift_dir / routing.SHIPPED_REGISTRY_NAME).write_text(
+            json.dumps(ref, ensure_ascii=False), encoding="utf-8")
+        edited2 = json.loads(json.dumps(pristine))
+        edited2["channels"][victim]["enabled"] = not edited2["channels"][victim].get("enabled")
+        live = drift_dir / "channels.json"
+        live.write_text(json.dumps(edited2, ensure_ascii=False), encoding="utf-8")
+        d = routing.registry_drift(str(live))
+        check(d and not d["pristine"] and any(c == victim and f == "enabled"
+                                              for c, f, _b, _a in d["changed"]),
+              "an in-place registry edit is reported BY FIELD, not as a yes/no", str(d)[:90])
+        live.write_text(json.dumps(ref, ensure_ascii=False), encoding="utf-8")
+        check((routing.registry_drift(str(live)) or {}).get("pristine") is True,
+              "an untouched registry reports pristine")
+        check(routing.registry_drift(str(tmp / "orch_selftest_nothing.json")) is None,
+              "no reference copy (a source tree) means NO verdict, not a false alarm")
+        # The plan is the one screen a human is guaranteed to read before spending.
+        regd = routing.load_registry(overlay=False)
+        regd["_drift"] = {"changed": [(victim, "model", "shipped/x", "somewhere/else")],
+                          "pristine": False, "reference": "x", "error": None}
+        check("channels.json has been edited" in routing.format_plan(
+                  routing.resolve(regd, tier="strategic"), regd),
+              "the PLAN reports registry drift, not only doctor.py")
+    finally:
+        shutil.rmtree(drift_dir, ignore_errors=True)
+
+    # --- upgrade carries everything the NEW version's loader accepts ------------------------
+    # 1.7.0 carried `enabled` and left the rest behind on a "might not load" that was answerable
+    # by asking. A user who followed INSTALL.md and set five things now keeps five things.
+    reg_path = str(Path(HERE, "channels.json"))
+    good = next(m for m in (pristine["channels"][victim].get("models") or {}))
+    other = next(c for c in pristine["channels"]
+                 if not c.startswith("_") and c != victim)
+    edits = [(victim, "enabled", True, False),
+             (victim, "model", None, good),
+             # Refused by _check_channel_models: a model that is not in its channel's own table
+             # has no label and no data policy, so the plan could not say what it was spending on.
+             (other, "model", None, "no/such/model/anywhere"),
+             ("ghost_channel_from_an_older_release", None, None, None)]
+    payload, keep, dropped, judged = _up.carryable(reg_path, edits,
+                                                   installed={"channels": {}})
+    check(judged, "the carry decision is made by the INCOMING version's loader")
+    check(any(f == "model" for _c, f, _b, _a in keep),
+          "a `model` edit that still validates IS carried (1.7.0 dropped it unread)")
+    check(any(c == other and f == "model" for c, f, _v, _w in dropped),
+          "an edit the loader refuses is dropped WITH the loader's own reason", str(dropped)[:80])
+    check(any(c == "ghost_channel_from_an_older_release" for c, _f, _v, _w in dropped),
+          "a channel this release removed is not resurrected without --carry-all")
+    check(payload.get("channels", {}).get(victim, {}).get("model") == good,
+          "what is written is the payload that was validated, not a re-derivation of it")
+
     # --- the re-attach budget is the MAINTAINER's failure, not the user's -------------------
     # `doctor.py` used to fail on this, which made a correct fresh install print NOT READY over
     # something the user cannot fix and that stops nothing from running. It warns there now, and
@@ -1040,6 +1209,94 @@ def suite_settings_and_upgrade():
                                           Path(HERE, ".git").exists()))
 
 
+def suite_echocheck():
+    """
+    9. The instrument that judges a knob by its meter must itself be judgeable.
+
+    Everything here is a pure function - no calls, no money. The point is the verdict logic: a
+    tool that can only ever answer CONFIRMED has not been calibrated, it has been trusted.
+    """
+    sys.path.insert(0, HERE)
+    import echocheck as e
+    import routing
+
+    reg = routing.load_registry(overlay=False)
+    plan = routing.resolve(reg, tier="strategic")
+
+    # 🔴 Keyed on `kind`, never on channel names - the defect this project has now hit at six
+    # layers. Every kind in the registry either declares a knob or is named as having none, and a
+    # new kind therefore shows up as NO KNOB rather than silently vanishing from the report.
+    kinds = sorted({p.get("kind") for p in plan.values() if p.get("kind")})
+    described = {k for k in kinds
+                 if e.knob_for(next(c for c, p in plan.items() if p.get("kind") == k),
+                               next(p for p in plan.values() if p.get("kind") == k),
+                               "strategic")[0]}
+    check(bool(described), "at least one kind declares a depth knob", str(sorted(described)))
+    for k in kinds:
+        cname = next(c for c, p in plan.items() if p.get("kind") == k)
+        desc, ladder, frag = e.knob_for(cname, plan[cname], "strategic")
+        check(desc is None or callable(frag),
+              "kind %r either declares a knob with a fragment builder, or none" % k, str(desc))
+        if desc and ladder:
+            check(len(ladder) >= 2, "kind %r declares a ladder with two ends" % k, str(ladder))
+
+    # 🔴 THE KNOB THIS TOOL VARIES ON SPARK IS `http_effort`, NOT `http_thinking_budget`. The
+    # vendor's own documentation calls the budget "accepted for compatibility but not translated
+    # into an effort value", so pointing the tool there is its CALIBRATION case: a working
+    # instrument must answer INERT or NO METER, never CONFIRMED.
+    http_c = next((c for c, p in plan.items() if p.get("kind") == "http"), None)
+    if http_c:
+        check("http_effort" in (e.knob_for(http_c, plan[http_c], "strategic")[0] or ""),
+              "the Spark knob under test is the one the vendor documents as live")
+        d, f = e.knob_override("http_thinking_budget", http_c, "strategic")
+        check(f(http_c, 4000) == {"tiers": {"strategic": {"http_thinking_budget": 4000}}},
+              "--knob reaches the documented-inert field, for calibration", d)
+
+    # Every fragment this tool writes must be acceptable from a REDIRECTED settings file, because
+    # that is how it drives the product. If a fragment needed the home path, the tool would be
+    # testing a configuration nobody can reach from a script.
+    for cname, p in plan.items():
+        _d, ladder, frag = e.knob_for(cname, p, "strategic")
+        if not frag or not ladder:
+            continue
+        err = routing.validate_overlay_data(Path(HERE, "channels.json"),
+                                            e.with_no_tools(frag(cname, ladder[-1]), cname,
+                                                            p.get("kind")),
+                                            trust=routing.OVERLAY_TRUST_REDIRECTED)
+        check(err is None, "echocheck's fragment for %s is accepted from a redirected file"
+              % cname, (err or "")[:90])
+
+    # --- the verdict is the product, so these are its truth table ---------------------------
+    def sp(vals):
+        return e.spread(vals)
+
+    cases = [
+        ("CONFIRMED", sp([0, 0, 0]), sp([1281, 1606, 1426]), 3),
+        ("UNPROVEN", sp([100, 200, 300]), sp([250, 260, 270]), 3),
+        ("INERT", sp([7, 7]), sp([7, 7]), 2),
+        ("INVERTED", sp([900, 950]), sp([10, 20]), 2),
+        ("NO METER", None, sp([1, 2]), 3),
+        # 🔴 The one that fired for real: a mid-run fix left one arm with a single usable sample
+        # and the guard read --samples instead of the data, announcing CONFIRMED on n=1.
+        ("UNPROVEN", sp([149, 269, 238]), sp([314]), 3),
+    ]
+    for want, lo, hi, n in cases:
+        got, why = e.verdict(lo, hi, n)
+        check(got == want, "verdict(%s vs %s) is %s"
+              % ((lo or {}).get("all"), (hi or {}).get("all"), want), "%s: %s" % (got, why[:60]))
+    # No reasoning counter, but the OUTPUT counts separate cleanly. Measured on Spark, whose
+    # thinking comes back as `redacted_thinking` - encrypted by the vendor, so no reasoning meter
+    # can exist there at all, while low/xhigh gave 805..854 against 1245..2236.
+    got, why = e.verdict(None, None, 3, sp([854, 833, 805]), sp([1245, 2236, 1623]))
+    check(got == "CONFIRMED (output tokens)",
+          "no reasoning meter + disjoint OUTPUT ranges is evidence, labelled as weaker", got)
+    got, _ = e.verdict(None, None, 3, sp([854, 1300]), sp([1245, 2236]))
+    check(got == "NO METER", "overlapping output ranges do not rescue a missing meter", got)
+    check(e.spread([None, None]) is None, "an arm with no numbers is no meter, not a zero")
+    check(e.PROBE_ANSWER in ("233",) and "233" not in e.PROBE,
+          "the probe does not contain its own answer")
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -1066,7 +1323,7 @@ def main():
 
     for suite in (suite_degradation, suite_routing, suite_redaction, suite_contract,
                   suite_citations, suite_dispatch, suite_tiers_and_grounding,
-                  suite_settings_and_upgrade):
+                  suite_settings_and_upgrade, suite_echocheck):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

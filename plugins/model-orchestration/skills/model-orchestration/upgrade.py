@@ -37,6 +37,7 @@ import datetime
 import json
 import os
 import shutil
+import importlib.util
 import subprocess
 import sys
 
@@ -47,11 +48,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SKIP_DIRS = {"__pycache__", ".git", "reviews", "runs"}
 UNKNOWN = "unknown (older than 1.7.0 - no version was shipped before that)"
 
-# The one field a reader is INSTRUCTED to change, and the only one that cannot break the registry
-# by being carried across a release: it is a boolean, and an unknown channel name is refused by
-# the loader with the full list. Everything else is reported and left behind unless --carry-all,
-# because a `model` string carried into a release that renamed it turns every later command into a
-# validation error - which punishes the person who followed the instructions.
+# The field a reader is INSTRUCTED to change, and the only one worth GUESSING about when there is
+# no baseline to diff against (see find_edits' inferred mode). It is no longer the only field
+# carried: since 1.8.0, when a baseline exists, every edit is offered to the new version's loader
+# one at a time and kept if it loads - see `carryable`. The old rule ("a carried `model` might name
+# something this release renamed") was answerable by asking rather than by refusing.
 AUTO_CARRY = ("enabled",)
 
 
@@ -171,18 +172,22 @@ def find_edits(installed, pristine, incoming):
     edit from a default the new release changed on purpose, so the report says "probable" and
     shows both values instead of pretending to know.
     """
-    edits, only = [], None
+    edits = []
     base = channel_map(pristine)
+    inferred = not base
     basis = "three-way (exact: your file against the copy your version shipped)"
-    if not base:
-        # 🔴 IN INFERRED MODE, LOOK AT ONE FIELD ONLY. Comparing against the incoming file makes
-        # every deliberate change in the new release look like an edit of the user's, and a report
-        # of two hundred "not carried" lines is a report nobody reads - which is how a real entry
-        # in it gets missed. `enabled` is the field INSTALL.md tells people to change, so it is
-        # the only one worth guessing about; everything else waits for a real baseline.
-        base, only = channel_map(incoming), set(AUTO_CARRY)
-        basis = ("two-way, %s ONLY (INFERRED: your version shipped no pristine copy, so a default "
-                 "this release changed on purpose is indistinguishable from an edit of yours)"
+    if inferred:
+        # 🔴 INFERRED MODE NOW REPORTS EVERYTHING AND CARRIES ONLY `enabled` - it used to LOOK at
+        # nothing else, on the reasoning that comparing against the incoming file would produce
+        # "two hundred not-carried lines nobody reads". Measured 2026-08-08 on the real 1.7.0 ->
+        # 1.8.0 hop: the two shipped registries differ in **zero** non-comment fields, so every
+        # difference there IS a user edit and the fear was never checked. A silent loss is worse
+        # than a long list either way; the list is printed with the count, so a reader facing two
+        # hundred lines can see at a glance that the release moved and ignore them.
+        base = channel_map(incoming)
+        basis = ("two-way (INFERRED: your version shipped no pristine copy, so a default this "
+                 "release changed on purpose looks the same as an edit of yours). %s is carried "
+                 "automatically; the rest are listed as probable and need --carry-all"
                  % "/".join(AUTO_CARRY))
     for cname, ch in channel_map(installed).items():
         ref = base.get(cname)
@@ -190,26 +195,121 @@ def find_edits(installed, pristine, incoming):
             edits.append((cname, None, None, None))       # whole channel absent from the baseline
             continue
         for field, value in ch.items():
-            if field.startswith("_") or (only and field not in only):
+            if field.startswith("_"):
                 continue
             if ref.get(field) != value:
                 edits.append((cname, field, ref.get(field), value))
-    return edits, basis
+    return edits, basis, inferred
 
 
-def merge_overlay(path, carry, dry):
-    """Write the carried settings into the user's local file, never dropping what is there."""
+def carryable(src_registry, edits, installed=None, force_channels=False, inferred=False):
+    """
+    Which of the user's edits can be carried into the NEW release? Ask the loader, one at a time.
+
+    🔴 1.7.0 carried `enabled` and left everything else behind, on the reasoning that a carried
+    `model` *might* name something this release renamed. "Might" was answerable all along - by
+    building the settings payload one field at a time and asking whether the registry still loads.
+    So the rule is no longer "one field is safe and the rest are scary": it is "everything the
+    loader accepts is carried, and everything it rejects is printed with its own error beside it".
+    A user who followed INSTALL.md and set five things keeps five things.
+
+    A whole channel that no longer exists upstream needs --carry-all: restoring something this
+    release deliberately removed is a decision, not a default.
+    """
+    keep, dropped, payload = [], [], {"channels": {}}
+    routing = routing_mod(os.path.dirname(os.path.abspath(src_registry)))
+    for cname, field, before, after in edits:
+        if field is None:
+            # A channel this release no longer has. Re-adding it is a DECISION - the release may
+            # have removed it because it stopped working - so it needs --carry-all, and then it is
+            # carried as a whole `_new` block and validated like any other.
+            block = dict(channel_map(installed).get(cname) or {})
+            if not force_channels or not block:
+                dropped.append((cname, "(whole channel)", None,
+                                "not in this release at all - pass --carry-all to re-add it from "
+                                "your own settings file"))
+                continue
+            block = {k: v for k, v in block.items() if not k.startswith("_")}
+            block["_new"] = True
+            trial = json.loads(json.dumps(payload))
+            trial["channels"][cname] = block
+            err = routing.validate_overlay_data(src_registry, trial) if routing else None
+            if err:
+                dropped.append((cname, "(whole channel)", None, err.splitlines()[0]))
+                continue
+            payload = trial
+            keep.append((cname, "(whole channel)", "(removed upstream)", "re-added from your copy"))
+            continue
+        if inferred and field not in AUTO_CARRY and not force_channels:
+            dropped.append((cname, field, after,
+                            "probable edit - your version shipped no baseline, so this could also "
+                            "be a default the new release changed. Pass --carry-all to keep it"))
+            continue
+        trial = json.loads(json.dumps(payload))
+        trial["channels"].setdefault(cname, {})[field] = after
+        # No routing.py to ask (a partial or pre-1.8.0 source tree): carry it and say so, rather
+        # than silently dropping settings because the checker is missing. The loader will still
+        # refuse a bad value at the next run, with the same message it would have given here.
+        err = routing.validate_overlay_data(src_registry, trial) if routing else None
+        if err:
+            dropped.append((cname, field, after, err.splitlines()[0]))
+            continue
+        payload = trial
+        keep.append((cname, field, before, after))
+    return payload, keep, dropped, bool(routing)
+
+
+def routing_mod(preferred=None):
+    """
+    routing.py from the INCOMING tree by preference, this tree otherwise, None if neither loads.
+
+    The incoming one is the right judge: the question is "will this setting work in the version
+    you are moving TO", and only that version's loader knows what it renamed.
+    """
+    # 🔴 THE `except` PRINTS. Written silent, this swallowed a plain NameError in its own first
+    # ten minutes - `importlib` was never imported here - and the only symptom was the degraded
+    # path quietly taking over: "nothing could be validated, carrying every edit unchecked". A
+    # broad except whose purpose is tolerating a PARTIAL TREE will also tolerate the author's
+    # typo, and this project has now measured that shape often enough to name it: dispatch fails
+    # loudly, reporting goes quiet. Caught by a selftest that asserted the judge was real.
+    for where in [preferred, HERE]:
+        if not where:
+            continue
+        target = os.path.join(where, "routing.py")
+        if not os.path.isfile(target):
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location("routing_for_upgrade", target)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            if hasattr(mod, "validate_overlay_data"):
+                return mod
+            print("  ! %s has no validate_overlay_data - it is older than 1.8.0" % target)
+        except Exception as exc:                         # noqa: BLE001 - a partial tree upgrades
+            print("  ! could not load %s to check your settings against: %r" % (target, exc))
+    return None
+
+
+def merge_overlay(path, payload, dry):
+    """
+    Write the carried settings into the user's local file, never dropping what is there.
+
+    Takes the same {"channels": {...}} shape the settings file itself uses, so what is written is
+    literally what `carryable` validated - not a re-derivation of it. It used to take a list of
+    (channel, field, before, after) tuples, which could not express "carry this whole channel".
+    """
     existing = load_json(path) or {}
     if not isinstance(existing.get("channels"), dict):
         existing = {"channels": {}} if not existing else dict(existing, channels={})
     kept, conflicts = [], []
-    for cname, field, _before, after in carry:
+    for cname, block in ((payload or {}).get("channels") or {}).items():
         cur = existing["channels"].setdefault(cname, {})
-        if field in cur and cur[field] != after:
-            conflicts.append((cname, field, cur[field], after))
-            continue                                     # the local file is the newer intent
-        cur[field] = after
-        kept.append((cname, field, after))
+        for field, after in block.items():
+            if field in cur and cur[field] != after:
+                conflicts.append((cname, field, cur[field], after))
+                continue                                 # the local file is the newer intent
+            cur[field] = after
+            kept.append((cname, field, after))
     if not dry and kept:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         existing.setdefault("_comment", "Your settings for the model-orchestration skill. This "
@@ -245,9 +345,10 @@ def main():
     ap.add_argument("--migrate", action="store_true",
                     help="only move in-tree edits into your local settings file; do not copy files")
     ap.add_argument("--carry-all", action="store_true",
-                    help="also carry fields other than %s. Read the report first: a stale model "
-                         "name carried across a release makes every later command fail validation"
-                         % "/".join(AUTO_CARRY))
+                    help="also re-add whole channels this release removed, from your own copy. "
+                         "Individual FIELDS no longer need this: since 1.8.0 every edit that the "
+                         "new version's loader accepts is carried, and the rest are printed with "
+                         "the loader's own reason")
     ap.add_argument("--no-doctor", action="store_true", help="skip the check run at the end")
     a = ap.parse_args()
 
@@ -286,19 +387,33 @@ def main():
         print("\n  Note: same version in both places. Nothing will change except a fresh copy of "
               "the files.")
 
-    carry, conflicts, edits, basis = [], [], [], ""
+    carry, carry_payload, conflicts, edits, basis = [], {}, [], [], ""
     if not fresh:
         installed = load_json(os.path.join(dst, "channels.json"))
         # ...and the in-tree location is still read, so an install made by an earlier 1.7.0 build
         # keeps its baseline instead of silently dropping to inferred mode.
-        pristine = (load_json(baseline_file())
-                    or load_json(os.path.join(dst, "channels.shipped.json")))
+        pristine = load_json(baseline_file())
+        # ...but only if it describes THIS install at THIS version. An unstamped one (written by
+        # 1.7.x) is accepted, because refusing it would drop every existing user back into
+        # inferred mode for no gain; a stamped one that disagrees is refused out loud.
+        if pristine:
+            bv = pristine.get("_baseline_for_version")
+            bi = pristine.get("_baseline_for_install")
+            if (bv and bv != old_v) or (bi and bi != os.path.normcase(os.path.abspath(dst))):
+                print("\n  ! ignoring the saved baseline at %s: it describes %s at %s, not %s at "
+                      "%s. Falling back to inferred detection rather than blaming that release's "
+                      "changes on you." % (baseline_file(), bv or "an unknown version",
+                                           bi or "an unknown folder", old_v, dst))
+                pristine = None
+        # The in-tree location is still read, so an install made by a 1.7.0+ build keeps its
+        # baseline instead of silently dropping to inferred mode.
+        pristine = pristine or load_json(os.path.join(dst, "channels.shipped.json"))
         incoming = load_json(os.path.join(src, "channels.json"))
         if installed is None:
             print("\n  ! %s\\channels.json is missing or unreadable - treating this as a fresh "
                   "install of the files, and leaving your local settings file alone." % dst)
         else:
-            edits, basis = find_edits(installed, pristine, incoming)
+            edits, basis, inferred = find_edits(installed, pristine, incoming)
             old_names, new_names = set(channel_map(installed)), set(channel_map(incoming))
             print("\nCHANNELS")
             print("  new in this version : %s" % (", ".join(sorted(new_names - old_names)) or "none"))
@@ -307,19 +422,19 @@ def main():
             print("  detection: %s" % basis)
             if not edits:
                 print("  none found - your registry matches the baseline")
-            for cname, field, before, after in edits:
-                if field is None:
-                    print("  %-18s a channel that is not in the baseline at all - left in your "
-                          "local settings file untouched" % cname)
-                    continue
-                take = field in AUTO_CARRY or a.carry_all
-                print("  %-18s %-14s %r -> %r   %s"
-                      % (cname, field, before, after,
-                         "CARRIED OVER" if take else "not carried (pass --carry-all to keep it)"))
-                if take:
-                    carry.append((cname, field, before, after))
+            carry_payload, carry, dropped, judged = carryable(
+                os.path.join(src, "channels.json"), edits, installed=installed,
+                force_channels=a.carry_all, inferred=inferred)
+            if edits and not judged:
+                print("  ! the incoming tree has no usable routing.py, so nothing could be "
+                      "validated - carrying every edit unchecked")
+            for cname, field, before, after in carry:
+                print("  %-18s %-14s %r -> %r   CARRIED OVER" % (cname, field, before, after))
+            for cname, field, after, why in dropped:
+                print("  %-18s %-14s %r   NOT CARRIED" % (cname, field, after))
+                print("  %-18s %s" % ("", why))
             ovp = overlay_file()
-            kept, conflicts = merge_overlay(ovp, carry, a.dry_run)
+            kept, conflicts = merge_overlay(ovp, carry_payload, a.dry_run)
             print("\nYOUR SETTINGS NOW LIVE OUTSIDE THE SKILL FOLDER")
             print("  %s" % ovp)
             # "written" in a --dry-run report is a false statement about the filesystem, and this
@@ -353,9 +468,10 @@ def main():
                   "deleted 14 days after an update, so this is a limited window:")
             for cname, field, before, after, where in cache_carry:
                 print("    %-18s %-9s %r -> %r   (from %s)" % (cname, field, before, after, where))
-            kept2, _c2 = merge_overlay(overlay_file(),
-                                       [(c, f, b, af) for c, f, b, af, _w in cache_carry],
-                                       a.dry_run)
+            cache_payload = {"channels": {}}
+            for cname, field, _b, after, _w in cache_carry:
+                cache_payload["channels"].setdefault(cname, {})[field] = after
+            kept2, _c2 = merge_overlay(overlay_file(), cache_payload, a.dry_run)
             print("  %d %s into %s"
                   % (len(kept2), "would be written" if a.dry_run else "written", overlay_file()))
         else:
@@ -379,8 +495,21 @@ def main():
             copy_tree(src, dst)
             # The pristine copy of what was just installed, so the NEXT upgrade is a three-way
             # merge instead of a guess. Written OUTSIDE the tree - see baseline_file().
+            #
+            # 🔴 STAMPED WITH THE VERSION IT DESCRIBES. It was an unlabelled copy of a registry
+            # until 2026-08-08, which is the same defect this project spent round 30 fixing one
+            # level up: a file whose identity you have to infer. It matters because the baseline
+            # is per-USER while installs are per-FOLDER - `install.ps1` hardcoded its destination
+            # until 1.7.0, so more than one install on a machine is a thing that really happens -
+            # and an unstamped baseline from a different install would silently attribute that
+            # release's own changes to the user.
             os.makedirs(os.path.dirname(baseline_file()), exist_ok=True)
-            shutil.copy2(os.path.join(src, "channels.json"), baseline_file())
+            with open(os.path.join(src, "channels.json"), encoding="utf-8") as f:
+                _base = json.load(f)
+            _base["_baseline_for_version"] = new_v
+            _base["_baseline_for_install"] = os.path.normcase(os.path.abspath(dst))
+            with open(baseline_file(), "w", encoding="utf-8") as f:
+                json.dump(_base, f, ensure_ascii=False)
         except OSError as exc:
             print("\n🔴 THE COPY FAILED PART-WAY: %s" % exc)
             print("   The folder is now a mix of both versions. Your settings file is untouched.")

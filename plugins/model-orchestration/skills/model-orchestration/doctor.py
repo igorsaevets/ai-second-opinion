@@ -20,7 +20,6 @@ Standard library only. Never prints a secret: for the API key it reports presenc
 """
 
 import argparse
-import hashlib
 import importlib.util
 import json
 import os
@@ -143,10 +142,19 @@ def check_registry(r):
     # Your settings, and whether they are somewhere an update can destroy.
     ov = reg.get("_overlay") or {}
     if ov.get("present"):
-        n = len(ov.get("applied", [])) + len(ov.get("added", []))
+        n = len(ov.get("applied", []))
         detail = "; ".join("%s.%s=%r" % (c, f, v) for c, f, _b, v in ov.get("applied", [])) or \
                  "present, changes nothing"
+        if ov.get("added"):
+            detail += "; adds channel(s): " + ", ".join(ov["added"])
         r.ok("your settings", "%s  (%d override(s): %s)" % (ov["path"], n, detail))
+        if ov.get("trust") == routing.OVERLAY_TRUST_REDIRECTED:
+            r.warn("settings provenance",
+                   "that path came from %s, not from your home directory" % routing.OVERLAY_ENV,
+                   "a project's own .claude/settings.json can set an environment variable, so a "
+                   "repository you cloned could be choosing this file. Transport fields are "
+                   "refused from it. If you set the variable yourself, that is fine; if you did "
+                   "not, look at where it came from. Home path: %s" % routing.overlay_home_path())
     else:
         r.ok("your settings", "none yet - %s does not exist. Put channel changes THERE, not in "
                               "channels.json: nothing that updates this skill can reach it"
@@ -155,30 +163,35 @@ def check_registry(r):
 
 def check_registry_pristine(r):
     """
-    Has the shipped registry been edited in place? That edit dies at the next update.
+    Has the shipped registry been edited in place, and WHICH fields? That edit dies at the update.
 
-    The fingerprint ships with a built kit and is deliberately absent from the author's working
+    The reference copy ships with a built kit and is deliberately absent from the author's working
     copy, which is edited every session - a check that always fails on the maintainer's machine is
     one the maintainer teaches themselves to ignore, and then it is not a check.
+
+    1.7.0 shipped a sha256 here and could answer only yes/no. Naming the fields is what lets
+    `upgrade.py` carry ALL of them instead of guessing `enabled`, and what lets a user see whether
+    the thing they are about to lose matters.
     """
-    stamp = os.path.join(HERE, "channels.sha256")
-    reg = os.path.join(HERE, "channels.json")
-    if not os.path.isfile(stamp) or not os.path.isfile(reg):
+    sys.path.insert(0, HERE)
+    import routing
+    drift = routing.registry_drift()
+    if drift is None:
+        return          # source tree: no reference copy was shipped, and none should be
+    if drift.get("error"):
+        r.warn("registry edits", "could not be checked (%s)" % drift["error"], "harmless; skip it")
         return
-    try:
-        want = open(stamp, encoding="utf-8").read().strip()
-        got = hashlib.sha256(open(reg, "rb").read().decode("utf-8").encode("utf-8")).hexdigest()
-    except OSError as exc:
-        r.warn("registry edits", "could not be checked (%s)" % exc, "harmless; skip it")
-        return
-    if got == want:
+    if drift["pristine"]:
         r.ok("registry edits", "channels.json is exactly what this version shipped")
-    else:
-        r.warn("registry edits",
-               "channels.json has been changed since it was installed",
-               "that change lives inside the skill folder, and the next update replaces the "
-               "whole folder - so it will be lost without a word. Move it out with:  python "
-               "%s --migrate" % os.path.join(HERE, "upgrade.py"))
+        return
+    shown = "; ".join("%s.%s=%r" % (c, f, a) for c, f, _b, a in drift["changed"][:6])
+    if len(drift["changed"]) > 6:
+        shown += "; +%d more" % (len(drift["changed"]) - 6)
+    r.warn("registry edits",
+           "channels.json has %d hand-edited field(s): %s" % (len(drift["changed"]), shown),
+           "those changes live inside the skill folder, and the next update replaces the whole "
+           "folder - so they will be lost without a word. Move them out with:  python "
+           "%s --migrate" % os.path.join(HERE, "upgrade.py"))
 
 
 def check_key(r):

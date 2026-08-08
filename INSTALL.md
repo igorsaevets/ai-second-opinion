@@ -200,23 +200,75 @@ From 1.7.0 your settings live in a file **outside** the skill folder, which noth
 }
 ```
 
-It can set `enabled`, `effort`, `reasoning`, `thinking_level`, `max_tokens`, `fetch_tool`, `web`,
-`label`, `cost` and `notes` — and **nothing else**. Anything that decides *which vendor receives
-your documents* or *what text is added to them* (`model`, `provider`, `kind`, `prompt_suffix`) is
-refused by name, because this file survives every update: a setting nobody can overwrite is also a
-setting nobody can correct. Change those in `channels.json`, where `doctor.py` will show that you
-did. Set `MODEL_ORCH_LOCAL` to keep the file somewhere else.
+### What it may change (1.8.0 widened this a lot)
 
-Four things make it hard to shoot yourself with:
+At the path in the table above — your own home directory — **it may change anything a channel or a
+tier has, and it may add whole new ones.** Repoint a model, add a vendor, define your own tier:
+
+```json
+{
+  "channels": {
+    "mylocal": {
+      "_new": true,
+      "kind": "openrouter", "label": "My Channel", "cost": "metered",
+      "model": "vendor/model-id",
+      "models": { "vendor/model-id": { "label": "My Model", "data_policy": "metered API" } },
+      "enabled": true
+    }
+  },
+  "tiers": { "strategic": { "gemini_thinking_level": "low" } }
+}
+```
+
+`"_new": true` is required when you are *adding* something, so that a misspelt name fails loudly
+instead of quietly becoming a second channel.
+
+1.7.0 refused all of that, and it was wrong to. Your settings file and `channels.json` have the
+same write permissions — anything able to change one can change the other — and `channels.json` was
+the file nothing announced at run time. Refusing `model` here never stopped anybody; it pushed the
+change into the quieter file. Both are now reported, in the plan, before a penny is spent.
+
+**Two conditions, and neither is about trusting you less.**
+
+**1. A transport change has to be accepted once.** Repointing a model, changing `provider` or
+`kind`, adding a channel — anything that decides *where a document goes* — is applied, printed in
+the plan with a 🔴, and then a paid round **refuses to run** until you have said once:
+
+```
+python routing.py --accept-settings
+```
+
+It prints exactly what you are accepting and records it. Change any of it later and the refusal
+comes back. Why: this file survives every update, so a single write to it — by a mistyped command,
+or by an AI assistant acting on a poisoned instruction — would otherwise redirect a channel
+*forever*, silently. Quiet settings (`enabled`, how hard it thinks, how much it may read) never
+need this. If you want a permanent transport change without the step, put it in `channels.json`:
+that is now reported field by field in the plan on every run, and an update will replace it, which
+is the right property for that class.
+
+**2. A relocated settings file may only set the quiet knobs.** If you point `MODEL_ORCH_LOCAL` at a
+different path, only these are accepted from it: `enabled`, `effort`, `reasoning`,
+`thinking_level`, `max_tokens`, `fetch_tool`, `web`, `timeout`, `label`, `notes`. A project's own
+`.claude/settings.json` can set environment variables for the sessions run inside it, so a
+repository you cloned can choose that path. Your home directory is yours. Move the file to the
+default path and everything is accepted, subject to condition 1.
+
+(`cost` is **not** on that list, though it looks cosmetic. It decides whether the plan warns you
+that a channel is expensive, and which channels `--ask` fans out to.)
+
+Five things make it hard to shoot yourself with:
 
 - **Every run prints the file's path and each value it changed**, in the resolved plan, whether or
-  not you were thinking about it. A settings file you forget you wrote is worse than none.
+  not you were thinking about it. Changes to a transport are marked 🔴. A settings file you forget
+  you wrote is worse than none.
+- **The plan also reports edits you made to `channels.json`**, by field, for the same reason —
+  and reminds you that the next update will take them.
 - **A name that is not a channel is refused, loudly**, with the list of real ones. A typo in a
   config file otherwise looks exactly like a channel that is off for some other reason.
 - **A channel that was renamed still resolves**, through the same alias table `--only` uses. A
   strict "unknown name" refusal plus a rename upstream would otherwise stop the tool starting, on
   upgrade day, for people who did nothing wrong.
-- **`doctor.py` warns if you edited `channels.json` in place anyway**, and points at
+- **`doctor.py` names the fields you edited in `channels.json`**, and points at
   `python upgrade.py --migrate`, which moves those edits out for you and changes nothing else.
 
 ---

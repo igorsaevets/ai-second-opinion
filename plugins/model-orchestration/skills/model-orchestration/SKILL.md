@@ -243,12 +243,17 @@ costs money: double the fetch budget is double the context, and context is the b
 
 **The floor is waived when your brief caps the length.** "Under 250 words" makes a short reply
 correct — the floor only means "under-allocated" when the brief did not ask for brevity.
-
 Streaming is automatic above a 32,000 budget — why, in `references/channels.md`.
 
 **Your own settings go in `~/.claude/model-orchestration.local.json`, never in `channels.json`** —
 an update replaces the skill folder and cannot reach that file. `{"channels": {"<name>":
-{"enabled": true}}}`. Updating an install: `python upgrade.py` (`--dry-run` first).
+{"enabled": true}}, "tiers": {"strategic": {"gemini_thinking_level": "low"}}}`. There it may change
+anything and add channels or tiers (`"_new": true`). Both files' changes print in the plan. 🔴 A
+change to WHERE a document goes needs `python routing.py --accept-settings` once, or a paid round
+refuses. Rules and errors: `references/when-it-breaks.md`. Updating: `python upgrade.py`.
+
+🔴 **A depth knob you have only SENT is not a depth knob.** `python echocheck.py --only <channel>
+--samples 3` judges by the reasoning counter that comes back, refusing CONFIRMED on overlap.
 
 ---
 

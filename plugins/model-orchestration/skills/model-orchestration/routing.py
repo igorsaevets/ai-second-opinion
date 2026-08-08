@@ -28,6 +28,7 @@ Standard library only.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -38,6 +39,12 @@ if hasattr(sys.stdout, "reconfigure"):
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_REGISTRY = os.path.join(HERE, "channels.json")
+# A byte-for-byte reference copy of the registry as it shipped, written by package.py into built
+# trees only. Never loaded, never merged - it exists so that "has this been edited?" can be
+# answered with the FIELD NAMES rather than a yes/no, both in the plan and by upgrade.py. It
+# replaced `channels.sha256` in 1.8.0: a hash answers the smaller question and cannot answer the
+# larger one, and two files answering one question is how the stale copy gets believed.
+SHIPPED_REGISTRY_NAME = "channels.shipped.json"
 
 # Ordered longest-first at match time. Russian and English both, because the override is
 # whatever Igor typed in chat, pasted verbatim.
@@ -70,68 +77,164 @@ class RouteError(Exception):
 OVERLAY_ENV = "MODEL_ORCH_LOCAL"
 OVERLAY_NAME = "model-orchestration.local.json"
 
-# 🔴🔴 THE OVERLAY IS DEFAULT-DENY, AND A REVIEWER IS THE REASON. The first version accepted any
-# field valid inside a channel block, and kimik3 named the consequence in one sentence: a file that
-# survives every update, is merged BEFORE validation, and can name a transport, hands anything able
-# to write one file in a home directory a persistent, update-proof redirection of where documents
-# are sent - "and the per-run print of what the overlay changed only helps if a human reads it,
-# which the plugin path specifically removes." Correct, and it was a regression created by moving
-# the file OUT of the update's reach: out of its reach is also out of the maintainer's.
+# 🔴🔴 THE OVERLAY'S TRUST IS KEYED ON PROVENANCE, NOT ON WHICH FIELD IS BEING SET.
 #
-# So the fields a user is documented to change pass, and everything else is refused BY NAME. The
-# allowlist is what people actually set; `enabled` alone covers every instruction in INSTALL.md, so
-# false positives here are close to nil - which matters, because a gate that fires on correct usage
-# is one people learn to switch off.
-OVERLAY_SAFE_FIELDS = frozenset({
+# Round 30 shipped a default-deny allowlist here on kimik3's finding: a file that survives every
+# update, is merged BEFORE validation and can name a transport is update-proof redirection of where
+# documents go - "and the per-run print of what the overlay changed only helps if a human reads it,
+# which the plugin path specifically removes." The finding was real. The remedy was aimed at the
+# wrong axis, and round 31 established why by looking rather than reasoning:
+#
+#   * `~/.claude/model-orchestration.local.json` and `<skill>/channels.json` have IDENTICAL write
+#     permissions. Anything that can write the first can write the second. Refusing `model` here
+#     never stopped an attacker; it sent them one file to the left.
+#   * And that file is the QUIET one. `format_plan` prints every overlay change on every run,
+#     while an in-place edit of channels.json was fingerprinted only by `doctor.py` - which nobody
+#     runs before a round. So the allowlist pushed the most sensitive class of change into the
+#     least visible place, which is the exact opposite of its purpose. Round 31 fixes that half
+#     too: the plan now reports registry drift itself (see `registry_drift`).
+#   * Meanwhile it fired on correct use. Igor, 2026-08-08: advanced users must be able to change
+#     and improve this, and the hand on the keyboard is their Claude Code, not a novice. A gate
+#     that fires on the intended workflow is a class this project has already measured twice - it
+#     teaches people to switch the whole class off.
+#
+# What IS asymmetric is where the path came from. The home default can only be chosen by whoever
+# owns the home directory. `MODEL_ORCH_LOCAL` can be chosen by a repository you cloned: verified
+# 2026-08-08 at code.claude.com/docs/en/settings, `env` is "Environment variables applied to every
+# session and to subprocesses Claude Code spawns from it", and `.claude/settings.json` is the file
+# "checked into source control and shared with your team". A cloned repo can set that variable; a
+# cloned repo cannot become your home directory.
+#
+# Hence two provenances, one rule each:
+#   home       - everything is allowed. The trust is already there by construction, and every
+#                change is printed before a penny is spent.
+#   redirected - the fields that decide WHERE a document goes or WHAT is added to it are refused,
+#                and the error says how to get them: move the file to the home path.
+# Deliberately still no env var to bypass this. An escape hatch that can be set once and forgotten
+# IS the default - measured in round 28, where a 161 KB case brief changed tier because the way
+# round the gate was written down.
+# 🔴🔴 AND THEN THREE REVIEWERS FOUND THE HOLE IN *THAT*, INDEPENDENTLY, AND THEY WERE RIGHT.
+# kimik3, goog36flash and agy36flash each named the same asymmetry the permission-equivalence
+# argument above misses: it is true for a RESIDENT attacker and false for a ONE-SHOT one.
+#
+#   `channels.json` is SELF-HEALING. The next update replaces it, which is exactly the defect
+#   round 30 fixed - and simultaneously a security property nobody had named. The home overlay is
+#   update-proof by construction. So opening it up handed the PERMANENT file the powers the
+#   EPHEMERAL one had. kimik3, verbatim: "a single compromised assistant session writes
+#   `model`/`provider` into the home overlay once, and every future run - including after the
+#   skill updates - silently re-points a channel."
+#
+# That threat is not hypothetical here: this product's own premise is that an AI assistant edits
+# the configuration on the user's behalf, so a one-shot write is the MOST likely compromise, not
+# the least. The inline red marker does not answer it - the plugin path removes the human who
+# would read it, which is the same sentence that killed the 1.7.0 design.
+#
+# THE FIX KEEPS BOTH REQUIREMENTS. A sharp change is still allowed at the home path - Igor's
+# advanced user, and their Claude Code, can repoint a model or add a channel - but it is NOT
+# applied to a paid run until it has been ACKNOWLEDGED once, by a command the user runs:
+#
+#     python routing.py --accept-settings
+#
+# The acknowledgement stores a digest of the sharp section. Change the sharp section and it stops
+# matching, so the tool refuses again and prints what changed. A file write alone is no longer
+# enough: the attacker would also have to make the human type a second command, having read a
+# refusal that names the redirect. Quiet fields are untouched by any of this.
+#
+# Why not a per-run flag instead: it would put the friction on every legitimate run forever and
+# teach people to paste it by reflex, which is this project's own measured definition of a dead
+# gate. Why not simply refuse: because permanent transport changes now have a proper home -
+# `channels.json`, which since 1.8.0 is reported field by field in the plan on EVERY run, and is
+# wiped by updates, which is the right property for that class.
+OVERLAY_TRUST_HOME = "home"
+OVERLAY_TRUST_REDIRECTED = "redirected"
+ACK_NAME = "model-orchestration.accepted.json"
+
+# Quiet fields: how hard a channel thinks, how much it may read, and bookkeeping. None of them can
+# move a byte to a new destination, so they are accepted at either provenance and applied without
+# ceremony. EVERYTHING NOT LISTED IS SHARP - a field added to the registry next month is sharp by
+# default, which is the right way round for a list that will be edited by someone in a hurry.
+OVERLAY_QUIET_FIELDS = frozenset({
     "enabled",          # the only field the docs ever told anyone to change
     "effort", "reasoning", "thinking_level", "max_tokens",   # how hard it thinks
-    "fetch_tool", "web",                                     # how much it may read
-    "label", "cost", "notes",                                # cosmetic / bookkeeping
+    "fetch_tool", "web", "timeout",                          # how much it may read, for how long
+    "label", "notes",                                        # genuinely cosmetic
 })
-# Deliberately NOT an env var. An escape hatch that can be set once and forgotten is the same
-# defect as the registry that "documented" a way round its own tier gate - measured in round 28,
-# where a 161 KB case brief moved tier because the way round was written down. Changing a
-# transport means editing channels.json, in the folder an update replaces, where the change is
-# visible, fingerprinted by doctor.py, and does not silently outlive the person who made it.
-OVERLAY_UNSAFE_HINT = ("This field decides WHERE your documents go or WHAT is added to them, so it "
-                       "is not accepted from a file that survives every update. Set it in "
-                       "channels.json instead - doctor.py will show that you did.")
+# 🔴 `cost` WAS ON THAT LIST AS "cosmetic / bookkeeping" AND IT IS NOT COSMETIC. Found by taking
+# a reviewer's general frame seriously and then checking it: kimik3 pointed out that every
+# verification layer here is a report printed by the program whose configuration is under review,
+# and offered `label` as the example. `label` turned out to be harmless - the plan prints the
+# channel KEY and the model SLUG beside it, neither of which a redirected file can touch. `cost`
+# is the one that bites: it decides whether the plan prints "EXPENSIVE channel" before you spend,
+# and it decides which channels `--ask` fans out to, since that set is derived from `cost == free`.
+# A cloned repository setting `cost: "free"` on an expensive channel would quietly add it to every
+# one-shot question. Verify the FINDING, discard the PROOF.
+OVERLAY_SHARP_HINT = (
+    "Those fields decide WHERE your documents go or WHAT is added to them. This settings file was "
+    "chosen by the %s environment variable, and a project's own .claude/settings.json can set that "
+    "variable - so its provenance is weaker than your home directory's. Move the file to %s and "
+    "the same fields are accepted, printed in full on every run." )
+
+
+def overlay_home_path():
+    """The one path whose provenance is the user's own home directory."""
+    return os.path.join(os.path.expanduser("~"), ".claude", OVERLAY_NAME)
 
 
 def overlay_path():
     """Where the user's own settings live. Never inside the skill directory - see above."""
-    return (os.environ.get(OVERLAY_ENV)
-            or os.path.join(os.path.expanduser("~"), ".claude", OVERLAY_NAME))
+    return os.environ.get(OVERLAY_ENV) or overlay_home_path()
 
 
-def apply_overlay(reg, path=None):
+def overlay_trust():
+    """
+    Who could have chosen this path. Not "is this file safe" - a file is not a provenance.
+
+    Note the test is on the ENV VAR being set, not on where it points. Pointing the variable back
+    at the home default is still a redirect, because we cannot see who set the variable; that is
+    the whole asymmetry. Erring here costs a clear error message with the fix in it, and erring
+    the other way costs a transport nobody printed.
+    """
+    return OVERLAY_TRUST_REDIRECTED if os.environ.get(OVERLAY_ENV) else OVERLAY_TRUST_HOME
+
+
+def apply_overlay(reg, path=None, trust=None, data=None):
     """
     Merge the user's local settings over the shipped registry, recording every change.
 
     Deliberately strict. A typo'd channel name is REFUSED rather than ignored, because the failure
     mode of a config overlay is silence: `"goog36flah": {"enabled": true}` looks exactly like a
     channel that is off for some other reason, and the user would go looking in the wrong file.
+
+    `data` skips the file entirely, for callers asking "would this payload load?" before writing
+    it - see `validate_overlay_data`. Same code path, so the answer is about the real merge rather
+    than about a re-implementation of it.
     """
-    path = path or overlay_path()
-    info = {"path": path, "present": False, "applied": [], "added": [], "renamed": []}
+    if path is None and data is None:
+        path, trust = overlay_path(), (trust or overlay_trust())
+    trust = trust or OVERLAY_TRUST_HOME
+    info = {"path": path or "(in memory)", "trust": trust, "present": data is not None,
+            "applied": [], "added": [], "renamed": [], "sharp": []}
     reg["_overlay"] = info
-    if not os.path.isfile(path):
-        return reg
-    info["present"] = True
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError) as exc:
-        raise RouteError(
-            "your local settings file could not be read: %s\n  %s\n"
-            "Fix it or rename it; it is not skipped silently, because a settings file that is "
-            "ignored when malformed is worse than one that is missing." % (path, exc))
-    if not isinstance(data, dict) or not isinstance(data.get("channels"), dict):
+    if data is None:
+        if not os.path.isfile(path):
+            return reg
+        info["present"] = True
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError) as exc:
+            raise RouteError(
+                "your local settings file could not be read: %s\n  %s\n"
+                "Fix it or rename it; it is not skipped silently, because a settings file that is "
+                "ignored when malformed is worse than one that is missing." % (path, exc))
+    if not isinstance(data, dict) or not (isinstance(data.get("channels"), dict)
+                                          or isinstance(data.get("tiers"), dict)):
         raise RouteError(
             "%s must look like {\"channels\": {\"goog36flash\": {\"enabled\": true}}} - a top-level "
-            "\"channels\" object. Nothing else is read from it." % path)
+            "\"channels\" object, and/or a \"tiers\" object. Nothing else is read from it." % path)
+    _apply_overlay_tiers(reg, data.get("tiers") or {}, path, trust, info)
     known = reg["channels"]
-    for cname, over in data["channels"].items():
+    for cname, over in (data.get("channels") or {}).items():
         if not isinstance(over, dict):
             raise RouteError("%s: channels.%s must be an object, not %s"
                              % (path, cname, type(over).__name__))
@@ -146,20 +249,45 @@ def apply_overlay(reg, path=None):
             if len(hits) == 1:
                 target = hits[0]
                 info["renamed"].append((cname, target))
+        # 🔴 ADDING A WHOLE CHANNEL IS THE POINT, NOT AN EDGE CASE - and until round 31 it was
+        # impossible while `info["added"]` existed, was counted by doctor.py, and could never be
+        # anything but empty. That is this project's signature defect (a reported field that no
+        # code path can populate) sitting inside the instrument built to prevent it. `_new: true`
+        # is required so a TYPO still fails loudly: without it, a misspelt name would silently
+        # create a second channel instead of editing the one that was meant.
         if target not in known:
+            if not over.get("_new"):
+                raise RouteError(
+                    "%s names a channel that does not exist: %r. Known channels: %s.\n"
+                    "If you MEANT to add a new channel, add \"_new\": true to that block - it is "
+                    "required so that a misspelt name cannot quietly become a second channel. If "
+                    "that channel was removed or renamed in this version, delete the line; your "
+                    "other settings still apply."
+                    % (path, cname, ", ".join(sorted(known))))
+            if trust != OVERLAY_TRUST_HOME:
+                raise RouteError(
+                    ("%s adds a new channel (%r), which needs the home settings file.\n"
+                     % (path, cname))
+                    + OVERLAY_SHARP_HINT % (OVERLAY_ENV, overlay_home_path()))
+            known[cname] = {}
+            target = cname
+            info["added"].append(cname)
+        # SHARP vs QUIET - see the block at the top of this file. At the home path nothing is
+        # refused; a redirected path may not repoint a transport. Either way the change is
+        # recorded, and `format_plan` prints the sharp ones under their own heading.
+        sharp = sorted(f for f in over if not f.startswith("_")
+                       and f not in OVERLAY_QUIET_FIELDS)
+        if sharp and trust != OVERLAY_TRUST_HOME:
             raise RouteError(
-                "%s names a channel that does not exist: %r. Known channels: %s.\nIf that channel "
-                "was removed or renamed in this version, delete the line - your other settings "
-                "still apply. Nothing is ignored silently here, because an ignored typo looks "
-                "exactly like a channel that is off for some other reason."
-                % (path, cname, ", ".join(sorted(known))))
-        refused = sorted(f for f in over if not f.startswith("_")
-                         and f not in OVERLAY_SAFE_FIELDS)
-        if refused:
-            raise RouteError(
-                "%s sets %s on channel %r, which this file may not change.\n%s\nIt may change: %s."
-                % (path, ", ".join(repr(f) for f in refused), cname, OVERLAY_UNSAFE_HINT,
-                   ", ".join(sorted(OVERLAY_SAFE_FIELDS))))
+                ("%s sets %s on channel %r.\n" % (path, ", ".join(repr(f) for f in sharp), cname))
+                + OVERLAY_SHARP_HINT % (OVERLAY_ENV, overlay_home_path())
+                + "\nAccepted from any path: %s." % ", ".join(sorted(OVERLAY_QUIET_FIELDS)))
+        for field in sharp:
+            # Only when it CHANGES something. A settings file that re-states the shipped value is
+            # not a redirect, and demanding acceptance for it would be a false positive in the one
+            # gate whose whole purpose is that a human reads it once and means it.
+            if known[target].get(field) != over[field]:
+                info["sharp"].append((target, field, known[target].get(field), over[field]))
         for field, value in over.items():
             if field.startswith("_"):
                 continue
@@ -170,12 +298,192 @@ def apply_overlay(reg, path=None):
     return reg
 
 
+def _apply_overlay_tiers(reg, over, path, trust, info):
+    """
+    Tiers are settings too, and until 1.8.0 they were the one knob a user could not reach.
+
+    That asymmetry had a concrete cost: `gemini_thinking_level` lives on the TIER and overrides the
+    channel's own value, so a user lowering `goog36flash.thinking_level` in their settings file
+    would have watched the tier silently put it back. A knob that resolves, prints and does nothing
+    is the single most repeated defect in this project's history; here it would have been created
+    by the safety rule rather than found by it.
+
+    What counts as quiet is DERIVED, not listed: a field the shipped tier already has is a knob
+    this release understands, and anything else is new, unrecognised, and therefore home-only.
+    """
+    if not over:
+        return
+    known = reg.get("tiers") or {}
+    for tname, block in over.items():
+        if tname.startswith("_"):
+            continue
+        if not isinstance(block, dict):
+            raise RouteError("%s: tiers.%s must be an object, not %s"
+                             % (path, tname, type(block).__name__))
+        if tname not in known:
+            if not block.get("_new"):
+                raise RouteError(
+                    "%s names a tier that does not exist: %r. Known tiers: %s. Add \"_new\": true "
+                    "to define a new one." % (path, tname, ", ".join(sorted(
+                        t for t in known if not t.startswith("_")))))
+            if trust != OVERLAY_TRUST_HOME:
+                raise RouteError(("%s adds a new tier (%r), which needs the home settings file.\n"
+                                  % (path, tname))
+                                 + OVERLAY_SHARP_HINT % (OVERLAY_ENV, overlay_home_path()))
+            known[tname] = {}
+            info["added"].append("tier:" + tname)
+        quiet = {k for k in known[tname] if not k.startswith("_")}
+        sharp = sorted(f for f in block if not f.startswith("_") and f not in quiet)
+        if sharp and trust != OVERLAY_TRUST_HOME:
+            raise RouteError(
+                ("%s sets %s on tier %r, which this release's %r tier does not define.\n"
+                 % (path, ", ".join(repr(f) for f in sharp), tname, tname))
+                + OVERLAY_SHARP_HINT % (OVERLAY_ENV, overlay_home_path())
+                + "\nAccepted from any path on this tier: %s." % (", ".join(sorted(quiet)) or "-"))
+        for field, value in block.items():
+            if field.startswith("_"):
+                continue
+            before = known[tname].get(field)
+            if field in sharp:
+                info["sharp"].append(("tier:" + tname, field, before, value))
+            if before != value:
+                info["applied"].append(("tier:" + tname, field, before, value))
+            known[tname][field] = value
+    reg["tiers"] = known
+
+
+def ack_path():
+    """Beside the settings file, never inside the skill folder - it must survive updates too."""
+    return os.path.join(os.path.dirname(os.path.abspath(overlay_path())), ACK_NAME)
+
+
+def sharp_digest(info):
+    """
+    A stable digest of every transport-affecting change the settings file makes.
+
+    Keyed on (channel, field, new value) and sorted, so re-ordering the JSON, reformatting it, or
+    editing a quiet field beside a sharp one does NOT invalidate the acknowledgement. Only a real
+    change to what is sent, or where, does.
+    """
+    items = sorted((c, f, json.dumps(a, sort_keys=True, ensure_ascii=False))
+                   for c, f, _b, a in (info.get("sharp") or []))
+    if not items:
+        return None
+    return hashlib.sha256(json.dumps(items, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def check_sharp_ack(reg):
+    """Record on the overlay info whether its sharp section has been acknowledged."""
+    info = reg.get("_overlay") or {}
+    want = sharp_digest(info)
+    info["sharp_digest"] = want
+    info["sharp_acked"] = True
+    if not want:
+        return reg
+    try:
+        with open(ack_path(), encoding="utf-8") as f:
+            info["sharp_acked"] = json.load(f).get("sharp_digest") == want
+    except (OSError, ValueError):
+        info["sharp_acked"] = False
+    return reg
+
+
+def accept_settings(reg):
+    """Write the acknowledgement. Returns (path, digest, list of what was accepted)."""
+    info = reg.get("_overlay") or {}
+    want = sharp_digest(info)
+    p = ack_path()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump({"sharp_digest": want,
+                   "_what": "You accepted the transport-affecting settings listed below. This "
+                            "file is not read for anything else. Change any of them and the tool "
+                            "will refuse to spend money until you accept again.",
+                   "_accepted": [[c, f_, a] for c, f_, _b, a in (info.get("sharp") or [])]},
+                  f, indent=2, ensure_ascii=False)
+    return p, want, info.get("sharp") or []
+
+
+def validate_overlay_data(registry_path, data, trust=OVERLAY_TRUST_HOME):
+    """
+    Would this settings payload produce a registry that still loads? Returns None, or the reason.
+
+    Exists so `upgrade.py` can carry a user's edits ONE AT A TIME and keep the ones that survive,
+    instead of the 1.7.0 behaviour: carry `enabled` and leave everything else behind because a
+    carried `model` *might* name something the new release renamed. "Might" is answerable - by
+    asking the loader. A setting that is dropped is now dropped with the loader's own error next
+    to it, which is the difference between a report and an apology.
+    """
+    try:
+        with open(registry_path, encoding="utf-8") as f:
+            reg = json.load(f)
+        _strip_comment_keys(reg)
+        apply_overlay(reg, trust=trust, data=data)
+        _check_channel_names(reg)
+        _check_alias_collisions(reg)
+        _check_channel_models(reg)
+        _check_channel_required(reg)
+    except RouteError as exc:
+        return str(exc)
+    except (OSError, ValueError) as exc:
+        return "registry could not be read: %s" % exc
+    return None
+
+
 def canon_channel_safe(reg, name):
     """`canon_channel` without its raise, for callers that have their own error to give."""
     try:
         return canon_channel(reg, name)
     except RouteError:
         return []
+
+
+def registry_drift(path=DEFAULT_REGISTRY):
+    """
+    Has the SHIPPED registry been edited in place, and if so, where?
+
+    Round 30 answered only "yes/no", only inside `doctor.py`, which nobody runs before a round.
+    That left the two config files with opposite visibility: an overlay change was printed on
+    every run, an in-place edit of channels.json was printed nowhere - so the strict overlay
+    allowlist was steering people towards the silent file. A shipped tree now carries a reference
+    copy of its own registry, so the answer is a LIST OF FIELDS rather than a boolean, and
+    `upgrade.py` no longer has to infer what to carry across.
+
+    Returns None in a source tree (no reference copy) - a check that always fires on the
+    maintainer's machine is one the maintainer trains themselves to ignore.
+    """
+    ref = os.path.join(os.path.dirname(os.path.abspath(path)), SHIPPED_REGISTRY_NAME)
+    if not os.path.isfile(ref) or not os.path.isfile(path):
+        return None
+    out = {"reference": ref, "pristine": True, "changed": [], "error": None}
+    try:
+        with open(ref, encoding="utf-8") as f:
+            was = json.load(f)
+        with open(path, encoding="utf-8") as f:
+            now = json.load(f)
+    except (OSError, ValueError) as exc:
+        out["error"] = str(exc)
+        return out
+    a, b = (was.get("channels") or {}), (now.get("channels") or {})
+    for cname in sorted(set(a) | set(b)):
+        # `_`-prefixed keys inside `channels` are prose, not channels - the house idiom, and the
+        # trap `_strip_comment_keys` exists for. Iterating one as a channel would `set()` a string
+        # into its characters and report every letter as a changed field.
+        if cname.startswith("_") or not isinstance(a.get(cname, b.get(cname)), dict):
+            continue
+        if cname not in a:
+            out["changed"].append((cname, "*", "(absent)", "added by hand"))
+            continue
+        if cname not in b:
+            out["changed"].append((cname, "*", "(shipped)", "deleted by hand"))
+            continue
+        for field in sorted(set(a[cname]) | set(b[cname])):
+            if field.startswith("_"):
+                continue
+            if a[cname].get(field) != b[cname].get(field):
+                out["changed"].append((cname, field, a[cname].get(field), b[cname].get(field)))
+    out["pristine"] = not out["changed"]
+    return out
 
 
 def load_registry(path=DEFAULT_REGISTRY, overlay=True):
@@ -188,12 +496,62 @@ def load_registry(path=DEFAULT_REGISTRY, overlay=True):
         # registry is how a config file becomes an unchecked code path.
         apply_overlay(reg)
     else:
-        reg["_overlay"] = {"path": overlay_path(), "present": False,
-                           "applied": [], "added": [], "renamed": []}
+        reg["_overlay"] = {"path": overlay_path(), "trust": overlay_trust(), "present": False,
+                           "applied": [], "added": [], "renamed": [], "sharp": []}
+    reg["_drift"] = registry_drift(path)
+    check_sharp_ack(reg)
     _check_channel_names(reg)
     _check_alias_collisions(reg)
     _check_channel_models(reg)
+    _check_channel_required(reg)
+    _check_tiers(reg)
     return reg
+
+
+def _check_tiers(reg):
+    """
+    A tier value that the vendor will reject costs a paid 400, so it is caught here for free.
+
+    Only `gemini_thinking_level` is checkable this way today - it is the one tier field with a
+    declared ladder to check against. The others are effort strings the dispatcher clamps, and
+    timeouts, where any number is legal.
+    """
+    ladders = [set(ch["thinking_levels"]) for ch in reg["channels"].values()
+               if isinstance(ch, dict) and ch.get("thinking_levels")]
+    if not ladders:
+        return
+    legal = set().union(*ladders)
+    for tname, t in (reg.get("tiers") or {}).items():
+        if tname.startswith("_") or not isinstance(t, dict):
+            continue
+        lvl = t.get("gemini_thinking_level")
+        if lvl and lvl not in legal:
+            raise RouteError(
+                "tier %r sets gemini_thinking_level=%r, which no channel declares. The levels "
+                "this release knows about are: %s. Sending an unknown one costs a paid 400."
+                % (tname, lvl, ", ".join(sorted(legal))))
+
+
+# The minimum a channel needs before the plan can honestly print a line for it. Checked at LOAD
+# time because the alternative is what actually happened to an unknown `kind`: the plan printed
+# [RUN ], money was budgeted for it, and the failure arrived from the dispatcher. Now that the
+# overlay can ADD a channel, a half-written block is a thing a user will really produce.
+_REQUIRED_CHANNEL_FIELDS = ("kind", "label", "model")
+
+
+def _check_channel_required(reg):
+    for cname, ch in reg["channels"].items():
+        missing = [f for f in _REQUIRED_CHANNEL_FIELDS if not ch.get(f)]
+        if missing:
+            # The list of legal `kind` values is deliberately NOT repeated here. It lives beside
+            # the dispatcher in orchestrate.py, which prints it when it meets one it cannot run;
+            # a second copy in this file is the two-homes rot this project keeps measuring.
+            raise RouteError(
+                "channel %r is missing %s. A channel needs at least %s before a plan can honestly "
+                "name what it is about to spend money on, and `kind` decides which dispatcher "
+                "runs it at all."
+                % (cname, ", ".join(repr(m) for m in missing),
+                   ", ".join(_REQUIRED_CHANNEL_FIELDS)))
 
 
 def _strip_comment_keys(reg):
@@ -229,10 +587,18 @@ def _check_channel_models(reg):
     for cname, ch in reg["channels"].items():
         known = ch.get("models") or {}
         if ch.get("model") and known and ch["model"] not in known:
+            # The fix, spelled out. Since 1.8.0 an advanced user can repoint a model from their own
+            # settings file, and this is the guard they will meet first - so it has to hand them
+            # the JSON rather than describe it. `label` is what the plan prints before money is
+            # spent and `data_policy` is what it prints about the vendor; a model with neither is
+            # a plan that cannot tell you what it is about to do.
             raise RouteError(
-                "channel %r defaults to model %r, which is not in its own `models` table (%s). "
-                "One channel = one model: list it, or point the default at one that is listed."
-                % (cname, ch["model"], ", ".join(known) or "empty"))
+                "channel %r defaults to model %r, which is not in its own `models` table (%s).\n"
+                "One channel = one model, and the table is where its label and data policy live. "
+                "Add it in the same block:\n"
+                '    "models": {"%s": {"label": "<what to print in the plan>",\n'
+                '                      "data_policy": "<what the vendor may do with the payload>"}}'
+                % (cname, ch["model"], ", ".join(known) or "empty", ch["model"]))
 
 
 # A channel name is now a FILESYSTEM PATH COMPONENT and a reported identity, not just a dict key:
@@ -839,6 +1205,12 @@ def _web_line(p):
     return None
 
 
+def _short(value, cap=90):
+    """A value a human can take in at a glance. The full object is in the file they are reading."""
+    text = repr(value)
+    return text if len(text) <= cap else text[:cap - 3] + "..."
+
+
 def format_plan(plan, reg):
     lines = ["RESOLVED PLAN", "-" * 78]
     # Printed BEFORE the channels, every run, whether or not it changed anything. A settings file
@@ -847,15 +1219,56 @@ def format_plan(plan, reg):
     # re-read). The plan is the one screen a human is guaranteed to look at before spending.
     ov = reg.get("_overlay") or {}
     if ov.get("present"):
-        lines.append("  local settings: %s" % ov["path"])
+        via = ("  (path chosen by %s - a project's .claude/settings.json can set that variable, "
+               "so transport fields are refused here)" % OVERLAY_ENV
+               ) if ov.get("trust") == OVERLAY_TRUST_REDIRECTED else ""
+        lines.append("  local settings: %s%s" % (ov["path"], via))
+        sharp = {(c, f) for c, f, _b, _a in ov.get("sharp", [])}
+        for cname in ov.get("added", []):
+            lines.append("           - 🔴 %s is a channel YOUR settings file adds; it is not part "
+                         "of this release" % cname)
         for cname, field, before, after in ov.get("applied", []):
-            lines.append("           - %s.%s: %r -> %r (yours, not the shipped default)"
-                         % (cname, field, before, after))
+            # 🔴 The sharp ones are marked in the SAME list rather than split into a second block.
+            # A separate "dangerous changes" section is read as a section about someone else: what
+            # has to be legible is that this line, among the ordinary ones, moves a document.
+            mark = "🔴 " if (cname, field) in sharp else ""
+            # 🔴 TRUNCATED, because the first version printed a whole `models` block - the shipped
+            # one carries several hundred characters of prose - and the warning under it scrolled
+            # off. A warning nobody can read is this project's own definition of a dead gate, and
+            # it had just been rebuilt into the line meant to prevent a silent redirect.
+            lines.append("           - %s%s.%s: %s -> %s (yours, not the shipped default)"
+                         % (mark, cname, field, _short(before), _short(after)))
         for old, new in ov.get("renamed", []):
             lines.append("           - %r in your file resolved to the channel now called %r"
                          % (old, new))
         if not ov.get("applied") and not ov.get("renamed"):
             lines.append("           - present but changes nothing")
+        if sharp:
+            lines.append("           🔴 marked lines change WHERE a document goes or WHAT is added "
+                         "to it.")
+            if not ov.get("sharp_acked"):
+                lines.append("           🔴🔴 NOT YET ACCEPTED. This file survives every update, so "
+                             "one write to it")
+                lines.append("              would otherwise re-point a channel forever, silently. "
+                             "If you made these")
+                lines.append("              changes, run once:   python \"%s\" --accept-settings"
+                             % os.path.join(HERE, "routing.py"))
+                lines.append("              If you did NOT, look at %s before anything else."
+                             % ov["path"])
+        lines.append("-" * 78)
+    # The other config file. Until 1.8.0 this was checked only by `doctor.py`, so the strict file
+    # printed itself every run and the file that can repoint a vendor printed nothing - which is
+    # how a safety rule ends up steering people towards the quiet path.
+    drift = reg.get("_drift")
+    if drift and drift.get("changed"):
+        lines.append("  🔴 channels.json has been edited since it was installed - %d field(s):"
+                     % len(drift["changed"]))
+        for cname, field, before, after in drift["changed"][:12]:
+            lines.append("           - %s.%s: %r -> %r" % (cname, field, before, after))
+        if len(drift["changed"]) > 12:
+            lines.append("           - ... and %d more" % (len(drift["changed"]) - 12))
+        lines.append("           That file is inside the folder an update replaces. Move it with:"
+                     "  python upgrade.py --migrate")
         lines.append("-" * 78)
     for c, p in plan.items():
         mark = "RUN " if p["enabled"] else "skip"
@@ -909,6 +1322,11 @@ def main():
     ap.add_argument("--set", dest="sets", nargs="*")
     ap.add_argument("--tier", default="strategic")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--accept-settings", action="store_true",
+                    help="accept the transport-affecting changes your settings file makes. Needed "
+                         "once after you add or repoint a channel there; a paid round refuses "
+                         "until then, so that one write to a file that survives every update "
+                         "cannot silently redirect a channel forever")
     a = ap.parse_args()
     # 🔴 LOADING WAS OUTSIDE THE HANDLER, so every refusal the loader is designed to produce came
     # out as a Python traceback. It never showed before because only a corrupt registry could
@@ -922,6 +1340,20 @@ def main():
     except RouteError as e:
         print("ROUTE ERROR: %s" % e)
         return 2
+    if a.accept_settings:
+        info = reg.get("_overlay") or {}
+        if not (info.get("sharp") or []):
+            print("Nothing to accept: %s makes no transport-affecting change.\n"
+                  "(Quiet settings - how hard a channel thinks, how much it may read, whether it "
+                  "is enabled - never need accepting.)" % info.get("path"))
+            return 0
+        p, digest, items = accept_settings(reg)
+        print("ACCEPTED, from %s:" % info.get("path"))
+        for cname, field, before, after in items:
+            print("  %s.%s: %r -> %r" % (cname, field, before, after))
+        print("\nRecorded in %s\nChange any of those and a paid round will refuse again until you "
+              "re-run this." % p)
+        return 0
     print(json.dumps(plan, ensure_ascii=False, indent=1) if a.json else format_plan(plan, reg))
     return 0
 
