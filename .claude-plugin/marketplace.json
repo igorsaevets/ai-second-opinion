@@ -1,5 +1,6 @@
 {
   "name": "review-channels",
+  "description": "Independent second-opinion review: send one document to several external AI models at once and mechanically verify each one did the research instead of inventing sources.",
   "owner": {
     "name": "igorsaevets",
     "url": "https://github.com/igorsaevets"
@@ -8,8 +9,23 @@
     {
       "name": "model-orchestration",
       "source": "./plugins/model-orchestration",
-      "description": "Run one brief past three external reviewer models in parallel (Spark over HTTPS, Codex CLI, Antigravity/Gemini CLI) and verify each one actually did the work.",
-      "version": "1.4.0"
+      "description": "Run one brief past several external reviewer models in parallel (Spark, Codex, Gemini/Antigravity, Kimi, Qwen), show where they disagree, and mechanically verify each one actually opened the sources it cited.",
+      "version": "1.4.1",
+      "category": "development",
+      "author": {
+        "name": "Igor Saevets",
+        "url": "https://github.com/igorsaevets"
+      },
+      "homepage": "https://github.com/igorsaevets/ai-second-opinion",
+      "license": "MIT",
+      "keywords": [
+        "review",
+        "second-opinion",
+        "verification",
+        "fact-checking",
+        "citations",
+        "hallucination"
+      ]
     }
   ]
 }
