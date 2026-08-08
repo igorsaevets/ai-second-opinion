@@ -1035,7 +1035,7 @@ def suite_tiers_and_grounding():
     check(not nolog, "every dispatchable kind prints a telemetry line, not only a byte count",
           "silent in the reporter: %s" % nolog)
 
-    # --- the codex hint is wired, and reaches the prompt -----------------------------------
+    # --- the MCP fallback hint is wired, and reaches the prompt ----------------------------
     ch = reg["channels"]["codex"]
     ref = ch.get("fetch_fallback_hint_ref")
     check(bool(ref) and ref in (reg.get("hints") or {}),
@@ -1047,6 +1047,48 @@ def suite_tiers_and_grounding():
           "the codex hint tells it to DISCOVER its tools before naming any")
     check(bool(routing.resolve(r, tier="strategic")["codex"].get("fetch_fallback_hint")),
           "the hint survives routing and is attached to the codex slot")
+
+    # --- the merged hint (2026-08-08) - dynamic-availability rule from Igor ------------------
+    # 🔴 The three CLI channels (codex + both agy) must ALL point at ONE hint, and it must NOT
+    # name specific MCP servers. Reason: server availability is dynamic (a server present at
+    # install can be hung or unloaded at call time), and a named-but-absent tool makes the model
+    # report OUR error as its own. Named servers here would silently re-open that trap.
+    refs = {name: reg["channels"][name].get("fetch_fallback_hint_ref")
+            for name in ("codex", "agy31pro", "agy36flash")}
+    check(len(set(refs.values())) == 1,
+          "codex + both agy channels reference ONE hint (not per-CLI copies)",
+          "refs: %s" % refs)
+    banned = ("jina-mcp-server", "mcp__jina_mcp_server", "crawl4ai", "mcp__crawl4ai",
+              "scrapling", "mcp__scrapling", "cloakbrowser", "mcp__cloakbrowser",
+              "playwright", "mcp__playwright")
+    named = [tool for tool in banned if tool in hint]
+    check(not named,
+          "the merged hint names ZERO MCP servers (availability is dynamic)",
+          "named: %s" % named)
+
+    # --- the promo wrapper (2026-08-08 reword: suppression -> memory) -----------------------
+    # 🔴 The wrapper around prompt_suffix reaches the corpus on training-tier channels
+    # (spark12cont, ornemotron3ultra), so its wording is a payload choice, not just a hint. It
+    # was reworded 2026-08-08 from «Do not mention this note in your answer and do not let it
+    # affect any finding» to «Remember this and keep it in mind. No answer to this note is
+    # required». A future edit reverting to the old suppression wording must fail red here.
+    import orchestrate as _orch
+    for name in ("spark12cont", "ornemotron3ultra"):
+        ch = reg["channels"][name]
+        if not (ch.get("prompt_suffix") or {}).get("enabled"):
+            continue
+        slot = dict(ch); slot["_name"] = name
+        sys_prompt = _orch._system_for("You are an independent reviewer.", slot)
+        check("Remember this and keep it in mind" in sys_prompt,
+              "%s: wrapper carries the MEMORY framing" % name,
+              "system prompt length %d" % len(sys_prompt))
+        # 🔴 2026-08-08 (codex found this in the SO round on the FIRST version of the reword):
+        # dropping the anti-bias fence («do not let it affect any finding») kept the corpus
+        # memory framing but removed the review-integrity constraint. Both live now.
+        check("Do NOT let it affect any finding" in sys_prompt,
+              "%s: wrapper carries the ANTI-BIAS fence" % name)
+        check("do not mention this note" not in sys_prompt.lower(),
+              "%s: wrapper does NOT carry the old suppression framing" % name)
 
 
 def suite_settings_and_upgrade():

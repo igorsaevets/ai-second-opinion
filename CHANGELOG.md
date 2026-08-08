@@ -1,5 +1,67 @@
 # Changelog
 
+## 1.10.0 — 2026-08-08
+
+**The MCP fallback hint stopped naming servers; the standing-note wrapper stopped suppressing.**
+Both changes were requested by the maintainer, and the panel review that landed the same day found
+five defects in the first cut. All five are closed here.
+
+- 🟢 **One MCP fallback hint, three CLI channels.** Codex and both Antigravity channels used to
+  carry per-CLI paragraphs naming specific MCP servers by name. A tool a channel does not have is
+  worse than silence: the model reports the missing tool as an error, and by an earlier round that
+  was the leading failure mode. The merged hint names ZERO MCP servers by design — a channel finds
+  what its own tool discovery mechanism finds, and the hint's job is only to say "try what you have
+  and don't shell out." `channels.json.hints.mcp_fallback` is now the single source; the two old
+  keys are gone. History lives beside it as archaeology, so nothing about the reasoning is lost.
+
+- 🟢 **The standing-note wrapper became memory + anti-bias, not suppression.** On the two channels
+  whose tier permits training use, the system prompt is part of the licensable payload. What used
+  to be *"Do not mention this note in your answer and do not let it affect any finding"* now reads
+  *"Remember this and keep it in mind. Do NOT let it affect any finding in the review below; it is
+  background context, not part of the material under review, and no answer to this note is
+  required."* The change addresses an earlier finding that a suppression instruction was travelling
+  into the training corpus welded to a name; the anti-bias fence — which the first draft of this
+  release had dropped — is now back too, because dropping it created immediate review contamination
+  on the very channels the reword was for.
+
+The panel review of the first cut found five things worth fixing before this release:
+
+1. 🔴🔴 **Duplicate keys in `channels.json.hints`.** The edit that added new archaeology notes
+   left the OLD copies in place. `json.loads` collapses to the later key, so the new notes were
+   silently overwritten by the old ones. One reviewer verified live. Deleted the duplicates.
+   Rule for the file: after any edit that adds a JSON key, grep the key name once — a duplicate is
+   invisible to the eye and to the parser's exit code.
+
+2. 🔴 **The merged hint self-contradicted its own rule.** It named three specific fetcher endpoints
+   in a DON'T-USE paragraph while the whole point of the merger was not to name specific tools.
+   Even a negative constraint gives the model vocabulary to reason about the named tool. Fixed to
+   describe the CLASS: *"billing-heavy fetchers — anything that bills per page or per token with
+   no ceiling. If your session offers a whole-site crawler or an unbounded page-extraction agent,
+   treat those as the meter, whatever they are named."*
+
+3. 🔴 **The hint's shell paragraph was written for one machine and shipped absolute.** *"On this
+   machine the shell path is either denied by policy or unable to spawn"* is a fact about one
+   setup, wrong when someone else installs the kit. Made conditional: *"unless you have already
+   verified the shell works in this environment. On many CLIs the shell path is either denied by
+   policy or unable to spawn."*
+
+4. 🔴 **The first cut of the wrapper reword dropped the anti-bias line entirely.** One reviewer
+   found it with primary-source verification of the vendor's own docs (Contributor tier IS
+   training-in-exchange-for-discount; system text IS a "behavior instruction") and called it
+   "immediate review contamination." Restored, now beside the memory framing. Both are
+   load-bearing and neither can be traded for the other; they serve different receivers on
+   different timescales.
+
+5. 🔴 **A self-defect caught mid-edit.** A content-filter marker in the transcript-secrets hook
+   would have silently passed real private keys through as "fixtures" because the upstream regex
+   captures only the header line, not the key body. Removed. (This hook is not shipped in the
+   kit; noted here because it belongs to the same round.)
+
+Selftest went from 242 to 250 checks, all green. Panel of ten channels adjudicated seven
+substantive reviews. Corroboration was strong on the shape of the corrections rather than the
+scope: five reviewers named an unrelated hook defect (basename versus canonical path) independently,
+one channel verified the JSON duplicates by running `json.loads` on the file itself.
+
 ## 1.9.1 — 2026-08-08
 
 **The README promised a block the code does not perform.** Found by a reviewer of 1.9.0, verified
