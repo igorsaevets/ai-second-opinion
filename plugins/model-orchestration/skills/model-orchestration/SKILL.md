@@ -48,17 +48,15 @@ kept **under** that budget (~4.3K tokens, ~300 lines) and is never clipped; the 
 - **agy dies silently if a tool is denied.** One auto-denied MCP call discards the whole run.
   Fixed once by `python patch_agy_permissions.py` (already applied 2026-07-31). If agy starts
   returning empty answers again, that is the first thing to check (`references/channels.md`).
-- **agy re-runs itself once, automatically, if it cites sources and opened none** — and it costs a
-  second agy call, announced before it spends. Measured: 0/3 grounded → **8/8**, tool calls 14 → 72,
-  and dead citations 3 → 0. If the second attempt also grounds nothing the *first* answer is
-  returned with both marked unverified. Never edit this into a loop.
-- **Citations are not evidence — the most reliable failure there is.** Read the `CITATIONS:` line;
-  the harness prints it for **agy and Spark**, which report the pages they opened. For **Codex,
-  which reports no telemetry**, "was it opened" is unanswerable, so ask the only remaining
-  question — `citecheck.py --answer reviews\CODEX.md --resolve-urls`, which needs no event log.
-  Measured on one brief 2026-07-31: **agy 3 dead URLs of 11 having opened zero pages**, Spark 0/22,
-  Codex 1/32 — and that 404 was a GitHub API probe for a tag that does not exist, i.e. the answer.
-  `DEAD` means the page is not there; `BLOCKED`/`UNKNOWN` mean the check failed and prove nothing.
+- **agy re-runs itself once, automatically, if it cites sources and opened none** — a second agy
+  call, announced before it spends (measured: 0/3 grounded → 8/8). If the retry also grounds
+  nothing the *first* answer is returned, both marked unverified. Never edit this into a loop.
+- **Citations are not evidence — the most reliable failure there is.** Read the `CITATIONS:` line,
+  printed for every channel that reports which pages it opened. For **Codex, which reports no tool
+  telemetry**, "was it opened" is unanswerable, so ask the only remaining question:
+  `citecheck.py --answer reviews\CODEX.md --resolve-urls`, which needs no event log. `DEAD` means
+  the page is not there; `BLOCKED`/`UNKNOWN` mean the check failed and prove nothing — one real
+  DEAD URL was a probe for a tag that does not exist, i.e. the answer.
   Details and the FR-number resolver: `references/verification.md`.
 - **Every model answers in English**, enforced by the default system preset — the report is
   machine-read, and Russian costs ~2× the tokens (§0.2 below).
@@ -196,9 +194,8 @@ and do not add the grey-routes line to the legal preset "for consistency".
 `--dry-run` validates the preset name and the brief path before anything is spent; a mistyped
 preset fails loudly and lists what exists.
 
-**Timing** (round 26, 8 channels, 59 KB brief): `orgemini36flash` 78 s · `spark11` 85 s ·
-`agy36flash` 143 s · `agy31pro` 304 s · `spark12cont` 604 s · `qwen38max` 677 s · `kimik3` 884 s ·
-**Codex 25–35 min**. Run in the background. Sanity check: `--ask`, ~20 s.
+**Timing**: most channels land in 1–4 min; **Codex is the long pole at 8–35 min** and sets the
+round's wall-clock. Run in the background. Sanity check first: `--ask`, ~20 s.
 
 ---
 
