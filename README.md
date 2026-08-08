@@ -11,7 +11,8 @@ found, where they contradict each other — and a mechanical check of whether th
 the research or quietly made it up.
 
 [Русская версия](README.ru.md) · [How it works, in technical detail](TECHNICAL.md) ·
-[Install](INSTALL.md) · [When something breaks](TROUBLESHOOTING.md)
+[Install](INSTALL.md) · [When something breaks](TROUBLESHOOTING.md) ·
+[What leaves your machine](PRIVACY.md)
 
 ---
 
