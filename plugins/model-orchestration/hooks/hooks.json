@@ -1,0 +1,20 @@
+{
+  "_doc": "R33-class duplicate-key guard for this plugin, shipped as a plugin hook (round-35 panel's preferred placement over machine-wide). Fires on Edit|Write|MultiEdit of .json files, warns Claude via exit 2 + stderr on duplicate keys. Fail-open on every internal error path. See tools/check_json_dup_keys_hook.py for the wrapper and CHANGELOG 1.12.0 for the panel that chose this over ~/.claude/settings.json.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/tools/check_json_dup_keys_hook.py"
+            ],
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

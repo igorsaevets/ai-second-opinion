@@ -1613,6 +1613,130 @@ def suite_dev_tooling():
         check('"E741"' in text,
               "ruff.toml still ignores E741 (existing `l` loop-variable pattern)")
 
+    # --- round-35: plugin-hook wrapper exists and its input contract holds -----------------
+    #
+    # The wrapper reads Claude Code hook JSON from stdin.buffer, extracts tool_input.file_path,
+    # and either exits 0 silently or exits 2 with stderr on a real dup key. The whole point of
+    # a fail-open safety gate is that the failure surface has to be measured, not inspected -
+    # a hook that only ever exits 0 in practice is exactly as valuable as no hook at all.
+    hook_wrapper = tools_dir / "check_json_dup_keys_hook.py"
+    check(hook_wrapper.is_file(), "tools/check_json_dup_keys_hook.py exists")
+    if hook_wrapper.is_file():
+        # Fresh tempdir - the earlier one was already torn down by its own `finally` block.
+        hook_tmp = Path(tempfile.mkdtemp(prefix="orch_hook_"))
+        try:
+            def _run_hook(payload):
+                return subprocess.run(
+                    [PY, str(hook_wrapper)],
+                    input=(json.dumps(payload) if payload is not None else "").encode("utf-8"),
+                    capture_output=True, timeout=30)
+
+            # empty stdin -> fail-open, exit 0
+            p = _run_hook(None)
+            check(p.returncode == 0 and not p.stderr,
+                  "hook exits 0 silently on empty stdin (fail-open)",
+                  "got exit=%d stderr=%r" % (p.returncode, p.stderr[:80]))
+
+            # non-Edit/Write tool -> fail-open, exit 0
+            p = _run_hook({"tool_name": "Read", "tool_input": {"file_path": "x.json"}})
+            check(p.returncode == 0 and not p.stderr,
+                  "hook ignores tools other than Edit|Write|MultiEdit",
+                  "got exit=%d stderr=%r" % (p.returncode, p.stderr[:80]))
+
+            # Edit of non-.json -> fail-open, exit 0
+            p = _run_hook({"tool_name": "Edit", "tool_input": {"file_path": "readme.md"}})
+            check(p.returncode == 0 and not p.stderr,
+                  "hook ignores non-JSON file extensions",
+                  "got exit=%d stderr=%r" % (p.returncode, p.stderr[:80]))
+
+            # Edit of nonexistent .json -> fail-open, exit 0
+            p = _run_hook({"tool_name": "Edit",
+                           "tool_input": {"file_path": str(hook_tmp / "does-not-exist.json")}})
+            check(p.returncode == 0 and not p.stderr,
+                  "hook fails open on missing file",
+                  "got exit=%d stderr=%r" % (p.returncode, p.stderr[:80]))
+
+            # Edit of clean .json -> exit 0 silently (regression sentinel: the CLEAN path must
+            # not produce noise, or the guard trains its own removal)
+            clean = hook_tmp / "clean.json"
+            clean.write_text('{"a": 1, "b": {"c": 2}}', encoding="utf-8")
+            p = _run_hook({"tool_name": "Edit", "tool_input": {"file_path": str(clean)}})
+            check(p.returncode == 0 and not p.stderr,
+                  "hook stays silent on clean JSON",
+                  "got exit=%d stderr=%r" % (p.returncode, p.stderr[:80]))
+
+            # Edit of dup-key .json -> exit 2 with stderr naming the duplicate (the ONLY real
+            # failure signal this hook is allowed to emit)
+            dupfile = hook_tmp / "dup.json"
+            dupfile.write_text('{"foo": 1, "foo": 2}', encoding="utf-8")
+            p = _run_hook({"tool_name": "Edit", "tool_input": {"file_path": str(dupfile)}})
+            check(p.returncode == 2,
+                  "hook exits 2 (warn Claude) on real dup-key",
+                  "got exit=%d stderr=%r" % (p.returncode, p.stderr[:80]))
+            check(b"duplicate key" in p.stderr,
+                  "stderr names the class of bug",
+                  "stderr=%r" % p.stderr[:120])
+        finally:
+            shutil.rmtree(hook_tmp, ignore_errors=True)
+
+    # --- plugin-hooks.json contract: matcher covers Edit|Write, references the wrapper -----
+    # This file lives in kit/ and package.py copies it to plugins/<plugin>/hooks/hooks.json
+    # in the kit tree - so at the SOURCE side we can only check the source, and it holds the
+    # authoritative shape.
+    plugin_hooks = HERE / "kit" / "plugin-hooks.json"
+    check(plugin_hooks.is_file(), "kit/plugin-hooks.json exists (round-35 plugin-hook source)")
+    if plugin_hooks.is_file():
+        text = plugin_hooks.read_text(encoding="utf-8")
+        try:
+            data = json.loads(text)
+            hook_ok = True
+        except Exception as exc:
+            hook_ok = False
+            check(False, "kit/plugin-hooks.json parses as JSON", repr(exc)[:80])
+        if hook_ok:
+            hooks_block = (data.get("hooks") or {}).get("PostToolUse") or []
+            check(len(hooks_block) >= 1,
+                  "plugin-hooks.json declares a PostToolUse hook")
+            if hooks_block:
+                entry = hooks_block[0]
+                check("Edit" in entry.get("matcher", "") and "Write" in entry.get("matcher", ""),
+                      "PostToolUse matcher covers both Edit and Write")
+                cmds = entry.get("hooks") or []
+                if cmds:
+                    args = cmds[0].get("args") or []
+                    check(any("check_json_dup_keys_hook.py" in str(a) for a in args),
+                          "hook entry points at the wrapper script by name")
+                    check(any("${CLAUDE_PLUGIN_ROOT}" in str(a) for a in args),
+                          "hook path uses CLAUDE_PLUGIN_ROOT (plugin-relative, not machine-wide)")
+
+    # --- round-35 / Codex finding: guard exists in git but pre-commit install is manual ----
+    # A common failure mode: .pre-commit-config.yaml is in the repo, ruff.toml is in the repo,
+    # tools/check_json_dup_keys.py is in the repo - and NONE of them do anything because the
+    # developer never ran `pre-commit install`, so .git/hooks/pre-commit is either absent or
+    # points at git's stock sample. Report the state; do NOT fail: a fresh clone is legitimately
+    # in this state before the first `pre-commit install`, and this suite runs in CI too where
+    # the workflow installs pre-commit explicitly.
+    try:
+        gr = subprocess.run(["git", "-C", str(HERE), "rev-parse", "--git-dir"],
+                            capture_output=True, text=True, timeout=5)
+    except Exception:
+        gr = None
+    if gr and gr.returncode == 0:
+        git_dir = Path(gr.stdout.strip())
+        if not git_dir.is_absolute():
+            git_dir = HERE / git_dir
+        pc_hook = git_dir / "hooks" / "pre-commit"
+        if pc_hook.is_file():
+            try:
+                head = pc_hook.read_text(encoding="utf-8", errors="replace")[:2000]
+            except OSError:
+                head = ""
+            check("pre-commit" in head.lower(),
+                  "if .git/hooks/pre-commit exists it references the pre-commit framework",
+                  "found file but no pre-commit reference in first 2KB")
+        # No else-branch: absence is not a failure. Fresh clone, or an environment where
+        # `pre-commit install` has not been run yet, is a legitimate state.
+
 
 def main():
     global _quiet

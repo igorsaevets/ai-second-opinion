@@ -1,5 +1,67 @@
 # Changelog
 
+## 1.12.0 — 2026-08-08
+
+**The R33 dup-key defense now follows the plugin, not the machine — and the CI that used to
+run only `selftest.py` now runs the pre-commit guards too, on tag pushes as well as branches.**
+
+Round-35 panel (nine channels: spark11, spark12cont, codex, kimik3, mimo25pro, grok420,
+goog36flash, qwen38max, ornemotron3ultra) reviewed a six-item improvement plan and rejected
+three claims the maintainer had asserted from memory. The changes in this release are what
+survived the panel, applied verbatim.
+
+- 🟢 **Plugin hook: `<plugin>/hooks/hooks.json` runs the dup-key guard on `Edit|Write|MultiEdit`.**
+  Scope is "sessions where THIS plugin is enabled", not machine-wide. Written after five
+  independent reviewers (goog36flash, kimik3, mimo25pro, grok420, codex) named machine-wide
+  hazards the original proposal did not see: the hook cannot un-write the file (per
+  code.claude.com/docs/en/hooks: "PostToolUse hooks fire after a tool has already executed
+  successfully"), a bug in the checker would block JSON edits in every unrelated project on
+  the host, Python subprocess spawn on Windows is 200-500 ms per edit, and the machine-wide
+  `~/.claude/settings.json` is itself a load-bearing config an over-broad hook could lock the
+  user out of. The plugin route was surfaced by spark12cont quoting the docs verbatim
+  ("Plugin `hooks/hooks.json` | When plugin is enabled") and is documented at
+  code.claude.com/docs/en/hooks. The wrapper (`tools/check_json_dup_keys_hook.py`) is
+  fail-open on every internal error path — a safety-gate false positive is worse than a miss.
+
+- 🟢 **Wrapper contract, tested from every angle.** Selftest grew by 14 assertions
+  (260 → 274 in source; kit stays at 243 because dev-tooling suite skips in kit layout).
+  New tests cover: empty stdin, non-Edit tools ignored, non-JSON extensions ignored, missing
+  files fail open, clean JSON stays silent (the CLEAN path must not produce noise or the
+  guard trains its own removal), real dup-key produces exit 2 with `stderr` naming the
+  duplicate, `plugin-hooks.json` parses and its matcher covers Edit|Write, and the referenced
+  path uses `${CLAUDE_PLUGIN_ROOT}` (plugin-relative, not machine-wide).
+
+- 🟢 **CI now runs the pre-commit guards, not just `selftest.py`.** The existing
+  `.github/workflows/selftest.yml` already ran on `push[main] + pull_request + workflow_dispatch`
+  across matrix `ubuntu/macos/windows × Python 3.9/3.13` — but ran only `selftest.py`, so a
+  fork contributor's PR was unguarded against the R34 pre-commit checks. This release adds a
+  step (`pre-commit run --all-files --show-diff-on-failure`) after selftest and adds
+  `tags: ['v*']` to the trigger set. The tag-triggered run is the one that matters at release
+  time; the branch runs catch drift earlier.
+
+- 🟢 **`.git/hooks/pre-commit` installation gets a soft check.** Codex's round-35 finding:
+  the guards exist in the tree but `pre-commit install` is manual, so on a fresh clone
+  `.git/hooks/pre-commit` may be absent (or the git-sample), and the entire pre-commit chain
+  runs zero times without anyone noticing. Selftest now checks: **if** a `pre-commit` hook file
+  exists in `.git/hooks/`, it references the pre-commit framework. It does **not** fail on
+  absence — a fresh clone is legitimately in that state before the first `pre-commit install`,
+  and CI installs pre-commit explicitly per-run so the check would be counterproductive there.
+
+- 🟢 **`kit/CHANGELOG.md` warns loudly when VERSION doesn't match the top entry** (unchanged
+  behaviour, mentioned because it is what caught the maintainer twice this session).
+
+**Round-35 panel corrections the maintainer's plan absorbed** (nothing to install; each is a
+one-line rule to remember):
+
+- 🔴 `restic` **IS** on winget (`winget install --exact --id restic.restic --scope Machine`
+  produces `restic 0.19.1`) — spark12cont refuted "install is manual" from a primary source.
+- 🔴 CI was **not** absent before this release; the workflow existed and ran on push+PR. The
+  gap was pre-commit and tag pushes, not CI itself. Original claim was fabricated from memory.
+- 🔴 A false claim planted in the review brief ("R34 saved ~500 KB of duplicated JSON keys")
+  was refuted 5/5 by every substantive channel. Codex verified from the commit diff:
+  `channels.json` went 99.5 KB → 99.6 KB across the R33 fix (grew 0.1 KB, did not shrink),
+  and the R34 release added a detector — did not remove any keys itself.
+
 ## 1.11.0 — 2026-08-08
 
 **The R33-class of bug (silent duplicate JSON keys) is now caught before commit — for you too.
