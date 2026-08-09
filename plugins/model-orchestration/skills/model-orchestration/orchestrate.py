@@ -980,7 +980,7 @@ def citation_audit(results, enabled=True, resolve_links=False):
         return {"skipped": _citecheck_reason or "disabled with --no-citecheck"}
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from citecheck import URL_RE, probe_url, resolve_all, resolve_wrappers
+        from citecheck import URL_RE, resolve_all, resolve_wrappers
     except Exception as exc:
         # A partial install is a supported state, so this is a note, not a failure.
         return {"skipped": "citecheck.py unavailable (%s)" % type(exc).__name__}
@@ -4414,7 +4414,6 @@ def main():
     # A missing binary is reported twice - once by the preflight, once by the channel that then
     # failed on it - and printing the same advice four times reads like four separate faults.
     # Keep the channel-level entry, which names the channel, and drop the preflight echo.
-    seen = {(p["channel"], p["likely_cause"]) for p in problems}
     causes = {p["likely_cause"] for p in problems}
     for p in preflight:
         cause, fix = diagnose(p)

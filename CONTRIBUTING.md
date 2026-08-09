@@ -29,6 +29,27 @@ file.
 
 **A change that breaks one of those is not a trade-off to discuss — it is a regression.**
 
+### Pre-commit guardrails (recommended)
+
+From the kit root:
+
+```
+pip install pre-commit
+pre-commit install
+```
+
+Now every `git commit` runs a small non-destructive set of checks — JSON syntax, YAML syntax,
+no accidentally-added large files, `ruff-check` on any Python touched, and a custom hook that
+detects **duplicate keys in any JSON object** (which `json.loads` silently collapses to the last
+one, and which the stock `check-json` hook does NOT catch — pre-commit-hooks issue #554). The
+duplicate-key hook lives at `tools/check_json_dup_keys.py` and uses `object_pairs_hook`, so it
+sees every key at every nesting level before the parser hides the earlier ones.
+
+The `ruff.toml` in this repo is deliberately minimal — only `E` and `F` categories, with `E741`
+and `E501` explicitly ignored. It exists to catch bugs (undefined names, unused imports, real
+syntax defects), not to enforce style. A style rule that fires many times on clean code trains
+you to run `git commit --no-verify` and lose the whole class of protection.
+
 ## House rules, each of which was learned the hard way
 
 **Run it; do not read it.** Every real bug in this project's history was found by execution and

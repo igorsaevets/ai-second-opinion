@@ -376,7 +376,7 @@ def main():
         hi = spread(raw[cname].get(str(levels[1]), []))
         lo_o = spread(outs[cname].get(str(levels[0]), []))
         hi_o = spread(outs[cname].get(str(levels[1]), []))
-        v, why = verdict(lo, hi, a.samples, lo_out, hi_out)
+        v, why = verdict(lo, hi, a.samples, lo_o, hi_o)
         right = [c for _l, _ok, c, _e in answers[cname]]
         out[cname] = {"knob": desc, "levels": levels, "low": lo, "high": hi,
                       "low_out": lo_o, "high_out": hi_o, "verdict": v, "why": why,

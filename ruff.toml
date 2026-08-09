@@ -1,0 +1,25 @@
+# Ruff configuration for model-orchestration.
+#
+# Philosophy: catch bugs, do not enforce cosmetic style. Every rule here has to justify itself
+# against churn - a rule that fires many times on existing code without pointing at a real defect
+# will train me to run pre-commit with --no-verify, disabling the whole class. Round 33 rule:
+# "a safety-gate false positive is worse than a miss".
+
+target-version = "py38"    # lowest we support (INSTALL.md says Python 3.8+)
+line-length = 120          # a few long lines are more readable than mid-word wraps
+
+[lint]
+# Default ruff selection (E, F) picks up the real defects: undefined names, unused imports,
+# unused variables, invalid syntax. Explicit list so a future ruff release cannot silently add
+# rules that churn the tree.
+select = ["E", "F"]
+
+ignore = [
+    # `l`/`O`/`I` as single-letter names. Established loop-variable pattern across the codebase;
+    # renaming every instance is pure churn and adds no safety - none of these shadow a builtin
+    # or hide a bug. If you find one that IS ambiguous in context, rename that one specifically.
+    "E741",
+    # Long-line warning. Handled by line-length above; block-quote paragraphs and URLs read worse
+    # when hard-wrapped.
+    "E501",
+]

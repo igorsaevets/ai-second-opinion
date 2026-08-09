@@ -1,0 +1,44 @@
+# pre-commit hooks for the model-orchestration skill SOURCE tree.
+#
+# Non-destructive by default: no auto-fix, no reformatting, no file rewrites. The point is to
+# CATCH the class of bugs that killed round 33 (duplicate JSON keys, silent overwrite), not to
+# churn the tree at every commit. Format/style enforcement can be added later; a guard that
+# rewrites files invites people to distrust it.
+#
+# Install once per clone:
+#     pip install pre-commit
+#     pre-commit install
+#
+# Run manually against the whole tree:
+#     pre-commit run --all-files
+#
+# The KIT tree has its own .pre-commit-config.yaml with the same policy - both live in git, both
+# guard against the same class of edit. package.py writes the kit's copy so they cannot drift.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-json          # syntax only; DOES NOT detect duplicate keys (issue #554)
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-merge-conflict
+      - id: check-toml
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.4
+    hooks:
+      - id: ruff-check          # lint only; no --fix. If a line is worth changing, change it.
+
+  - repo: local
+    hooks:
+      - id: check-json-dup-keys
+        name: 'JSON: duplicate keys (silent overwrite guard - R33)'
+        entry: python tools/check_json_dup_keys.py
+        language: system
+        files: '\.json$'
+        # Applies to every .json in the tree: channels.json, .claude-plugin/*.json, plugin.json.
+        # Standard check-json above does NOT catch this; json.loads collapses duplicates to the
+        # LAST value silently. Round 33 (2026-08-08): my SUPERSEDED-prefixed edits were overwritten
+        # by old copies below them, and only a direct object_pairs_hook probe caught it.

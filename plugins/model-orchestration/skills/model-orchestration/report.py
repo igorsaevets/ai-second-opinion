@@ -25,7 +25,6 @@ from an old run months later.
 
 import argparse
 import json
-import os
 import sys
 
 # The seat each channel is meant to occupy. Printed next to the telemetry because a number without

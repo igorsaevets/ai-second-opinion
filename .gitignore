@@ -28,6 +28,11 @@ __pycache__/
 venv/
 .pytest_cache/
 
+# --- dev tooling caches (contain absolute paths, must not ship) -----------------------------
+.ruff_cache/
+.mypy_cache/
+.pre-commit-cache/
+
 # --- editors / OS ---------------------------------------------------------------------------
 .vscode/
 .idea/

@@ -1077,7 +1077,8 @@ def suite_tiers_and_grounding():
         ch = reg["channels"][name]
         if not (ch.get("prompt_suffix") or {}).get("enabled"):
             continue
-        slot = dict(ch); slot["_name"] = name
+        slot = dict(ch)
+        slot["_name"] = name
         sys_prompt = _orch._system_for("You are an independent reviewer.", slot)
         check("Remember this and keep it in mind" in sys_prompt,
               "%s: wrapper carries the MEMORY framing" % name,
@@ -1534,6 +1535,85 @@ def suite_echocheck():
           "the probe does not contain its own answer")
 
 
+def suite_dev_tooling():
+    """
+    9. The pre-commit guardrails exist and actually catch the class of bug they were written for.
+
+    Round 33 (2026-08-08): a JSON edit with a duplicate key silently overwrote the intended value
+    (`json.loads` collapses duplicates to the LAST one). Standard `check-json` from
+    pre-commit-hooks does NOT catch this (issue #554). This suite verifies:
+
+      * the custom `check_json_dup_keys.py` exists next to this file
+      * it EXITS 1 on a planted duplicate (fixture written to a temp dir - not the tree)
+      * it EXITS 0 on the real `channels.json` (regression sentinel for R33's fix)
+      * `.pre-commit-config.yaml` names our custom hook, so a rename here fails loudly
+      * `ruff.toml` sets `E741` as ignored (not enforced by whitespace of custom-config comments)
+
+    This suite is skill-source only. In the built kit the same files live at kit ROOT (two
+    directories above this file); they are verified there by kit's own `pre-commit run` and by
+    package.py's KIT_TOOLING copy step that prints every file as it is written.
+    """
+    tools_dir = HERE / "tools"
+    if not tools_dir.is_dir():
+        return  # kit layout: tools/ lives at kit root, not next to selftest.py
+    dup_script = tools_dir / "check_json_dup_keys.py"
+    check(dup_script.is_file(), "tools/check_json_dup_keys.py exists (the R33 sentinel)")
+    if not dup_script.is_file():
+        return
+
+    # --- planted duplicate: the script must EXIT 1 with a clear message ------------------
+    tmpdir = Path(tempfile.mkdtemp(prefix="orch_dupkey_"))
+    try:
+        bad = tmpdir / "planted-dup.json"
+        bad.write_text('{"foo": 1, "foo": 2}', encoding="utf-8")
+        p = subprocess.run([PY, str(dup_script), str(bad)],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=30)
+        check(p.returncode == 1,
+              "planted dup key -> exit 1", "got exit=%d stderr=%r" % (p.returncode, p.stderr[:80]))
+        check("duplicate key" in p.stderr,
+              "the error message names the class of bug", p.stderr[:80])
+
+        # --- real channels.json: exit 0 (R33 regression sentinel) --------------------------
+        real = HERE / "channels.json"
+        p = subprocess.run([PY, str(dup_script), str(real)],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=30)
+        check(p.returncode == 0,
+              "the real channels.json is clean (R33 fix still holds)",
+              "got exit=%d stderr=%r" % (p.returncode, p.stderr[:80]))
+
+        # --- nested dup inside an array element ---------------------------------------------
+        nested = tmpdir / "nested.json"
+        nested.write_text('{"list": [{"x": 1, "x": 2}]}', encoding="utf-8")
+        p = subprocess.run([PY, str(dup_script), str(nested)],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=30)
+        check(p.returncode == 1,
+              "nested dup inside an array element is still caught",
+              "the object_pairs_hook fires per object, not only at the top")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    # --- pre-commit config: names our custom hook --------------------------------------
+    pc_config = HERE / ".pre-commit-config.yaml"
+    check(pc_config.is_file(), ".pre-commit-config.yaml exists")
+    if pc_config.is_file():
+        text = pc_config.read_text(encoding="utf-8")
+        check("check-json-dup-keys" in text,
+              "the pre-commit config still names our custom R33 hook by id")
+        check("tools/check_json_dup_keys.py" in text,
+              "the pre-commit config points at the script's actual path")
+
+    # --- ruff config: E741 stays ignored (established pattern in this codebase) --------
+    ruff_config = HERE / "ruff.toml"
+    check(ruff_config.is_file(), "ruff.toml exists")
+    if ruff_config.is_file():
+        text = ruff_config.read_text(encoding="utf-8")
+        check('"E741"' in text,
+              "ruff.toml still ignores E741 (existing `l` loop-variable pattern)")
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -1561,7 +1641,7 @@ def main():
     for suite in (suite_degradation, suite_routing, suite_redaction,
                   suite_prose_matches_behaviour, suite_contract,
                   suite_citations, suite_dispatch, suite_tiers_and_grounding,
-                  suite_settings_and_upgrade, suite_echocheck):
+                  suite_settings_and_upgrade, suite_echocheck, suite_dev_tooling):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

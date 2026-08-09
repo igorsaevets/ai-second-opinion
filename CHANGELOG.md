@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.11.0 — 2026-08-08
+
+**The R33-class of bug (silent duplicate JSON keys) is now caught before commit — for you too.
+And running the same guard on the maintainer's own tree turned up one real bug in `echocheck.py`
+that had been sitting undiscovered.**
+
+- 🟢 **Pre-commit guardrails at the kit root.** `.pre-commit-config.yaml` and `ruff.toml` are now
+  part of the kit, along with a small `tools/check_json_dup_keys.py` helper. Install once
+  (`pip install pre-commit && pre-commit install` from the kit root) and every `git commit` in
+  your fork checks: JSON syntax, YAML syntax, TOML syntax, no merge-conflict markers, no
+  accidentally-added large files, Python via `ruff-check` (undefined names, unused imports,
+  unused variables), and — this is the one the round-33 review found — duplicate keys inside
+  any JSON object at any nesting level.
+
+- 🟢 **Why the custom dup-key hook exists.** `json.loads` (and every other mainstream JSON
+  parser) collapses duplicate keys silently and returns the LAST one. The standard `check-json`
+  hook from `pre-commit-hooks` uses the same parser, so it inherits the same blind spot
+  (pre-commit-hooks issue #554, open since 2019). The custom hook uses Python's
+  `object_pairs_hook` to see every key BEFORE the parser collapses them; it exits 1 with
+  `duplicate key '<name>'` and blocks the commit. This is exactly the failure the round-33 panel
+  caught by hand in `channels.json.hints` — the tool now catches it mechanically.
+
+- 🟢 **One real bug found in `echocheck.py` by turning ruff on the maintainer's own tree.**
+  The main-loop call site was passing `lo_out, hi_out` (undefined names in that scope) instead
+  of `lo_o, hi_o` (the local variables actually populated on the two lines above). Would have
+  crashed at runtime whenever the code path exercising the output-token fallback fired. Ruff's
+  `F821` (undefined name) caught it in the first run.
+
+- 🟢 **Four minor cleanups in the same sweep**, none behavioural: an unused `os` import in
+  `report.py`, an unused `probe_url` import in `orchestrate.py`, an unused local `seen` in
+  `orchestrate.py`, one f-string without placeholders in `probe_firecrawl_tools.py`, and a
+  semicolon-joined statement in `selftest.py`. All caught by the same ruff config that now ships
+  with the kit.
+
+- 🟢 **Ruff config is minimal on purpose.** Only rule categories `E` (syntax-shaped defects) and
+  `F` (undefined/unused) are enabled. `E741` (ambiguous `l`/`O`/`I` names) and `E501` (long
+  lines) are explicitly ignored — the first is an established loop-variable pattern across the
+  codebase, and the second matters less than block-quote comments reading well. The philosophy
+  is round-33's rule: a safety-gate false positive teaches you to switch the guard off, so a
+  hook that fires on style trains distrust.
+
+- 🟢 **Selftest grew by 10 assertions** (250 → 260). The new suite `suite_dev_tooling` runs
+  the dup-key script against a planted fixture, against the real `channels.json` (regression
+  sentinel: R33 stays fixed), and against a nested-inside-array case; it also verifies that
+  `.pre-commit-config.yaml` still names the custom hook by its id and that `ruff.toml` still
+  ignores `E741`. If a future edit removes any of these guards, selftest goes red.
+
 ## 1.10.0 — 2026-08-08
 
 **The MCP fallback hint stopped naming servers; the standing-note wrapper stopped suppressing.**
