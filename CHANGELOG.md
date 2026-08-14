@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.16.0 — 2026-08-14
+
+**GPT-5.6 Terra Pro becomes the first OPT-IN channel — off unless you ask for it by name.
+Making that true exposed two more defects in the router, both of the same class as the one
+1.15.0 fixed: a name that stopped being unambiguous when a sibling arrived.**
+
+- 🔴 **`orgpt56terrapro` is now `enabled: false` — strategic questions only.** the operator, after
+  seeing the measured bill: «только для стратегических вопросов, а не всех подряд. И по
+  дефолту отключена, только если явно скажут ее использовать.» Same rationing as `codex`,
+  reached from the opposite direction: codex is slow and expensive per question, this one
+  measured **$1.76–1.81 per review, ~7× kimik3**. A default panel run no longer includes it —
+  which matters most for kit users, whose first run should not silently cost $1.80 more.
+  🔴 `enabled: false` here means **default-off, never unreachable**: `--only orgpt56terrapro`,
+  «только 5.6 Terra Pro» and «добавь терра-про» all still run it.
+
+- 🔴 **Router bug: naming a default-off channel in prose selected nothing.** The route's
+  only-branch could turn channels OFF but never ON, so «только 5.6 terra» removed the other
+  twelve and left the named one disabled — `running 0 channel(s): NONE`, no error. The `--only`
+  FLAG had always been right (`else: enabled = True`), so the two selection paths disagreed and
+  only the prose one was wrong. Unreachable until a channel was off by default, which is why it
+  survived this long.
+
+- 🔴 **A bare `5.6` alias routed to the wrong model.** `5.6` meant `gpt-5.6-sol` on the codex
+  channel — unambiguous until `openai/gpt-5.6-terra-pro` arrived. In «используй все модели и 5.6
+  Terra Pro» the scanner consumed `terra pro` first, leaving `5.6` free to match codex, and the
+  route refused with «mentions codex». The bare alias is removed; `5.6 sol`, `5.6-sol`, `sol`
+  and `соль` are unambiguous and still work. **Third instance of one class in two releases**
+  (after the `openai` alias and the `gemini` group): a version number, a vendor name or a family
+  word is safe only until the thing it names gets a sibling.
+
+- 🟢 **New route mode: ADD — "the default set PLUS this one".** «используй все модели и ещё 5.6
+  Terra Pro», «а также», «добавь», «плюс», «вместе с», `and also`, `plus`, `add`. `ONLY` could
+  not express it (it drops everything else) and without it the operator's own sentence was a hard route
+  error. 🔴 The bare «и» is deliberately **not** a marker: it is the commonest word in Russian
+  and would turn half of every sentence into a selection verb — the same over-matching that made
+  a bare `5.6` route to the wrong model.
+
+- 🟢 **Selftest 262 → 265 in the kit, 293 → 296 in the source.** New assertions: the opt-in
+  channel stays off by default *and* stays reachable by name; both prose-selection forms; ADD
+  keeps the default set; a plain negation still leaves the opt-in channel off. (The kit gains
+  fewer than the source because several route cases are derived from the enabled set, which is
+  one channel smaller here.)
+
 ## 1.15.0 — 2026-08-14
 
 **A 17th channel: OpenAI's GPT-5.6 Terra Pro over OpenRouter, pinned to OpenAI's own

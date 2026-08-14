@@ -54,6 +54,20 @@ NEG = ["не использовать", "не используй", "не исп�
        "do not use", "don't use", "dont use", "skip", "without", "except", "exclude", "no "]
 SUBST = ["вместо", "взамен", "заменить на", "замени на", "instead of", "replace with", "->", "→"]
 ONLY = ["только", "лишь", "исключительно", "only", "just use", "nothing but"]
+# 🔴 ADD is the "default set PLUS this one" mode, and it exists because opt-in channels do.
+# Added 2026-08-14 (round 38) with orgpt56terrapro, the first channel that is off unless asked
+# for by name. Igor: «если скажут используй все модели, ее не использовать, а если скажут и 5.6
+# Terra Pro, то используй.» ONLY could not express that - "только terra pro" drops the other
+# twelve - and without ADD the sentence he actually says was a hard ROUTE ERROR.
+#
+# 🔴 THE BARE "и" IS DELIBERATELY NOT A MARKER, and this is the whole design risk. It is the
+# commonest word in Russian and appears in briefs, channel prose and ordinary conjunctions
+# ("spark и codex"), so accepting it would turn half of every sentence into a selection verb -
+# the same over-matching that made a bare `5.6` route to the wrong model in this very round.
+# Only unambiguous ADDITIVE phrases are listed, and "и ещё" is included because the "ещё"
+# carries the meaning that "и" alone does not.
+ADD = ["и ещё", "и еще", "а также", "плюс ", "добавь", "добавить", "дополнительно", "вместе с",
+       "and also", "plus ", "add "]
 
 
 class RouteError(Exception):
@@ -712,7 +726,7 @@ def _scan(text, idx):
     """Produce an ordered stream of ('neg'|'subst'|'only'|entity) tokens with their positions."""
     t = " " + text.lower().replace("ё", "е") + " "
     marks = []
-    for kind, words in (("neg", NEG), ("subst", SUBST), ("only", ONLY)):
+    for kind, words in (("neg", NEG), ("subst", SUBST), ("only", ONLY), ("add", ADD)):
         for w in words:
             for m in re.finditer(re.escape(w), t):
                 marks.append((m.start(), kind, w))
@@ -768,7 +782,7 @@ def apply_route(plan, reg, text):
     only_list = []
 
     for _, kind, val in stream:
-        if kind in ("neg", "subst", "only"):
+        if kind in ("neg", "subst", "only", "add"):
             mode = kind
             if kind == "subst":
                 subst_target = pending_neg      # "не 5.6 sol, вместо нее 5.5" -> anaphora
@@ -782,6 +796,20 @@ def apply_route(plan, reg, text):
             if etype == "model":
                 plan[cname]["model"] = mname
                 plan[cname]["why"].append("only: model pinned to %s" % mname)
+
+        elif mode == "add":
+            # ADDITIVE: keep whatever the default set already is and switch this one ON. The
+            # point of the mode is opt-in channels - anything already enabled is unaffected, so
+            # "добавь kimi" on a default run is a no-op that still prints why, rather than an
+            # error. Note this does NOT set _route_off anywhere: adding a channel excludes
+            # nothing, which is exactly how it differs from `only`.
+            plan[cname]["enabled"] = True
+            plan[cname].pop("_route_off", None)
+            if etype == "model":
+                plan[cname]["model"] = mname
+                plan[cname]["why"].append("route: added, model pinned to %s" % mname)
+            else:
+                plan[cname]["why"].append("route: added to the default set by name")
 
         elif mode == "neg":
             if etype == "channel":
@@ -833,6 +861,22 @@ def apply_route(plan, reg, text):
                 plan[c]["enabled"] = False
                 plan[c]["_route_off"] = True
                 plan[c]["why"].append("route: not in the 'only' list")
+            elif c in only_list and not plan[c]["enabled"]:
+                # 🔴 NAMING A CHANNEL SELECTS IT, ON BOTH SELECTION PATHS. Until 2026-08-14 this
+                # branch only turned channels OFF, so a route that named a default-OFF channel
+                # produced "running 0 channel(s): NONE" - it removed everything else and then
+                # left the one thing the human asked for still disabled. The `--only` FLAG had
+                # always done the right thing (`else: plan[c]["enabled"] = True` in apply_flags),
+                # so the two selection paths disagreed and only the prose one was wrong.
+                #
+                # Found the same day orgpt56terrapro became the first opt-in channel, which is
+                # what made the gap reachable: with every channel enabled by default, "только X"
+                # and "X is already on" were indistinguishable. Igor's rule - «по дефолту
+                # отключена, только если явно скажут ее использовать» - is only true if saying it
+                # in prose works as well as passing a flag.
+                plan[c]["enabled"] = True
+                plan[c].pop("_route_off", None)
+                plan[c]["why"].append("route: named explicitly (overrides default-off)")
 
     # A refused model with no stated replacement: fall back to the next model in registry order
     # and SAY SO in the plan. Registry order is curated, so this is deterministic - but it is

@@ -229,13 +229,13 @@
         },
         "gpt-5.6-sol": {
           "label": "GPT-5.6 Sol",
+          "_lost_the_bare_5.6_alias_2026_08_14": "🔴 THIS MODEL USED TO ANSWER TO A BARE `5.6`, and round 38 removed it the moment a SECOND 5.6 model entered the registry (openai/gpt-5.6-terra-pro). Third instance of one class in a single round, after the `openai` alias on this same channel and the `gemini` group on 2026-08-07: a name is unambiguous only until the thing it names gets a sibling, and nothing fails when it stops being so. This one was not theoretical - it broke the exact sentence the operator asked to support. In «используй все модели и 5.6 Terra Pro» the scanner consumed `terra pro` first, leaving `5.6` free to match HERE, so the route reported «mentions codex» and refused. `5.6 sol`, `5.6-sol`, `sol` and `соль` all still work and none of them is ambiguous. A bare version number shared by two models cannot route, and the right answer is to stop accepting it rather than to guess.",
           "aliases": [
             "gpt-5.6-sol",
             "5.6 sol",
             "5.6-sol",
             "sol",
-            "соль",
-            "5.6"
+            "соль"
           ]
         },
         "gpt-5.4": {
@@ -858,12 +858,15 @@
     "orgpt56terrapro": {
       "kind": "openrouter",
       "provider": "openrouter",
-      "enabled": true,
+      "enabled": false,
       "distribution": "both",
       "label": "OR GPT-5.6 Terra Pro",
       "cost": "metered",
       "model": "openai/gpt-5.6-terra-pro",
       "role": "strategy",
+      "_off_by_default_on_purpose": "🔴🔴 THE ONLY CHANNEL IN THIS REGISTRY THAT IS OPT-IN RATHER THAN OPT-OUT, and `enabled: false` here does NOT mean «broken», «untested» or «kit-only». the operator, 2026-08-14, after seeing the measured bill: «добавь что 5.6 Terra pro только для стратегических вопросов, а не всех подряд. И по дефолту отключена, только если явно скажут ее использовать. если скажут используй все модели, ее не использовать, а если скажут и 5.6 Terra Pro, то используй.» Note this is the SAME shape as the `codex` policy in the second-opinion skill - «strategic questions only, never send it a lookup» - arrived at from the opposite direction: codex is rationed because it is slow and expensive per question, this one because a single grounded review measured $1.7641 and $1.8071, about 7x kimik3. See _search_is_a_token_bomb for where the money goes.",
+      "_how_the_opt_in_actually_works": "MECHANICALLY, and verified by execution 2026-08-14 rather than assumed - `enabled` and `--only` are read at different points, and the whole policy depends on that: (a) a plain run with no flags takes the `enabled: true` set, so this channel is ABSENT - which is also what «используй все модели» resolves to, since there is no all-channels route word and the phrase is a hard ROUTE ERROR listing the known aliases; (b) `--only orgpt56terrapro` runs it ANYWAY, because --only is an explicit selection and overrides `enabled` (proved against the already-disabled orgrok420 before this flag was flipped, so the behaviour was not invented for this entry); (c) a free-text route naming it - «и 5.6 Terra Pro», «терра-про» - selects it the same way. So «all models» and «all models AND terra pro» differ exactly as the operator asked, with no new code. 🔴 The corollary nobody should have to rediscover: `enabled: false` in this registry means DEFAULT-OFF, never UNREACHABLE.",
+      "_distribution_both_says_nothing_about_enabled": "Deliberate, and worth naming because it looks like a contradiction: `distribution: \"both\"` ships the channel to kit users too, while `enabled: false` leaves it off for them as well - which is the intent, since an employee's first panel run should not silently cost $1.80 more than they expected. The selftest's distribution/enabled agreement check maps \"both\" to None and therefore asserts NOTHING here, so this state is permitted but invisible; a dedicated assertion was added in the same round to make the off-by-default intent mechanical, so that «fixing» this to true fails a test instead of quietly raising everyone's bill.",
       "_added": "2026-08-14 (round 38), the operator: «Теперь добавь вот эту модель еще. Именно с провайдером OpenAI», with the URL openrouter.ai/openai/gpt-5.6-terra-pro?endpoint=a775a298-1154-44d8-9db7-c2b9e75fba9a. FIRST OpenAI model on the OpenRouter transport - the panel already had OpenAI through the `codex` CLI, so this is a TRANSPORT twin of a vendor it already reaches, which is the comparison [[transport-beats-model]] exists to make. The vendor's own description of the model, read from the catalogue rather than recalled: «GPT-5.6 Terra Pro is the same underlying model as GPT-5.6 Terra, served with `reasoning.mode` set to `pro` for higher-quality responses on complex tasks.» knowledge_cutoff 2026-02-16.",
       "_provider_pinned": "🔴 PIN TO `openai`, AND THE PIN WAS PROVED BY A NEGATIVE CONTROL IN THE SAME FIELD rather than by a 200. Three arms, 2026-08-14: only=[openai] -> response `provider` field says OpenAI, cost $0.001727; only=[azure] -> says Azure, cost $0.00345 on the same 1527/33 tokens; no pin at all -> OpenAI. The Azure arm costs EXACTLY 2x, which is what the catalogue predicts ($2/$12 per M against OpenAI's $1/$6), so the pin is steering rather than being accepted and ignored - the failure mode [[http-200-is-not-evidence]] was written for. the operator asked for the OpenAI provider specifically and that is what the UUID in his URL resolves to.",
       "_uuid_resolution": "🔴 THE `?endpoint=<UUID>` IN THE URL IS UI-ONLY - same trap as round 36. It is not an API parameter and there is no API that maps it. Resolved by fetching the model page and reading the embedded Next.js payload, where the endpoint object carries both `id` (the UUID) and `provider_slug`: a775a298-1154-44d8-9db7-c2b9e75fba9a -> provider_slug `openai`, variant `standard`. The same method re-confirmed round 36's pin (e28074f6-... -> `google-vertex/global`), so that entry needed no correction. Script kept at tools/ in the answer archive; if it ever stops working, the fallback is to match on price, since the catalogue prices differ per endpoint.",
@@ -914,7 +917,7 @@
         "terra-pro",
         "терра-про"
       ],
-      "notes": "OpenAI's flagship reasoner in `pro` mode, reached over OpenRouter and pinned to OpenAI's own endpoint. Its seat in the panel is not «another strong model» - it is the only voice that is the SAME VENDOR as codex on a DIFFERENT transport, so where the two disagree the difference is transport, tooling and depth rather than training. Deliberately the most expensive channel per round in this registry, and the only one that can cross a price cliff mid-run: read _search_is_a_token_bomb before enabling it for routine work."
+      "notes": "🔴 STRATEGIC QUESTIONS ONLY, AND OFF BY DEFAULT - ask for it by name («и 5.6 Terra Pro», --only orgpt56terrapro) or it does not run. Same rationing as codex, for a measured reason: ~$1.80 a review, about 7x kimik3. Do not send it a lookup. What it is: OpenAI's flagship reasoner in `pro` mode over OpenRouter, pinned to OpenAI's own endpoint. Its seat is not «another strong model» - it is the only voice that is the SAME VENDOR as codex on a DIFFERENT transport, so where those two disagree the difference is transport, tooling and depth rather than training. Also the only channel that can cross a price cliff mid-run."
     }
   },
   "_models_removed_from_agy": "claude-sonnet-4-6, claude-opus-4-6-thinking and gemini-3.1-pro-low are deliberately absent from both agy channels (the operator, 2026-07-31): routing a Claude model through agy spends the Gemini weekly subscription on a model already reachable directly, and Pro Low is the shallow variant this channel exists to avoid. 🔴 This note lives at TOP LEVEL and not inside `channels`, and that is not cosmetic: every other object in this file takes `_`-prefixed prose keys, so putting one inside `channels` is the natural habit - and there it would be iterated AS A CHANNEL. Written there first, in this very edit. routing.py now skips `_`-prefixed keys inside `channels` (the declared convention) and refuses any other non-object entry by name, so the trap costs a clear error instead of a confusing one.",

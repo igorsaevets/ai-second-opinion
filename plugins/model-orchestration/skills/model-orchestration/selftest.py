@@ -177,6 +177,29 @@ def suite_routing():
     check(not bad, "every channel's `distribution` agrees with the `enabled` for THIS tree",
           "; ".join(bad))
 
+    # 🔴 OPT-IN CHANNELS: default-off must be INTENTIONAL, not an accident nobody notices.
+    # The check above maps distribution "both" to None and therefore asserts NOTHING about
+    # `enabled` for such channels - so a rationed channel could be flipped on (or a normal one
+    # flipped off) in either tree and no test would object. Igor's rule for orgpt56terrapro,
+    # 2026-08-14: «по дефолту отключена, только если явно скажут ее использовать … если скажут
+    # используй все модели, ее не использовать». That is a POLICY with a measured price behind it
+    # (~$1.80 a review, ~7x kimik3), so it gets a test rather than a paragraph: turning it on by
+    # default should fail here, in both the working copy and a shipped kit.
+    OPT_IN = {"orgpt56terrapro": "rationed: ~$1.80/review, strategic questions only"}
+    for c, why in sorted(OPT_IN.items()):
+        if c not in _CHANS:
+            check(False, "opt-in channel %s still exists" % c)
+            continue
+        check(_CHANS[c].get("enabled") is False,
+              "%s stays OFF by default (%s)" % (c, why),
+              "enabled=%r" % _CHANS[c].get("enabled"))
+        # Off-by-default must not mean unreachable: the whole policy is that naming it works.
+        p = run_cli(["--only", c])
+        b = blob_of(p)
+        check(p.returncode == 0 and ("running 1 channel(s): %s" % c) in b,
+              "%s is still REACHABLE by name despite being off by default" % c,
+              b.strip().splitlines()[-1][:120] if b.strip() else "no output")
+
     def without(*names):
         return ALL - set(names)
 
@@ -237,6 +260,24 @@ def suite_routing():
          "--skip codex + agy group"),
         (["--route", "только spark11"], {"spark11"}, "route: только spark11"),
         (["--route", "не используй codex"], without("codex"), "route: RU negation"),
+        # 🔴 OPT-IN CHANNELS, round 38. Naming a default-OFF channel in prose must SELECT it -
+        # until 2026-08-14 the route's only-branch could only turn things off, so "только 5.6
+        # terra" removed the other twelve and left the named one disabled: "running 0 channel(s):
+        # NONE". The --only FLAG was always right, so the two selection paths disagreed and the
+        # prose one silently did nothing. Derived from the registry, not hard-coded to a count.
+        (["--route", "только 5.6 terra"], {"orgpt56terrapro"},
+         "route: только 5.6 terra (names an OFF-by-default channel)"),
+        (["--route", "только терра-про"], {"orgpt56terrapro"},
+         "route: только терра-про (RU alias of an OFF-by-default channel)"),
+        # ADD mode: default set PLUS the named channel. Igor's rule is that «используй все
+        # модели» must NOT pull in the rationed channel while «и ещё 5.6 Terra Pro» must.
+        (["--route", "используй все модели и ещё 5.6 Terra Pro"], ALL | {"orgpt56terrapro"},
+         "route: ADD keeps the default set and adds the opt-in one"),
+        (["--route", "добавь терра-про"], ALL | {"orgpt56terrapro"},
+         "route: добавь <opt-in channel>"),
+        # The negative half of the same rule: no additive marker => the default set, unchanged.
+        (["--route", "не используй gemini"], without(*group_of("gemini")),
+         "route: a plain negation still leaves the opt-in channel OFF"),
         (["--route", "кроме gemini"], without(*group_of("gemini")), "route: кроме gemini (GROUP)"),
         (["--route", "не используй spark"], without(*GROUPS["spark"]),
          "route: RU negation of a GROUP"),
