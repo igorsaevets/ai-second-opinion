@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.17.0 — 2026-08-14
+
+**One config change (Terra Pro effort → `max` on the operator's instruction, deliberately UNTESTED)
+and one live-measured failure recorded honestly (Gemini 3.7 Flash on OpenRouter returns empty
+content after the fetch loop). No code changes.**
+
+- 🟢 **`orgpt56terrapro.reasoning.effort`: `xhigh` → `max`.** the operator: «раз там есть Max, давай для
+  orgpt56terrapro него сделаем. Но не тестируй, а то дорого.» `max` is in the endpoint's own
+  `supported_reasoning_efforts` list read live from the catalogue, so it is documented rather
+  than invented. 🔴 It has NEVER been sent from this project — the first real use of this channel
+  is also the first execution of this parameter. Two consequences to expect, neither a bug: it
+  could fail with a paid 400 (never auto-retry), and if accepted it will cost more than the
+  $1.76–1.81 measured at `xhigh`. Rationale for matching codex at `xhigh` no longer applies: the
+  channel is opt-in and reserved for strategic questions, so its ceiling IS the point.
+
+- 🔴🔴 **`orgemini37flash` — live-run failure recorded, not fixed.** the operator asked for a live run
+  because he could see no prior invocation in the OpenRouter logs. His instinct was right: the
+  channel had never actually run. Two runs on the same brief with the fetch loop returned **0
+  characters of content** with reasoning present and no error event — signature identical to the
+  R29 grok420 and R36 kimik3 failures. A third run that made only 2 fetches produced 850 output
+  tokens but **fabricated 4 URLs** (2 returned 404, 2 were MOVED). By the project's own logic
+  (a stream that ends inside the vendor's agentic loop without emitting a message item) this is a
+  vendor behaviour, not a harness config bug. **Third channel in a row with the same failure
+  class** (kimik3 08-03, grok420 R36, orgemini37flash R38); the harness cannot fix any of them.
+  Recorded in the channel's `_LIVE_MEASURED_EMPTY_OUTPUT_2026_08_14` field so the next round
+  starts from measurement, and left `enabled: true` because disabling it or capping its fetch
+  budget would both trade something and neither is justified by one working data point that also
+  fabricated URLs.
+
+- 🟡 **A scripted registry edit went to the wrong channel.** One of the diagnostic runs above
+  used a scripted anchor that matched an earlier `"enabled": true` line and hit `kimik3.fetch_tool`
+  instead of the intended `orgemini37flash.fetch_tool`. Caught by a semantic diff against a
+  backup, restored to byte-identical. Third round in a row where a "find X and edit it" script
+  needed a more unique anchor — the class fits [[one-subject-two-skills-rots]]: **any
+  find-and-edit that lands somewhere else silently is a script that trusted the shape of the
+  target instead of naming it.** Fixed in the workflow (semantic diff before commit is now the
+  reflex), not in the code.
+
 ## 1.16.0 — 2026-08-14
 
 **GPT-5.6 Terra Pro becomes the first OPT-IN channel — off unless you ask for it by name.
