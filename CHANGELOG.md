@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.14.0 — 2026-08-14
+
+**Two panel-found bugs fixed. Grok gets more room to think per the operator's «focus on quality»;
+agy stops warning about non-ASCII paths and transparently works around them. The employee
+update path was verified end-to-end for anyone still asking «if I send them a link, will it
+just update?»**
+
+- 🟢 **`grok420.max_tokens` raised 60000 → 131072.** the operator: «Про Grok, фокус на качество,
+  а значит токенов на размышление урезать не надо» — the fix cannot cap reasoning, only
+  raise the combined ceiling. Probed against xAI's own `/v1/responses` first: it accepts
+  `max_output_tokens: 200000` on this model without a 400, so 131072 sits well below any
+  refused limit. `max_tokens` is a CEILING, not a reservation — a call that only needs 5K
+  bills for 5K, so the raise is free on light briefs and prophylactic on heavy ones.
+  🔴 **Honest scope of the fix.** This removes the ceiling as a potential future exhaust
+  on very heavy reasoning briefs. It does NOT fix the AOS R29 failure class (2/2 срыва,
+  8456 output tokens with 8453 reasoning + zero-byte text) — that call was NOWHERE NEAR
+  the 60000 ceiling, so raising the ceiling cannot have caused or cured it. The R29
+  pattern is a stream that ends inside the agentic loop without emitting a message item;
+  the empty-text warning already reports it with rich diagnostics (status,
+  incomplete_reason, output_item_kinds, reasoning/output ratio). Per the operator's standing rule
+  «Never auto-retry a billable failure», that class is a `--only grok420` re-run when it
+  happens, not a silent retry. Recorded in `channels.json` so nobody «restores» the old
+  value or «adds» a retry.
+
+- 🟢 **agy Cyrillic path — transparent %TEMP% workspace instead of a preflight warning.**
+  agy corrupts non-ASCII path components in its own stream-json output
+  («...\\???????????\\...»), which broke workspace-scoped agent discovery on Cyrillic
+  paths. Fix in `_agy_once`: when the workdir contains non-ASCII, mirror it deterministically
+  under `%TEMP%\\orch-agy-ws\\<basename>-<md5-of-original>` (retries reuse the same folder),
+  run agy there, and leave the OUTFILE at the path the caller asked for — Python writes
+  the outfile after agy is done and handles non-ASCII paths correctly. Preflight still
+  names the situation so the `%TEMP%` line in agy's own log is not surprising. Previously
+  measured on AOS R29: the runner did this by hand («беру ASCII-путь») because no
+  automatic workaround existed. Fresh-install case: a user with a Cyrillic Windows
+  username can now run reviews from their `~/reviews/` folder without editing anything.
+
+- 🟢 **Employee update path verified end-to-end.** Simulated a v1.13.0 install with (a)
+  an existing overlay entry (`orgemini37flash.max_tokens: 40000`) and (b) a channels.json
+  edit (`goog36flash.enabled: true`), then ran `upgrade.py` against the R37 dev tree.
+  Result: overlay preserved untouched; channels.json edit MIGRATED into the overlay
+  automatically; new tree files copied; backup made at `.bak.<timestamp>`; doctor ran
+  automatically. All three supported update paths (plugin auto-update, installer script,
+  `upgrade.py`) preserve overlay settings by design; the plugin path additionally relies
+  on Claude Code's 14-day cache window to recover pre-1.7.0 channels.json edits. No R37
+  code change to the update path — this is a verification that R30's design still works
+  under a new release.
+
 ## 1.13.0 — 2026-08-13
 
 **Two new Gemini 3.7 Flash reviewers. Plus `provider_route` — OpenRouter endpoint pinning that

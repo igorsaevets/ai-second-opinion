@@ -3388,15 +3388,20 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
         problem = agy_permission_preflight()
         if problem:
             yield "agy: " + problem
-        # agy mangles non-ASCII in its own JSON output (observed: a directory with a Cyrillic
-        # component came back as "...\\???????????\\..."). Nothing crashed, but a workspace it
-        # cannot spell is not a workspace you want a 25-minute run to depend on.
+        # 🔴 R37 2026-08-14: agy mangles non-ASCII path components in its own stream-json
+        # output ("...\\???????????\\..."), which broke workspace-scoped agent discovery on
+        # Cyrillic paths. The preflight used to only WARN. Now _agy_once transparently
+        # mirrors its workdir to an ASCII sibling under %TEMP% when needed; the outfile
+        # stays at the path the caller asked for because Python writes it and handles
+        # non-ASCII paths. Preflight still names the situation so users see what happened.
         p = os.path.abspath(outdir)
         try:
             p.encode("ascii")
         except UnicodeEncodeError:
-            yield ("agy: the output path contains non-ASCII characters (%s). agy corrupts them "
-                   "in its own logs; prefer an ASCII path such as %%TEMP%%\\reviews." % p)
+            yield ("agy: the output path contains non-ASCII characters (%s). The workspace "
+                   "agy runs in will be mirrored to an ASCII path under %%TEMP%%; your "
+                   "outfile still lands at the path you asked for. This is safe - it is here "
+                   "so you know why %%TEMP%% shows up in agy's own log lines." % p)
 
 
 def _write_agy_agent(workdir):
@@ -3653,6 +3658,28 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
     the tool. Pick by size.
     """
     binary = agy_bin()
+    # 🔴 R37 2026-08-14: agy corrupts non-ASCII characters in its own stream-json output
+    # (observed: a directory with a Cyrillic component came back as "...\\???????????\\..."),
+    # so a workspace-scoped agent at <workdir>/.agents/agents/... is not reliably discovered
+    # when workdir contains non-ASCII. The AOS runner worked around this by hand ("беру
+    # ASCII-путь"). Do it transparently here: mirror workdir to an ASCII sibling under %TEMP%
+    # deterministically hashed off the original path (so retries reuse it), run agy there,
+    # and leave the OUTFILE where the caller asked - Python writes it after agy finishes and
+    # handles non-ASCII paths correctly. Only the workspace agy actually reads (BRIEF.md, the
+    # workspace-scoped agent) needs to be ASCII-clean; the caller's REPORT.md and diagnostics
+    # can stay wherever they were.
+    try:
+        workdir.encode("ascii")
+    except UnicodeEncodeError:
+        import hashlib
+        safe_root = os.path.join(tempfile.gettempdir(), "orch-agy-ws")
+        os.makedirs(safe_root, exist_ok=True)
+        digest = hashlib.md5(workdir.encode("utf-8")).hexdigest()[:12]
+        # basename tag helps a human find their own runs among sibling hashes
+        tag = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(workdir))[:24] or "ws"
+        workdir = os.path.join(safe_root, "%s-%s" % (tag, digest))
+        log("  [agy] workdir path contains non-ASCII; running in %s so agy's telemetry stays "
+            "readable. The output file stays at the path you asked for." % workdir)
     os.makedirs(workdir, exist_ok=True)
     _write_agy_agent(workdir)
     ndjson = os.path.splitext(outfile)[0] + ".events.ndjson"
