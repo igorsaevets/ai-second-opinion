@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.13.0 — 2026-08-13
+
+**Two new Gemini 3.7 Flash reviewers. Plus `provider_route` — OpenRouter endpoint pinning that
+is now a first-class registry field, so the plan can honestly print what a run will cost when a
+model is served by more than one endpoint at prices differing 18x.**
+
+- 🟢 **`agy37flash` — Gemini 3.7 Flash via the Antigravity subscription CLI.** Third `agy`-kind
+  channel joining `agy31pro` (deep) and `agy36flash` (fast). Base slug `gemini-3.7-flash` +
+  `--effort` in `{low, medium, high}`, same shape as `agy36flash`. Verified against `agy models`
+  before the entry was written. Groups updated: `agy` grew from 2 to 3 channels (label
+  «both» → «all»), `gemini` grew from 4 to 6.
+
+- 🟢 **`orgemini37flash` — Gemini 3.7 Flash via OpenRouter, pinned to `google-vertex/global`.**
+  4x cheaper than `orgemini36flash` on both directions ($0.375/M in, $1.875/M out at the pinned
+  endpoint vs $1.50/$7.50 for 3.6-flash) — a newer flash undercutting the older one is unusual
+  and worth noticing before anyone «corrects» the price to match neighbours. Effort ladder
+  {high, medium, low} — NO `minimal` (unlike 3.6-flash). Pinned to `google-vertex/global` on
+  the operator's explicit request (endpoint UUID `e28074f6-26f6-4ba2-adf9-0bb807bc970e` in his URL).
+
+- 🟢 **New registry field: `provider_route`.** A dict passed verbatim to OpenRouter's
+  `provider` request block (openrouter.ai/docs/features/provider-routing). Accepts
+  `only`/`order`/`ignore`/`allow_fallbacks`/`sort`, all documented there. WITHOUT the pin,
+  `google/gemini-3.7-flash` routes across SIX endpoints — three Vertex Global tiers (flex
+  $0.1875/$0.9375, normal $0.375/$1.875, priority $0.675/$3.375) and three AI Studio tiers
+  ($0.375/$1.875 flex up to $1.35/$6.75 priority). Cheapest is 18x under most expensive; a plan
+  cannot honestly print what a run will cost when the endpoint is chosen at request time. The
+  pin also fixes the DATA POLICY: Vertex Global's terms say prompts are not used for model
+  training, AI Studio's are different. A channel whose data policy varies per-request is a
+  policy nobody agreed to.
+
+- 🟢 **The provider_route from the registry must REACH the call, not stay on the printout.**
+  Selftest grew to 280 checks (was 279) with a mechanical assertion that any launched channel
+  carrying `provider_route` receives it in its call kwargs. Same discipline as `web.enabled`
+  and `fetch_tool.max_calls` — a knob that resolves and prints but never reaches the function
+  is the defect class this repository has recorded seven times (channels.spark.model, the four
+  dispatch literals, telemetry keyed on old names, `tools` on goog36flash, the renamed flag
+  that missed its own reporter, ...).
+
+- 🟢 **Selftest crash-isolation now DERIVES the expected-to-crash set from the registry.** A
+  hard-coded `("agy31pro", "agy36flash", "ghost")` list broke the moment `agy37flash` was
+  added, because the test wanted to prove ALL non-crashing channels survive when ONE (any
+  agy-kind) crashes — but a hand-maintained list is not «all agy channels», it is
+  «two agy channels». Now derived: `{kind == "agy"} ∪ {"ghost"}`. This is a corner of the
+  same defect class the surrounding paragraph WARNS about — the exact silent-drop pattern the
+  test was written to catch. Fixed inline; the comment now names the round.
+
+**About the `provider_route` field, for anyone building a similar registry:** the OpenAI-shaped
+channel already had a top-level `provider` field (openrouter | mimo | xai — WHICH vendor). The
+new field's name is DELIBERATELY different to avoid the two-things-one-name defect this project
+keeps measuring elsewhere. `provider` remains the dispatch key for OAI_PROVIDERS; `provider_route`
+is what OpenRouter's own body sees as `body["provider"]`. Read them together in the source and
+the names carry the distinction; read them apart and confusion is a nightmare.
+
 ## 1.12.0 — 2026-08-08
 
 **The R33 dup-key defense now follows the plugin, not the machine — and the CI that used to

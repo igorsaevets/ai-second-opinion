@@ -449,6 +449,7 @@ def suite_dispatch():
         "                  'effort': k.get('effort'), 'timeout': k.get('timeout'),\n"
         "                  'reasoning': k.get('reasoning'), 'fetch_tool': k.get('fetch_tool'),\n"
         "                  'thinking_level': k.get('thinking_level'),\n"
+        "                  'provider_route': k.get('provider_route'),\n"
         "                  'web': bool((k.get('web') or {}).get('enabled'))})\n"
         "        return {'ok': True, 'text': 'stub\\nREVIEW-COMPLETE', 'seconds': 0.0}\n"
         "    return f\n"
@@ -536,6 +537,24 @@ def suite_dispatch():
                   "the registry's web setting reached the %s call" % c)
         check(bool(webbed), "at least one launched channel has web search on",
               "webbed=%s" % webbed)
+        # 🔴 R36 (2026-08-13): a registry `provider_route` block must REACH the call, not stay on
+        # the printout. Same discipline as `web.enabled` above: the plan can print «provider pin»
+        # and the dispatcher can still hand OpenRouter no `provider` field, which is the exact
+        # rot this repository has recorded seven times for other fields. Derived from the registry
+        # rather than named: any launched channel whose registry entry carries `provider_route`
+        # must have received it in its call kwargs.
+        pinned = [c for c, ch in json.loads(
+            Path(HERE, "channels.json").read_text(encoding="utf-8"))["channels"].items()
+            if not c.startswith("_") and ch.get("enabled", True)
+            and ch.get("provider_route")]
+        for c in pinned:
+            row = next((r for r in launched if r["name"] == c), None)
+            check(bool(row and row.get("provider_route")),
+                  "provider_route from the registry REACHED the %s call" % c,
+                  "registry=%s got=%s" % (
+                      json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))
+                      ["channels"][c].get("provider_route"),
+                      row and row.get("provider_route")))
         # 🔴 THE TIER MUST REACH THE CALL, NOT ONLY THE PRINTOUT. Compared arg-for-arg between a
         # strategic and a deep dispatch of the same registry: a knob that resolves and prints but
         # never reaches the function is the defect class this repository has now recorded seven
@@ -632,7 +651,20 @@ def suite_dispatch():
             # newly added `gemini` channel had no stub and failed for a reason that had nothing to
             # do with the crash being tested. A floor cannot detect a channel quietly dropping out
             # of the sample. Demand EVERY non-crashing channel, computed from the registry.
-            expected = {n for n in st if n not in ("agy31pro", "agy36flash", "ghost")}
+            # 🔴 THE CRASH-EXPECTED SET IS DERIVED FROM `kind == "agy"`, not hard-coded. Round 36
+            # (2026-08-13) hit exactly the sibling defect this comment above documents: the list
+            # was `("agy31pro", "agy36flash", "ghost")` while agy37flash was added the same day,
+            # so the test failed for a reason that had nothing to do with the crash isolation
+            # question - the exact silent-drop pattern the surrounding paragraph exists to warn
+            # about. Fix: derive. `call_agy = boom` stubs the agy dispatcher, so every channel of
+            # kind agy is expected to crash, and `ghost` is added by name because it is planted
+            # by this test for the undispatchable-kind assertion.
+            _reg = json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))
+            _agy_chans = {k for k, v in _reg["channels"].items()
+                          if not k.startswith("_") and isinstance(v, dict)
+                          and v.get("kind") == "agy"}
+            _crash_set = _agy_chans | {"ghost"}
+            expected = {n for n in st if n not in _crash_set}
             survivors = {n for n in expected if st[n]}
             check(survivors == expected,
                   "one channel's crash does not discard ANY other paid-for result",

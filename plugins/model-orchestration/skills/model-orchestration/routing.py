@@ -1110,8 +1110,8 @@ def _decorate(plan, reg):
         # time anyone edited the registry to drop url_context. Both homes still exist (the literal
         # is a deliberate fallback for a corrupt registry) but the registry now actually wins.
         for extra in ("reasoning", "max_tokens", "toolsets", "role", "fetch_tool", "tools",
-                      "provider", "prompt_suffix", "distribution", "thinking_level",
-                      "thinking_levels"):
+                      "provider", "provider_route", "prompt_suffix", "distribution",
+                      "thinking_level", "thinking_levels"):
             if ch.get(extra) is not None:
                 p[extra] = ch[extra]
         # Hints are stored ONCE at top level and referenced, because the same 1.5 KB paragraph

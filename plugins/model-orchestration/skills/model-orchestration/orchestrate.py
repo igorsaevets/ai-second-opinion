@@ -2425,7 +2425,7 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
 
 def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2400,
                       web=None, name="kimi", reasoning=None, max_tokens=None,
-                      fetch_tool=None, provider="openrouter"):
+                      fetch_tool=None, provider="openrouter", provider_route=None):
     """
     Any OpenAI-protocol model over /chat/completions, DIRECTLY - no CLI in between.
 
@@ -2520,6 +2520,22 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         body["usage"] = {"include": True}
     else:
         body["stream_options"] = {"include_usage": True}
+    # 🔴 OPENROUTER endpoint pinning, added 2026-08-13 (round 36). Igor gave a specific endpoint
+    # UUID for gemini-3.7-flash - the same model is served by SIX OpenRouter endpoints across
+    # Vertex Global (flex/normal/priority) and AI Studio (flex/normal/priority) at prices that
+    # differ 18x from cheapest to most expensive. Without a pin OpenRouter's default routing picks
+    # one and the plan cannot honestly print what a run will cost. WITH the pin the vendor path is
+    # deterministic, which is also the point of the `distribution` split - Vertex Global's data
+    # policy is enterprise-grade (prompts not used for model training), AI Studio's is not, and a
+    # channel whose data policy varies per-request is a policy nobody agreed to. The field maps 1:1
+    # to OpenRouter's documented `provider` request block (openrouter.ai/docs/features/provider-
+    # routing): `only`/`order`/`ignore`/`allow_fallbacks`/`sort` are all passed through unchanged.
+    # A wrong key returns a plain 400 from the vendor which is the right layer to fail at, not
+    # here - re-validating a documented API in prose is how a stale registry rots.
+    if provider_route:
+        body["provider"] = provider_route
+        log("  [%s] provider pin: %s" % (name, ", ".join("%s=%s" % (k, v)
+                                          for k, v in provider_route.items())))
     native_search = False
     if (web or {}).get("enabled"):
         if prov["search"] == "plugin":
@@ -4148,7 +4164,8 @@ def main():
                                         reasoning=p.get("reasoning"),
                                         max_tokens=p.get("max_tokens"),
                                         fetch_tool=p.get("fetch_tool"),
-                                        provider=p.get("provider") or "openrouter")
+                                        provider=p.get("provider") or "openrouter",
+                                        provider_route=p.get("provider_route"))
             elif kind == "xai":
                 # 🔴 THE TIER TIMEOUT WAS NEVER PASSED HERE, and the plan claimed otherwise.
                 # Found by codex in the round-29 panel, reviewing this very change: the tier note

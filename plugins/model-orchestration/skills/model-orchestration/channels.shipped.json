@@ -30,12 +30,14 @@
       ]
     },
     "agy": {
-      "label": "both Antigravity SUBSCRIPTION models",
+      "label": "all Antigravity SUBSCRIPTION models",
       "channels": [
         "agy31pro",
-        "agy36flash"
+        "agy36flash",
+        "agy37flash"
       ],
       "_lost_the_gemini_aliases_2026_08_07": "🔴 This group used to answer to `gemini` / `джемини` / `гемини`, and on 2026-08-07 that became a lie the moment a Gemini arrived on a different transport. «не используй gemini» would have dropped two of three Gemini channels and left the third running - the failure mode where a word keeps working, keeps printing a plan, and silently means less than it used to. The vendor words now belong to the `gemini` group below, which is the family; `agy` stays the TRANSPORT. Same disease as `_model_was_decorative` and the dispatch literals: a name that used to describe the thing and no longer does.",
+      "_membership_updated_2026_08_13": "agy37flash added round 36. `label` renamed from «both» to «all» because there are three now - the same rot as calling `agy` a synonym for `gemini` once a second transport arrived. A group's label has to describe its actual contents.",
       "aliases": [
         "agy",
         "antigravity",
@@ -44,14 +46,17 @@
       ]
     },
     "gemini": {
-      "label": "every Gemini, all three transports",
+      "label": "every Gemini, across every transport",
       "channels": [
         "agy31pro",
         "agy36flash",
+        "agy37flash",
         "orgemini36flash",
+        "orgemini37flash",
         "goog36flash"
       ],
-      "_added": "2026-08-07 with orgemini36flash. A human who says «gemini» means the MODEL FAMILY, not the billing path - and after this round the family spans a subscription CLI and a metered API. Two words are needed and they are not synonyms: `gemini` = all three, `agy` = the two that spend the Antigravity subscription, `openrouter` = the three that spend the OpenRouter key. `orgemini36flash` is deliberately in both `gemini` and `openrouter`, because it genuinely belongs to both sets - overlapping groups are fine, a group whose name misdescribes its contents is not.",
+      "_added": "2026-08-07 with orgemini36flash. A human who says «gemini» means the MODEL FAMILY, not the billing path - and after this round the family spans a subscription CLI and a metered API. Two words are needed and they are not synonyms: `gemini` = every transport, `agy` = the ones that spend the Antigravity subscription, `openrouter` = the ones that spend the OpenRouter key. Overlapping groups are fine, a group whose name misdescribes its contents is not.",
+      "_membership_updated_2026_08_13": "agy37flash and orgemini37flash added round 36. Six channels now - three via the agy CLI (3.1 pro, 3.6 flash, 3.7 flash), two via OpenRouter (3.6 flash, 3.7 flash), one via Google directly (3.6 flash). Note the asymmetry: 3.7 has no `goog37flash` yet because the operator did not add one, so the direct-Google leg has only 3.6.",
       "aliases": [
         "gemini",
         "джемини",
@@ -66,6 +71,7 @@
         "kimik3",
         "qwen38max",
         "orgemini36flash",
+        "orgemini37flash",
         "ormimo25pro",
         "orgrok420",
         "ornemotron3ultra"
@@ -293,6 +299,37 @@
       ],
       "notes": "The FAST Gemini voice - the operator's reason for adding it is that Gemini answers quickly, so a second opinion from this family costs almost no wall-clock. Unlike 3.1 Pro it does have a 'medium' effort, so the standard tier reaches it unclamped."
     },
+    "agy37flash": {
+      "kind": "agy",
+      "enabled": true,
+      "label": "agy 3.7 Flash",
+      "cost": "mid",
+      "model": "gemini-3.7-flash",
+      "agent": "deep-researcher",
+      "_added": "2026-08-13 (round 36), the operator: «Добавь еще одну модель параллельно: agy 3.7 Flash High и через openrouter 3.7 Flash High через провайдера google-vertex/global». Third Gemini through the Antigravity subscription CLI, joining agy31pro (deep) and agy36flash (fast). VERIFIED against `agy models`: three suffixed forms exist - gemini-3.7-flash-high/medium/low - and the base slug `gemini-3.7-flash` composes with --effort exactly as 3.6-flash does. Same pattern as agy36flash, deliberately: adding one channel and everything ELSE unchanged is the only way to isolate what the new model changes.",
+      "_one_model_per_call": "See agy36flash._one_model_per_call. The agy CLI runs ONE model per invocation, so a third Gemini voice needs a third channel entry.",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "models": {
+        "gemini-3.7-flash": {
+          "label": "Gemini 3.7 Flash",
+          "aliases": [
+            "gemini-3.7-flash",
+            "3.7 flash"
+          ],
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      },
+      "aliases": [
+        "agy37flash",
+        "agy37",
+        "аджи37"
+      ],
+      "notes": "The newest Gemini flash via Antigravity subscription. Same three-effort ladder as 3.6-flash. Positioned as the FASTEST reviewer in the panel carrying the newest model weights - what its round-to-round disagreement with agy36flash reveals is the model delta, not the transport."
+    },
     "kimik3": {
       "kind": "openrouter",
       "enabled": true,
@@ -469,6 +506,58 @@
         "джемини апи"
       ],
       "notes": "The SAME model as agy36flash, reached the other way. Its whole reason for existing is the comparison: if it matches agy36flash the Antigravity subscription is a billing path, and if it loses the difference is Google's agent harness, which is a thing we could copy. Do not 'simplify' the two into one channel - one channel = one model AND one transport, and collapsing them destroys the only control in the panel."
+    },
+    "orgemini37flash": {
+      "kind": "openrouter",
+      "provider": "openrouter",
+      "enabled": true,
+      "distribution": "both",
+      "label": "OR Gemini 3.7 Flash",
+      "cost": "metered",
+      "model": "google/gemini-3.7-flash",
+      "role": "analysis",
+      "_added": "2026-08-13 (round 36), the operator: «через openrouter 3.7 Flash High через провайдера google-vertex/global», with the exact endpoint URL openrouter.ai/google/gemini-3.7-flash?endpoint=e28074f6-26f6-4ba2-adf9-0bb807bc970e. Different reasoning from orgemini36flash's distribution split: there is no goog37flash on this machine (the operator did not add one), so this is the ONLY OpenRouter route to Gemini 3.7 Flash for both audiences - local and kit - and distribution is `both` rather than `kit`.",
+      "_provider_pinned": "🔴 EXPLICIT PROVIDER PIN to google-vertex/global via `provider_route` below. Without the pin OpenRouter picks across SIX endpoints for this model - three Vertex Global tiers (flex $0.1875/$0.9375 per M, normal $0.375/$1.875, priority $0.675/$3.375) and three AI Studio tiers ($0.375/$1.875 flex, $0.75/$3.75 normal, $1.35/$6.75 priority). Cheapest is 18x under the most expensive; a plan cannot honestly print what a run will cost when the endpoint is chosen at request time. The pin also fixes the DATA POLICY: Vertex Global's terms say prompts are not used for model training, AI Studio's terms are different, and a channel whose data policy varies per-request is a policy nobody agreed to. the operator's URL pointed at the normal Vertex Global tier (endpoint UUID e28074f6-26f6-4ba2-adf9-0bb807bc970e); kept as-is. Adding flex/priority variants later would be additional channels rather than --set overrides, because --set has no way to change a provider block.",
+      "provider_route": {
+        "only": [
+          "google-vertex/global"
+        ]
+      },
+      "_catalogue": "READ FROM LIVE CATALOGUE 2026-08-13 at api.openrouter.ai/v1/models: `google/gemini-3.7-flash` context_length 1,048,576, top_provider.max_completion_tokens 65,536. At the pinned endpoint google-vertex/global: $0.000000375/token prompt = $0.375/M, $0.000001875/token completion = $1.875/M. 🔴 THIS IS FOUR TIMES CHEAPER THAN 3.6-flash ($1.50 in / $7.50 out) - a newer flash undercutting the older one is unusual and worth recording so nobody 'corrects' the pricing here to match neighbouring channels. supported_parameters includes reasoning, reasoning_effort, tools, tool_choice, structured_outputs. reasoning_config: mandatory=true, default_enabled=true, supported_efforts=[high, medium, low], default_effort=medium.",
+      "reasoning": {
+        "effort": "high"
+      },
+      "_effort_ladder_has_no_minimal": "🔴 UNLIKE 3.6-flash which supports [high, medium, low, MINIMAL], this model has NO minimal effort. Setting effort=minimal here would be a paid 400. `high` is both this channel's ceiling and, deliberately, the same effort orgemini36flash uses - which keeps the two 3.x-flash OpenRouter channels matched on depth, so their disagreement is model-vs-model rather than depth-vs-depth. Reasoning cannot be disabled (mandatory=true), so this is a forced-depth reviewer.",
+      "max_tokens": 60000,
+      "_max_tokens_same_as_neighbours": "60000 against the model's 65,536 max_completion_tokens ceiling, and on OpenRouter's protocol that ceiling covers REASONING AND ANSWER TOGETHER. Same footroom as orgemini36flash - see kimik3._reasoning_budget for the 2026-08-03 failure mode this margin exists to prevent.",
+      "web": {
+        "enabled": true,
+        "max_results": 5,
+        "_engine_deliberately_unset": "Google IS on OpenRouter's native-search list («powered by native search for Anthropic, Google, OpenAI, Perplexity, and SpaceXAI models»), so leaving `engine` unset gets NATIVE Google grounding here. Same reasoning as orgemini36flash._engine_deliberately_unset - naming exa would DOWNGRADE this channel to the excerpt-splicing surface the other OpenRouter channels warn about.",
+        "_unverified": "That native grounding is what actually runs is INFERRED from the vendor's list plus the catalogue's web_search pricing, not yet observed on a real 3.7-flash response - one round of measurement is what would prove it."
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8,
+        "_added": "Same wiring, same SSRF fence, same per-CALL budget as orgemini36flash - read the notes on kimik3.fetch_tool. Kept ON alongside native search: the vendor decides WHICH page, we OPEN and PROVE it. `n_grounded` is a list on this channel."
+      },
+      "models": {
+        "google/gemini-3.7-flash": {
+          "label": "Gemini 3.7 Flash (OpenRouter)",
+          "data_policy": "Metered API through OpenRouter, PINNED to google-vertex/global. Vertex Global data policy applies (enterprise-grade: prompts not used for Google's model training). This is materially different from AI Studio's terms, which is why the endpoint is pinned rather than allowed to route. See also _data_controls_not_wired at the end of this file for OpenRouter-side controls that are documented but not yet enabled here.",
+          "aliases": [
+            "google/gemini-3.7-flash",
+            "or gemini 3.7",
+            "3.7 flash api"
+          ]
+        }
+      },
+      "aliases": [
+        "orgemini37flash",
+        "orgemini37",
+        "оргемини37"
+      ],
+      "notes": "The newest and cheapest Gemini in the panel - 4x cheaper than orgemini36flash on both directions, and pinned to Vertex Global so the price is deterministic. Its disagreement with orgemini36flash is a model-delta signal on ONE transport; its disagreement with agy37flash is a transport-delta signal on ONE model. See _provider_pinned for why the pin is not optional."
     },
     "goog36flash": {
       "kind": "gemini",
