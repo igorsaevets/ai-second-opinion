@@ -1,5 +1,60 @@
 # Changelog
 
+## 1.15.0 — 2026-08-14
+
+**A 17th channel: OpenAI's GPT-5.6 Terra Pro over OpenRouter, pinned to OpenAI's own
+endpoint. Adding it exposed two defects that had nothing to do with it — a vendor alias that
+was about to start lying, and a fetch budget that paid twice for the same page.**
+
+- 🟢 **New channel `orgpt56terrapro` — `openai/gpt-5.6-terra-pro`, provider-pinned to
+  `openai`.** The first OpenAI model on the OpenRouter transport, so the panel now reaches
+  one vendor two ways (`codex` via the CLI, this via HTTP) — the comparison that isolates
+  transport from model. Effort `xhigh` to match codex, `max_tokens` 120000 against a hard
+  128000 ceiling.
+  🔴 **The pin was proved by a negative control in the same field, not by a 200.**
+  `only: ["openai"]` → the response's `provider` field says OpenAI, $0.001727;
+  `only: ["azure"]` → says Azure, $0.00345 on the same token counts. The Azure arm costs
+  exactly 2×, which is what the catalogue predicts ($2/$12 per M vs $1/$6) — so the pin
+  steers rather than being accepted and ignored.
+  🔴 **The `?endpoint=<UUID>` in an OpenRouter URL is still UI-only** (the round-36 trap).
+  Resolved by reading the model page's embedded payload, where the endpoint object carries
+  both `id` and `provider_slug`: `a775a298-…` → `openai`, variant `standard`. The same
+  method re-confirmed round 36's `google-vertex/global` pin, which needed no correction.
+
+- 🟢 **Native web search: measured, not inferred.** Same question with and without the
+  plugin, deliberately dated past the model's 2026-02-16 cutoff. Without: 0 citations and a
+  confidently wrong answer invented from weights. With: the right answer and a citation URL
+  carrying `utm_source=openai` — positive proof the search was OpenAI's own rather than Exa
+  wearing a native label. On a 2 744-character brief with three planted falsehoods the
+  channel returned **4/4 correct verdicts**, every claim `[OPENED]` with verbatim quotes.
+
+- 🔴 **New `openai` GROUP, created before the alias could lie.** `openai` was an alias on the
+  `codex` channel — true while codex was the only OpenAI voice, false the moment a second
+  one existed. That is exactly what happened to `gemini` on 2026-08-07, discovered only
+  after «не используй gemini» had been silently dropping two of three channels. This time
+  the group ships in the same commit that creates the condition: `--only openai` now means
+  both OpenAI channels, `--only codex` still means the CLI.
+
+- 🔴 **Fetch-budget bug: a `#fragment` is not a different page.** The page-fetch budget keyed
+  its already-tried map on the raw URL string, so `…/provider-selection` and
+  `…/provider-selection#base-slug-matching` counted as two fetches of one HTTP request — a
+  fragment is resolved client-side and never reaches the server (RFC 3986). Found in the new
+  channel's first live run: 2 of 8 budget slots spent re-fetching byte-identical pages, each
+  wasted slot adding a tool round that re-sent a 400 KB page. The tell was that two counters
+  disagreed — `fetched_by_us` said 6 (it normalises) while the log said 8 (it did not), and
+  the one spending money was the naive one. New `_fetch_key()` keys on what the origin
+  actually sees: fragment dropped, query string KEPT (`?page=2` is a different page), path
+  case preserved. 8 new regression assertions, including the over-merge controls — telling a
+  model «already tried» about a page it never received is the worse failure of the two.
+
+- 📋 **This channel is the most expensive in the registry and the number is now written down.**
+  Two consecutive live runs on an identical 2.7 KB brief billed **$1.7641 and $1.8071** —
+  roughly 7× kimik3. Cause, identical both runs: the model fetches OpenRouter's entire model
+  catalogue (399,995 chars, truncated at the 400 KB cap) to answer a question about one
+  model, and every later tool round re-sends it. Deliberately **not** «fixed» by capping
+  fetches or page size: both buy money with grounding, and grounding is why the channel earns
+  its seat. Recorded in `channels.json` for a human to price.
+
 ## 1.14.0 — 2026-08-14
 
 **Two panel-found bugs fixed. Grok gets more room to think per the operator's «focus on quality»;

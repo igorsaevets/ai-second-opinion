@@ -74,12 +74,30 @@
         "orgemini37flash",
         "ormimo25pro",
         "orgrok420",
-        "ornemotron3ultra"
+        "ornemotron3ultra",
+        "orgpt56terrapro"
       ],
       "aliases": [
         "openrouter",
         "опенроутер",
         "or"
+      ],
+      "_membership_updated_2026_08_14": "orgpt56terrapro added round 38."
+    },
+    "openai": {
+      "label": "every OpenAI model, both transports",
+      "channels": [
+        "codex",
+        "orgpt56terrapro"
+      ],
+      "_added": "2026-08-14 (round 38), and PRE-EMPTIVELY rather than after it broke. Until this round the word `openai` was an ALIAS ON THE CODEX CHANNEL, which was true while codex was the only OpenAI voice. Adding orgpt56terrapro made it false in exactly the way the `agy` group records for `gemini` on 2026-08-07: «не используй openai» would have dropped one of two OpenAI channels and left the other running - a word that keeps working, keeps printing a plan, and silently means less than it used to. The difference this time is that the group was created in the SAME commit that created the second channel, so the lie never shipped. `codex` keeps `codex`/`кодекс` because that name identifies the TRANSPORT (the CLI), the same division of labour as agy-the-transport versus gemini-the-family.",
+      "aliases": [
+        "openai",
+        "опенай",
+        "gpt",
+        "гпт",
+        "chatgpt",
+        "чатгпт"
       ]
     },
     "grok": {
@@ -230,9 +248,9 @@
       },
       "aliases": [
         "codex",
-        "кодекс",
-        "openai"
+        "кодекс"
       ],
+      "_lost_the_openai_alias_2026_08_14": "🔴 This channel used to answer to `openai`, and round 38 moved that word to the new `openai` GROUP the moment a second OpenAI channel (orgpt56terrapro) arrived. Identical reasoning to agy's _lost_the_gemini_aliases_2026_08_07, and deliberately caught BEFORE it could mislead rather than after: a vendor word must name the family, and a channel name must name the transport. `--only openai` now means both OpenAI voices; `--only codex` still means this one.",
       "notes": "Strategic questions and final line-level audits only. Never send it a lookup. Reports no tool telemetry of any kind, so the citation-existence audit is the only instrument that works on it."
     },
     "agy31pro": {
@@ -836,6 +854,67 @@
         "nvidia"
       ],
       "notes": "550B MoE (55B active), hybrid Transformer-Mamba, 1M context, and free. Its seat costs nothing, so the only reason to drop it is wall-clock. Expect provider-side rate limiting."
+    },
+    "orgpt56terrapro": {
+      "kind": "openrouter",
+      "provider": "openrouter",
+      "enabled": true,
+      "distribution": "both",
+      "label": "OR GPT-5.6 Terra Pro",
+      "cost": "metered",
+      "model": "openai/gpt-5.6-terra-pro",
+      "role": "strategy",
+      "_added": "2026-08-14 (round 38), the operator: «Теперь добавь вот эту модель еще. Именно с провайдером OpenAI», with the URL openrouter.ai/openai/gpt-5.6-terra-pro?endpoint=a775a298-1154-44d8-9db7-c2b9e75fba9a. FIRST OpenAI model on the OpenRouter transport - the panel already had OpenAI through the `codex` CLI, so this is a TRANSPORT twin of a vendor it already reaches, which is the comparison [[transport-beats-model]] exists to make. The vendor's own description of the model, read from the catalogue rather than recalled: «GPT-5.6 Terra Pro is the same underlying model as GPT-5.6 Terra, served with `reasoning.mode` set to `pro` for higher-quality responses on complex tasks.» knowledge_cutoff 2026-02-16.",
+      "_provider_pinned": "🔴 PIN TO `openai`, AND THE PIN WAS PROVED BY A NEGATIVE CONTROL IN THE SAME FIELD rather than by a 200. Three arms, 2026-08-14: only=[openai] -> response `provider` field says OpenAI, cost $0.001727; only=[azure] -> says Azure, cost $0.00345 on the same 1527/33 tokens; no pin at all -> OpenAI. The Azure arm costs EXACTLY 2x, which is what the catalogue predicts ($2/$12 per M against OpenAI's $1/$6), so the pin is steering rather than being accepted and ignored - the failure mode [[http-200-is-not-evidence]] was written for. the operator asked for the OpenAI provider specifically and that is what the UUID in his URL resolves to.",
+      "_uuid_resolution": "🔴 THE `?endpoint=<UUID>` IN THE URL IS UI-ONLY - same trap as round 36. It is not an API parameter and there is no API that maps it. Resolved by fetching the model page and reading the embedded Next.js payload, where the endpoint object carries both `id` (the UUID) and `provider_slug`: a775a298-1154-44d8-9db7-c2b9e75fba9a -> provider_slug `openai`, variant `standard`. The same method re-confirmed round 36's pin (e28074f6-... -> `google-vertex/global`), so that entry needed no correction. Script kept at tools/ in the answer archive; if it ever stops working, the fallback is to match on price, since the catalogue prices differ per endpoint.",
+      "provider_route": {
+        "only": [
+          "openai"
+        ]
+      },
+      "_base_slug_matching_is_the_subtle_part": "🔴 READ LIVE 2026-08-14 at openrouter.ai/docs/features/provider-routing, because getting this wrong silently changes the bill. Verbatim: «When you use a base provider slug (e.g. \"google-vertex\") in any provider routing field (`order`, `only`, or `ignore`), it matches ALL endpoints for that provider, including any variants or regions ... Note that service tier endpoints (e.g. `openai/priority`, `google-vertex/flex`) are NOT matched by base slugs - they require explicit opt-in via the `service_tier` parameter or a tier-suffixed slug.» So `only: [openai]` gets the standard tier and CANNOT silently land on `openai/flex` ($0.50/$3) or `openai/priority` ($2/$12): the price is deterministic without having to enumerate tiers. It also cannot land on Azure, which is a different provider_slug. This is why a bare `openai` is correct here while round 36 needed the suffixed `google-vertex/global` - there the suffix names a REGION, and regions ARE matched by a base slug.",
+      "_catalogue": "READ FROM THE LIVE CATALOGUE 2026-08-14 at openrouter.ai/api/v1/models/openai/gpt-5.6-terra-pro/endpoints and the model page payload. context_length 1,050,000; max_completion_tokens 128,000; max_prompt_tokens 922,000. At the pinned `openai` endpoint: $1/M prompt, $6/M completion, cache read $0.10/M, cache write $1.25/M. 🔴 THERE IS A HIGH-CONTEXT PRICE CLIFF: above 272,000 prompt tokens the rate DOUBLES to $2/M prompt and rises to $9/M completion (`min_prompt_tokens: 272000` override). That threshold is reachable on this channel - see _search_is_a_token_bomb below - so it is a real number, not trivia. supported_parameters: reasoning, include_reasoning, seed, max_tokens, response_format, structured_outputs, tools, tool_choice, reasoning_effort. Endpoint feature flags: supports_native_web_search TRUE, supports_tool_parameters TRUE, supports_file_urls TRUE.",
+      "reasoning": {
+        "effort": "xhigh"
+      },
+      "_effort_ladder": "🔴 SIX RUNGS, THE WIDEST LADDER IN THE REGISTRY: [none, low, medium, high, xhigh, max]. default_reasoning_effort `medium`, is_mandatory_reasoning FALSE - so unlike orgemini37flash this reviewer's thinking can be switched off entirely, which is what made the cheap probes in this round nearly free. MEASURED on an identical prompt, 2026-08-14: effort `none` -> 0 reasoning tokens, effort `xhigh` -> 107. Disjoint ranges on the meter that comes BACK, which is the standard [[depth-knobs-judged-by-meter]] set. `xhigh` is chosen rather than `high` to MATCH the codex channel, which is the other OpenAI-family voice: equal depth is what makes a codex-vs-terrapro disagreement a transport-and-model signal instead of a depth artefact. That deliberately breaks parity with the two OpenRouter geminis, which sit at `high` because that is THEIR ceiling. `max` exists above xhigh and is NOT set: it was never executed this round, and an unexecuted rung is a guess.",
+      "max_tokens": 120000,
+      "_max_tokens": "120,000 against the model's hard 128,000 max_completion_tokens ceiling. On this protocol the budget covers REASONING AND ANSWER TOGETHER (see kimik3._reasoning_budget for the 2026-08-03 failure this margin exists to prevent), and round 37 established the governing principle on the grok channel: max_tokens is a CEILING, not a reservation, so a call that needs 5K bills for 5K and a generous ceiling is free on light briefs and prophylactic on heavy ones. With effort xhigh that ceiling is the thing standing between a deep review and a zero-byte answer, so it is set high on purpose and NOT traded down to save money that would not have been spent anyway.",
+      "web": {
+        "enabled": true,
+        "_engine_deliberately_unset": "Leaving `engine` unset selects NATIVE OpenAI search. Docs verbatim, read live 2026-08-14: «Native search is used by default for OpenAI, Anthropic, Google, Perplexity, and SpaceXAI models that support it» and «Exa search is used for all other models or when native search is not supported». Naming `exa` here would DOWNGRADE this channel to the excerpt-splicing surface that kimik3._snippets_not_pages documents.",
+        "_measured": "🔴 NOT INFERRED THIS TIME - MEASURED, with the control in the same field, 2026-08-14. Same question («latest @anthropic-ai/claude-code version on npm and its publish date»), deliberately dated past the model's 2026-02-16 cutoff. WITHOUT the plugin: 0 citations and a confidently WRONG answer invented from weights - «2.1.70, published February 28, 2025». WITH the plugin: 1 url_citation and «2.1.220», which is the version this machine's own `claude --version` reports. And the citation URL came back as npmjs.com/...?utm_source=openai - the `utm_source=openai` tag is positive proof the search was OPENAI'S OWN and not Exa wearing a native label, which is stronger evidence than any feature flag. This also retires the `_unverified` hedge that orgemini37flash still carries: the endpoint feature flag supports_native_web_search is TRUE for both models, and here the flag was confirmed against behaviour.",
+        "_max_results_deliberately_absent": "🔴 EVERY OTHER OpenRouter channel here sets `max_results: 5`; this one does NOT, and the omission is the honest position rather than an oversight. `max_results` is a WEB-PLUGIN parameter, and under native search the provider's own tool decides what it returns - nothing in this round demonstrated the number reaching OpenAI's search, and sending a knob whose effect you cannot see is exactly the decorative-field class this registry has already been burned by twice (`channels.spark.model`, `thinking.budget_tokens`). 🔴 The same doubt therefore applies to orgemini36flash, orgemini37flash and orgrok420, which all set max_results: 5 WITH native search - not corrected here because that would be changing three channels on an untested hunch, but it is written down so the next round can measure instead of re-deriving.",
+        "_search_context_size_measured_and_rejected": "🔴 THE OBVIOUS COST LEVER IS NOT ONE - MEASURED, AND THE RESULT IS BACKWARDS. OpenRouter documents `web_search_options.search_context_size` {low, medium, high} as what governs native («provider passthrough») search volume. Five arms on one question, 2026-08-14, prompt tokens: default(omitted) 112,409 and 114,792 on a repeat; low 95,131; medium 95,236; high 75,161. So `high` was the CHEAPEST and the default the most expensive, the opposite of what the name predicts, while the two default arms agreed within 2% - the spread between arms is real, the DIRECTION is not what anyone would guess. n=1 per arm is too thin to ship a recommendation on, so the harness does NOT send this field and this channel does not set it. Recorded here with the numbers so the next round starts from data instead of intuition."
+      },
+      "_search_is_a_token_bomb": "🔴🔴 THE MOST EXPENSIVE CHANNEL IN THIS REGISTRY BY A WIDE MARGIN: TWO LIVE HARNESS RUNS BILLED $1.7641 AND $1.8071 FOR ONE REVIEW OF A 2 744-CHARACTER BRIEF. That is roughly 7x kimik3's ~$0.26 and it is not an anomaly - the two runs were consecutive, on the identical brief, and agreed within 3%. 🔴 AN EARLIER DRAFT OF THIS VERY NOTE PREDICTED «around $0.25» FROM SYNTHETIC PROBES AND WAS WRONG BY 7x; the number here is what the vendor reported through the harness, not an extrapolation, and it is written over the estimate rather than beside it.\n\nWHY. Search and page-fetch text is re-sent on every later tool round, so the input bill is roughly quadratic in the number of rounds, not linear in the brief. Run 1: in=6,643,398 tokens (3,324,849 of them cache reads) for a 2.7 KB brief. Run 2: in=5,569,499 (3,969,070 cached). The isolated probes that produced the 50x figure below were real but far too small to reveal this: one native search on a 160-character question moved 1,754 prompt tokens / $0.0027 to 89,605 / $0.0557, and other arms reached 112-115K. A full review does that eight times over, on top of each other.\n\nWHAT ACTUALLY DRIVES IT, both runs, same page: the model fetched `https://openrouter.ai/api/v1/models` - OpenRouter's ENTIRE model catalogue - to answer a question about ONE model. It came back at 399,995 chars, i.e. truncated at the 400 KB FETCH_MAX_BYTES ceiling, roughly 99k tokens, and was then re-sent on every subsequent round. The harness's oversized-page warning fired correctly both times; the cumulative FETCH_RUN_BUDGET did not, because the run total (~470 KB) stays under its 1 MB ceiling. So the guard that exists is aimed at a different failure than the one this channel produces.\n\nNOT «FIXED» HERE, AND THAT IS A DECISION RATHER THAN AN OVERSIGHT. The obvious levers - lower fetch_tool.max_calls, or a per-channel page-size cap - both buy money with grounding, and grounding is the whole reason this channel earns its seat: it answered 4/4 on a brief with three planted falsehoods, every claim [OPENED] with verbatim quotes. Round 36 proposed exactly this shape of trade on the grok channel («cap reasoning or lower max_tokens») and the operator rejected the direction outright: «фокус на качество, а значит токенов на размышление урезать не надо». Capping this channel unasked would repeat that mistake. The cost is therefore MEASURED, WRITTEN DOWN, and left for a human to price - which is this project's own rule that a cost which does not appear in the plan is a cost nobody declined.\n\nFLOOR AND CLIFF, both real: even a six-word question bills ~1,500-1,750 prompt tokens here, so the model carries substantial invisible scaffolding; and the 272,000-token high-context threshold in _catalogue (input rate doubles to $2/M, output to $9/M) is genuinely reachable on a multi-fetch round, which is true of no other channel in this registry.",
+      "_date_answers_are_less_stable_than_version_answers": "Worth knowing before trusting a dated claim from this channel: across four grounded runs of the identical question the VERSION was 2.1.220 every time, but the publish DATE it reported moved between «July 25, 2026» and «August 10, 2026». The number it can read off a page is stable; the number it has to infer from page furniture is not. Treat its dates as [SNIPPET] unless the run's citation audit resolved them.",
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8,
+        "_added": "Same wiring, same SSRF fence and same per-CALL budget as the other OpenRouter channels - read the notes on kimik3.fetch_tool. Kept ON alongside native search rather than instead of it: the vendor decides WHICH page, the harness OPENS it, and `n_grounded` becomes a list we produced rather than a claim the model made. supported_parameters confirms `tools` and `tool_choice`, and supports_tool_choice covers none/auto/required/function, so the tool surface is real on this endpoint."
+      },
+      "models": {
+        "openai/gpt-5.6-terra-pro": {
+          "label": "GPT-5.6 Terra Pro (OpenRouter)",
+          "data_policy": "Metered API through OpenRouter, PINNED to the `openai` provider slug, so the request goes to OpenAI's own API and not to Azure's hosting of the same weights. OpenAI's API platform terms (not the consumer ChatGPT terms) govern; OpenRouter's own per-request controls `provider.data_collection: deny` and `provider.zdr: true` are documented and NOT set here - see _data_controls_not_wired at the end of this file, which covers every metered channel alike.",
+          "aliases": [
+            "openai/gpt-5.6-terra-pro",
+            "gpt-5.6-terra-pro",
+            "terra pro",
+            "terrapro",
+            "5.6 terra",
+            "терра"
+          ]
+        }
+      },
+      "aliases": [
+        "orgpt56terrapro",
+        "orterrapro",
+        "terra-pro",
+        "терра-про"
+      ],
+      "notes": "OpenAI's flagship reasoner in `pro` mode, reached over OpenRouter and pinned to OpenAI's own endpoint. Its seat in the panel is not «another strong model» - it is the only voice that is the SAME VENDOR as codex on a DIFFERENT transport, so where the two disagree the difference is transport, tooling and depth rather than training. Deliberately the most expensive channel per round in this registry, and the only one that can cross a price cliff mid-run: read _search_is_a_token_bomb before enabling it for routine work."
     }
   },
   "_models_removed_from_agy": "claude-sonnet-4-6, claude-opus-4-6-thinking and gemini-3.1-pro-low are deliberately absent from both agy channels (the operator, 2026-07-31): routing a Claude model through agy spends the Gemini weekly subscription on a model already reachable directly, and Pro Low is the shallow variant this channel exists to avoid. 🔴 This note lives at TOP LEVEL and not inside `channels`, and that is not cosmetic: every other object in this file takes `_`-prefixed prose keys, so putting one inside `channels` is the natural habit - and there it would be iterated AS A CHANNEL. Written there first, in this very edit. routing.py now skips `_`-prefixed keys inside `channels` (the declared convention) and refuses any other non-object entry by name, so the trap costs a clear error instead of a confusing one.",

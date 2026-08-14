@@ -2669,7 +2669,7 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     text_parts, reasoning_chars, usage = [], 0, {}
     served_models = set()
     opened, fetch_failures, fetches = [], [], 0
-    tried = {}          # url -> first outcome; a repeat is answered, not re-fetched, not charged
+    tried = {}          # _fetch_key(url) -> first outcome; a repeat is answered, not re-fetched
     blocked_hosts = {}  # host -> consecutive failures; 2 retires the host for this review
     fetched_bytes = 0   # cumulative page text; the CALL budget does not bound this. See below.
     in_tot = out_tot = 0
@@ -2721,24 +2721,44 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                 url = (args or {}).get("url") or ""
                 if c["name"] != "fetch_url":
                     result = "REFUSED: unknown tool %r." % c["name"]
-                elif fetches >= max_rounds and url not in tried:
+                elif fetches >= max_rounds and _fetch_key(url) not in tried:
                     # 🔴 MEASURED: the console printed `fetch 9/8`. The budget was checked once
                     # per ROUND, but one assistant turn can emit several tool calls, and every
                     # call in that batch ran. A ceiling tested outside the loop it is meant to
                     # bound is not a ceiling. Checked per CALL now.
                     result = ("REFUSED: the fetch budget for this review (%d) is spent. Answer "
                               "from what you have and mark anything unverified." % max_rounds)
-                elif url in tried:
+                elif _fetch_key(url) in tried:
                     # 🔴 MEASURED ON THE FIRST LIVE ROUND, 2026-08-07: qwen spent fetches 6, 7 and
                     # 8 on ONE unreachable URL, re-requesting it verbatim each time. A budget that
                     # counts attempts rather than distinct pages lets a single broken link consume
                     # the whole allowance, and the model has no way to know it is repeating itself
                     # because each refusal looks new. Serve the first outcome again, say plainly
                     # that this is a repeat, and DO NOT spend a fetch on it.
+                    #
+                    # 🔴 KEYED ON _fetch_key SINCE 2026-08-14 (round 38), NOT ON THE RAW STRING,
+                    # and the reason is that the 2026-08-07 fix above only caught VERBATIM
+                    # repeats. Measured on this channel's first live run: the model fetched
+                    # `.../provider-selection` and later `.../provider-selection#base-slug-matching`,
+                    # then `.../web-search` and `.../web-search#default-behavior`. A fragment is
+                    # processed client-side and is NEVER put on the wire (RFC 3986), so those were
+                    # two HTTP requests to the origin and four entries in a dict keyed on the raw
+                    # string. Both came back byte-identical (22 328 and 17 279 chars), spent 2 of
+                    # the 8 budget slots, and - the expensive part - added two more tool rounds,
+                    # each of which re-sent the 400 KB page already in the conversation. The run
+                    # billed $1.76.
+                    #
+                    # The tell that this was a bug and not a policy: `opened` was ALREADY
+                    # normalised through _norm_url, so the same run reported fetched_by_us=6 while
+                    # the log showed 8 fetches. Two counters disagreed and the one spending money
+                    # was the naive one.
                     result = ("ALREADY TRIED THIS URL in this review - here is the same result, "
                               "and it did not cost you a fetch. Do not request it again; either "
-                              "use a different source or say the page could not be opened.\n\n"
-                              + tried[url])
+                              "use a different source or say the page could not be opened. If you "
+                              "were trying to reach a particular SECTION, note that a #fragment "
+                              "never reaches the server: you already have the whole page, so read "
+                              "the section out of the text above.\n\n"
+                              + tried[_fetch_key(url)])
                 elif blocked_hosts.get(_fetch_host(url), 0) >= 2:
                     # 🔴 SAME CLASS AS THE REPEATED-URL FIX ABOVE, ONE LEVEL UP: a HOST that
                     # refuses automated traffic refuses all of it, so the budget drains a
@@ -2786,7 +2806,7 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                 else:
                     fetches += 1
                     result = _safe_fetch_url(url)
-                    tried[url] = result[:2000] if len(result) > 2000 else result
+                    tried[_fetch_key(url)] = result[:2000] if len(result) > 2000 else result
                     failed = result.startswith(("REFUSED:", "HTTP ", "could not fetch"))
                     if failed:
                         fetch_failures.append(url)
@@ -3427,6 +3447,50 @@ def _write_agy_agent(workdir):
 # the bracketed-host form is matched by its own branch FIRST, before the general one.
 _URL_RE = re.compile(r"https?://\[[0-9A-Fa-f:.]+\][^\s)\]>\"'`|]*"
                      r"|https?://[^\s)\]>\"'`|]+")
+
+
+def _fetch_key(u):
+    """Dedupe key for the page-FETCH budget: everything the origin server sees, and nothing else.
+
+    Deliberately NOT _norm_url, and the two must not be merged - they answer different questions
+    and a single "normalise a URL" helper would have to be wrong for one of them:
+
+      _norm_url  answers "did the model cite this SOURCE" and therefore DROPS the query string,
+                 because `?utm_source=openai` is not a different source.
+      _fetch_key answers "would this be the same HTTP REQUEST" and therefore KEEPS the query
+                 string, because `?page=2` is a different page and refusing it as a duplicate
+                 would deny the model a source it never read.
+
+    What both drop is the FRAGMENT, and that is the bug this function was extracted to fix
+    (round 38, 2026-08-14). RFC 3986 resolves a `#fragment` client-side; it is never placed on
+    the wire. So `.../provider-selection` and `.../provider-selection#base-slug-matching` are one
+    request to the origin, and a dict keyed on the raw string counted them as two. Measured on
+    the first live run of orgpt56terrapro: 2 of 8 budget slots spent re-fetching two pages the
+    model already had, byte-identical both times, and each wasted slot added a tool round that
+    re-sent a 400 KB page already sitting in the conversation.
+
+    Case handling is conservative on purpose. Scheme and host are case-INSENSITIVE per RFC 3986
+    and are lowercased; the PATH is not, because most origins serve case-sensitive paths and
+    over-merging here does not waste money - it silently refuses the model a page it never got.
+    The failure modes are asymmetric, so the cheap one is chosen.
+
+    🔴 LIKE _norm_url, THIS MUST NEVER RAISE. It runs inside the paid tool loop, and the lesson
+    recorded in _norm_url's docstring - a parsing bug in a verification helper billed as a
+    network failure and retried three times - applies here with more force, because this helper
+    decides whether a paid fetch happens at all.
+    """
+    u = (u or "").strip().rstrip(".,;:")
+    try:
+        s = urlsplit(u)
+        host = s.netloc.lower()
+        if host.startswith("www."):
+            host = host[4:]
+        path = (s.path or "/").rstrip("/") or "/"
+        return (s.scheme.lower(), host, path, s.query)
+    except ValueError:
+        # Same fallback shape as _norm_url: a URL this malformed will fail in the fetcher anyway,
+        # and the only job here is to return SOMETHING hashable and stable for the same input.
+        return ("", "", u.split("#", 1)[0], "")
 
 
 def _norm_url(u):

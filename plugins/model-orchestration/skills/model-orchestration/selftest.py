@@ -1022,6 +1022,55 @@ def suite_tiers_and_grounding():
     check(not miss, "every dispatchable kind describes its web access in the plan",
           "silent kinds: %s" % miss)
 
+    # --- the fetch-budget dedupe key: a #fragment never reaches the server -------------------
+    # 🔴 REGRESSION GUARD, round 38. The budget's `tried` dict was keyed on the RAW url, so
+    # `.../page` and `.../page#section` counted as two fetches of one HTTP request. Measured on
+    # the first live orgpt56terrapro run: 2 of 8 slots wasted on byte-identical re-fetches, each
+    # adding a tool round that re-sent a 400 KB page. The tell was that `opened` (via _norm_url)
+    # said 6 while the log said 8 - two counters disagreed and the spending one was wrong.
+    #
+    # Both directions are asserted. Under-merging wastes money; OVER-merging is worse, because it
+    # tells the model "already tried" about a page it never received - so the query-string and
+    # path-case controls below must stay DIFFERENT, and they are the reason _fetch_key is not
+    # just _norm_url under another name.
+    import orchestrate as o
+    _same = [
+        ("https://openrouter.ai/docs/guides/routing/provider-selection",
+         "https://openrouter.ai/docs/guides/routing/provider-selection#base-slug-matching",
+         "a #fragment is not a different request (the round-38 bug)"),
+        ("https://ex.com/docs", "https://www.ex.com/docs/",
+         "www. and a trailing slash are not different requests"),
+        ("HTTPS://EX.com/a", "https://ex.com/a",
+         "scheme and host are case-insensitive per RFC 3986"),
+    ]
+    _diff = [
+        ("https://ex.com/a?page=1", "https://ex.com/a?page=2",
+         "a different query IS a different page - must not over-merge"),
+        ("https://ex.com/Case", "https://ex.com/case",
+         "path case is preserved - origins mostly serve case-sensitive paths"),
+        ("http://ex.com/a", "https://ex.com/a",
+         "scheme is part of the request"),
+    ]
+    for _a, _b, _why in _same:
+        check(o._fetch_key(_a) == o._fetch_key(_b), "fetch key: " + _why)
+    for _a, _b, _why in _diff:
+        check(o._fetch_key(_a) != o._fetch_key(_b), "fetch key: " + _why)
+    # _norm_url and _fetch_key must NOT collapse into one helper: the citation layer drops the
+    # query (utm_source is not a different source), the fetch budget keeps it (?page=2 is).
+    check(o._norm_url("https://ex.com/a?page=1") == o._norm_url("https://ex.com/a?page=2"),
+          "the CITATION key still ignores the query string (deliberately not the same helper)")
+    # It runs inside the paid tool loop, so like _norm_url it must never raise - including on the
+    # bracketed-IPv6 forms that once killed two paid calls and got them retried in full.
+    _raised = []
+    for _u in ["http://[::1]/", "http://[::1", "not a url", "", None, "https://",
+               "https://ex.com/a#f#g", "https://ex.com/a.,;:"]:
+        try:
+            hash(o._fetch_key(_u))
+        except Exception as _exc:                                            # noqa: BLE001
+            _raised.append("%r -> %r" % (_u, _exc))
+    check(not _raised, "the fetch key never raises and is always hashable",
+          "; ".join(_raised)[:160])
+
     # --- the cumulative fetch budget must exist and must not fire on one honest page -------
     probe4 = (
         "import json, sys\n"
