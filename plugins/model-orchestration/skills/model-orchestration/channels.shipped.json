@@ -53,10 +53,12 @@
         "agy37flash",
         "orgemini36flash",
         "orgemini37flash",
-        "goog36flash"
+        "goog36flash",
+        "goog37flash"
       ],
       "_added": "2026-08-07 with orgemini36flash. A human who says «gemini» means the MODEL FAMILY, not the billing path - and after this round the family spans a subscription CLI and a metered API. Two words are needed and they are not synonyms: `gemini` = every transport, `agy` = the ones that spend the Antigravity subscription, `openrouter` = the ones that spend the OpenRouter key. Overlapping groups are fine, a group whose name misdescribes its contents is not.",
-      "_membership_updated_2026_08_13": "agy37flash and orgemini37flash added round 36. Six channels now - three via the agy CLI (3.1 pro, 3.6 flash, 3.7 flash), two via OpenRouter (3.6 flash, 3.7 flash), one via Google directly (3.6 flash). Note the asymmetry: 3.7 has no `goog37flash` yet because the operator did not add one, so the direct-Google leg has only 3.6.",
+      "_membership_updated_2026_08_13": "agy37flash and orgemini37flash added round 36. Six channels then - three via the agy CLI (3.1 pro, 3.6 flash, 3.7 flash), two via OpenRouter (3.6 flash, 3.7 flash), one via Google directly (3.6 flash). SEE ALSO _membership_updated_2026_08_14 below.",
+      "_membership_updated_2026_08_14": "goog37flash added round 39. SEVEN channels now, and this is the moment 3.7-flash gains parity with 3.6-flash: three transports each (agy CLI, OpenRouter, Google direct). The reason for adding it is not symmetry - it is that orgemini37flash live-failed in R38c with the vendor-side agentic-loop empty-content class the harness cannot fix (measured 3 runs: 2 empty at 208K/284K accumulated prompt tokens, 1 with content but 4 fabricated URLs). goog37flash sidesteps that class entirely by using Google's own url_context/google_search retrieval instead of the harness fetch_url loop - no token accumulation, no loop-inside-vendor. Confirmed live 2026-08-14 by the R39 probe: a Claude Code version question was answered correctly (2.1.231) with two google_search calls and a real citation in a single 111-char response, marker present.",
       "aliases": [
         "gemini",
         "джемини",
@@ -132,10 +134,11 @@
       "label": "every channel on a DIRECT vendor key rather than a reseller or a CLI",
       "channels": [
         "goog36flash",
+        "goog37flash",
         "mimo25pro",
         "grok420"
       ],
-      "_why": "the operator, 2026-08-08: «В моем локальном плагине используй api ключи прямые, а для репозитория openrouter». This word exists so that intent is one flag rather than three channel names a human has to remember - and so `--only direct` keeps meaning what it says when a fourth direct channel is added.",
+      "_why": "the operator, 2026-08-08: «В моем локальном плагине используй api ключи прямые, а для репозитория openrouter». This word exists so that intent is one flag rather than three channel names a human has to remember - and so `--only direct` keeps meaning what it says when a fourth direct channel is added. FOURTH channel added 2026-08-14 - goog37flash, direct Google API for 3.7 Flash - and the reason the flag kept meaning the same thing without any code change is that the flag reads this list at run time.",
       "aliases": [
         "direct",
         "прямые",
@@ -637,6 +640,55 @@
         "gemini-direct"
       ],
       "notes": "Google's own API, no reseller and no CLI in between. Its edge is auditable grounding: character-span citations plus Google-side retrieval that reaches pages our fetcher is refused. Depth IS adjustable here after all - `generation_config.thinking_level`, medium on strategic and high on deep; the sentence that used to sit in this line saying otherwise is corrected above."
+    },
+    "goog37flash": {
+      "kind": "gemini",
+      "enabled": false,
+      "distribution": "local",
+      "_distribution": "LOCAL ONLY since it was added 2026-08-14, and the reason is the same one that keeps goog36flash local: this channel needs GEMINI_API_KEY, not the OpenRouter key that lets every kit user reach every other channel with one credential. Anyone installing the kit who wants this can flip `distribution` to \"both\" and set GEMINI_API_KEY; INSTALL.md already documents that path for goog36flash.",
+      "label": "Google 3.7 Flash",
+      "cost": "metered",
+      "model": "gemini-3.7-flash",
+      "role": "analysis",
+      "_added": "2026-08-14 (round 39). THIRD transport to gemini-3.7-flash, alongside agy37flash (Antigravity subscription CLI) and orgemini37flash (OpenRouter resale). Direct reason it was added: orgemini37flash live-failed in R38c with the vendor-side agentic-loop empty-content class - 2 of 3 runs produced 0 chars of content past 200K accumulated prompt tokens, and the third fabricated 4 citations of which 4 do not resolve. That failure is inside the fetch_url tool loop this harness runs on OpenRouter: every round re-sends the whole conversation, and past a per-model ceiling gemini-3.7-flash on that transport emits reasoning-only. Google's direct API sidesteps the class by handling retrieval on Google's side (`url_context`, `google_search`) with no round-trip through us - the same reason goog36flash is the best-grounded channel in the panel. So this pairs with goog36flash the way orgemini37flash pairs with orgemini36flash: same transport, one model newer.",
+      "_endpoint": "SAME endpoint as goog36flash - POST https://generativelanguage.googleapis.com/v1beta/interactions with header `x-goog-api-key`, so `kind: \"gemini\"` dispatches through call_gemini_direct without any code change. Verified 2026-08-14: a probe answered a Claude Code version question correctly (\"2.1.231\") with two google_search calls and one citation in 111 chars, marker present. See goog36flash._endpoint and ._wire_shape_probed_not_read for the shared wire details.",
+      "_effort_ladder_has_no_minimal": "🔴 UNLIKE gemini-3.6-flash which supports [minimal, low, medium, high], gemini-3.7-flash supports ONLY [low, medium, high]. Confirmed live 2026-08-14 by negative control - `thinking_level: \"minimal\"` returned 400 with the enum listed verbatim: «'minimal' is not a supported thinking level for this model. Allowed values are: high, low, medium.» So setting minimal here is a paid 400, and the tier ladder must not send it. The list is data in `thinking_levels` below so `routing.py` can read the enum from the file rather than a code literal.",
+      "thinking_level": "high",
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "_thinking_level_choice": "`high` matches goog36flash's setting so the two direct-Google channels are matched on depth, and matches agy37flash's `high` so a goog37flash-vs-agy37flash disagreement is transport-vs-transport, not depth-vs-depth. The vendor default is `medium` per Google's docs (dev.google.ai/gemini-api/docs/thinking, read 2026-08-14): gemini-3.7-flash is «On (medium), Levels: low, medium, high». Bumping to `high` on this channel is deliberate for a reviewer role; a lookup role would set `low` and pay less. Not measured yet on this model - three arms per goog36flash's `_thinking_level_default` measurement would be under $0.10 each.",
+      "_citations_carry_character_spans_and_wrapper_trap": "🟢 SAME AS goog36flash - every url_citation annotation carries start_index/end_index into the answer text, so «which sentence does this source support» is a lookup. 🔴 AND the same wrapper trap: `google_search` citations come back as `vertexaisearch.cloud.google.com/grounding-api-redirect/...` opaque wrappers, NOT publisher URLs, while `url_context` citations are the real URL. `citecheck.resolve_wrappers` handles the redirect hop; `annotation.title` is usually the publisher DOMAIN and is recovered by the same parser goog36flash uses. All of this is code shared with goog36flash - see that channel's notes for the reasoning behind each mechanism.",
+      "_no_harness_fetch_tool_here_on_purpose": "SAME REASONING AS goog36flash - `url_context` is Google's own retrieval (internal index cache with live fetch fallback, up to 20 URLs per request, 34 MB each, reads PDFs). Two fetchers on one channel would make «who opened this page» ambiguous, and that answer is the one thing this channel is best at. Bonus: Google refuses localhost, private ranges and tunnelling services at THEIR end, so here the SSRF fence is theirs and our attack surface is smaller. 🔴 It is ALSO the reason this channel does not carry the R38c orgemini37flash empty-content class: our fetch loop accumulates prompt tokens, Google's does not.",
+      "tools": [
+        "google_search",
+        "url_context"
+      ],
+      "max_tokens": 60000,
+      "_max_tokens": "60000 against the model's 65,536 output ceiling reported in the model card (ai.google.dev/gemini-api/docs/models/gemini-3.7-flash, read 2026-08-14). Same headroom as goog36flash and the OpenRouter Gemini channels.",
+      "_pricing": "🔴 NOT VERIFIED FROM GOOGLE'S OWN PRICE PAGE IN THIS SESSION. OpenRouter's catalogue prices `google/gemini-3.7-flash` at $0.375/M in and $1.875/M out through Google Vertex Global normal - one quarter the price of `google/gemini-3.6-flash` ($1.50/$7.50), and OpenRouter's home page is currently showing a 50% discount on 3.7 Flash for a limited time (dropping the OpenRouter side to $0.1875/$0.9375). Google direct is not necessarily the same rate, and grounding is billed PER SEARCH QUERY on Gemini 3 regardless of tier (vendor docs, verbatim: «this counts as two billable uses of the tool for that request»). Read the price page before assuming a number.",
+      "models": {
+        "gemini-3.7-flash": {
+          "label": "Gemini 3.7 Flash",
+          "data_policy": "Metered Google API on a personal key. Paid quota is NOT used to improve Google's products (verified against ai.google.dev/gemini-api/terms 2026-08-08 for the whole family). But Grounding with Google Search stores prompts, context and output for THIRTY DAYS regardless of tier, for debugging and testing, and that clause survives termination. See goog36flash._data_policy_verified_2026_08_08 for the full quotation.",
+          "_aliases_must_be_transport_qualified": "🔴 THE BARE `gemini-3.7-flash` IS DELIBERATELY ABSENT for the same reason it is absent on goog36flash's model table: agy37flash and orgemini37flash both already claim it, and once three channels run the same model id the bare name stops identifying anything - `--route \"используй gemini-3.7-flash\"` would have to guess between the Antigravity subscription, the OpenRouter reseller and this direct key. The collision guard catches this at registry load time.",
+          "aliases": [
+            "google gemini-3.7-flash",
+            "goog 3.7 flash",
+            "gemini 3.7 напрямую",
+            "3.7 flash direct"
+          ]
+        }
+      },
+      "aliases": [
+        "goog37flash",
+        "google37flash",
+        "гугл37флеш",
+        "gemini-3.7-direct"
+      ],
+      "notes": "Google's own API for the newest Flash. Its edge is the same as goog36flash - character-span citations plus Google-side retrieval - and its EXTRA edge is that it does not carry the R38c orgemini37flash empty-content class, because there is no harness fetch loop to accumulate. Pair with agy37flash and orgemini37flash for a controlled transport comparison on ONE model."
     },
     "mimo25pro": {
       "kind": "oai",

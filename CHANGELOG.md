@@ -1,5 +1,53 @@
 # Changelog
 
+## 1.18.0 — 2026-08-14
+
+**Third transport for `gemini-3.7-flash` (`goog37flash` — direct Google Interactions API),
+bringing 3.7-flash to parity with 3.6-flash which already had three transports. The reason
+is not symmetry: it is that R38c's `orgemini37flash` empty-content class turned out to be a
+stochastic vendor failure inside OpenRouter's fetch loop that no config value fixes.
+the operator challenged the R38c "lower the cap" hypothesis by execution — R39 ran the sweep at
+every integer cap 8→2 and the pattern is not a threshold. Direct-Google API sidesteps the
+whole class by pushing retrieval to Google's side (no harness fetch loop → no accumulation).**
+
+- 🟢 **`goog37flash`** — `gemini-3.7-flash` over `POST https://generativelanguage.googleapis.com/v1beta/interactions`
+  on a personal `GEMINI_API_KEY`. `kind: "gemini"` dispatches through the same `call_gemini_direct`
+  as `goog36flash`; `_registry_default` reads model, thinking_level, tools, and max_tokens from
+  the new entry, so this is a pure registry addition — no code change, no new dispatch branch.
+  **18 channels total, 14 enabled by default.** Distribution `local` (same as goog36flash: needs
+  a Google account, kit users get `orgemini37flash` on the one OpenRouter key they already have).
+  `groups.gemini` and `groups.direct` extended. Live-tested this round: 15 s, 846 chars, marker
+  on last line, three `google_search` calls, three grounding-api-redirect citations recovered to
+  publisher URLs by `citecheck.resolve_wrappers`.
+
+- 🔴 **Two things verified live for `gemini-3.7-flash`, not copied from `goog36flash`.**
+  (1) `thinking_levels: ["low", "medium", "high"]` — NOT `minimal`. Google's own docs list this
+  model as the FIRST flash to drop `minimal`, and the endpoint returns `400 "'minimal' is not a
+  supported thinking level for this model. Allowed values are: high, low, medium."` — a clean
+  named-enum negative control. Recorded in the channel's own `_effort_ladder_has_no_minimal`.
+  (2) Content still lives in `steps[N].content[0].text` where `steps[N].type == "model_output"`
+  — the convenience field `output_text` may be empty even at 200 OK with output tokens billed.
+  Same as goog36flash; `parse_gemini_steps` handles it correctly.
+
+- 🔴🔴 **The `orgemini37flash` cap-reduction hypothesis is REFUTED by execution.** R38c proposed
+  lowering `fetch_tool.max_calls` from 8 to 3-4 as a possible fix; the operator asked why the jump and
+  suggested running incrementally instead. R39 did the sweep, one integer per arm, 8 down to 2:
+  `EMPTY at cap 7, 6, AND 2`; `CONTENT at 8, 5, 4, 3`. Three EMPTY points interleaved with four
+  CONTENT arms, and `cap=3` produced 863 chars ending in the marker with three fabricated URLs
+  (all three returned 404) plus «N/A (unverified)» in the answer file. Prompt-token totals do
+  not predict outcome either. **This is a stochastic vendor failure, not a config-tunable one.**
+  The `_LIVE_MEASURED_EMPTY_OUTPUT_2026_08_14` note on the channel is now framed accordingly:
+  the fix for the class is `goog37flash`, not a cap value.
+
+- 🔴 **A visible empty answer is safer than confident prose with fabricated citations** — new
+  rule saved in memory this round. The `cap=3` arm would be graded OK by the panel's own
+  OK/PROBLEM triage (marker present, output non-empty), while every URL it cited was invented.
+  If you have a choice between a knob that turns EMPTY into fabricated CONTENT, keep the
+  failure loud.
+
+**Cost of the R39 measurements:** ~$0.60 on the OpenRouter side (50%-off promo on 3.7-flash is
+currently live: $0.1875/M in, $0.9375/M out). Direct Google and Antigravity are on other keys.
+
 ## 1.17.0 — 2026-08-14
 
 **One config change (Terra Pro effort → `max` on the operator's instruction, deliberately UNTESTED)
