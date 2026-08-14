@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.19.0 — 2026-08-14
+
+**The plan-instead-of-review failure class on the CLI channel is root-caused, fixed at three
+layers, and made mechanically detectable. Trigger: a 9-channel round on an 87K-char brief where
+BOTH agy channels returned the IDE's implementation-plan artifact — "I am presenting the plan
+here for your approval" — with the required end marker appended, so the marker gate graded runs
+that did no work as OK.**
+
+- 🔴🔴 **Root cause was self-inflicted: the harness passed `--mode plan` to the CLI.** The
+  2026-07-31 measurement ("unvalidated, invisible in telemetry") remains true and had been read
+  as "inert" — but invisible is not inert. A/B on the SAME 87K brief, one variable: `--mode
+  plan` → plan artifact (4 template headings, 34 tool calls, marker under the plan); `--mode
+  default` → the actual review (0 headings, 53 calls, 26 searches, 14 pages opened). The flag
+  now passes `default`. A knob the meter cannot see can still act.
+
+- 🟢 **`AGY_ENV_CONSTRAINT` — the harness appends two environment rules to every agy brief:**
+  no shell commands (they are denied headlessly, and one denial discards the whole run), and no
+  plans (nobody is present to approve one). Placement is load-bearing and was measured both
+  ways the same day: the same words steered the model off `run_command` **2/2 in the brief and
+  0/1 in the workspace persona alone** — agent.md is the weak position. The persona carries a
+  copy as the second layer. This also fixes the R39 flake where `agy31pro` died 4/4 reaching
+  for shell on briefs that need page-parsing.
+
+- 🟢 **Plan-shape detector + one announced re-run.** `_agy_plan_shape()` fires on ≥2 of the
+  five stable plan-template headings **rendered as line-start markdown headings** — not
+  substrings. The substring first cut false-positived in production within the hour: a review
+  brief that audits the detector names its headings, so a real review quoting them inline got
+  re-run for nothing. Validated 11/11 on real outputs (2 plans caught; 9 real reviews
+  untouched, including three that quote or discuss the trigger headings in prose). On
+  detection `call_agy` re-runs once with a do-the-work escalation and keeps both transcripts;
+  if the retry also fails to deliver, the channel is marked PROBLEM — "marker present" alone
+  no longer grades a plan as a review. The retry's own zero-grounding warning is preserved
+  (deliberately not a third call: the cost bound is one extra attempt, announced).
+
+- 🟢 **Workspace `.agents/hooks.json` is the THIRD workspace mechanism tested negative.** An
+  IDE agent tried to fix the shell denials by writing a PreToolUse auto-allow hook into the
+  run workspace; a probe that FORCED a shell call still died on the denial with the hook file
+  present. The docstring now records it so nobody re-adds one. (Also measured on the way:
+  `command()` rules in the CLI's global settings are exact-string — wildcards are literal.)
+
+- 🟡 **Diagnosis coverage: "END MARKER NOT ON LAST LINE" now matches the same known-failure
+  entry as "END MARKER ABSENT"** — two spellings of one failure from two code paths, and the
+  second was recorded with `likely_cause: null`, which left the console's "cause and fix for
+  each" block EMPTY under its own header. Unmatched problems now print their recorded detail
+  instead of nothing, and two new entries cover provider 5xx mid-stream and plan-instead-of-
+  review.
+
 ## 1.18.0 — 2026-08-14
 
 **Third transport for `gemini-3.7-flash` (`goog37flash` — direct Google Interactions API),

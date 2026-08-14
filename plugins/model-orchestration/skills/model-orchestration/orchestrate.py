@@ -819,11 +819,27 @@ KNOWN_FAILURES = [
      "Either install it, or exclude that channel with --skip <channel>. If it IS installed, point "
      "the harness at it explicitly with the matching <CHANNEL>_BIN environment variable "
      "(CODEX_BIN / AGY_BIN / HERMES_BIN). `python doctor.py` reports which ones were found."),
-    ("END MARKER ABSENT",
+    # Two spellings of one failure: the agy path says "END MARKER ABSENT", the HTTP path says
+    # "END MARKER NOT ON LAST LINE". Until 2026-08-14 this pattern knew only the first, so the
+    # second was recorded with likely_cause=null and the console's "cause and fix for each"
+    # block printed a header followed by nothing. Same class as the dispatch-on-literal bugs:
+    # a diagnosis keyed on one channel's exact wording goes silently blind on the next channel.
+    ("END MARKER (ABSENT|NOT ON LAST LINE)",
      "The model stopped before finishing, or never emitted the agreed end-of-review marker.",
      "The harness appends the marker instruction automatically when the brief does not contain "
      "it. If this still fires, the model most likely hit a length or time limit - re-run that "
      "channel alone, or lower --tier."),
+    ("PROVIDER ERROR MID-STREAM|Upstream error|Internal server error",
+     "The vendor's own upstream failed while streaming - their infrastructure, not the brief "
+     "and not this harness.",
+     "Re-run just that channel with --only <channel>. If it repeats, that provider is degraded "
+     "right now: drop the channel for this round rather than retrying into the same outage."),
+    ("PLAN INSTEAD OF REVIEW",
+     "The CLI's agent returned its implementation-plan artifact and stopped, as if a human "
+     "were present to approve the plan.",
+     "The harness re-runs this once with a do-the-work instruction automatically. If it still "
+     "happens, the brief is probably too large or too task-shaped for this channel's agent - "
+     "shrink it or send it to a non-CLI channel."),
     ("REFUSAL",
      "The model declined the task on policy grounds rather than failing technically.",
      "This is almost always a framing problem, not a subject ban. Rewrite the brief as "
@@ -833,11 +849,21 @@ KNOWN_FAILURES = [
      "The API key was rejected by the vendor.",
      "The key is present but not valid - it was revoked, rotated, or belongs to a different "
      "account. Issue a new one and replace it in the environment."),
-    ("status.*429|rate.?limit|quota|weekly limit",
+    # The bare word "quota" used to be in this pattern, and it matched the codex PREFLIGHT
+    # INFO line ("subscription quota, from codex's own cached snapshot... under half used") -
+    # so every round that RAN codex recorded a phantom rate-limit problem. Measured live
+    # 2026-08-14. The pattern now requires exhaustion language, which the real events carry:
+    # HTTP 429, "WEEKLY LIMIT EXHAUSTED" (codex), "Key limit exceeded" (OpenRouter free tier).
+    ("status.*429|\\b429\\b|rate.?limited?\\b|LIMIT EXHAUSTED|limit exceeded|quota exceeded",
      "A usage or rate limit was hit on that vendor.",
      "Wait, or route the work to another channel with --route/--skip. Do NOT switch that "
      "channel to a metered pay-per-token key to get around a subscription limit unless you "
      "have decided that cost is acceptable."),
+    ("CITATIONS: only 0 of",
+     "The model cited sources and opened none of them - memory dressed as research.",
+     "The harness already re-ran this channel once with a source-discipline escalation. Treat "
+     "every URL in the answer as unverified: run citecheck.py --answer <file> --resolve-urls "
+     "before repeating any of them."),
     ("timed out|timeout",
      "The channel took longer than its allotted time.",
      "Raise the timeout for that channel, lower --tier, or split the brief into smaller "
@@ -3163,6 +3189,15 @@ as the answer looks plausible. That tuning is wrong for this task and does not a
 answer that arrives quickly and cites nothing is a failed answer. Length, source count and
 explicit uncertainty are the deliverable.
 
+## Environment constraints (non-interactive run)
+
+- No human is present and nothing can be approved mid-run. Never end with an implementation
+  plan, a proposal, or a request for confirmation - produce the completed deliverable itself.
+  A plan with the end marker under it is still a failed run.
+- Terminal/shell commands are denied by policy here, and a single denial discards the entire
+  run with all the work already done in it. Never attempt one. Read pages with your search and
+  page-reading tools, and do any parsing or extraction from the fetched text directly.
+
 ## Protocol - follow in order, do not skip ahead
 
 1. Before searching, write out the list of factual claims that need verification. Dated facts,
@@ -3433,6 +3468,15 @@ def _write_agy_agent(workdir):
     agent="deep-researcher"), while the same directory's settings.json and mcp_config.json are
     NOT read by this build. So the persona travels with the run and nothing global is touched -
     but permissions cannot be set this way, which is why patch_agy_permissions.py exists.
+
+    🔴 A workspace .agents/hooks.json is not read either - the THIRD workspace mechanism tested
+    negative. On 2026-08-14 an IDE agent added one here carrying a PreToolUse auto-allow hook
+    for run_command; a probe that FORCED a shell call still died on the permission denial with
+    the hook file present. Do not re-add one: the only levers this channel has are the global
+    settings.json (exact-string command() rules, no wildcards) and BRIEF-level steering
+    (AGY_ENV_CONSTRAINT), measured to work 2/2 the same day - while the identical words in
+    this agent.md alone were ignored 1/1. The persona copy below stays as the second layer,
+    not the load-bearing one.
     """
     d = os.path.join(workdir, ".agents", "agents", AGY_AGENT)
     os.makedirs(d, exist_ok=True)
@@ -3662,21 +3706,85 @@ the URLs it produced do not exist. That is the failure to avoid here.
   recollection.
 """
 
+AGY_ENV_CONSTRAINT = """
+
+---
+
+ENVIRONMENT CONSTRAINTS (from the harness, non-negotiable):
+
+- This is a non-interactive run. No human is present and nothing can be approved. Never end
+  with an implementation plan or a request for confirmation - return the completed deliverable
+  itself. A plan with the end marker under it is still a failed run.
+- Terminal/shell commands are DENIED here, and a single denial discards the whole run with all
+  the work already done in it. Do not attempt them. Use your search and page-reading tools,
+  and do any parsing or extraction from the fetched text directly.
+"""
+# ^ Appended to the BRIEF, not only the persona, because placement is load-bearing and was
+# measured both ways on 2026-08-14: the same two sentences in the brief steered the model off
+# run_command 2/2; in the workspace agent.md alone they were ignored 1/1 (it called
+# Select-String and died on the denial). Same asymmetry as July's "MCP tool descriptions
+# outrank the agent prompt": agent.md is the weak position, the user turn is the strong one.
+
+AGY_PLAN_ESCALATION = """
+
+---
+
+ADDITIONAL REQUIREMENT FOR THIS ATTEMPT.
+
+A previous attempt at this exact brief returned an implementation PLAN and asked for approval.
+There is no human in this run: nothing you propose can be approved, so a plan is a failed
+deliverable even with the end marker under it. Do the work NOW, in this attempt, and return the
+completed review itself. Do not describe what you will do - do it.
+
+And do it with sources: open every page you cite in THIS attempt. A citation to a page you did
+not open in this run is treated as fabricated, which is a worse failure than the plan was.
+"""
+
+
+def _agy_plan_shape(text):
+    """
+    True when the answer is the CLI's implementation-plan artifact, not the deliverable.
+
+    Measured 2026-08-14 (AOS round 31, 87K-char code-review brief): BOTH agy channels returned
+    the IDE's plan template - one literally said "I am presenting the plan here for your
+    approval" - with the required end marker appended, so the marker gate graded a run that did
+    no work as OK. The template's section headings are stable vendor furniture, so two or more
+    of them in one answer is the fingerprint.
+
+    Only MARKDOWN HEADINGS at line start count, not substrings. The first cut matched bare
+    substrings and false-positived IN PRODUCTION within the hour: the review brief that
+    audited this very detector named all five headings, so the channel's real review quoted
+    them inline and was re-run for nothing (a free retry here, but the same event on a paid
+    channel would bill twice). The panel reviewer then independently constructed the same
+    failure - a review quoting a PR template's section names. A plan RENDERS the phrases as
+    section headings; a review MENTIONS them in prose. Distinct headings, not total
+    occurrences, so one heading repeated in a quoted block cannot fire alone.
+    """
+    pat = r"(?m)^#{1,6}\s*(?:\d+[.)]\s*)?(Implementation Plan|Goal Description|User Review Required|Proposed Changes|Verification Plan)\b"
+    return len({m.group(1) for m in re.finditer(pat, text or "")}) >= 2
+
 
 def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout="25m",
              system=None):
     """
-    Run the channel, and re-run it ONCE if it cited sources without opening any.
+    Run the channel, and re-run it ONCE if it planned instead of working, or if it cited
+    sources without opening any.
 
     Measured 2026-07-31: agy issued 10 searches, opened **zero** pages, and cited 11 URLs of which
     3 return 404 - while getting the substance right. That combination is the dangerous one,
     because it survives casual review: correct conclusions with invented receipts.
+    Measured 2026-08-14: on an 87K brief both agy channels returned the plan artifact with the
+    marker appended - the second shape a mechanical marker check cannot see on its own.
 
-    Why a mechanical retry rather than a stronger instruction: this channel has now refused to be
-    steered by prose three separate times (a system prompt could not restrict its tool access, an
-    agent persona could not, and `--mode` does nothing at all). Re-running is the lever that
-    actually exists. It is bounded to exactly one extra attempt, it announces itself and its cost
-    before spending, and it keeps BOTH transcripts on disk so the two can be compared.
+    Why a mechanical retry rather than ONLY a stronger instruction: prose has a measured
+    asymmetry on this channel. It cannot restrict tool ACCESS (a system prompt could not, an
+    agent persona could not, `--mode` could not - three separate failures), but it reliably
+    steers tool USE when an alternative exists AND it stands in the strong position: the
+    2026-08-14 shell-ban worked 2/2 written into the BRIEF and 0/1 written into the persona
+    alone, so AGY_ENV_CONSTRAINT rides the brief. This wrapper carries the enforcement for
+    the runs where steering still loses. It is bounded to exactly one extra attempt, it
+    announces itself and its cost before spending, and it keeps BOTH transcripts on disk so
+    the two can be compared.
 
     The retry is not automatically believed. If the second attempt still opens nothing, the FIRST
     answer is returned - it was produced under cleaner conditions, without an instruction nagging
@@ -3684,6 +3792,32 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
     signal about the brief than one.
     """
     first = _agy_once(brief, marker, workdir, outfile, model, effort, timeout, system)
+
+    if first.get("plan_shape"):
+        log("  [agy] the answer is an implementation PLAN, not the review. Re-running once "
+            "with an explicit do-the-work instruction (this costs a second agy call).")
+        retry_out = os.path.splitext(outfile)[0] + ".retry" + (os.path.splitext(outfile)[1] or ".md")
+        second = _agy_once(brief + AGY_PLAN_ESCALATION, marker,
+                           os.path.join(workdir, "plan-retry"), retry_out,
+                           model, effort, timeout, system)
+        if second.get("text") and not second.get("plan_shape") \
+                and (not marker or marker in second["text"]):
+            # Deliberately NOT chained into the zero-grounding re-run below: the cost bound is
+            # exactly one extra attempt per call, announced before it is spent. If this retry
+            # cited sources and opened none, _agy_once has ALREADY attached the zero-grounding
+            # WARNING to it (ok=False, the panel shows PROBLEM), so the failure stays loud -
+            # what is skipped is only a third paid attempt, not the detection. The panel's own
+            # reviewer called this "blind acceptance"; the warning path above is why it is not.
+            second.setdefault("notes", []).append(
+                "SECOND ATTEMPT. The first run returned the CLI's plan artifact instead of the "
+                "review; it is kept at %s. This answer is the actual deliverable." % outfile)
+            return second
+        first.setdefault("warnings", []).append(
+            "RE-RUN ALSO FAILED TO DELIVER (kept at %s). Two attempts planned instead of "
+            "working - the brief may be too large or too task-shaped for this channel's agent. "
+            "Shrink the brief or use a non-CLI channel for it." % retry_out)
+        first["ok"] = False
+        return first
 
     if not first.get("zero_grounding"):
         return first
@@ -3747,7 +3881,7 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
     os.makedirs(workdir, exist_ok=True)
     _write_agy_agent(workdir)
     ndjson = os.path.splitext(outfile)[0] + ".events.ndjson"
-    brief = _with_system(brief, system)
+    brief = _with_system(brief, system) + AGY_ENV_CONSTRAINT
 
     if len(brief) <= AGY_ARGV_LIMIT:
         # Pass as a single argv element; let the runtime quote it, never hand-quote a 14KB string.
@@ -3775,26 +3909,26 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
         if mdl.endswith(suffix):
             mdl = mdl[:-len(suffix)]
             break
-    # --mode is kept because it is the documented intent, but it must NOT be read as the thing
-    # that makes this run read-only. Measured 2026-07-31 on 1.1.9, headless `-p`:
+    # --mode: SUPERSEDED 2026-08-14 - the old text here said the value "does nothing at all",
+    # and the value this code passed was "plan". Both halves of that were wrong together:
+    # A/B on the SAME 87K-char brief, same day, same channel, one variable changed:
     #
-    #   --mode plan | default | accept-edits | definitely-not-a-mode
-    #     -> every one exits 0, and every one reports permission_mode="request-review" in init.
+    #   --mode plan    -> "Here is the implementation plan..." - 4 plan-template headings,
+    #                     34 tool calls, the marker appended UNDER the plan. Exactly the
+    #                     round-31 failure where both agy channels planned instead of working.
+    #   --mode default -> the actual review: 0 plan headings, 53 tool calls, 26 searches,
+    #                     14 pages opened.
     #
-    # So the flag is (a) unvalidated - a typo like `--mode paln` is accepted in silence, with no
-    # warning and no non-zero exit - and (b) not observable in the telemetry, so there is no way
-    # to confirm from the event log that it took effect at all. Anything that depends on it is
-    # depending on something unverifiable.
-    #
-    # What actually constrains this run is the permission configuration written by
-    # patch_agy_permissions.py, which is checked by doctor.py and is visible as the granted tool
-    # list in the init event. That is Igor's own rule holding for a third time in this channel:
-    # prose does not restrict tool access, an agent prompt does not, and now a CLI flag does not
-    # either - only permission rules do. Do not "harden" this by tightening the --mode value.
+    # What REMAINS true from the 2026-07-31 measurement on 1.1.9: the flag is unvalidated
+    # (garbage values exit 0) and invisible in telemetry (permission_mode reads
+    # "request-review" for every value). Invisible is not inert - a knob the meter cannot see
+    # can still act, and this one acts on large briefs, where the agent's planner engages.
+    # And --mode is still NOT what makes the run read-only: --sandbox and the permission rules
+    # written by patch_agy_permissions.py carry that, exactly as before.
     cmd += ["--model", mdl,
             "--effort", effort,
             "--agent", AGY_AGENT,
-            "--mode", "plan", "--sandbox",
+            "--mode", "default", "--sandbox",
             "--output-format", "stream-json",   # the ONLY way this channel reports tool use
             "--print-timeout", timeout]         # default truncates at 5m
     try:
@@ -3843,6 +3977,11 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
         warn.append("END MARKER ABSENT - output is incomplete, do not parse it as a review." + why)
     note = []
     record_refusal(refusal_check(text, marker, min_chars=500), warn, note)
+    plan_shape = _agy_plan_shape(text)
+    if plan_shape:
+        warn.append("PLAN INSTEAD OF REVIEW - this is the CLI's implementation-plan artifact "
+                    "with the marker appended, not the deliverable. The marker alone cannot "
+                    "catch it: the model writes the marker under the plan.")
     # status lies in BOTH directions, both observed on 2026-07-31: "SUCCESS" on an empty answer
     # after a permission denial, and "ERROR" on a complete, marker-terminated 1,417-char answer
     # because one late MCP call got a transient HTTP 503. The marker is the only honest gate.
@@ -3879,6 +4018,7 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
             # "cited sources and opened none of them" is a different animal from partial
             # grounding: it is memory dressed as research, and it is worth one more attempt.
             "zero_grounding": bool(n_cited and not grounded),
+            "plan_shape": plan_shape,
             "n_cited": n_cited, "n_grounded": len(grounded)}
 
 
@@ -4586,6 +4726,12 @@ def main():
             if p["likely_cause"]:
                 log("  [%s] %s" % (p["channel"], p["likely_cause"]))
                 log("      -> %s" % p["suggested_fix"])
+            else:
+                # No stock diagnosis matched. Print the recorded detail rather than nothing:
+                # until 2026-08-14 an unmatched problem left this block EMPTY under a header
+                # promising "cause and fix for each" - a quiet path that read as "no problems"
+                # while diagnostics.json held two.
+                log("  [%s] (no stock diagnosis) %s" % (p["channel"], p["detail"]))
     if diag:
         log("\nDiagnostics: %s" % diag)
         log("If something went wrong, hand that file to an AI assistant and ask it to fix the "

@@ -1860,6 +1860,86 @@ def suite_dev_tooling():
         # `pre-commit install` has not been run yet, is a legitimate state.
 
 
+def suite_agy_plan_class():
+    """
+    Round-40 regression corpus for the plan-instead-of-review class.
+
+    Fixtures are SYNTHESIZED to reproduce the SHAPES of the real 2026-08-14 failures without
+    carrying that round's content (the originals live in a private project). Positive #1
+    mirrors the bare plan artifact; positive #2 mirrors a plan quoted inside a fenced block.
+    The negatives mirror the false positive the substring detector produced IN PRODUCTION
+    within an hour of shipping: a review that mentions or quotes the template headings
+    without rendering them as headings. The panel reviewer's own adversarial construction
+    is negative #1 almost verbatim.
+    """
+    section("agy plan-shape detector + plan-class plumbing (round-40 regression corpus)")
+    import inspect
+
+    import orchestrate as o
+
+    plan = ("I am presenting the plan here for your approval.\n\n"
+            "## Goal Description\nReview the scripts.\n\n"
+            "## User Review Required\n> [!IMPORTANT]\n> depends on external modules\n\n"
+            "## Proposed Changes\nNo files will be modified.\n\n"
+            "## Verification Plan\nManual verification.\nMARKER-X\n")
+    fenced_plan = ("I have created a plan artifact:\n\n```markdown\n"
+                   "# Implementation Plan: independent review\n\n"
+                   "## Goal Description\nAudit the diff.\n\n"
+                   "## Proposed Changes\nAnalysis only.\n```\nMARKER-X\n")
+    review_mentions = ("The detector is overbroad: a review can say your **Goal Description** "
+                       "states X, under **Proposed Changes** you added Y, and your "
+                       "**Verification Plan** lacks rollback - three trigger phrases inline, "
+                       "zero headings. That is a review, not a plan.\nMARKER-X\n")
+    review_quotes_code = ('A review of the detector itself quotes the tuple: '
+                          '`headings = ("Implementation Plan", "Goal Description", '
+                          '"User Review Required", "Proposed Changes", "Verification Plan")` '
+                          'and still is not a plan.\nMARKER-X\n')
+    one_heading_repeated = ("## Proposed Changes\nfirst block\n\n## Proposed Changes\n"
+                            "same heading twice is ONE distinct heading\n")
+
+    check(o._agy_plan_shape(plan), "plan artifact with markdown headings FIRES")
+    check(o._agy_plan_shape(fenced_plan),
+          "plan quoted in a fenced block still FIRES (line-start headings inside the fence)")
+    check(not o._agy_plan_shape(review_mentions),
+          "review MENTIONING headings inline does not fire (the production false positive)")
+    check(not o._agy_plan_shape(review_quotes_code),
+          "review quoting the detector's own tuple does not fire")
+    check(not o._agy_plan_shape(one_heading_repeated),
+          "one heading repeated twice is one DISTINCT heading - does not fire")
+    check(not o._agy_plan_shape(""), "empty text does not fire")
+
+    # The workspace writer ships the persona ONLY. hooks.json was proven not-read on
+    # 2026-08-14 (a probe that FORCED a shell call died on the denial with the hook file
+    # present) - a hooks.json here is dead code wearing a safety feature's name.
+    t = tempfile.mkdtemp(prefix="orch_agy_agent_")
+    o._write_agy_agent(t)
+    check(os.path.exists(os.path.join(t, ".agents", "agents", o.AGY_AGENT, "agent.md")),
+          "_write_agy_agent ships the persona")
+    check(not os.path.exists(os.path.join(t, ".agents", "hooks.json")),
+          "_write_agy_agent does NOT re-add the dead workspace hooks.json")
+
+    # Placement is load-bearing (measured 2/2 in the brief vs 0/1 in the persona alone), and
+    # --mode default vs plan was the A/B that root-caused the class. Assert the SOURCE, so a
+    # refactor that drops either one goes red here instead of resurfacing in a paid round.
+    src = inspect.getsource(o._agy_once)
+    check("AGY_ENV_CONSTRAINT" in src,
+          "the env constraint is appended to the BRIEF in _agy_once")
+    check('"--mode", "default"' in src, '--mode is "default" (the plan-mode A/B, 2026-08-14)')
+
+    # diagnose(): both marker spellings, exhaustion-only rate-limit matching, zero-grounding.
+    c, _ = o.diagnose("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
+    check(c is not None, "END MARKER NOT ON LAST LINE has a stock diagnosis (was null)")
+    c, _ = o.diagnose("subscription quota, from codex's own cached snapshot - not a live "
+                      "reading: under half of the 168h window used")
+    check(c is None, "codex preflight INFO line is no longer diagnosed as a rate limit")
+    c, _ = o.diagnose("WEEKLY LIMIT EXHAUSTED, this run will draw on credits")
+    check(c is not None and "limit" in c.lower(), "real exhaustion still diagnosed")
+    c, _ = o.diagnose("CITATIONS: only 0 of 11 cited URLs were actually opened in this run")
+    check(c is not None, "zero-grounding CITATIONS warning has a stock diagnosis")
+    c, _ = o.diagnose("PLAN INSTEAD OF REVIEW - this is the CLI's implementation-plan artifact")
+    check(c is not None, "PLAN INSTEAD OF REVIEW has a stock diagnosis")
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -1887,7 +1967,8 @@ def main():
     for suite in (suite_degradation, suite_routing, suite_redaction,
                   suite_prose_matches_behaviour, suite_contract,
                   suite_citations, suite_dispatch, suite_tiers_and_grounding,
-                  suite_settings_and_upgrade, suite_echocheck, suite_dev_tooling):
+                  suite_settings_and_upgrade, suite_echocheck, suite_dev_tooling,
+                  suite_agy_plan_class):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
