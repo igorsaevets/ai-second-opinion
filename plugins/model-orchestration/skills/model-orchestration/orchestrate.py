@@ -70,6 +70,27 @@ def load_tiers():
         return dict(_TIERS_FALLBACK)
 
 
+def load_panels():
+    """
+    Panel names from channels.json, for `--panel`'s choices. NO literal fallback on purpose.
+
+    The tier list has one, because a tier resolves to depth values the dispatcher can supply
+    from its own defaults - a degraded run beats an exception. A PANEL resolves to a set of
+    channels, and there is no honest default for that without the registry: guessing here would
+    mean guessing who gets sent the document. An unreadable registry therefore yields an empty
+    choice list, `--panel` becomes unusable, and the round runs the full set - which is exactly
+    what happened before panels existed, so the degraded behaviour is the old behaviour rather
+    than an invented one.
+    """
+    try:
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "channels.json")
+        with open(p, encoding="utf-8") as fh:
+            d = json.load(fh).get("panels")
+        return sorted(k for k in d if not k.startswith("_")) if isinstance(d, dict) else []
+    except Exception:                                     # noqa: BLE001
+        return []
+
+
 def tier_config(tier):
     """The Spark-shaped view of a tier: the thinking block and the output-token floor.
 
@@ -4297,6 +4318,20 @@ def main():
                          "before tiers were reduced to two; `deep` buys more time, twice the "
                          "pages each channel may open and twice the reasoning ceiling where the "
                          "vendor has one. The resolved value per channel is printed in the plan.")
+    # 🔴 A SECOND AXIS, NOT A SECOND TIER. `--tier` is how deep each reviewer goes; `--panel` is
+    # which reviewers are in the room. Igor, 2026-08-15: «разделим оркестр[ацию] на дешевую и
+    # стандартную». They compose freely - `--panel cheap --tier deep` is few voices thinking
+    # hard, which is a sensible and cheap way to ask a difficult question. `choices` comes from
+    # the registry for the same reason --tier's does: deleting a panel there must really delete
+    # it, rather than leaving the flag accepting a name that now filters nothing.
+    _panels = load_panels()
+    ap.add_argument("--panel", default=None, choices=_panels or None,
+                    help="which reviewers are in the room (%s). Filters DOWN only - unlike "
+                         "--only it never enables a channel the registry has off, because "
+                         "`enabled` is what distinguishes this install from the published kit. "
+                         "Default comes from `default_panel` in channels.json; the plan always "
+                         "prints what the other panel would add or drop, by name."
+                         % ("|".join(_panels) or "none defined"))
     ap.add_argument("--marker", default="REVIEW-COMPLETE",
                     help="literal string the model must end with; absence means incomplete")
     ap.add_argument("--out", default="./reviews")
@@ -4437,13 +4472,24 @@ def main():
         # This import must be its own try block - catching routing.RouteError below when the
         # import itself failed would raise NameError on the exception clause.
         log("routing unavailable (%r) - falling back to env defaults" % (e,))
-        if a.route or a.skip or a.sets:
+        # 🔴 `--only` AND `--panel` ADDED TO THIS LIST 2026-08-15. Every flag here is one whose
+        # entire meaning is "run a DIFFERENT set of channels than the default", so a fallback
+        # that ignores it does not degrade gracefully - it runs the set the user just said not
+        # to run, and says only that routing is unavailable. `--only` was missing from the day
+        # the list was written, which is the same shape as the panel-vs-group trap this round
+        # found: a selection mechanism whose failure mode is silently selecting everything.
+        if a.route or a.skip or a.sets or a.only or a.panel:
+            log("  ...and %s cannot be honoured without it. Refusing rather than running a "
+                "different set of channels than you asked for."
+                % ", ".join(f for f, v in (("--route", a.route), ("--skip", a.skip),
+                                           ("--set", a.sets), ("--only", a.only),
+                                           ("--panel", a.panel)) if v))
             return 2
     if routing is not None:
         try:
             reg = routing.load_registry()
             plan = routing.resolve(reg, route=a.route, only=a.only, skip=a.skip,
-                                   sets=a.sets, tier=a.tier)
+                                   sets=a.sets, tier=a.tier, panel=a.panel)
             log(routing.format_plan(plan, reg))
         except routing.RouteError as e:          # ambiguity must stop the run, never guess
             log("ROUTE ERROR: %s" % e)

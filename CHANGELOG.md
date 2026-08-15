@@ -1,5 +1,143 @@
 # Changelog
 
+## 1.21.0 — 2026-08-15
+
+**Two axes instead of one. `--tier` has always answered "how deep does each reviewer go"; the new
+`--panel` answers "who is in the room". A cheap panel of eleven voices costs cents; the standard
+panel adds four more VENDORS, which is what it is really selling. Plus an eighth vendor family:
+DeepSeek V4 Pro.**
+
+- 🟢 **`--panel cheap|standard`.** Membership is declared per channel (`"panel": "cheap"`) and
+  the ladder in a new `panels` object, so `standard` INCLUDES everything `cheap` has — «standard»
+  has to mean *what normally runs*, and the default is bit-for-bit the behaviour that shipped
+  before panels existed. Composes freely with `--tier`: `--panel cheap --tier deep` is few voices
+  thinking hard. Russian route words work too (*«дешевая панель, без grok»*).
+
+- 🔴🔴 **A panel FILTERS DOWN and never enables anything, and that is the whole design.** `--only`
+  deliberately resurrects a channel the registry has `enabled: false` — the documented opt-in
+  path. A panel must not, because `enabled` is exactly the field `package.py` flips per
+  `distribution`. Implementing `cheap` as a **group** would have been a one-line config edit with
+  no code at all, and it would have been wrong invisibly: `--only cheap` would have resurrected
+  every direct-vendor channel in an install that has no such keys, and every OpenRouter twin in
+  one that does — paying twice for a single voice. Same word, opposite semantics; they cannot
+  share a mechanism. The suite now asserts the invariant against every panel × every default-off
+  channel, and asserts the asymmetry with `--only` as a control.
+
+- 🔴 **The plan counts VENDORS, not just channels.** This harness reaches one company through up
+  to six transports — three Geminis via the Antigravity CLI, two via Google directly, one via
+  OpenRouter. When those six agree, that is one opinion reported six times, and a channel count
+  presents it as six. Every plan now prints the vendor tally of the resolved set and warns when
+  one vendor holds half the seats. Measured on the shipped registry: `cheap` = 11 channels from
+  **6** vendors, six of them Google; `standard` = 15 channels from **9**. What the cheap panel
+  actually costs is vendor diversity, not depth.
+
+- 🟢 **New channel `ordeepseekv4pro`** — DeepSeek V4 Pro (1.6T MoE, 49B active, 1M context) over
+  OpenRouter, eighth vendor family, and the cheap panel's `role: code` seat. Live end-to-end:
+  25.6 s, three generations, 3 pages fetched, marker present, **$0.025587** reported by the
+  provider; it refuted a planted false claim by quoting the source.
+
+- 🔴🔴 **The catalogue lists what EXISTS; the account decides what is REACHABLE.** That channel
+  first shipped pinned to the first-party `deepseek` endpoint on a genuinely good argument —
+  cheapest non-requantised, best uptime, the only cheap endpoint advertising implicit caching.
+  Every word of it true, and the first live call returned `404 No endpoints available matching
+  your guardrail restrictions and data policy`. Neither `/models` nor `/endpoints` reflects an
+  account's privacy settings. All seven non-fp4 candidates were then probed: six answer, that one
+  does not. Shipped pin is `only: ["baidu","streamlake","novita"]`, verified by four live calls
+  (all served from inside the list) **plus a negative control in the same field**. General rule
+  now written into the registry: a provider slug read from a catalogue is a hypothesis until one
+  call comes back from it.
+
+- 🔴 **`reasoning.effort` on the new channel is recorded as SENT-AND-UNPROVEN.** Six calls, one
+  provider pinned so the arms differ by one variable, judged by the `reasoning_tokens` that come
+  back: `high` = [205, 295, 274], `xhigh` = [245, 387, 464]. The means move 41% the expected way
+  and the ranges OVERLAP, so by this project's own disjoint-ranges rule it is not established. A
+  plausible mean is exactly what a decorative parameter also produces.
+
+- 🟢 **`role` is no longer a decorative field.** Four channels declared it, `_decorate` copied it
+  into the plan, and nothing read it — the same shape as two fields this project has already
+  caught. It is printed now, and the omission only started to cost something in this release:
+  `--panel cheap` drops `kimik3`, the sole `role: code` seat, and nothing said so. That is why
+  the new channel carries `role: code`.
+
+- 🔴 **`--only` and `--panel` join the flags that REFUSE when routing is unavailable.** The
+  fallback path listed `--route`, `--skip` and `--set`; `--only` had been missing since the list
+  was written. Every flag there means *run a different set of channels than the default*, so
+  ignoring one does not degrade gracefully — it runs the set the user just excluded and reports
+  only that routing is unavailable.
+
+- Route-parsing details that are silent when wrong: a **negated** panel word
+  (*«не используй дешевую панель»*) is refused rather than obeyed backwards — the first draft
+  selected the cheap panel from that sentence; naming **two** panels is refused; filler left
+  after a panel word (*«запусти на дешевой»*) resolves, while an **instruction** left with no
+  channel behind it (*«дешевая панель, без грокк»*) is refused, because that is a misspelt
+  channel name and swallowing it would silently include or exclude the wrong reviewer.
+
+- `SKILL.md` §0.2 moved to `references/systems.md` to stay under the 5,000-token budget an
+  auto-compaction re-attaches (4,899 after the move, from 4,905 before it).
+
+### Applied the same day, from a twelve-reviewer panel on this diff
+
+Run without Codex, Kimi, Qwen or the OpenAI channels, at the user's instruction. Every one of
+these was a defect in the FIRST draft of this release, found by an outside reader and fixed
+before it shipped.
+
+- 🔴 **`--tier` on `routing.py` had no `choices` at all** — so `python routing.py --tier quick`
+  was accepted silently and printed a plan resolved at the default, while `channels.json` said
+  in as many words that *"`--tier quick` is now an argparse error naming the two that exist,
+  because a silently-accepted dead tier is the decorative-knob defect this file keeps
+  recording."* One sentence, two programs, verified against only the one it was written about.
+  Both flags on both scripts now derive their choices from the registry. **Found by one reviewer
+  alone**, and it is the sharpest finding of the round.
+
+- 🔴 **`«A вместо B»` was refused as a negation.** The panel extractor tested one prefix for both
+  NEG and SUBST markers, so *«стандартная панель вместо дешевой»* answered *"a panel cannot be
+  negated"* — naming the word the human was discarding. Substitution now selects the panel
+  BEFORE the marker, the same anaphora rule `--route` has always used for models, and the marker
+  is cut out with the words it joined so the leftover is not a bare *«вместо»*. **Three
+  reviewers independently.**
+
+- 🔴 **A word that answers "how deep" must not select a panel.** `full`, `полная`, `полную`,
+  `полной` were panel aliases; *«run a full analysis»* is asking for `--tier deep`. Measured
+  before the fix: the route silently set `panel=standard`, swallowed the word, and then failed
+  with *"'run a  analysis with grok' mentions grok420 but no instruction word"* — the wrong
+  action taken and an error about something else. Removed; `full panel` and `полная панель`
+  stay, because the noun disambiguates. **Two reviewers independently.**
+
+- **Missing Russian case endings** (`дешевом`, `дешевые`, `дешевых`, `экономную`, `экономной`,
+  `экономном`, `стандартном`, `стандартный`, `стандартные`) — a missing ending is silent in the
+  expensive direction. **Four reviewers.** The registry note that said a missing ending "does
+  not error, it falls through to `default_panel`" was itself wrong and is corrected: with a
+  channel elsewhere in the sentence it runs the default panel silently, and with none it dies
+  with an error about channels rather than about panels.
+
+- **`order` added to the DeepSeek provider route**, after measurement: without it four samples
+  went StreamLake ×3 / Baidu ×1 — OpenRouter load-balances inside `only` — and a provider swap
+  *between tool rounds* throws away the prompt cache this harness depends on (21,357 of 28,837
+  input tokens came back cached on the first real run). With `order`, Baidu 3/3, and 4/4 with
+  the full shipped triple.
+
+- **Rejected with proof, and the proof is a measurement, not an argument.** Two reviewers called
+  the missing `allow_fallbacks: false` a BLOCKER — *"OpenRouter will silently fall back to
+  unapproved providers"* — quoting the vendor's own documentation. That sentence is about
+  `order`; `only` is a separate and harder field. Negative control in the same field:
+  `only:["anthropic"]`, a provider that does not serve this model at all, returned `404 No
+  allowed providers are available for the selected model` rather than answering from somewhere
+  else. The flag is set anyway, because it costs nothing and the next reader will have the same
+  doubt — but the *reason* it is set is now the probe, not the paragraph.
+  Also rejected: *"the $2.00 ceiling does not stop a 7.4M-token runaway ($2.58)"* — $2.58 is
+  above $2.00, which is when a STOP stops; *"the cheap panel is ~4 channels in the generated
+  kit"* — it is 10, measured by running the built kit; *"the plan does not print data policy,
+  web access, spend ceiling or tier effect"* — it prints all four.
+
+- **Corrected:** the price band across the DeepSeek allow-list is **3.36×** ($1.168 / $0.348),
+  not the 2.9× first written, which forgot that StreamLake is in the list. **One reviewer, by
+  doing the division.**
+
+- **Recorded, not fixed:** three transports of one Gemini model sit in the cheap panel, and two
+  reviewers asked why they are not deduplicated. They are there on purpose — the transport
+  comparison is the measurement that produced `goog37flash` — but the vendor tally now makes the
+  concentration visible, which is the honest half of the answer.
+
 ## 1.20.0 — 2026-08-15
 
 **A metered channel ran away and the harness reported the round as cheap. One review billed

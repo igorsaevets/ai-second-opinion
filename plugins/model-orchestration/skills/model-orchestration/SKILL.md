@@ -86,6 +86,7 @@ complete instead of clipped.
 | `references/briefs.md` | building any brief: what goes in it, and the live-web-search demand |
 | `references/verification.md` | judging whether a review actually happened; reviewer signatures; citation spot-checks |
 | `references/when-it-breaks.md` | **anything failed** — symptom → cause → fix, and the status fields that lie |
+| `references/systems.md` | the `--system` presets in full: what each one says, and why the legal one omits a clause |
 | `KIT-README.md` + `package.py` | giving this to somebody else's machine. `package.py --out <dir>` regenerates the distributable (plugin + installers) from this directory, so there is never a second copy to drift |
 
 Paths are relative to this skill's own directory,
@@ -147,18 +148,10 @@ the alias table in **`channels.json`**, which is the single place any model name
 --route "не использовать 5.6 Sol, а использовать вместо нее 5.5. И не использовать для этого промта Spark"
 ```
 
-The resolved plan is **always printed before anything is spent**, with a reason line per channel:
-
-```
-  [skip] spark11     Spark11              model=Muse Spark 1.1 [muse-spark-1.1]  effort=xhigh
-           - route: excluded by name
-  [RUN ] spark12cont Spark12Cont          model=Muse Spark 1.2 Contributor [muse-spark-1.2-contributor]  effort=xhigh
-           - data: 🔴 CONTRIBUTOR TIER - Meta MAY TRAIN on your prompts and completions.
-  [RUN ] codex       Codex CLI            model=GPT-5.4 [gpt-5.4]  effort=xhigh
-           - route: gpt-5.6-sol -> gpt-5.4
-           - cost: EXPENSIVE channel
-  [RUN ] agy36flash  agy 3.6 Flash        model=Gemini 3.6 Flash [gemini-3.6-flash]  effort=high
-```
+The resolved plan is **always printed before anything is spent**: the panel and what the other
+panel would add or drop, then one `[RUN ]`/`[skip]` line per channel with its model, effort,
+role, data policy, web access, spend ceiling and tier effect, then the running set and its
+**vendor tally**. Read it; it is the one screen that exists to be read before money moves.
 
 Rules that matter: an unparseable route is a **hard stop**, never a guess — a router that
 silently picks an expensive model defeats its own purpose. A refused model with no stated
@@ -166,37 +159,20 @@ replacement falls back to the next model in registry order and says so on a `NOT
 a model or a channel, edit `channels.json`; nothing in `orchestrate.py` needs to change.
 Check it costs nothing: `--dry-run`.
 
-### 0.2 System presets — depth, language and domain framing
+### 0.2 System presets — one line each, detail in `references/systems.md`
 
-`--system` takes a **preset name**, a path, or nothing. Resolution tries the literal path, then
-the skill's own `systems/` directory, so a bare name works from any project directory:
+`--system <preset|path>` frames the reviewer. Two presets: **`base-depth`** (the default — the
+maximum-depth amplifier, applied when `--system` is omitted) and **`legal-research`** (any legal
+/ immigration / regulatory brief — read `references/legal-briefs.md` **before** writing it). All
+presets force English output.
 
-| preset | when |
-|---|---|
-| `base-depth` | **the default**, applied when `--system` is omitted |
-| `legal-research` | any legal / immigration / regulatory brief — read `references/legal-briefs.md` first |
-
-`base-depth.md` is the amplifier that used to be pasted into briefs by hand: maximum depth, first
-intuition may be wrong, enumerate alternatives, check for contradictions, name the
-unofficial-but-lawful route beside the official one, no length cap, escalate fetch tools, never
-reconstruct a citation from memory, and say so when nothing could open a page.
-
-**All presets force English output.** The report is consumed by the orchestrating model, not read
-directly by a human, and Cyrillic costs roughly twice the tokens for the same content. A Russian
-brief still gets an English answer; quoted sources stay verbatim in their original language with
-a translation beside them.
-
-⚠️ **The presets are not interchangeable, and the difference is deliberate.** `base-depth` asks
-for "unofficial, grey routes alongside the official one". `legal-research` deliberately omits
-that clause: in a regulated domain it reads as *suggest a way around the rule*, which is exactly
-what gets the brief refused and what makes the output useless to an attorney. Do not merge them,
-and do not add the grey-routes line to the legal preset "for consistency".
-
-`--dry-run` validates the preset name and the brief path before anything is spent; a mistyped
-preset fails loudly and lists what exists.
+⚠️ **They are not interchangeable.** `base-depth` asks for "unofficial, grey routes alongside the
+official one"; `legal-research` deliberately omits that clause, because in a regulated domain it
+reads as *suggest a way around the rule* — which is what gets a brief refused. Do not merge them.
 
 **Timing**: most channels land in 1–4 min; **Codex is the long pole at 8–35 min** and sets the
-round's wall-clock. Run in the background. Sanity check first: `--ask`, ~20 s.
+round's wall-clock — which is also why `--panel cheap` finishes far sooner. Run a full round in
+the background; sanity check first with `--ask`, ~20 s.
 
 ---
 
@@ -230,16 +206,34 @@ and `orchestrate.py` refuses to SEND one, with no override at any setting. Ident
 
 ---
 
-## 2. Depth tiers — there are two
+## 2. Two axes — WHO is in the room, and HOW DEEP each one goes
 
-| tier | what it buys |
+**`--panel`** picks the reviewers. **`--tier`** picks the depth. They compose freely, and
+`--panel cheap --tier deep` (few voices, thinking hard) is a sensible, cheap way to ask a hard
+question.
+
+| `--panel` | who runs |
+|---|---|
+| **`standard`** (default) | every enabled channel — what ran before panels existed |
+| **`cheap`** | free, subscription and sub-$1/M channels only — everything **except** spark11, codex, kimik3, qwen38max and terra-pro. Ask the plan for the list; it prints both sets by name |
+
+🔴 **A panel FILTERS DOWN and never enables anything** — unlike `--only`, which resurrects a
+default-off channel on purpose. So `--panel cheap` cannot turn on a channel whose key you do not
+have. 🔴 **What `cheap` really costs is vendor diversity, not depth**: it drops OpenAI, Moonshot,
+Alibaba and Meta-Standard, and over half its remaining seats are Google. The plan prints the
+vendor tally of whatever resolves and warns when one vendor holds half the room — six Geminis
+agreeing is one opinion repeated, not corroboration. Route words work too: *«дешевая панель, без
+grok»*.
+
+| `--tier` | what it buys |
 |---|---|
 | **`strategic`** (default) | every vendor at the depth it supports; agy 25m, codex 50m; Spark budget 60k, floor ≥15,000 |
 | **`deep`** | agy 40m, codex 75m; Spark budget 100k, floor ≥25,000; **reasoning cap and page-fetch budget DOUBLED** on every OpenRouter/MiMo channel |
 
-`quick`/`standard` are gone (argparse error). **Read the tier from the plan, not this table** — it
-prints per channel what the tier resolved to, including "nothing this tier can raise here". `deep`
-costs money: double the fetch budget is double the context, and context is the bill.
+`quick`/`standard` are gone **as tiers** (argparse error); `standard` is now a PANEL, a different
+flag. **Read both from the plan, not this table** — it prints per channel what the tier resolved
+to, including "nothing this tier can raise here". `deep` costs money: double the fetch budget is
+double the context, and context is the bill.
 
 **The floor is waived when your brief caps the length.** "Under 250 words" makes a short reply
 correct — the floor only means "under-allocated" when the brief did not ask for brevity.

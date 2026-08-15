@@ -77,14 +77,16 @@
         "ormimo25pro",
         "orgrok420",
         "ornemotron3ultra",
-        "orgpt56terrapro"
+        "orgpt56terrapro",
+        "ordeepseekv4pro"
       ],
       "aliases": [
         "openrouter",
         "опенроутер",
         "or"
       ],
-      "_membership_updated_2026_08_14": "orgpt56terrapro added round 38."
+      "_membership_updated_2026_08_14": "orgpt56terrapro added round 38.",
+      "_membership_updated_2026_08_15": "ordeepseekv4pro added round 42. NINE channels now, and this group is the one that matters most for a failure mode the panel cannot route around: they all spend ONE key, so a single channel's runaway can 403 every other member - measured 2026-08-14, when orgpt56terrapro's $12.08 round exhausted the monthly cap and took four channels down with it in the next round, including the FREE one. `--skip openrouter` is therefore a real lever, not a cosmetic one."
     },
     "openai": {
       "label": "every OpenAI model, both transports",
@@ -150,6 +152,8 @@
   "channels": {
     "spark11": {
       "kind": "http",
+      "panel": "standard",
+      "vendor": "meta",
       "enabled": true,
       "label": "Spark11",
       "cost": "cheap",
@@ -179,6 +183,8 @@
     },
     "spark12cont": {
       "kind": "http",
+      "panel": "cheap",
+      "vendor": "meta",
       "enabled": true,
       "label": "Spark12Cont",
       "cost": "cheap",
@@ -211,6 +217,8 @@
     },
     "codex": {
       "kind": "codex",
+      "panel": "standard",
+      "vendor": "openai",
       "enabled": true,
       "label": "Codex",
       "_label_carries_no_model_ON_PURPOSE": "2026-08-07, the operator: «пусть ИИ выводит codex и название модели, а не просто Codex». Done - but NOT by putting the model in this string, which is the one way of doing it that would rot. This channel is the only one whose model is DELIBERATELY variable (three ids in its table) because an exhausted weekly limit is answered by switching model, so a label reading `CodexGPT54` would be wrong the first time that happens and would go on being wrong silently. The model is therefore resolved at RUN time and printed everywhere the channel is named: the plan, the status line, diagnostics.json, and the channel column of REPORT.md, which is the artifact another chat actually reads. kimik3 and qwen38max CAN carry the model in the name, and do, because their model cannot change - the registry refuses it.",
@@ -258,6 +266,8 @@
     },
     "agy31pro": {
       "kind": "agy",
+      "panel": "cheap",
+      "vendor": "google",
       "enabled": true,
       "label": "agy 3.1 Pro",
       "cost": "mid",
@@ -290,6 +300,8 @@
     },
     "agy36flash": {
       "kind": "agy",
+      "panel": "cheap",
+      "vendor": "google",
       "enabled": true,
       "label": "agy 3.6 Flash",
       "cost": "mid",
@@ -322,6 +334,8 @@
     },
     "agy37flash": {
       "kind": "agy",
+      "panel": "cheap",
+      "vendor": "google",
       "enabled": true,
       "label": "agy 3.7 Flash",
       "cost": "mid",
@@ -353,6 +367,8 @@
     },
     "kimik3": {
       "kind": "openrouter",
+      "panel": "standard",
+      "vendor": "moonshot",
       "enabled": true,
       "label": "KimiK3",
       "_renamed": "2026-08-07 (round 25) from `kimi`, the operator: «аналогично для qwen и kimi, что бы было понятно: KimiK3, Qwen38Max». Same rule as spark11/spark12cont/agy31pro/agy36flash - the channel name must identify the MODEL, and here it can, because one channel runs one model and the registry refuses any other. The bare vendor name stopped being an identity the moment a second OpenRouter model joined. The old name survives as an ALIAS below, so every `--only kimi` in an existing script keeps working: renaming a channel must not break the commands people already have.",
@@ -426,6 +442,8 @@
     },
     "qwen38max": {
       "kind": "openrouter",
+      "panel": "standard",
+      "vendor": "alibaba",
       "enabled": true,
       "label": "Qwen38Max",
       "_renamed": "2026-08-07 (round 25) from `qwen`, the operator's own spelling. See kimik3._renamed for the rule; `qwen` remains an alias.",
@@ -490,6 +508,8 @@
     },
     "orgemini36flash": {
       "kind": "openrouter",
+      "panel": "cheap",
+      "vendor": "google",
       "provider": "openrouter",
       "enabled": true,
       "distribution": "kit",
@@ -541,6 +561,8 @@
     },
     "orgemini37flash": {
       "kind": "openrouter",
+      "panel": "cheap",
+      "vendor": "google",
       "provider": "openrouter",
       "enabled": true,
       "distribution": "both",
@@ -595,6 +617,8 @@
     },
     "goog36flash": {
       "kind": "gemini",
+      "panel": "cheap",
+      "vendor": "google",
       "enabled": false,
       "distribution": "local",
       "_distribution": "LOCAL ONLY since 2026-08-08. Not because it is worse in the kit - it is the best-grounded channel in the panel - but because it needs a SECOND vendor account, and the kit's whole install story is one OpenRouter key. Anyone installing the kit who wants this can flip `distribution` to \"both\" and set GEMINI_API_KEY; INSTALL.md says so.",
@@ -654,6 +678,8 @@
     },
     "goog37flash": {
       "kind": "gemini",
+      "panel": "cheap",
+      "vendor": "google",
       "enabled": false,
       "distribution": "local",
       "_distribution": "LOCAL ONLY since it was added 2026-08-14, and the reason is the same one that keeps goog36flash local: this channel needs GEMINI_API_KEY, not the OpenRouter key that lets every kit user reach every other channel with one credential. Anyone installing the kit who wants this can flip `distribution` to \"both\" and set GEMINI_API_KEY; INSTALL.md already documents that path for goog36flash.",
@@ -703,6 +729,8 @@
     },
     "mimo25pro": {
       "kind": "oai",
+      "panel": "cheap",
+      "vendor": "xiaomi",
       "provider": "mimo",
       "enabled": false,
       "distribution": "local",
@@ -749,6 +777,8 @@
     },
     "grok420": {
       "kind": "xai",
+      "panel": "cheap",
+      "vendor": "xai",
       "enabled": false,
       "distribution": "local",
       "label": "Grok 4.20 Reasoning",
@@ -789,6 +819,8 @@
     },
     "ormimo25pro": {
       "kind": "openrouter",
+      "panel": "cheap",
+      "vendor": "xiaomi",
       "provider": "openrouter",
       "enabled": true,
       "distribution": "kit",
@@ -832,6 +864,8 @@
     },
     "orgrok420": {
       "kind": "openrouter",
+      "panel": "cheap",
+      "vendor": "xai",
       "provider": "openrouter",
       "enabled": true,
       "distribution": "kit",
@@ -875,6 +909,8 @@
     },
     "ornemotron3ultra": {
       "kind": "openrouter",
+      "panel": "cheap",
+      "vendor": "nvidia",
       "provider": "openrouter",
       "enabled": true,
       "distribution": "both",
@@ -920,8 +956,87 @@
       ],
       "notes": "550B MoE (55B active), hybrid Transformer-Mamba, 1M context, and free. Its seat costs nothing, so the only reason to drop it is wall-clock. Expect provider-side rate limiting."
     },
+    "ordeepseekv4pro": {
+      "kind": "openrouter",
+      "panel": "cheap",
+      "vendor": "deepseek",
+      "provider": "openrouter",
+      "enabled": true,
+      "distribution": "both",
+      "label": "DeepSeek V4 Pro",
+      "cost": "metered",
+      "model": "deepseek/deepseek-v4-pro",
+      "role": "code",
+      "_added": "2026-08-15 (round 42), the operator gave the URL: openrouter.ai/deepseek/deepseek-v4-pro. Eighth vendor family in the panel (DeepSeek), and it arrives in the same round as the cheap/standard panel split - which is why `role` is `code` rather than `analysis`. The cheap panel deliberately drops kimik3, and kimik3 was the only channel carrying `role: code`; without this entry the cheap panel would have had no code voice at all. Vendor's own catalogue description, read rather than recalled: «large-scale Mixture-of-Experts model from DeepSeek with 1.6T total parameters and 49B activated parameters, supporting a 1M-token context window ... designed for advanced reasoning, coding».",
+      "_catalogue": "READ LIVE 2026-08-15 from openrouter.ai/api/v1/models/deepseek/deepseek-v4-pro and .../endpoints. canonical_slug `deepseek/deepseek-v4-pro-20260423`, hugging_face_id `deepseek-ai/DeepSeek-V4-Pro`, context_length 1,048,576, is_moderated false. supported_parameters includes `tools`, `tool_choice`, `reasoning`, `reasoning_effort`, `structured_outputs` - so it takes our fetch_url tool and an effort value. `reasoning`: mandatory false, supported_efforts [xhigh, high], default_effort `high`. EIGHTEEN providers serve it, $0.348/M (StreamLake, fp8) to $1.91/M (Azure); the model-level headline price $1.168/$2.336 is Novita's, not a floor.",
+      "provider_route": {
+        "only": [
+          "baidu",
+          "streamlake",
+          "novita"
+        ],
+        "order": [
+          "baidu",
+          "streamlake",
+          "novita"
+        ],
+        "allow_fallbacks": false
+      },
+      "🔴_THE_CATALOGUE_LISTS_WHAT_EXISTS_THE_ACCOUNT_DECIDES_WHAT_IS_REACHABLE": "🔴🔴 THIS ENTRY SHIPPED FOR ABOUT AN HOUR PINNED TO A PROVIDER THAT CANNOT BE CALLED FROM THIS ACCOUNT, AND EVERY DOCUMENT SAID IT WAS THE RIGHT CHOICE. The first draft pinned `only: [deepseek]` - the first-party endpoint - on a real argument read from the live catalogue: $0.435/M against Novita's $1.168, `quantization: unknown` rather than a third party's fp8, best-in-class uptime, and the one field that mattered most here, `supports_implicit_caching: true`, which in a harness whose every tool round re-sends the whole conversation is worth more than the headline rate. All of that is TRUE and NONE of it is REACHABLE: the first live call returned `404 No endpoints available matching your guardrail restrictions and data policy` (2026-08-15). the operator's OpenRouter account carries privacy/guardrail settings that exclude that provider, and NEITHER `/api/v1/models/...` NOR `/endpoints` reflects them - the catalogue describes the world, not this key's view of it. Probed all seven non-fp4 candidates the same minute: streamlake, baidu, gmicloud, digitalocean, novita and azure all answered; `deepseek` alone 404s. GENERAL RULE, and it applies to every `provider_route` in this file: a provider slug read from a catalogue is a HYPOTHESIS until one call comes back from it. The two older pins (orgpt56terrapro -> openai, orgemini37flash -> google-vertex/global) were each verified by execution when they were written, so they are safe - but they were verified by luck of habit, not by a rule, and this is the rule.",
+      "_which_providers_and_why_these_three": "🟢 MEASURED 2026-08-15, all seven non-fp4 candidates, one tiny call each. Reachable, with their catalogue rates: streamlake $0.348/M fp8 (96.2% 24h uptime), baidu $0.4056 fp8 (98.7%), gmicloud $0.609 fp8 (97.0%), digitalocean $0.87 (97.1%), novita $1.168 fp8 (99.4%), azure $1.91 (97.4%). Refused: deepseek. The three chosen are the cheapest reachable one, the most reliable cheap one, and the most reliable one under $1.2 - so the price band is bounded at 3.36x (1.168 / 0.348) instead of the 5.49x an unpinned request could see, nothing fp4-quantised can serve, and no single provider outage kills the channel. 🔴 3.36x IS A CORRECTION: this line first said 2.9x, which is baidu-to-novita and forgets that streamlake is in the list. A reviewer did the division. A price BAND stated wrongly is the same class of defect as a price stated wrongly.",
+      "_all_three_fields_and_what_each_one_was_MEASURED_to_do": "🟢 `only` + `order` + `allow_fallbacks: false`, and each earns its place by a probe rather than by the documentation. (a) `only` BOUNDS the set: `only:[anthropic]` - a provider that does not serve this model at all - returned `404 No allowed providers are available for the selected model` instead of quietly answering from somewhere else, so it is a hard allow-list and not a preference. (b) `order` PINS THE PRIMARY: without it four samples went StreamLake x3 / Baidu x1, i.e. OpenRouter load-balanced inside the list; with `order` it was Baidu 3/3. That matters beyond tidiness - swapping provider BETWEEN tool rounds throws away the prompt cache, and this harness re-sends the whole conversation every round (first real run: 21 357 of 28 837 input tokens came back marked cached). (c) `allow_fallbacks: false` is belt-and-braces on top of (a), measured harmless: no 400, no collapse to a single entry. 🔴 THE COMBINATION ITSELF WAS PROBED, not merely its parts - four calls with all three fields set, Baidu 4/4 - because an untested combination of tested pieces is still untested.",
+      "_the_allow_fallbacks_BLOCKER_was_RAISED_and_REFUTED_and_APPLIED_ANYWAY": "Two of eight reviewers on 2026-08-15 called the missing `allow_fallbacks: false` a BLOCKER and quoted OpenRouter's own words: «allow_fallbacks true (default): when the primary provider (or your custom providers in `order`) is unavailable, use the next best provider». Right to raise it, wrong about the mechanism - that sentence is about `order`, and `only` is a separate and harder field, which arm (a) above settles by execution rather than by re-reading. The flag is set anyway: it costs nothing and the next reader will have the same doubt. 🔴 The finding still earned its round, because the OTHER half of the same objection - that nothing pinned the PRIMARY inside the list - was correct and changed the config. Verify the finding, discard the proof.",
+      "spend_guard": {
+        "max_usd_per_review": 2.0,
+        "_no_requires_ack_on_purpose": "Same asymmetry as kimik3 and qwen38max: `requires_ack` belongs only on a channel that is OFF by default, because on a default-on channel it would refuse every ordinary zero-flag round. A numeric ceiling costs nothing on a round that never reaches it.",
+        "_why_2_and_not_3": "kimik3 and qwen38max carry 3.00; this one is lower because its token price is lower, not because it is trusted less. Arithmetic rather than a feeling, and re-done after the pin changed: the worst runaway this project has measured is 7.4M billed input tokens in one round; across this channel's allow-list that is $3.0 at Baidu's $0.4056/M, $2.6 at StreamLake's $0.348 and $8.6 at Novita's $1.168, against ~$13 at Terra Pro's rate. So $2.00 stops a runaway on all three providers while sitting roughly 6-16x above a normal round here (measured probe calls: $0.0002-0.0006 each). 🔴 THE FIRST DRAFT OF THIS NUMBER WAS COMPUTED FROM A PROVIDER THIS ACCOUNT CANNOT REACH - see the catalogue-vs-account note above. Same figure survived, different reasoning; the reasoning is what is written down, because the figure alone would have looked equally right either way.",
+        "measured_usd": null,
+        "_measured_usd_is_null_ON_PURPOSE": "This channel has never completed a paid REVIEW at the time of writing - the probe calls above are not reviews, and putting their price here would print in the plan as `spend: measured ...` and read exactly like a measured round. That is the class of defect this file exists to stop. Fill it from `diagnostics.json` after the first real round, never from a price multiplied by a token count."
+      },
+      "reasoning": {
+        "effort": "high"
+      },
+      "_effort_is_SENT_AND_UNPROVEN_here": "🔴 MEASURED 2026-08-15 AND IT DID NOT PASS THIS PROJECT'S OWN BAR. Six calls, one provider pinned (Baidu) so the arms differ by one variable, same prompt, judged by the `reasoning_tokens` that come BACK: high = [205, 295, 274] (mean 258), xhigh = [245, 387, 464] (mean 365). The means move 41% in the expected direction and the RANGES OVERLAP - 295 at high is above 245 at xhigh - so by the disjoint-ranges rule this is NOT a proven depth control on this prompt. It is recorded as SENT-AND-UNPROVEN rather than as a knob, because the whole point of that rule is that a plausible mean is exactly what a decorative parameter also produces. What IS established: the transport reports reasoning_tokens on this channel (unlike 8 of 11 measured elsewhere), the vendor accepts both values without a 400, and the model does spend real reasoning tokens. To settle it, re-run with a prompt whose difficulty forces a wider spread, or n>=8 per arm.",
+      "_effort_ladder_is_only_TWO_RUNGS": "supported_efforts [high, xhigh], default `high` - there is no low/medium/none on this model, so the cheap-probe trick that made orgpt56terrapro's tests nearly free is not available here. `high` is the default and is what is set. 🔴 CONSEQUENCE THE PLAN WILL PRINT HONESTLY: `--tier deep` does NOTHING to this channel's depth. The tier scales `reasoning.max_tokens`, and this entry declares `effort` instead, so `or_reasoning_scale` finds nothing to multiply and the tier note says «nothing this tier can raise on this channel». That is accurate but it is a MISSED LEVER, not a property of the vendor: `deep` could legitimately raise high -> xhigh here. Wiring it needs a raise-only rule clamped to a declared ladder, because an absolute tier effort would silently DOWNGRADE qwen38max, whose registry effort is already xhigh - the trap the tiers block already records. Deferred to its own round rather than improvised in this one.",
+      "max_tokens": 60000,
+      "_max_tokens": "60000, well under the pinned endpoint's 384,000 max_completion_tokens. On this protocol the budget covers reasoning AND answer together, which is the 2026-08-03 failure where thinking consumed the whole allowance and left zero answer tokens with no end marker.",
+      "web": {
+        "enabled": true,
+        "engine": "exa",
+        "max_results": 5,
+        "_engine": "DeepSeek is not on OpenRouter's native-search list («native search for Anthropic, Google, OpenAI, Perplexity, and SpaceXAI models»), so this is Exa whether or not it is named - naming it keeps the $0.005-per-search cost visible instead of implicit. Exa returns query-selected EXCERPTS with `[...]` elision markers, not whole pages; the fetch tool below is what makes a quotation from this channel groundable."
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8
+      },
+      "_no_prompt_suffix_here_on_purpose": "The promo paragraph rides on spark12cont and ornemotron3ultra ONLY. the operator named exactly those two, and the thing they have in common is that their vendors may train on the payload; extending it to a third channel because it is also cheap would be inventing intent. 🔴 Note the open question this raises rather than answers: OpenRouter's free tier requires the ACCOUNT-level prompt-training setting to be on, which is why ornemotron3ultra serves at all - and if that setting is account-wide it also covers every paid OpenRouter channel here, this one included. Unresolved; see `_data_controls_not_wired` at the end of this file, which is the one home for that gap.",
+      "models": {
+        "deepseek/deepseek-v4-pro": {
+          "label": "DeepSeek V4 Pro",
+          "data_policy": "Metered API through OpenRouter, restricted to three third-party hosts (Baidu, StreamLake, Novita) - the payload goes to whichever of them serves the call, NOT to DeepSeek itself, whose endpoint this account's data policy refuses. OpenRouter documents `provider.data_collection: deny` and `provider.zdr: true` as per-request controls; NEITHER IS SET HERE - see _data_controls_not_wired at the end of this file.",
+          "aliases": [
+            "deepseek/deepseek-v4-pro",
+            "deepseek v4 pro",
+            "deepseek-v4-pro",
+            "v4 pro",
+            "дипсик v4"
+          ]
+        }
+      },
+      "aliases": [
+        "ordeepseekv4pro",
+        "deepseek",
+        "дипсик",
+        "ds4pro"
+      ],
+      "_first_real_run_2026_08_15": "🟢 END TO END THROUGH THE HARNESS, not a raw HTTP probe: an 881-char brief with a live-search question and a planted false claim. 25.6 s, three generations, in=28 837 out=1 149, reasoning 272 tokens, three pages fetched by US (github.com/astral-sh/ruff releases + CHANGELOG + repo root), marker on the last line, citation audit ran (2 cited / 1 LIVE / 1 BLOCKED). It answered correctly with [OPENED] tags and REFUTED the planted claim by quoting the source: «An extremely fast Python linter and code formatter, written in Rust». Cost reported BY THE PROVIDER: $0.025587. 🔴 THE INTERESTING NUMBER IS `cached 21357` OF 28 837 INPUT - 74% of the re-sent conversation came back marked cached, on a route whose catalogue entries all say `supports_implicit_caching: false`. So that flag describes something narrower than «this endpoint caches», and the tool-loop re-send is not being billed at full rate here. Recorded as MEASURED but NOT ATTRIBUTED: the cached count is telemetry, whether the discount reached the price cannot be separated from a three-generation total that may have crossed two providers.",
+      "notes": "1.6T MoE (49B active), 1M context, ~$0.35-1.17 per M depending on which of the three allowed hosts serves the call. The cheap panel's CODE voice, the seat kimik3 holds in the standard panel. 🔴 Its agreement with another channel is not corroboration until a quotation has been checked byte-for-byte: the AOS corpus measured kimik3 at 0 of 32 byte-exact quotations because it quoted the BRIEF back rather than the source, and nothing about this vendor makes that failure less likely."
+    },
     "orgpt56terrapro": {
       "kind": "openrouter",
+      "panel": "standard",
+      "vendor": "openai",
       "provider": "openrouter",
       "enabled": false,
       "distribution": "both",
@@ -997,7 +1112,65 @@
   },
   "_models_removed_from_agy": "claude-sonnet-4-6, claude-opus-4-6-thinking and gemini-3.1-pro-low are deliberately absent from both agy channels (the operator, 2026-07-31): routing a Claude model through agy spends the Gemini weekly subscription on a model already reachable directly, and Pro Low is the shallow variant this channel exists to avoid. 🔴 This note lives at TOP LEVEL and not inside `channels`, and that is not cosmetic: every other object in this file takes `_`-prefixed prose keys, so putting one inside `channels` is the natural habit - and there it would be iterated AS A CHANNEL. Written there first, in this very edit. routing.py now skips `_`-prefixed keys inside `channels` (the declared convention) and refuses any other non-object entry by name, so the trap costs a clear error instead of a confusing one.",
   "_data_controls_not_wired": "🔴 STILL NOT WIRED, BUT NO LONGER A GUESS — and the key keeps its old name on purpose: five `data_policy` strings above point at it by name, and renaming the target of a pointer is how a cross-reference dies quietly. This entry used to say the two OpenRouter data controls were «KNOWN AND DELIBERATELY NOT IMPLEMENTED», on the reasoning that «a knob nobody has exercised looks exactly like a free change until the day it silently drops a channel». That reasoning was right and the remedy was to exercise it, which took six cheap calls. RESULTS, all judged by whether a completion came back AND by which provider served it: `provider.data_collection:\"deny\"` is FREE on 5 of 6 - kimik3, qwen38max, orgemini36flash, ormimo25pro, orgrok420 all answer normally - and DROPS ornemotron3ultra with `404 No endpoints found matching your data policy (Free model training)`, which is logically necessary: the free tier's price IS the training grant. `provider.zdr:true` is free on 4 of 6 and additionally DROPS qwen38max (`404 ... (Zero data retention)`). 🔴 THE CONTROL IS NOT A FILTER, IT IS A RE-ROUTE: kimik3 moved from provider Chutes to Modal and ormimo25pro from Xiaomi to Novita. So «deny» trades a known company for a different one with a better stated policy, which is a real change and not a free one. STILL NOT WIRED, and now that is a decision with numbers behind it: the operator's standing scope (2026-08-03) is that only keys, passwords and .env are critical and «остальное не критично», so the upside is small by his own rule while the provider swap is a genuine unknown. One line in call_oai_reviewer turns it on if that ever changes. Independent of all this: briefs sent through these channels reach a metered third party under its default retention terms, and spark12cont and ornemotron3ultra are materially different because their discount IS the training grant.",
+  "_panels_doc": "🔴 A PANEL IS WHO IS IN THE ROOM. A TIER IS HOW DEEP EACH OF THEM GOES. Added 2026-08-15 (round 42), the operator: «Давай теперь разделим оркестр[ацию] на дешевую и стандартную», with the membership he dictated verbatim - «В дешевую добавь: deepseek, Grok, Agy, google и openrouter 3.6 и 3.7 Flash, mimo, nemotron, spark12cont Muse Spark 1.2 Contributor». Everything he did not name stays standard-only: spark11, codex, kimik3, qwen38max, orgpt56terrapro. The two axes are deliberately orthogonal and both print in the plan - `--panel cheap --tier deep` is a legal and sensible combination (few reviewers, each thinking hard), and so is `--panel standard --tier strategic`.\n\n🔴 THE LADDER IS NESTED, NOT A PARTITION: `standard` INCLUDES every cheap channel. «Стандартная» has to mean «what normally runs», and what normally runs is every enabled channel - so `--panel standard` is bit-for-bit the behaviour that shipped before this key existed, and the default is unchanged. A disjoint reading would have produced a four-channel «standard» panel with no Gemini voice at all, which nobody would ever want: the cheap voices cost nothing extra once you are already paying for the expensive ones.\n\n🔴 A PANEL IS NOT A GROUP, AND THE DIFFERENCE IS RESURRECTION. `--only <group>` deliberately overrides `enabled: false` - that is the documented opt-in path. A panel must NOT: it filters DOWN to channels that are already enabled and never turns one on. Implementing `cheap` as a group instead would have been a one-line registry edit and would have been wrong in a way nothing would have caught, because `enabled` is exactly what package.py flips per `distribution`: `--only cheap` in the kit would have resurrected mimo25pro, grok420 and goog36/37flash - four channels whose direct vendor keys a kit user does not have - and here it would have resurrected their OpenRouter twins, paying twice for the same voice. Same word, opposite semantics; they cannot share a mechanism.\n\n🔴 THE NAME `standard` WAS A TIER UNTIL 2026-08-08 AND IS NOT ONE NOW. the operator removed the `quick` and `standard` TIERS that day, and `--tier standard` is still an argparse error naming strategic|deep. The word returning as a PANEL is not that tier coming back - different flag, different axis. Recorded here because the retired name appears in `_tiers_doc` above and a reader meeting both would otherwise be entitled to think one of them is stale.",
+  "_panels_hidden_cost_doc": "🔴 THE THING THE CHEAP PANEL COSTS IS VENDOR DIVERSITY, NOT DEPTH - and it is invisible if you only read the price. Counted on this machine 2026-08-15: of the 11 cheap channels enabled here, SIX are Gemini (agy31pro, agy36flash, agy37flash, goog36flash, goog37flash, orgemini37flash). In the generated kit it is five of ten. A panel's whole product is disagreement between independent voices, and six seats sharing one vendor's training data are not six independent voices on a question where that vendor is systematically wrong - they will agree with each other and the convergence will read as corroboration. What `standard` actually buys, therefore, is not «more expensive», it is four more VENDORS: OpenAI (codex), Moonshot (kimik3), Alibaba (qwen38max) and Meta's Standard tier (spark11). The plan prints the vendor breakdown of whatever set resolves, so this is checkable at run time rather than trusted from this paragraph.",
+  "default_panel": "standard",
+  "_default_panel_is_standard_ON_PURPOSE": "Flipping this to \"cheap\" is a one-word edit and was deliberately NOT made in round 42. The reason is not caution in general, it is a specific asymmetry: making the default cheaper silently removes codex, kimik3, qwen38max and spark11 from every round launched by a session that passes no flag - including the legal rounds in another project, where the loss would be four vendors on a question with a filing deadline, and where nobody would see a message saying so. A default that quietly spends more is a bug; a default that quietly reviews LESS is also a bug, and the second one is harder to notice. So the change is offered rather than taken: every `standard` plan prints what `--panel cheap` would drop, by name.",
+  "panels": {
+    "cheap": {
+      "label": "cheap panel",
+      "includes": [
+        "cheap"
+      ],
+      "aliases": [
+        "cheap",
+        "дешевая",
+        "дешевую",
+        "дешевой",
+        "дешевый",
+        "дешевом",
+        "дешевые",
+        "дешевых",
+        "дешево",
+        "эконом",
+        "экономная",
+        "экономную",
+        "экономной",
+        "экономном",
+        "cheap panel",
+        "дешевая панель",
+        "дешевая оркестрация"
+      ],
+      "_aliases_and_the_two_things_that_are_NOT_automatic": "«дешёвая» needs no entry: both the panel extractor and the entity scanner fold ё to е before matching, the same normalisation the route parser has always used. Case endings DO need entries, because nothing stems Russian here - «дешевой» is not derivable from «дешевая» by any rule this file implements. 🔴 WHAT A MISSING ENDING ACTUALLY DOES, CORRECTED 2026-08-15 after a reviewer traced it: this note used to say it «falls through to default_panel», which is only half the story and the reassuring half. If the rest of the route names a channel («не используй grok на дешевом»), the panel word is invisible and the round runs the DEFAULT - i.e. the expensive - panel, silently. If it names nothing («запусти на дешевом»), the route dies with «no channel or model in this route matched the registry», an error about the wrong thing entirely. Neither outcome is the one asked for, and one of them costs money. That is why this list is longer than it looks like it needs to be, and why the endings a Russian speaker would actually type were added by asking a panel rather than by introspection.",
+      "_what_it_is": "Every channel that is either free, on a flat-rate subscription, or metered below roughly $1/M input. Subscriptions (agy) count as cheap because their marginal cost is zero, even though the weekly allowance is a real and scarce resource - which is why `codex`, also a subscription, is NOT here: it is rationed for a different reason (slow, strategic-only), and that policy predates this key.",
+      "_the_seat_it_loses": "kimik3 carries `role: code` and is standard-only, so the cheap panel would have had no code voice at all. ordeepseekv4pro was added in the same round and carries `role: code` for exactly that reason. See _panels_hidden_cost_doc for the loss that is NOT filled by anything: four vendors."
+    },
+    "standard": {
+      "label": "standard panel",
+      "includes": [
+        "cheap",
+        "standard"
+      ],
+      "aliases": [
+        "standard",
+        "стандартная",
+        "стандартную",
+        "стандартной",
+        "стандартном",
+        "стандартный",
+        "стандартные",
+        "стандарт",
+        "standard panel",
+        "стандартная панель",
+        "полная панель",
+        "full panel"
+      ],
+      "🔴_words_that_could_mean_DEPTH_are_not_panel_aliases": "`full`, `полная`, `полную`, `полной` were here and are GONE, and the reason is sharper than «too common». A bare word is dangerous as a panel alias exactly when it could equally name the OTHER axis: «run a full analysis», «полная проверка» are asking for THOROUGHNESS, which is `--tier deep`, not for a room full of reviewers. Measured 2026-08-15, before the removal: `--route \"run a full analysis with grok\"` silently set panel=standard AND swallowed the word, so the leftover produced «'run a  analysis with grok' mentions grok420 but no instruction word» - the wrong action taken, and an error message about something else. `full panel` and `полная панель` stay, because the noun disambiguates. Two reviewers found this independently. The general rule for anyone adding an alias here: ask whether the word could be an answer to «how deep», not just whether it is common.",
+      "_what_it_is": "Every enabled channel - the behaviour that shipped before panels existed, and the default. Adds spark11 (Meta Standard tier, no training grant), codex (OpenAI via the ChatGPT subscription, strategic questions only), kimik3 (Moonshot, the code voice) and qwen38max (Alibaba). orgpt56terrapro is nominally in this panel and still does not run without `--only` plus `--accept-spend`: `panel` and `enabled` answer different questions, and a panel never resurrects a default-off channel."
+    }
+  },
   "_tiers_doc": "🔴 TWO TIERS SINCE 2026-08-08, and the reason is a question that had no good answer. the operator: «quick и standart tier давай уберем. И не понятно визуально, чем отличается strategic от Deep.» He was right, and the honest answer was embarrassing: strategic and deep differed by NOTHING except a timeout - identical agy_effort, identical http_effort - so a human reading the two words was promised a depth difference the file did not contain. Rather than invent one, `deep` now changes the three things that CAN change on every vendor (time, pages read, room to think) and the plan PRINTS the resolved value per channel, including «already at this vendor's ceiling, deep changes nothing here». A tier is a word; what it resolves to has to be visible before anything is spent. 🔴 quick and standard are GONE, not hidden: `--tier quick` is now an argparse error naming the two that exist, because a silently-accepted dead tier is the decorative-knob defect this file keeps recording. 🔴 THE TIER LIST HAS ONE HOME. Until 2026-08-08 it had two - this object AND a `TIERS` dict in orchestrate.py that fed `--tier`'s choices - so deleting a tier here would have left the flag still accepting it and falling through to defaults. orchestrate now derives its tiers from this file. HISTORY, kept because each entry is a lever that was wired to nothing: codex_timeout added 2026-08-05 (before it, codex fell through to a hard-coded 3000 s while the harness advised 'raise the timeout for that channel', naming a lever that did not exist); http_effort added 2026-08-06 (the tier varied `thinking.budget_tokens`, which Meta documents as «accepted for compatibility but not translated into an effort value» - depth is output_config.effort alone, which the code pinned at xhigh for every tier, so the ladder did nothing on Spark). PROBED 2026-08-06 on both Spark models: low/medium/high/xhigh all return 200, `max` returns 400 on both, and so does an invented value - the negative control proving the endpoint validates the field. xhigh is the real ceiling even though Meta's own OpenAPI enum lists `max`.",
+  "_tiers_reach_correction_2026_08_15": "🔴 «AND EVERY OPENROUTER/OAI CHANNEL (REASONING CEILING AND PAGE-FETCH BUDGET, BOTH MULTIPLIED)» IN THE NEXT KEY IS TOO STRONG, and three of eight reviewers caught it on the same day. The multiplier acts on `reasoning.max_tokens`; a channel that declares `reasoning.effort` INSTEAD has no number to multiply, so `deep` moves only its fetch budget. That is true today of `ordeepseekv4pro` (effort high, two rungs) and of `ornemotron3ultra` (effort high). The plan has always printed the truth per channel - «nothing this tier can raise on this channel» - so the code was right and the prose generalised. Kept as a correction beside the original rather than edited into it, because the original sentence is the measurement of 2026-08-08 and rewriting a measurement to match a later one is how a record stops being a record. The fix that would make the sentence true again is a raise-only effort rule clamped to each model's declared ladder; deferred, because an absolute tier effort would silently DOWNGRADE qwen38max, which already runs xhigh.",
   "_tiers_reach_doc": "🔴 WHICH CHANNELS THE TIER ACTUALLY REACHES, measured 2026-08-08 rather than assumed. Before this round the answer was 4 of 11 - two Spark and two agy - while `--tier` read like a global control. Now: agy (effort+timeout), codex (timeout only; its effort is pinned in its own block and the subscription has no cheaper setting worth having), http/Spark (effort+thinking budget+output floor), gemini (thinking_level - see goog36flash, this was believed impossible until the docs were re-read), and every openrouter/oai channel (reasoning ceiling and page-fetch budget, both multiplied). xai gets the timeout and nothing else. 🔴🔴 TWO CORRECTIONS TO THAT LAST CLAUSE, both from the round-29 panel reviewing this very change, and both right. (a) codex noticed the dispatcher passed NO timeout to the xai channel at all - `call_xai_responses` fell back to its own 2400 s default in both tiers - so `deep` was a literal NO-OP there while the printed note claimed it bought wall-clock. A line written to be honest about a missing lever was itself wrong about the one lever that remained. Fixed: it now takes `codex_timeout`. (b) qwen38max objected that «no depth knob on this vendor» rested on a single 400 from a single placement - the exact error this round had just corrected for Gemini - and cited xAI's own docs showing `reasoning_effort` on grok-4.5 and `reasoning.effort` on grok-4.20-multi-agent. RE-PROBED on /v1/responses in the Responses shape: `reasoning:{\"effort\":\"low\"|\"high\"|\"zzz\"}` ALL return `400 Model grok-4.20-0309-reasoning does not support parameter reasoningEffort`, identical to the top-level placement, while the invented sibling `reasoning:{\"effort_zzz\":\"low\"}` returns 200 and is silently ignored. The refusal is MODEL-level, not a placement mistake, so the correct wording is «this model», never «this vendor». The objection was methodologically right and changed the sentence even though it did not change the outcome - which is what a panel is for.",
   "tiers": {
     "strategic": {

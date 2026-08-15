@@ -2195,6 +2195,293 @@ def suite_spend_guard():
           "main() refuses rather than warns when an opt-in channel was selected without it")
 
 
+def suite_panels():
+    """
+    Round-42: a PANEL is who is in the room; a TIER is how deep each of them goes.
+
+    The invariant this suite exists for is the one that is invisible when it breaks: a panel
+    FILTERS DOWN and must never enable a channel the registry has off. `--only` deliberately
+    does the opposite - that is the documented opt-in path - so the two mechanisms look
+    interchangeable and are not. Implementing `cheap` as a GROUP would have been a one-line
+    registry edit with no code at all, and it would have been wrong in a silent way: `enabled`
+    is precisely the field package.py flips per `distribution`, so `--only cheap` would have
+    resurrected every kit-only twin here (paying twice for one voice) and every direct-key
+    channel in the kit (where the user has no such keys).
+
+    Everything below is DERIVED from channels.json except the membership Igor dictated, which
+    is an input and is therefore allowed to be a literal - the same rule the routing suite
+    follows for `--only X`.
+    """
+    section("panels: who is in the room (round 42)")
+    import subprocess as _sp
+
+    import orchestrate as _o
+    import routing as _r
+
+    with open(HERE / "channels.json", encoding="utf-8") as fh:
+        RAW = json.load(fh)
+    CH = {k: v for k, v in RAW["channels"].items() if not k.startswith("_")}
+    PANELS = {k: v for k, v in (RAW.get("panels") or {}).items() if not k.startswith("_")}
+
+    # ---- registry shape -------------------------------------------------------------------
+    check(bool(PANELS), "the registry defines panels", ", ".join(sorted(PANELS)))
+    check(RAW.get("default_panel") in PANELS, "default_panel names a panel that exists",
+          repr(RAW.get("default_panel")))
+    # STRICT here, forgiving at run time. routing._check_panels defaults a missing `panel` to
+    # `default_panel` so that a user's own settings file adding a channel cannot break the load;
+    # a channel SHIPPED in this file has no such excuse, and an undeclared one would quietly sit
+    # in the expensive panel forever.
+    nop = sorted(c for c, v in CH.items() if not v.get("panel"))
+    check(not nop, "every shipped channel declares a `panel`", ", ".join(nop))
+    nov = sorted(c for c, v in CH.items() if not v.get("vendor"))
+    check(not nov, "every shipped channel declares a `vendor`", ", ".join(nov))
+    bad = sorted(c for c, v in CH.items() if v.get("panel") not in PANELS)
+    check(not bad, "no channel declares a panel the registry does not define", ", ".join(bad))
+    for p, spec in sorted(PANELS.items()):
+        check(p in (spec.get("includes") or []), "panel %r includes its own label" % p,
+              repr(spec.get("includes")))
+
+    # ---- Igor's dictated membership, 2026-08-15 ---------------------------------------------
+    # «В дешевую добавь: deepseek, Grok, Agy, google и openrouter 3.6 и 3.7 Flash, mimo,
+    # nemotron, spark12cont». The set is the INPUT, so naming it is legitimate; the complement
+    # is COMPUTED, because a frozen complement is what went red in the routing suite when a
+    # fourth channel arrived in 2026-08.
+    DICTATED_CHEAP = {
+        "ordeepseekv4pro", "grok420", "orgrok420",
+        "agy31pro", "agy36flash", "agy37flash",
+        "goog36flash", "goog37flash", "orgemini36flash", "orgemini37flash",
+        "mimo25pro", "ormimo25pro", "ornemotron3ultra", "spark12cont",
+    }
+    actual_cheap = {c for c, v in CH.items() if v.get("panel") == "cheap"}
+    check(actual_cheap == DICTATED_CHEAP, "the cheap panel is exactly what Igor dictated",
+          "extra=%s missing=%s" % (sorted(actual_cheap - DICTATED_CHEAP),
+                                   sorted(DICTATED_CHEAP - actual_cheap)))
+    standard_only = {c for c in CH} - DICTATED_CHEAP
+    check({c for c, v in CH.items() if v.get("panel") == "standard"} == standard_only,
+          "everything he did not name is standard-only", ", ".join(sorted(standard_only)))
+    # The ladder is NESTED, not a partition: «стандартная» has to mean "what normally runs".
+    reg = _r.load_registry()
+    check(_r.panel_members(reg, "cheap") < _r.panel_members(reg, "standard"),
+          "standard is a strict SUPERSET of cheap - the ladder is nested, not a partition",
+          "%d < %d" % (len(_r.panel_members(reg, "cheap")),
+                       len(_r.panel_members(reg, "standard"))))
+    # What a cheap round ACTUALLY runs here: membership intersected with `enabled`. Several
+    # later checks derive their expected numbers from this rather than pinning a literal.
+    cheap_live = [c for c in _r.panel_members(reg, "cheap") if CH[c].get("enabled", True)]
+
+    # ---- THE CORE INVARIANT: a panel never resurrects -----------------------------------------
+    off = sorted(c for c, v in CH.items() if not v.get("enabled", True))
+    check(bool(off), "there is at least one default-off channel to test resurrection against",
+          ", ".join(off))
+    for pname in sorted(PANELS):
+        plan = _r.resolve(_r.load_registry(), panel=pname)
+        woke = sorted(c for c in off if plan[c]["enabled"])
+        check(not woke, "--panel %s enables nothing that the registry has off" % pname,
+              "woke: " + ", ".join(woke))
+        live = {c for c, p in plan.items() if p["enabled"]}
+        outside = live - _r.panel_members(reg, pname)
+        check(not outside, "--panel %s runs nothing outside its own membership" % pname,
+              ", ".join(sorted(outside)))
+    # ...and the ASYMMETRY that makes the invariant meaningful: --only still resurrects.
+    plan = _r.resolve(_r.load_registry(), panel="cheap", only=[off[0]])
+    check(plan[off[0]]["enabled"],
+          "CONTROL: --only still resurrects a default-off channel (panels are not --only)",
+          off[0])
+
+    # ---- alias namespace ----------------------------------------------------------------------
+    # Panel words are consumed BEFORE the entity scan, so a word that is both a panel alias and
+    # a channel alias would mean two different things depending on which consumer ran first.
+    ent = {a for a, _ in _r.alias_index(reg)}
+    pal = {a for a, _ in _r._panel_alias_index(reg)}
+    check(not (ent & pal), "no panel alias collides with a channel/model/group alias",
+          ", ".join(sorted(ent & pal)))
+
+    # ---- route parsing ------------------------------------------------------------------------
+    def route_err(text, **kw):
+        try:
+            _r.resolve(_r.load_registry(), route=text, **kw)
+            return None
+        except _r.RouteError as e:
+            return str(e)
+
+    check(route_err("не используй дешевую панель"),
+          "a NEGATED panel word is refused, not silently obeyed backwards",
+          (route_err("не используй дешевую панель") or "")[:70])
+    check(route_err("дешевая и стандартная"), "naming two panels is refused")
+    check(route_err("дешевая панель, без грокк"),
+          "a marker with no channel behind it is refused even after a panel word")
+    p = _r.resolve(_r.load_registry(), route="запусти на дешевой")
+    check(sum(1 for v in p.values() if v["enabled"]) == len(
+        [c for c in _r.panel_members(reg, "cheap") if CH[c].get("enabled", True)]),
+        "filler after a panel word is NOT an error - «запусти на дешевой» resolves")
+    check(route_err("дешевая", panel="standard"),
+          "route and --panel disagreeing about the panel is a hard stop")
+    # Unchanged behaviour when no panel word is present.
+    p = _r.resolve(_r.load_registry(), route="не используй gemini")
+    check(not any(p[c]["enabled"] for c in _r.group_members(reg, "gemini")),
+          "CONTROL: a route with no panel word behaves exactly as before")
+
+    # ---- what the plan prints -----------------------------------------------------------------
+    reg2 = _r.load_registry()
+    txt = _r.format_plan(_r.resolve(reg2, panel="cheap"), reg2)
+    check("panel: cheap" in txt, "the plan names the panel it resolved")
+    check("--panel standard would ALSO run" in txt,
+          "a cheap plan says what the other panel would ADD, by name")
+    # DERIVED, not pinned to 6: the number moves the moment a channel is added or skipped, and
+    # a test that froze it would go red against correct code - the failure this suite's own
+    # complement rule exists to avoid.
+    want_v = len({CH[c]["vendor"] for c in cheap_live})
+    check(("from %d vendor(s)" % want_v) in txt,
+          "the plan counts VENDORS, not just channels",
+          next((ln.strip() for ln in txt.splitlines() if "vendor(s)" in ln), "(no line)"))
+    check("role=code" in txt,
+          "`role` is printed - it was a registry field nothing read until round 42")
+    reg3 = _r.load_registry()
+    dflt = _r.format_plan(_r.resolve(reg3), reg3)
+    check("--panel cheap would DROP" in dflt,
+          "the DEFAULT plan offers the cheaper panel and names what it costs")
+    # The concentration warning is derived from the resolved set, so it has to move when the
+    # set does. Two arms, because a line that is always printed is not evidence of anything.
+    reg4 = _r.load_registry()
+    only_two = _r.format_plan(_r.resolve(reg4, only=["spark11", "codex"]), reg4)
+    check("seats are" not in only_two,
+          "CONTROL: no concentration warning when no vendor holds half the seats")
+    check("seats are google" in txt,
+          "and it DOES fire on the cheap panel, where 6 of 11 seats are one vendor")
+
+    # ---- the cheap panel keeps a code voice ---------------------------------------------------
+    # The reason ordeepseekv4pro was added in this round. Derived: if the only `role: code`
+    # channel is standard-only, the cheap panel has no code seat and this check says so.
+    check(any(CH[c].get("role") == "code" for c in cheap_live),
+          "the cheap panel has at least one `role: code` seat",
+          ", ".join(sorted(c for c in cheap_live if CH[c].get("role") == "code")))
+    check(not any(CH[c].get("cost") == "expensive" for c in _r.panel_members(reg, "cheap")),
+          "no channel tagged cost=expensive sits in the cheap panel")
+
+    # ---- deepseek, the round's new channel ----------------------------------------------------
+    ds = CH.get("ordeepseekv4pro") or {}
+    check(ds.get("model") == "deepseek/deepseek-v4-pro",
+          "ordeepseekv4pro runs the id the live catalogue returned", repr(ds.get("model")))
+    pin = (ds.get("provider_route") or {}).get("only") or []
+    check(len(pin) >= 2, "it is pinned to an allow-list, not left to route across 18 providers "
+                         "at a 5.5x price spread", repr(pin))
+    # 🔴 THE ONE PROVIDER THAT MUST NOT COME BACK. The first draft of this channel pinned
+    # `only: [deepseek]` - cheapest non-quantised, best uptime, the only reachable endpoint with
+    # implicit caching - and it is 404 on this account: «No endpoints available matching your
+    # guardrail restrictions and data policy». The catalogue lists what EXISTS; the account
+    # decides what is REACHABLE, and no API call shows the difference. Measured 2026-08-15.
+    check("deepseek" not in pin,
+          "and NOT to the first-party endpoint, which this account's data policy refuses (404)",
+          repr(pin))
+    sg = ds.get("spend_guard") or {}
+    check(sg.get("max_usd_per_review") is not None and not sg.get("requires_ack"),
+          "it declares a ceiling and NO ack gate (an ack gate on a default-on channel would "
+          "refuse every ordinary round)", "ceiling=%r" % sg.get("max_usd_per_review"))
+    check(sg.get("measured_usd") is None,
+          "measured_usd is null until a real round fills it - an estimate here would print "
+          "as «spend: measured ...» and read like a measurement")
+
+    # ---- what the round-42 panel of twelve reviewers found ------------------------------------
+    # Each of these is a regression test for a defect that was SHIPPED in the first draft of this
+    # round and caught by an external reviewer. Kept as behaviour checks (route in, panel out)
+    # rather than as assertions about the alias table, so the fix can be implemented differently
+    # and the test still means the same thing.
+    def resolved_panel(text):
+        r = _r.load_registry()
+        _r.resolve(r, route=text)
+        return r.get("_panel_chosen")
+
+    # 🔴 «A вместо B» is SUBSTITUTION, not negation. Three reviewers independently hit the first
+    # draft's single NEG+SUBST prefix test, which answered «a panel cannot be negated» - naming
+    # the word the human was DISCARDING. `apply_route` has always resolved «вместо» this way for
+    # models; the panel extractor now does too.
+    check(resolved_panel("стандартная панель вместо дешевой") == "standard",
+          "«A вместо B» selects A, the panel BEFORE the marker",
+          repr(resolved_panel("стандартная панель вместо дешевой")))
+    check(resolved_panel("дешевая панель вместо стандартной") == "cheap",
+          "...and the mirror image selects the other one - the rule is positional, not a "
+          "preference for either panel",
+          repr(resolved_panel("дешевая панель вместо стандартной")))
+    check(route_err("дешевая и стандартная"),
+          "CONTROL: two panels with NO substitution marker is still a hard stop")
+
+    # 🔴 A word that could name the OTHER AXIS must not select a panel. `full`, `полная`,
+    # `полную`, `полной` were aliases; «run a full analysis» is asking for DEPTH (--tier deep),
+    # and the first draft silently set panel=standard AND swallowed the word, so the leftover
+    # produced an error about a channel. Two reviewers found it independently.
+    check(resolved_panel("run a full analysis, но без grok") == reg.get("default_panel"),
+          "a depth word («full») no longer hijacks the panel",
+          repr(resolved_panel("run a full analysis, но без grok")))
+    check(resolved_panel("полная панель") == "standard",
+          "...while the disambiguated noun phrase still works («полная панель»)")
+    pal_bare = {a for a, _ in _r._panel_alias_index(reg)}
+    depth_words = {"full", "полная", "полную", "полной", "deep", "глубокая", "глубоко"}
+    check(not (pal_bare & depth_words),
+          "no bare panel alias is a word that answers «how deep»",
+          ", ".join(sorted(pal_bare & depth_words)))
+
+    # Case endings, checked by BEHAVIOUR. A missing ending is silent in the expensive direction:
+    # with a channel elsewhere in the sentence the round just runs the default panel.
+    for phrase, want in (("запусти на дешевом", "cheap"), ("запусти на дешевой", "cheap"),
+                         ("экономную панель", "cheap"), ("стандартном", "standard"),
+                         ("стандартные", "standard")):
+        check(resolved_panel(phrase) == want, "route %r resolves to %s" % (phrase, want),
+              repr(resolved_panel(phrase)))
+
+    # 🔴 THE REGISTRY CLAIMED «--tier quick is now an argparse error» AND IT WAS TRUE IN ONE OF
+    # THE TWO PROGRAMS. orchestrate.py had `choices`; routing.py did not, and printed a plan
+    # resolved at the default. One sentence, two files, verified against the one it was written
+    # about. Found by a reviewer who checked it against both.
+    for script, flag, bad in (("routing.py", "--tier", "quick"), ("routing.py", "--panel", "zz"),
+                              ("orchestrate.py", "--tier", "quick")):
+        p = _sp.run([PY, str(HERE / script), flag, bad] +
+                    ([] if script == "routing.py" else ["--brief", str(HERE / "SKILL.md"),
+                                                        "--dry-run"]),
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=120)
+        check(p.returncode != 0 and "invalid choice" in blob_of(p),
+              "%s %s %s is refused by argparse, listing what exists" % (script, flag, bad),
+              "exit=%d" % p.returncode)
+    ok = _sp.run([PY, str(HERE / "routing.py"), "--tier", "deep"], capture_output=True, text=True,
+                 encoding="utf-8", errors="replace", timeout=120)
+    check(ok.returncode == 0, "CONTROL: a tier that DOES exist is still accepted",
+          "exit=%d" % ok.returncode)
+
+    # 🔴 THE PROVIDER ROUTE NEEDS ALL THREE FIELDS, AND EACH WAS MEASURED SEPARATELY:
+    # `only` bounds (only:[anthropic] -> 404, no leak), `order` pins the primary (Baidu 3/3
+    # against StreamLake x3 / Baidu x1 without it, which matters because a provider swap between
+    # tool rounds discards the prompt cache), `allow_fallbacks:false` is belt-and-braces.
+    pr = ds.get("provider_route") or {}
+    check(pr.get("order") and set(pr["order"]) <= set(pr.get("only") or []),
+          "the provider `order` is a subset of `only` - a preference cannot widen the allow-list",
+          repr(pr))
+    check(pr.get("allow_fallbacks") is False,
+          "and fallbacks are explicitly off, so the doubt a reader has is answered in the file",
+          repr(pr.get("allow_fallbacks")))
+
+    # ---- the flag reaches the CLI --------------------------------------------------------------
+    check(sorted(_o.load_panels()) == sorted(PANELS),
+          "orchestrate.load_panels() derives --panel's choices from the registry",
+          repr(_o.load_panels()))
+    h = _sp.run([PY, str(HERE / "orchestrate.py"), "--help"], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=120).stdout or ""
+    check("--panel" in h, "--panel is a documented flag on orchestrate.py")
+    # 🔴 --dry-run, ALWAYS. The 1.19.0 version of the reachability check ran the real CLI with
+    # no --dry-run against the most expensive channel and asserted returncode == 0 - which only
+    # passes if a paid call SUCCEEDED. One live call per `python selftest.py`, invisible because
+    # nothing printed a price. Found in round 41 when the new ack gate refused the test suite.
+    r = run_cli(["--dry-run", "--panel", "cheap", "--marker", "X"])
+    blob = blob_of(r)
+    check(r.returncode == 0 and "panel: cheap" in blob,
+          "orchestrate --dry-run --panel cheap resolves the cheap panel", "exit=%d" % r.returncode)
+    check("kimik3" not in blob.split("running")[-1],
+          "and the standard-only channels are not in its running list")
+    r = run_cli(["--dry-run", "--panel", "nosuchpanel", "--marker", "X"])
+    check(r.returncode != 0 and "invalid choice" in blob_of(r),
+          "an unknown --panel is refused by argparse, listing the ones that exist",
+          "exit=%d" % r.returncode)
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -2223,7 +2510,7 @@ def main():
                   suite_prose_matches_behaviour, suite_contract,
                   suite_citations, suite_dispatch, suite_tiers_and_grounding,
                   suite_settings_and_upgrade, suite_echocheck, suite_dev_tooling,
-                  suite_agy_plan_class, suite_spend_guard):
+                  suite_agy_plan_class, suite_spend_guard, suite_panels):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

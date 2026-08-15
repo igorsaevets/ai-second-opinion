@@ -162,10 +162,29 @@ channel is an edit to that file, never to `orchestrate.py`.
 --skip gemini               exclude
 --set codex=gpt-5.4         pin a specific model
 --route "<free text>"       parse an instruction as written, in Russian or English
---tier strategic|deep       two only; the plan prints what it resolved to, per channel
+--tier strategic|deep       HOW DEEP each reviewer goes; the plan prints what it resolved to
+--panel cheap|standard      WHO is in the room; filters down only, never enables
 --system legal-research     system-prompt preset
 --dry-run                   complete preflight, spends nothing
 ```
+
+**`--panel` and `--tier` are two axes, not two spellings of one.** A panel is which reviewers
+are in the room; a tier is how hard each of them thinks. `--panel cheap --tier deep` — few
+voices, thinking hard — is a legal and often sensible combination. Membership is declared per
+channel (`"panel": "cheap"`) and the ladder in the `panels` object, so `standard` INCLUDES
+everything `cheap` has: «standard» has to mean "what normally runs", and it does — the default
+is bit-for-bit the behaviour that shipped before panels existed.
+
+🔴 **A panel filters DOWN and never enables anything.** `--only` deliberately resurrects a
+channel the registry has `enabled: false`; a panel must not, because `enabled` is exactly the
+field the packaging step flips per `distribution`. Implementing `cheap` as a *group* would have
+been one line of config and would have silently resurrected every channel whose vendor key you
+do not have. Same word, opposite semantics — they cannot share a mechanism.
+
+🔴 **What the cheap panel really costs is vendor diversity, not depth.** The plan prints the
+vendor tally of whatever resolves and warns when one vendor holds half the seats, because six
+channels reaching one company's weights that agree with each other are one opinion reported six
+times. Read that line before treating convergence as corroboration.
 
 **Why two tiers and not four.** There were four; the two at the top differed by a *timeout* and
 nothing else, so the word "deep" advertised a depth the configuration did not contain. `deep`

@@ -519,6 +519,7 @@ def load_registry(path=DEFAULT_REGISTRY, overlay=True):
     _check_channel_models(reg)
     _check_channel_required(reg)
     _check_tiers(reg)
+    _check_panels(reg)
     return reg
 
 
@@ -546,10 +547,105 @@ def _check_tiers(reg):
                 % (tname, lvl, ", ".join(sorted(legal))))
 
 
+def _check_panels(reg):
+    """
+    Validate the `panels` ladder and normalise every channel's membership.
+
+    A PANEL is who is in the room; a TIER is how deep each of them goes. The two are separate
+    flags on purpose, and this checker exists because the failure mode of getting a panel wrong
+    is silent in the expensive direction: an unknown panel name that fell through to "run
+    everything" would look exactly like a cheap run that happened to cost more.
+
+    🔴 A MISSING `panel` DEFAULTS TO `default_panel` RATHER THAN RAISING, and the asymmetry is
+    deliberate. Since 1.8.0 a user's own settings file can ADD a channel, and refusing to load a
+    registry because someone's hand-written block omits one advisory word would break a working
+    install over a formality. Defaulting to `standard` is also the SAFE direction: an
+    undeclared channel is absent from `--panel cheap` (a cheap run stays cheap) and present in
+    the default run (nothing changes). It is recorded in `_panel_defaulted` and printed, because
+    the one thing it must not be is invisible. Channels shipped in THIS file are held to the
+    stricter rule by selftest, where a missing declaration is a test failure rather than a
+    silent default.
+    """
+    panels = {k: v for k, v in (reg.get("panels") or {}).items()
+              if not k.startswith("_") and isinstance(v, dict)}
+    reg["panels"] = panels
+    if not panels:
+        # A registry with no panels is legal and means "one room, everyone in it". The flag
+        # then has nothing to offer and `--panel` is refused by argparse for lack of choices.
+        reg["_panel_defaulted"] = []
+        return
+    default = reg.get("default_panel")
+    if default not in panels:
+        raise RouteError(
+            "default_panel=%r is not one of the panels this registry defines (%s). A default "
+            "that names nothing resolves to «no filter», which is the most expensive option "
+            "wearing the name of a cheaper one."
+            % (default, ", ".join(sorted(panels))))
+    for pname, p in panels.items():
+        inc = p.get("includes")
+        if not isinstance(inc, list) or not inc:
+            raise RouteError("panel %r has no `includes` list. A panel is defined by which "
+                             "membership labels it admits; without one it admits nothing and "
+                             "would run zero channels." % pname)
+        unknown = [i for i in inc if i not in panels]
+        if unknown:
+            raise RouteError("panel %r includes %s, which is not a panel in this registry (%s)."
+                             % (pname, ", ".join(repr(u) for u in unknown),
+                                ", ".join(sorted(panels))))
+        if pname not in inc:
+            raise RouteError(
+                "panel %r does not include its own label %r. `includes` is the ladder - a panel "
+                "always admits the channels declared for it, plus anything cheaper it lists. "
+                "Omitting itself makes the panel's own members invisible to it."
+                % (pname, pname))
+    defaulted = []
+    for cname, ch in reg["channels"].items():
+        want = ch.get("panel")
+        if want is None:
+            ch["panel"] = default
+            defaulted.append(cname)
+        elif want not in panels:
+            raise RouteError(
+                "channel %r declares panel=%r, which this registry does not define (%s). A "
+                "membership label nothing admits means the channel silently never runs under "
+                "any --panel, which reads as «it was not selected» rather than as a typo."
+                % (cname, want, ", ".join(sorted(panels))))
+    reg["_panel_defaulted"] = defaulted
+
+
+def panel_members(reg, name):
+    """The channel names a panel admits, by the `includes` ladder. Raises on an unknown name."""
+    panels = reg.get("panels") or {}
+    if name not in panels:
+        raise RouteError("unknown panel %r. This registry defines: %s."
+                         % (name, ", ".join(sorted(panels)) or "(none)"))
+    admits = set(panels[name]["includes"])
+    return {c for c, ch in reg["channels"].items() if ch.get("panel") in admits}
+
+
+def channel_vendor(reg, cname):
+    """
+    Which COMPANY's weights this channel runs, falling back to the channel name.
+
+    Not cosmetic and not derivable from `kind`: kind is the transport. Three Geminis through
+    the agy CLI, two through Google directly and one through OpenRouter are six transports and
+    ONE vendor - and a panel of six seats that all agree because they share a training corpus
+    has produced one opinion, not six. The plan prints the tally so that «eleven reviewers
+    agreed» can be read as what it is.
+    """
+    return (reg["channels"].get(cname) or {}).get("vendor") or cname
+
+
 # The minimum a channel needs before the plan can honestly print a line for it. Checked at LOAD
 # time because the alternative is what actually happened to an unknown `kind`: the plan printed
 # [RUN ], money was budgeted for it, and the failure arrived from the dispatcher. Now that the
 # overlay can ADD a channel, a half-written block is a thing a user will really produce.
+#
+# 🔴 `panel` AND `vendor` ARE DELIBERATELY NOT IN THIS TUPLE. Both have a safe fallback
+# (`default_panel`, and the channel's own name) and both are advisory-to-a-human rather than
+# load-bearing for the dispatcher, so refusing to load over a missing one would turn a
+# formatting nicety into an outage. selftest requires them of every SHIPPED channel instead -
+# strict where the author is this project, forgiving where the author is a user's settings file.
 _REQUIRED_CHANNEL_FIELDS = ("kind", "label", "model")
 
 
@@ -726,9 +822,113 @@ def initial_plan(reg):
     return {c: {"enabled": ch.get("enabled", True), "model": ch.get("model"),
                 "default_enabled": ch.get("enabled", True),
                 "spend_guard": ch.get("spend_guard") or None,
+                "panel": ch.get("panel"), "vendor": ch.get("vendor") or c,
                 "kind": ch["kind"], "label": ch.get("label", c),
                 "effort": ch.get("effort"), "agent": ch.get("agent"), "why": []}
             for c, ch in reg["channels"].items()}
+
+
+# Panel words a human can type into a free-text route, resolved from the registry so the flag
+# and the prose cannot drift apart. Longest first, for the same reason alias_index sorts that
+# way: "дешевая панель" must win over "дешевая" or the leftover word confuses the entity scan.
+def _panel_alias_index(reg):
+    out = []
+    for pname, p in (reg.get("panels") or {}).items():
+        for al in [pname] + list(p.get("aliases") or []):
+            out.append((al.lower(), pname))
+    out.sort(key=lambda kv: -len(kv[0]))
+    return out
+
+
+def extract_panel(reg, text):
+    """
+    Pull a panel word out of free text and hand back (panel, the rest of the text).
+
+    🔴 THIS IS NOT PART OF THE ENTITY SCAN, AND IT MUST NOT BE. A group word expands into
+    channel tokens that `--only` then resurrects from `enabled: false` - that is the documented
+    opt-in path. A panel does the opposite: it filters DOWN and never turns a channel on. Two
+    opposite semantics cannot share the alias namespace without one of them silently becoming
+    the other, so panel words are consumed HERE, before `_scan` ever sees the string, and the
+    remaining text is what gets parsed for channels. The alternative - registering `cheap` as a
+    group - would have been one line and would have resurrected every kit-only twin.
+    """
+    if not text:
+        return None, text
+    t = " " + text.lower().replace("ё", "е") + " "
+    found = []
+    spans = []
+    for al, pname in _panel_alias_index(reg):
+        for m in re.finditer(r"(?<![\w\-])" + re.escape(al) + r"(?![\w\-])", t):
+            if any(m.start() < e and m.end() > s for s, e in spans):
+                continue                       # already consumed by a longer panel alias
+            spans.append((m.start(), m.end()))
+            found.append((m.start(), pname, al))
+    if not found:
+        return None, text
+    # 🔴 A NEGATED PANEL IS A SILENT INVERSION, AND THIS WAS A DEFECT WRITTEN IN THIS ROUND.
+    # The first version of this function matched the alias wherever it appeared, so «не
+    # используй дешевую панель» SELECTED the cheap panel - the exact opposite of the sentence -
+    # and then produced a confusing "no channel matched" error from the leftover words, which
+    # is the worst possible pairing: the wrong thing happens and the message is about something
+    # else. The entity scanner handles negation because markers and entities travel in one
+    # ordered stream; panel words are consumed before that stream exists, so negation has to be
+    # checked here or not at all. Refusing rather than complementing is deliberate: with exactly
+    # two panels "not cheap" has an obvious answer, and the code must not encode "exactly two".
+    # 🔴 SUBSTITUTION IS NOT NEGATION, AND TREATING IT AS ONE REFUSED A SENTENCE THAT MEANS
+    # EXACTLY ONE THING. «стандартная панель вместо дешевой» has a marker before the SECOND
+    # panel word, so the first draft's single NEG+SUBST prefix test fired and answered «a panel
+    # cannot be negated» - about the word the human was discarding. Three reviewers hit it
+    # independently. The rule that resolves it is the one `apply_route` already uses for models:
+    # after «вместо», the LATER name wins. So SUBST selects, NEG refuses, and the difference is
+    # that «вместо X» tells you what to drop AND what is left, while «не X» tells you only the
+    # first half - which with three panels would be a guess.
+    subst_at = [m.start() for w in SUBST for m in re.finditer(re.escape(w), t)]
+    for s, pname, word in found:
+        prefix = t[max(0, s - 40):s].rstrip(" ,.:;-—")
+        if next((w for w in SUBST if prefix.endswith(w.rstrip())), None):
+            continue                           # «вместо <panel>» - handled below, not an error
+        hit = next((w for w in NEG if prefix.endswith(w.rstrip())), None)
+        if hit:
+            raise RouteError(
+                "%r negates the panel word %r, and a panel cannot be negated - it names which "
+                "room the review happens in, so there is always exactly one. Say which panel "
+                "you DO want: %s, or use the substitution form («%s вместо ...»), which says "
+                "both halves. (Channels CAN be negated: «%s панель, без grok» works.)"
+                % (hit.strip(), word, ", ".join(sorted(reg.get("panels") or {})), pname, pname))
+    names = {p for _, p, _ in found}
+    chosen = found[0][1]
+    if len(names) > 1:
+        # «A вместо B» = A wins, and A is the one that has a substitution marker AFTER it.
+        # (Getting this backwards is easy and silent: the first draft kept B.) Without such a
+        # marker, two panels named in one breath is a real ambiguity and stops the run.
+        keeps = {p for s, p, _ in found if any(s2 > s for s2 in subst_at)}
+        if len(keeps) == 1:
+            chosen = keeps.pop()
+        else:
+            raise RouteError(
+                "this route names more than one panel (%s). A panel is which reviewers are in "
+                "the room and there can only be one room - say which: %s. If you meant one "
+                "INSTEAD OF the other, write it that way: «<panel> вместо <panel>»."
+                % (", ".join("%r" % w for _, _, w in sorted(found)),
+                   " or ".join(sorted(names))))
+        # 🔴 The substitution marker has to be cut out WITH the panel words it joined, or the
+        # leftover is a bare «вместо» with nothing behind it - and resolve() refuses exactly
+        # that shape, on purpose, because it usually means a misspelt channel name. Fixing the
+        # selection without fixing the leftover would have turned a wrong answer into a
+        # confident refusal, which is not obviously better.
+        lo, hi = min(s for s, _, _ in found), max(s for s, _, _ in found)
+        for w in SUBST:
+            for m in re.finditer(re.escape(w), t):
+                if lo < m.start() < hi:
+                    spans.append((m.start(), m.end()))
+    # Cut the matched words out so the entity scanner never sees them. `_scan` pads with spaces
+    # too, so the offsets line up after dropping the leading pad.
+    keep, prev = [], 0
+    for s, e in sorted(spans):
+        keep.append(t[prev:s])
+        prev = e
+    keep.append(t[prev:])
+    return chosen, "".join(keep).strip()
 
 
 def _scan(text, idx):
@@ -775,6 +975,13 @@ def _expand_groups(stream, reg):
         else:
             out.append(tok)
     return out
+
+
+def _route_has_entity(reg, text):
+    """True when the text names at least one channel, model or group the registry knows."""
+    if not text:
+        return False
+    return any(t[1] == "entity" for t in _scan(text, alias_index(reg)))
 
 
 def apply_route(plan, reg, text):
@@ -995,8 +1202,66 @@ def apply_flags(plan, reg, only=None, skip=None, sets=None):
     return plan
 
 
-def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None):
+def apply_panel(plan, reg, panel):
+    """
+    Narrow the plan to one panel. FILTERS DOWN ONLY - it never enables a channel.
+
+    🔴 THE ASYMMETRY WITH `--only` IS THE WHOLE POINT. `--only` resurrects a default-off channel
+    by design; a panel must not, because `enabled` is precisely the field package.py flips when
+    it generates the kit. A panel that could enable would mean `--panel cheap` runs the direct
+    vendor channels in a kit where the user has no such keys, and runs the OpenRouter twins here
+    where the direct ones are already running - paying twice for one voice. So this loop only
+    ever turns things OFF, and a channel already off stays off with no extra `why` line, because
+    the reason it is off is the one that was already recorded.
+    """
+    members = panel_members(reg, panel)
+    for c, p in plan.items():
+        if p["enabled"] and c not in members:
+            p["enabled"] = False
+            p["why"].append("outside the %r panel (this channel is declared %r)"
+                            % (panel, p.get("panel")))
+    return plan
+
+
+def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=None):
     plan = initial_plan(reg)
+    # PANEL FIRST, so that a name given afterwards can still put a channel back. «дешевая
+    # панель, плюс codex» is a sentence a human will write, and it can only mean what it says
+    # if the narrowing happens before the naming; the reverse order would resolve --panel cheap
+    # --only codex to an EMPTY round rather than to codex. Note --only stays exclusive - it
+    # means "these and nothing else", so `--panel cheap --only codex` runs codex alone. The
+    # additive form is the route's ADD mode, not a flag.
+    if reg.get("panels"):
+        route_panel, route = extract_panel(reg, route)
+        if route_panel and panel and route_panel != panel:
+            raise RouteError(
+                "the --panel flag says %r and the route says %r. Neither wins by default - the "
+                "same rule as a route and a flag disagreeing about a channel. Pass one of them."
+                % (panel, route_panel))
+        chosen = panel or route_panel or reg.get("default_panel")
+        plan = apply_panel(plan, reg, chosen)
+        reg["_panel_chosen"] = chosen
+        reg["_panel_from_route"] = bool(route_panel and not panel)
+        # 🔴 «запусти на дешевой» IS A COMPLETE INSTRUCTION AND USED TO BE A ROUTE ERROR.
+        # After the panel word is consumed the leftover is «запусти на» - filler, no channel -
+        # and apply_route's job is to refuse a route that names nothing, so it refused. The
+        # refusal was right for its own contract and wrong for the sentence. What distinguishes
+        # the two cases is not whether an entity survived but whether an INSTRUCTION did: filler
+        # after a panel word means nothing more was asked, while a marker («без …», «только …»)
+        # with no entity behind it means a channel name was meant and was misspelled - and
+        # swallowing that would silently run a channel the human just excluded. So: markers
+        # still raise, filler does not.
+        if route_panel and route and not _route_has_entity(reg, route):
+            stream = _expand_groups(_scan(route, alias_index(reg)), reg)
+            markers = [w for _, k, w in stream if k in ("neg", "subst", "only", "add")]
+            if markers:
+                raise RouteError(
+                    "after the panel word, %r is left and it contains an instruction (%s) with "
+                    "no channel behind it. Something was meant here - most likely a misspelt "
+                    "channel name - and running the panel while ignoring it would silently "
+                    "include or exclude the wrong reviewer."
+                    % (route, ", ".join("%r" % m.strip() for m in markers)))
+            route = None
     if route:
         plan = apply_route(plan, reg, route)
     plan = apply_flags(plan, reg, only=only, skip=skip, sets=sets)
@@ -1334,6 +1599,41 @@ def format_plan(plan, reg):
         lines.append("           That file is inside the folder an update replaces. Move it with:"
                      "  python upgrade.py --migrate")
         lines.append("-" * 78)
+    # WHICH REVIEWERS ARE IN THE ROOM, printed above the list of them. Separate from `--tier`,
+    # which is how deep each one goes: two axes, two lines, because collapsing them into one
+    # word is what made `strategic` and `deep` indistinguishable until 2026-08-08.
+    chosen = reg.get("_panel_chosen")
+    panels = reg.get("panels") or {}
+    if chosen and panels:
+        admits = set(panels[chosen]["includes"])
+        others = sorted(set(panels) - {chosen})
+        how = (" (named in your route text)" if reg.get("_panel_from_route")
+               else " (the default)" if chosen == reg.get("default_panel")
+               else " (from --panel)")
+        lines.append("  panel: %s%s - who is in the room. (--tier is how deep each of them goes.)"
+                     % (chosen, how))
+        for other in others:
+            # What the OTHER panel would do, by name, every run. A cheaper option mentioned only
+            # when someone already knows to ask for it is an option nobody takes; and the
+            # reverse - what `cheap` gives up - has to be equally visible, because a panel that
+            # silently reviews LESS is as much a defect as one that silently spends more.
+            oadmits = set(panels[other]["includes"])
+            gain = sorted(c2 for c2, p2 in plan.items()
+                          if reg["channels"][c2].get("panel") in oadmits - admits
+                          and p2.get("default_enabled"))
+            lose = sorted(c2 for c2, p2 in plan.items()
+                          if reg["channels"][c2].get("panel") in admits - oadmits
+                          and p2.get("default_enabled"))
+            if gain:
+                lines.append("           - --panel %s would ALSO run: %s"
+                             % (other, ", ".join(gain)))
+            if lose:
+                lines.append("           - --panel %s would DROP: %s" % (other, ", ".join(lose)))
+        for cname in reg.get("_panel_defaulted") or []:
+            lines.append("           - 🔴 %s declares no panel; defaulted to %r. Shipped channels "
+                         "always declare one, so this is a channel your settings file added."
+                         % (cname, reg.get("default_panel")))
+        lines.append("-" * 78)
     for c, p in plan.items():
         mark = "RUN " if p["enabled"] else "skip"
         cost = reg["channels"][c].get("cost", "?")
@@ -1343,9 +1643,18 @@ def format_plan(plan, reg):
         shown = p.get("model_label") or p.get("model")
         if shown != p.get("model"):
             shown = "%s [%s]" % (shown, p.get("model"))
-        lines.append("  [%s] %-12s %-32s model=%s%s" % (
+        # 🔴 `role` WAS A DECORATIVE FIELD UNTIL 2026-08-15 (round 42). Four channels declare it
+        # in channels.json, `_decorate` copied it into the plan, and NOTHING then read it - not
+        # the dispatcher, not this printout, not report.py. The exact shape of `channels.spark.
+        # model` and of the `tools` passthrough this file already records twice: a registry key
+        # that reads as configuration and is prose. Printing it is the whole fix, because what
+        # it was always FOR is a human deciding who should be in the room - and that decision
+        # became a flag in this round, which is what made the omission finally cost something:
+        # `--panel cheap` drops kimik3, the only `role: code` seat, and nothing said so.
+        lines.append("  [%s] %-12s %-32s model=%s%s%s" % (
             mark, c, p["label"], shown,
-            ("  effort=%s" % p["effort"]) if p.get("effort") else ""))
+            ("  effort=%s" % p["effort"]) if p.get("effort") else "",
+            ("  role=%s" % p["role"]) if p.get("role") else ""))
         for w in p["why"]:
             lines.append("           - %s" % w)
         if p["enabled"] and cost == "expensive":
@@ -1399,9 +1708,52 @@ def format_plan(plan, reg):
     live = [c for c, p in plan.items() if p["enabled"]]
     lines.append("-" * 78)
     lines.append("  running %d channel(s): %s" % (len(live), ", ".join(live) or "NONE"))
+    # 🔴 HOW MANY COMPANIES, NOT HOW MANY CHANNELS. A panel's product is disagreement between
+    # independent voices, and this harness reaches ONE vendor by up to six transports - three
+    # Geminis through the agy CLI, two through Google directly, one through OpenRouter. When
+    # those six agree, that is one opinion reported six times, and a channel count presents it
+    # as six. The tally is printed rather than described because the number moves whenever a
+    # channel is skipped, and a paragraph in a config file cannot know what --skip was passed.
+    if live:
+        tally = {}
+        for c in live:
+            v = channel_vendor(reg, c)
+            tally[v] = tally.get(v, 0) + 1
+        ranked = sorted(tally.items(), key=lambda kv: (-kv[1], kv[0]))
+        lines.append("  from %d vendor(s): %s"
+                     % (len(tally), ", ".join("%s %d" % kv for kv in ranked)))
+        top, n = ranked[0]
+        if n > 1 and n * 2 >= len(live):
+            lines.append("           - 🔴 %d of %d seats are %s. Where those agree, treat it as "
+                         "one voice repeated, not as corroboration." % (n, len(live), top))
     if not live:
         lines.append("  !! every channel is disabled - nothing would run")
     return "\n".join(lines)
+
+
+def _cli_choices(path, key):
+    """
+    Names declared under `key` in the registry, for an argparse `choices`, or None.
+
+    🔴 THIS EXISTS BECAUSE `--tier` HERE HAD NO `choices` AT ALL, AND THE REGISTRY CLAIMED
+    OTHERWISE. `_tiers_doc` in channels.json says «`--tier quick` is now an argparse error naming
+    the two that exist, because a silently-accepted dead tier is the decorative-knob defect this
+    file keeps recording» - and that was true of orchestrate.py and false of this script, which
+    accepted `--tier quick` and printed a plan resolved at the default. One claim, two programs,
+    verified in one of them. Found 2026-08-15 by a reviewer who checked the sentence against
+    both files instead of against the one it was written about.
+
+    Returns None rather than raising when the registry cannot be read, so that a corrupt file
+    still gets you a readable RouteError from the loader a moment later instead of an argparse
+    traceback about choices.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            d = json.load(fh).get(key)
+        names = sorted(k for k in d if not k.startswith("_")) if isinstance(d, dict) else []
+        return names or None
+    except Exception:                                     # noqa: BLE001
+        return None
 
 
 def main():
@@ -1411,7 +1763,15 @@ def main():
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--skip", nargs="*")
     ap.add_argument("--set", dest="sets", nargs="*")
-    ap.add_argument("--tier", default="strategic")
+    ap.add_argument("--tier", default="strategic",
+                    choices=_cli_choices(DEFAULT_REGISTRY, "tiers"),
+                    help="depth per channel. Choices come from the registry, so a tier deleted "
+                         "there is really deleted here")
+    ap.add_argument("--panel", default=None,
+                    choices=_cli_choices(DEFAULT_REGISTRY, "panels"),
+                    help="which reviewers are in the room. Orthogonal to --tier, which is how "
+                         "deep each of them goes. Filters DOWN only: unlike --only it never "
+                         "enables a channel the registry has off")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--accept-settings", action="store_true",
                     help="accept the transport-affecting changes your settings file makes. Needed "
@@ -1427,7 +1787,8 @@ def main():
     # unreadable, and "it refused" would have looked like a pass in a log.
     try:
         reg = load_registry(a.registry)
-        plan = resolve(reg, route=a.route, only=a.only, skip=a.skip, sets=a.sets, tier=a.tier)
+        plan = resolve(reg, route=a.route, only=a.only, skip=a.skip, sets=a.sets, tier=a.tier,
+                       panel=a.panel)
     except RouteError as e:
         print("ROUTE ERROR: %s" % e)
         return 2
