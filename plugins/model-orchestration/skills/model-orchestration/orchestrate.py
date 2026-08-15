@@ -853,12 +853,63 @@ KNOWN_FAILURES = [
     # INFO line ("subscription quota, from codex's own cached snapshot... under half used") -
     # so every round that RAN codex recorded a phantom rate-limit problem. Measured live
     # 2026-08-14. The pattern now requires exhaustion language, which the real events carry:
-    # HTTP 429, "WEEKLY LIMIT EXHAUSTED" (codex), "Key limit exceeded" (OpenRouter free tier).
+    # HTTP 429, "WEEKLY LIMIT EXHAUSTED" (codex), "Key limit exceeded" (OpenRouter).
+    #
+    # 🔴 THE MORE SPECIFIC ENTRY GOES FIRST AND THE ORDER IS LOAD-BEARING: diagnose() takes the
+    # first pattern that matches, and «Key limit exceeded» also matches the generic "limit
+    # exceeded" below. Written as one generic row, the advice it produced was actively wrong for
+    # this case - it said "wait, or route the work to another channel", and on 2026-08-15 the AOS
+    # round-35 report shows four channels taking that advice in parallel while every one of them
+    # was on the SAME key. 🔴 An earlier version of the comment above called this «(OpenRouter free
+    # tier)», which is the misreading this entry exists to kill: the cap is on the KEY's monthly
+    # budget, so it kills the free channel too. ornemotron3ultra costs $0.007 a round and died
+    # with the same 403 as the paid ones.
+    ("Key limit exceeded|monthly limit",
+     "Your OpenRouter KEY has hit the monthly budget cap set on it - this is your own limit, "
+     "not the model's rate limit and not a vendor outage. It applies to the key, so EVERY "
+     "OpenRouter channel in the round fails together, including free ones: a free model still "
+     "spends the key's allowance, and its price is the model, not the request.",
+     "Routing to another OpenRouter channel cannot help - they share the key. Either raise the "
+     "monthly limit on that key in the OpenRouter dashboard (Settings -> Keys), wait for the "
+     "month to roll over, or run the round on the channels that do not use this key at all "
+     "(spark*, agy*, goog*, mimo25pro, grok420, codex). If the cap arrived sooner than expected, "
+     "look at the round total printed above and at which channel spent it - as of 2026-08-15 the "
+     "harness sums per-round cost across tool rounds and reports it even for channels that "
+     "failed, which it did not do when this was first seen."),
     ("status.*429|\\b429\\b|rate.?limited?\\b|LIMIT EXHAUSTED|limit exceeded|quota exceeded",
      "A usage or rate limit was hit on that vendor.",
      "Wait, or route the work to another channel with --route/--skip. Do NOT switch that "
      "channel to a metered pay-per-token key to get around a subscription limit unless you "
      "have decided that cost is acceptable."),
+    # 🔴 KEYED ON THE EXCEPTION CLASS NAME, NEVER ON THE OS MESSAGE, and that is the whole point of
+    # this entry rather than a stylistic preference. Measured in AOS round 33 (2026-08-14): both
+    # Google channels died in the same round, one with
+    # `RemoteDisconnected('Remote end closed connection without response')` and the other with
+    # `ConnectionResetError(10054, 'Удаленный хост принудительно разорвал существующее
+    # подключение', ...)` - the second message is in RUSSIAN because Windows localises WinSock
+    # strings to the system language. A pattern written against the English wording would have
+    # matched one machine and silently missed the same failure on another, which is the quiet-and-
+    # dead shape this project keeps finding. Class names and errno are not translated.
+    # Both rounds printed `likely_cause: null` and an empty "cause and fix" block.
+    ("RemoteDisconnected|ConnectionReset|ConnectionAborted|BrokenPipe|IncompleteRead|10054",
+     "The network connection to the vendor was dropped mid-request. This is a transport failure - "
+     "nothing was wrong with the brief, the key or the model, and no answer was produced. It is "
+     "most common on endpoints that think for a long time before emitting anything, because the "
+     "connection sits idle and something between here and the vendor closes it.",
+     "Re-run just that channel with --only <channel>. If it repeats on the same channel while "
+     "others in the round succeed, the endpoint is unhealthy right now rather than the network: "
+     "drop it for this round. Nothing was billed for a request that returned no tokens, so a "
+     "single re-run is safe here - unlike a rate limit or a spend stop, which must not be "
+     "auto-retried."),
+    # The vendor answered, spent its whole output budget on reasoning, and never emitted a message
+    # item. Distinct from an empty stream with no error: here the meter proves the model worked.
+    ("A high reasoning share with no message item|reasoning_tokens=\\d+ of \\d+ output tokens",
+     "The model reasoned until its output budget was gone and never started the answer, so the "
+     "turn ended inside its own agentic loop. The tokens were spent and billed; there is simply "
+     "no text.",
+     "Shorten the brief or split it into fewer questions, or raise that channel's max_tokens in "
+     "channels.json - on this protocol the budget covers REASONING AND ANSWER TOGETHER, so a "
+     "ceiling that looks generous can still leave nothing for the review."),
     ("CITATIONS: only 0 of",
      "The model cited sources and opened none of them - memory dressed as research.",
      "The harness already re-ran this channel once with a source-discipline escalation. Treat "
@@ -2451,7 +2502,8 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
 
 def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2400,
                       web=None, name="kimi", reasoning=None, max_tokens=None,
-                      fetch_tool=None, provider="openrouter", provider_route=None):
+                      fetch_tool=None, provider="openrouter", provider_route=None,
+                      spend_guard=None):
     """
     Any OpenAI-protocol model over /chat/completions, DIRECTLY - no CLI in between.
 
@@ -2699,21 +2751,118 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     blocked_hosts = {}  # host -> consecutive failures; 2 retires the host for this review
     fetched_bytes = 0   # cumulative page text; the CALL budget does not bound this. See below.
     in_tot = out_tot = 0
+    # 🔴🔴 THE COST WAS SUMMED FOR TOKENS AND OVERWRITTEN FOR DOLLARS, ON ADJACENT LINES.
+    # `in_tot`/`out_tot` accumulated across tool rounds while the returned `usd` read
+    # `usage.get("cost")` - and `usage` holds only the LAST round's object. Proven 2026-08-14
+    # against OpenRouter's own log for AOS round 34: qwen38max billed five generations at
+    # $0.0984 + $0.102 + $0.159 + $0.185 + $0.43, and this harness reported $0.4297 - the last
+    # one, to four decimal places. The token column was right (in=334,444 against a row sum of
+    # ~311,086 plus one row below the fold), so the two meters over one event disagreed and the
+    # one spending money was the wrong one. That is this project's own round-38 rule, applied to
+    # itself one field over.
+    #
+    # `usd_seen` is separate from `usd_tot > 0` on purpose: a channel that legitimately costs
+    # zero (a free tier) and a channel that reported no price at all are different facts, and
+    # collapsing them puts free channels into the "reports no price" list where nobody prices
+    # them again.
+    # 🔴 `cached_tot` EXISTS BECAUSE THE FIX FOR `usd` DID NOT LOOK AT ITS NEIGHBOURS.
+    # orgemini37flash, reviewing this diff the day it was written: `cached_in_tokens` read
+    # `usage.prompt_tokens_details.cached_tokens` from the LAST round's object while `in_tokens`
+    # summed every round - so an 8-round review paired a multi-round denominator with a
+    # single-round numerator and threw away seven rounds of cache hits. That is the SAME defect
+    # as the one this release is named for, two lines below it in the same return dict, and it
+    # survived because the round was framed as "fix the money field" instead of "find every
+    # field read from `usage` after a loop that overwrites `usage`".
+    usd_tot, usd_seen, rounds_done, cached_tot = 0.0, False, 0, 0
+    # The most expensive single round SO FAR, used as the estimate of what the next one will cost.
+    # Measured, not derived from a price table - same rule as the ceiling itself.
+    usd_max_round = 0.0
+    sg = spend_guard or {}
+    usd_ceiling = sg.get("max_usd_per_review")
+    # 🔴 `is not None`, NOT truthiness. agy31pro, reviewing this diff the day it was written:
+    # `max_usd_per_review: 0` - the value an owner would write to mean "this channel must never
+    # spend anything" - is falsy, so the old `if usd_ceiling` read the strictest possible setting
+    # as NO SETTING AT ALL and disabled the guard. Same class as the `or 8` fallbacks elsewhere in
+    # this file: a legitimate zero and an absent key are different facts, and only `is None`
+    # distinguishes them. Nothing shipped with a zero, so this was a trap for the next person.
+    usd_ceiling = float(usd_ceiling) if usd_ceiling is not None else None
+    spend_stop = False
+    # 🔴 THE FORCED-ANSWER ROUND HAD NO EXIT, and that was true of the fetch-budget path too since
+    # it was written. `body.pop("tools")` is what normally stops the model asking for another page,
+    # so in practice the next turn is the answer and the loop ends - but "in practice" is doing all
+    # the work there, and it is doing it on the branch that exists because money ran out. A vendor
+    # that echoes a tool call anyway (or any future transport that ignores a removed `tools` key)
+    # would re-enter the same branch every iteration, paying for the whole conversation each time,
+    # up to max_rounds. Found by the offline probe for this round rather than by a bill: the fake
+    # transport did exactly that, which is the point of testing a stop condition with something
+    # that does not cooperate.
+    forced_final = False
     start = time.time()
+
+    def _telemetry():
+        """Everything measured so far, so a failure path can report it instead of dropping it."""
+        return {"in_tokens": in_tot or None, "out_tokens": out_tot or None,
+                "usd": round(usd_tot, 6) if usd_seen else None,
+                "usd_rounds": rounds_done if usd_seen else None,
+                "fetches": fetches or None,
+                "seconds": round(time.time() - start, 1)}
+
     try:
         for _round in range(max_rounds + 1):
             chunk, rch, use, calls, served = _stream_once(body)
+            rounds_done += 1
             served_models.update(served)
             reasoning_chars += rch
             in_tot += (use or {}).get("prompt_tokens") or 0
             out_tot += (use or {}).get("completion_tokens") or 0
+            cached_tot += (((use or {}).get("prompt_tokens_details") or {})
+                           .get("cached_tokens") or 0)
+            _c = (use or {}).get("cost")
+            if _c is not None:
+                try:
+                    _c = float(_c)
+                    usd_tot += _c
+                    usd_max_round = max(usd_max_round, _c)
+                    usd_seen = True
+                except (TypeError, ValueError):
+                    pass
             usage = use or usage
             if chunk:
                 text_parts.append(chunk)
-            if not calls or not fetch_on or fetches >= max_rounds:
-                if calls and fetches >= max_rounds:
-                    log("  [%s] fetch budget of %d reached; asking for the answer as it stands"
-                        % (name, max_rounds))
+            if forced_final:
+                break     # tools were already removed and the answer demanded; this is it
+            # 🔴 THE CIRCUIT BREAKER, and it is deliberately NOT a depth cap. Igor's standing rule
+            # on this harness is «фокус на качество, а значит токенов на размышление урезать не
+            # надо», so nothing here trims reasoning, lowers effort or shortens the answer: what it
+            # stops is FURTHER PAGE FETCHING, whose cost is quadratic because every later round
+            # re-sends every page already read. The round then does one final no-tools turn and
+            # returns a real review. Measured motivation, AOS round 34: eight rounds on a 57.9 KB
+            # brief walked the billed input from 814K to 7.41M tokens and $12.08, and the ninth call
+            # met the key's monthly cap - so the uncapped path did not buy a deeper review, it
+            # bought no review at all plus four dead channels in the next round.
+            # 🔴 THE TRIGGER RESERVES HEADROOM FOR THE FINAL CALL, because a ceiling tested only
+            # against money ALREADY SPENT is not a ceiling. goog37flash, reviewing this diff the
+            # day it was written, did the arithmetic: rounds costing $3.90, then one at $2.10
+            # (crossing), then the forced answer at $2.10 = $8.10 against a $4.00 setting - over
+            # 100% overshoot. The estimate of "what the next call will cost" is the largest round
+            # THIS run has actually billed, not a price from a config file: same rule as the
+            # ceiling itself, and it is conservative because the cost per round grows as the
+            # conversation grows. It cannot be exact - the only honest bound is "ceiling plus at
+            # most one more round" - and the plan says so rather than promising a hard number.
+            if (usd_ceiling is not None and usd_seen and not spend_stop
+                    and usd_tot + usd_max_round >= usd_ceiling):
+                spend_stop = True
+                log("  [%s] ⛔ SPEND CEILING: $%.4f billed so far and the largest round cost "
+                    "$%.4f, so the next one would risk crossing the $%.2f ceiling. No further "
+                    "page fetches; asking for the answer as it stands. This is OUR limit, not "
+                    "the vendor's - raise spend_guard.max_usd_per_review in channels.json if "
+                    "this review is worth more."
+                    % (name, usd_tot, usd_max_round, usd_ceiling))
+            if not calls or not fetch_on or fetches >= max_rounds or spend_stop:
+                if calls and (fetches >= max_rounds or spend_stop):
+                    if not spend_stop:
+                        log("  [%s] fetch budget of %d reached; asking for the answer as it stands"
+                            % (name, max_rounds))
                     # Tell the model rather than silently dropping its request: an unanswered
                     # tool call leaves it waiting for a result that will never arrive, and the
                     # usual outcome is an empty answer with no marker.
@@ -2724,13 +2873,19 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                               "function": {"name": c["name"] or "fetch_url",
                                            "arguments": c["args"] or "{}"}}
                              for i, c in enumerate(calls)]})
+                    stop_msg = ("REFUSED: the spending ceiling for this review has been reached, "
+                                "so no further pages may be opened. This is the harness's limit "
+                                "and says nothing about the page. Answer from what you already "
+                                "have, and say plainly which questions you could not settle."
+                                if spend_stop else
+                                "REFUSED: the fetch budget for this review is spent. Answer from "
+                                "what you already have and mark anything unverified.")
                     for i, c in enumerate(calls):
                         body["messages"].append(
                             {"role": "tool", "tool_call_id": c["id"] or ("call_%d" % i),
-                             "content": "REFUSED: the fetch budget for this review is spent. "
-                                        "Answer from what you already have and mark anything "
-                                        "unverified."})
+                             "content": stop_msg})
                     body.pop("tools", None)      # no more tool rounds; force a final answer
+                    forced_final = True
                     continue
                 break
             body["messages"].append(
@@ -2861,16 +3016,31 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                 body["messages"].append({"role": "tool",
                                          "tool_call_id": c["id"] or ("call_%d" % i),
                                          "content": result})
+    # 🔴🔴 A FAILURE PATH THAT DROPS THE METER MAKES THE EXPENSIVE ROUNDS THE INVISIBLE ONES.
+    # Both handlers used to return {channel, ok, error} and nothing else, so everything measured
+    # before the exception - tokens, dollars, pages opened, seconds - was discarded at exactly the
+    # moment it mattered most. AOS round 34, 2026-08-14: orgpt56terrapro completed EIGHT paid
+    # generations totalling $12.08, then met the key's monthly cap on the ninth; the round summary
+    # listed it under «these channels report no price» and put the round's cost at $0.9250. The
+    # bill was ~$13. A harness that reports a spend of zero for the run that emptied the budget is
+    # not merely incomplete - it actively argues the panel is cheap.
     except urllib.error.HTTPError as e:
         detail = ""
         try:
             detail = e.read().decode("utf-8", "replace")[:300]
         except Exception:
             pass
-        return {"channel": name, "ok": False,
-                "error": "HTTP %s from OpenRouter: %s" % (e.code, detail)}
+        out = {"channel": name, "ok": False,
+               "error": "HTTP %s from OpenRouter: %s" % (e.code, detail)}
+        out.update(_telemetry())
+        if usd_seen and usd_tot:
+            log("  [%s] ⚠ this channel had already billed $%.4f before it failed - that money is "
+                "spent and is counted in the round total below." % (name, usd_tot))
+        return out
     except Exception as e:
-        return {"channel": name, "ok": False, "error": "stream failed: %r" % (e,)}
+        out = {"channel": name, "ok": False, "error": "stream failed: %r" % (e,)}
+        out.update(_telemetry())
+        return out
     secs = time.time() - start
     # Only the LAST assistant turn is the review. Earlier turns are the model narrating its
     # tool use ("let me open that page"), and concatenating them would put commentary above the
@@ -2892,6 +3062,22 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         warn.append("MODEL SUBSTITUTION: we asked for %r and the provider's own response says it "
                     "served %s. Every finding below belongs to THAT model, not to this channel's "
                     "name." % (model, ", ".join(repr(m) for m in served)))
+    # 🔴🔴 A CEILING THAT COULD NOT BE ENFORCED MUST SAY SO. spark12cont, reviewing this diff the
+    # day it was written, called the guard "a dead switch whenever `cost` is missing": the whole
+    # mechanism depends on the vendor returning `usage.cost`, there is no fallback, and if that
+    # field ever stops arriving the loop runs to max_rounds with quadratic context while the
+    # report shows `usd: null` and files the channel under "reports no price" - the original
+    # failure again, wearing a different response shape and quieter than before. It also named the
+    # reason this could ship: the offline probe returns `cost` on every round, so the missing-meter
+    # path was never executed. There is no honest automatic fallback - a token estimate needs a
+    # price table, which is the thing this design refuses to trust - so the remedy is not to
+    # enforce silently but to REFUSE TO CLAIM enforcement. A declared ceiling with no meter behind
+    # it is a warning on the channel, which makes the round PROBLEM rather than OK.
+    if usd_ceiling is not None and not usd_seen:
+        warn.append("SPEND CEILING NOT ENFORCEABLE: this channel declares a $%.2f ceiling, but "
+                    "the vendor returned no cost meter on any of the %d round(s), so nothing "
+                    "bounded this run. Treat its price as unknown, not as zero."
+                    % (usd_ceiling, rounds_done))
     if marker and not text.strip().endswith(marker):
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip():
@@ -2935,8 +3121,15 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             # cost" was unanswerable for everything except xAI - which we praised for being the
             # only channel that prices its own call. It was not; it was the only one we asked.
             # Found 2026-08-08 by dumping the raw usage object instead of the fields we expected.
-            "usd": usage.get("cost"),
-            "cached_in_tokens": (usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
+            #
+            # 🔴 AND THEN READ FROM THE WRONG VARIABLE FOR SIX DAYS. `usage` is the LAST round's
+            # object; on a fetch-heavy review the round before it cost just as much. Summed since
+            # 2026-08-14 - see the usd_tot comment above for the OpenRouter log that proves the
+            # under-report factor was 2.3x on qwen38max and infinite on the channel that 403'd.
+            "usd": round(usd_tot, 6) if usd_seen else None,
+            "usd_rounds": rounds_done if usd_seen else None,
+            "spend_stopped": True if spend_stop else None,
+            "cached_in_tokens": cached_tot or None,
             # 🔴🔴 THIS KEY WAS MISSING ENTIRELY, ON SIX OF ELEVEN CHANNELS, AND THE REPORT PRINTED
             # A COLUMN FOR IT. `report.py` and the run summary both read `r.get("reasoning_tokens")`
             # - which was None here forever, indistinguishable from a model that did no thinking,
@@ -4082,6 +4275,20 @@ def main():
                          "are contributor tiers: their vendors may train on what you send. Pass "
                          "--only spark11 for anything you would not publish")
     ap.add_argument("--system", help="path to the system prompt for the HTTPS channel")
+    # 🔴 SELECTING A CHANNEL AND AUTHORISING ITS BILL ARE TWO DIFFERENT ACTS, and until 2026-08-14
+    # they were one. `--only <name>` both chose a default-OFF channel and paid for it, which reads
+    # as deliberate when a human types one name and means nothing at all when an agent session
+    # enumerates fifteen - which is exactly what happened: orgpt56terrapro appeared in a
+    # fifteen-name --only list, billed $12.08, returned no review, and emptied the OpenRouter key's
+    # monthly cap so that four channels (including the FREE one) failed in the next round.
+    # Enumeration is not a decision. `action="extend"` for the same reason as --only/--skip below.
+    ap.add_argument("--accept-spend", dest="accept_spend", nargs="*", action="extend", default=[],
+                    metavar="CHANNEL",
+                    help="authorise the bill for a channel that declares spend_guard.requires_ack "
+                         "(currently orgpt56terrapro). Pass the channel name, or `all`. Selecting "
+                         "such a channel without this flag is a hard refusal, not a warning. "
+                         "--dry-run never needs it: seeing what a round would cost must not "
+                         "require agreeing to pay for it.")
     # Choices come from the registry, so deleting a tier there really deletes it. Igor removed
     # `quick` and `standard` on 2026-08-08; with the old literal list this flag would have gone
     # on accepting both and silently falling through to per-branch defaults.
@@ -4327,6 +4534,63 @@ def main():
     # is the same sentence that killed the 1.7.0 design. So the money stops here until a human has
     # run one command. `--dry-run` above still works, on purpose: seeing what WOULD happen must
     # never require accepting it first.
+    # 🔴🔴 THE SPEND GATE. Same shape and same place as the settings gate below, on purpose: refuse
+    # rather than warn, print the number, and let --dry-run through untouched. What it answers is
+    # the question the plan could not: a channel can be SELECTED by an agent enumerating the
+    # registry, but it cannot be PAID FOR without a flag whose only meaning is "yes, that money".
+    #
+    # 🔴 GATED ON `requires_ack` ALONE, NOT ON "was it overridden". The first cut read
+    # `requires_ack and not default_enabled`, i.e. it only fired for a channel that was off by
+    # default and got re-selected. agy31pro, reviewing this diff the same day, named the hole:
+    # anything that flips the channel ON BY DEFAULT makes `default_enabled` true and the gate
+    # silently stops existing, turning the registry's own `requires_ack: true` into a decorative
+    # field - this project's most-repeated defect, reintroduced inside its own fix. The selftest
+    # asserts the shipped registry never pairs requires_ack with enabled:true, but the local
+    # settings overlay can set `enabled` at run time and no test covers a user's own file. So the
+    # declaration alone now arms the gate: if a channel says its bill needs authorising, it needs
+    # authorising however it came to be selected.
+    need_ack = []
+    for cname in sorted(want):
+        p = (plan or {}).get(cname) or {}
+        g = p.get("spend_guard") or {}
+        if g.get("requires_ack"):
+            need_ack.append((cname, g))
+    acked = {s.lower() for s in (a.accept_spend or [])}
+    missing = [(c, g) for c, g in need_ack if "all" not in acked and c.lower() not in acked]
+    if missing:
+        log("\n" + "=" * 78)
+        log("REFUSING TO SPEND: %d channel(s) in this round are OFF BY DEFAULT because they cost "
+            "real money, and nothing in this invocation authorised that." % len(missing))
+        for cname, g in missing:
+            log("  %s" % cname)
+            if g.get("measured_usd"):
+                log("      measured: %s" % g["measured_usd"])
+            if g.get("max_usd_per_review"):
+                log("      ceiling once it runs: $%.2f per review"
+                    % float(g["max_usd_per_review"]))
+        log("  Naming a channel selects it; it does not authorise the bill. If you meant to pay:")
+        log("      --accept-spend %s" % " ".join(c for c, _ in missing))
+        # 🔴 THE REFUSAL PRINTS ITS OWN BYPASS, and three of eight reviewers said so on the day it
+        # shipped: an autonomous session reads the remediation line and re-runs with the flag,
+        # which is exactly the repair behaviour agents are built to have. Nothing mechanical can
+        # stop that - a session with a shell can pass any flag - so the honest position is that
+        # this gate is HARD against accident and SOFT against an agent, and the sentence aimed at
+        # the agent goes here, where it is actually read, rather than in a document it will not
+        # open. Same placement rule as round 40's brief-versus-persona measurement.
+        log("  IF YOU ARE AN AUTOMATED SESSION: do not re-run with that flag unless a human named "
+            "this channel. Report this refusal and the price instead - authorising a bill is not "
+            "an error to repair.")
+        log("  If you did NOT mean to run it - which is the usual case when a channel list was "
+            "generated rather than chosen - drop it from --only, or add --skip %s."
+            % " ".join(c for c, _ in missing))
+        log("  --dry-run shows the whole plan, including these channels, without this flag.")
+        log("=" * 78)
+        return 2
+    if need_ack:
+        for cname, g in need_ack:
+            log("  [spend] %s authorised by --accept-spend; ceiling $%s per review"
+                % (cname, g.get("max_usd_per_review", "none")))
+
     ov = (reg or {}).get("_overlay") or {}
     if ov.get("sharp") and not ov.get("sharp_acked"):
         log("\n" + "=" * 78)
@@ -4396,7 +4660,8 @@ def main():
                                         max_tokens=p.get("max_tokens"),
                                         fetch_tool=p.get("fetch_tool"),
                                         provider=p.get("provider") or "openrouter",
-                                        provider_route=p.get("provider_route"))
+                                        provider_route=p.get("provider_route"),
+                                        spend_guard=p.get("spend_guard"))
             elif kind == "xai":
                 # 🔴 THE TIER TIMEOUT WAS NEVER PASSED HERE, and the plan claimed otherwise.
                 # Found by codex in the round-29 panel, reviewing this very change: the tier note
@@ -4506,8 +4771,15 @@ def main():
                    r.get("reasoning_tokens"),
                    r.get("reasoning_chars"), (slot.get("web") or {}).get("enabled", False),
                    r.get("fetched_by_us") or 0, r.get("grounding_basis"),
+                   # 🔴 THE ROUND COUNT RIDES WITH THE PRICE. spark11, reviewing this diff:
+                   # `usd_rounds` was measured and never printed, so a reader could not tell
+                   # $4 over two generations from $4 over eight - and those are different
+                   # facts about whether the fetch loop is the problem. A number computed and
+                   # not surfaced is the same defect class as a knob sent and not applied.
                    ("" if r.get("usd") is None
-                    else " | cost reported BY THE PROVIDER: $%.6f" % r["usd"])))
+                    else " | cost reported BY THE PROVIDER: $%.6f%s"
+                    % (r["usd"], (" across %d generation(s)" % r["usd_rounds"])
+                       if r.get("usd_rounds") else ""))))
             if r.get("vendor_searches") or r.get("vendor_pages") or r.get("vendor_citations"):
                 # Named `vendor_*` and printed on its own line because it is a DIFFERENT claim
                 # from the one above: these are pages the vendor says it opened, which nothing
@@ -4631,12 +4903,33 @@ def main():
     # report no price; the Spark channels are billed per token against a rate this file does not
     # hold. A total that silently omitted them while looking complete would be worse than none -
     # the same failure as a `grounded` column that mixed evidence with assertion.
+    #
+    # 🔴🔴 AND THEN THE TOTAL WAS WRONG ANYWAY, TWICE OVER, UNTIL 2026-08-15. Both faults lived in
+    # call_oai_reviewer and both are fixed there: (a) the per-channel figure was the LAST tool
+    # round's cost rather than the sum of all of them, and (b) a channel that raised - which is
+    # what a spending cap looks like from here - returned no telemetry at all. AOS round 34 is the
+    # measurement: this line printed "$0.9250 across 5 channel(s)" for a round whose OpenRouter
+    # bill was about $13, because orgpt56terrapro's $12.08 landed in the "reports no price" list
+    # below and qwen38max's $0.97 was reported as $0.43. A cost report that is most wrong on the
+    # round that spent the most is not a partial answer, it is a misleading one.
     priced = {c: r["usd"] for c, r in results.items() if r.get("usd") is not None}
     if priced:
         unpriced = sorted(c for c in results if c not in priced)
+        failed_but_billed = sorted(c for c, r in results.items()
+                                   if r.get("usd") and not r.get("ok"))
         log("cost reported BY THE VENDORS for this round: $%.4f across %d channel(s) (%s)"
             % (sum(priced.values()), len(priced),
-               ", ".join("%s $%.4f" % (c, v) for c, v in sorted(priced.items()))))
+               ", ".join("%s $%.4f%s" % (c, v, "*" if c in failed_but_billed else "")
+                         for c, v in sorted(priced.items()))))
+        if failed_but_billed:
+            log("  * that channel FAILED and the money was still spent: %s. Partial telemetry is "
+                "reported on purpose - a failed round is exactly when the bill is easiest to lose."
+                % ", ".join(failed_but_billed))
+        stopped = sorted(c for c, r in results.items() if r.get("spend_stopped"))
+        if stopped:
+            log("  SPEND CEILING fired on: %s - those channels stopped opening pages and answered "
+                "from what they had. Raise spend_guard.max_usd_per_review in channels.json if the "
+                "answer came back thin." % ", ".join(stopped))
         if unpriced:
             log("  NOT INCLUDED - these channels report no price: %s. Subscription channels "
                 "(codex, agy) never will; the rest bill per token at a rate this harness does "

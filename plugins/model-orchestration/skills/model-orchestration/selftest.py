@@ -194,11 +194,34 @@ def suite_routing():
               "%s stays OFF by default (%s)" % (c, why),
               "enabled=%r" % _CHANS[c].get("enabled"))
         # Off-by-default must not mean unreachable: the whole policy is that naming it works.
-        p = run_cli(["--only", c])
+        #
+        # 🔴🔴 `--dry-run` HERE IS A BUG FIX, NOT A STYLE CHOICE, AND IT IS THE SHARPEST THING THIS
+        # ROUND FOUND ABOUT ITSELF. Written on 2026-08-14 without it, this line ran the real CLI
+        # with a real brief and no dry-run against THE MOST EXPENSIVE CHANNEL IN THE REGISTRY - so
+        # every `python selftest.py`, on a machine holding a live OpenRouter key, launched a paid
+        # orgpt56terrapro round with web search and the page-fetch tool enabled. A test suite that
+        # bills is not a test suite. It was invisible for the same reason the round-34 overspend
+        # was: nothing printed a price, so a passing green line and a paid call looked identical.
+        # Caught the next day by the spend gate refusing it - the guard fired on its own author.
+        p = run_cli(["--only", c, "--dry-run"])
         b = blob_of(p)
         check(p.returncode == 0 and ("running 1 channel(s): %s" % c) in b,
               "%s is still REACHABLE by name despite being off by default" % c,
               b.strip().splitlines()[-1][:120] if b.strip() else "no output")
+        check("--dry-run: nothing was called" in b,
+              "%s reachability is proved WITHOUT paying for a round" % c)
+        # ... and reachable is not the same as authorised. Two separate acts since 1.20.0.
+        p = run_cli(["--only", c])
+        b = blob_of(p)
+        check(p.returncode == 2 and "REFUSING TO SPEND" in b,
+              "%s selected but not authorised -> hard refusal, exit 2" % c,
+              "rc=%s" % p.returncode)
+        check("--accept-spend %s" % c in b,
+              "the refusal names the exact flag that would authorise it")
+        p = run_cli(["--only", c, "--accept-spend", c, "--dry-run"])
+        b = blob_of(p)
+        check(p.returncode == 0 and "REFUSING TO SPEND" not in b,
+              "CONTROL: with --accept-spend the gate is satisfied", "rc=%s" % p.returncode)
 
     def without(*names):
         return ALL - set(names)
@@ -1940,6 +1963,238 @@ def suite_agy_plan_class():
     check(c is not None, "PLAN INSTEAD OF REVIEW has a stock diagnosis")
 
 
+def suite_spend_guard():
+    """
+    Round-41: money is measured from the meter that comes back, bounded, and never dropped.
+
+    Written against a FAKE transport rather than a live channel, and the fake is deliberately
+    uncooperative: it keeps offering tool calls after the harness removes `tools`, which is how
+    the missing exit from the forced-answer round was found. A stop condition tested with a
+    cooperative stub proves only that the stub cooperates.
+
+    What the three faults were, all measured on AOS round 34 (2026-08-14) against OpenRouter's
+    own generation log:
+      - `usd` returned the LAST tool round's cost while tokens were summed across all of them.
+        qwen38max billed 0.0984+0.102+0.159+0.185+0.43 and this harness reported 0.4297.
+      - a channel that raised mid-loop returned no telemetry at all, so orgpt56terrapro's eight
+        completed paid generations ($12.08) were reported as "reports no price" and the round
+        total printed $0.9250 for a round that cost about $13.
+      - nothing bounded the spend, so the run walked its billed input from 814K to 7.41M tokens
+        and then met the key's monthly cap - buying no review and killing four channels in the
+        next round, one of them the FREE one.
+    """
+    section("spend guard: summed cost, hard ceiling, telemetry that survives a failure")
+    import inspect
+    import io
+    import json as _json
+    import urllib.request
+
+    import orchestrate as o
+
+    def sse(*events):
+        return (b"".join(("data: " + _json.dumps(e) + "\n").encode() for e in events)
+                + b"data: [DONE]\n")
+
+    class FakeResp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    seq_n = [0]
+
+    def fetch_round(cost):
+        # A DISTINCT url each time: a repeated one is served from cache without spending a
+        # fetch (round-38), so reusing an address would measure that defence, not this one.
+        seq_n[0] += 1
+        return sse({"choices": [{"delta": {
+            "content": "opening a page",
+            "tool_calls": [{"index": 0, "id": "c1", "function": {
+                "name": "fetch_url",
+                "arguments": _json.dumps({"url": "https://example.gov/p%d" % seq_n[0]})}}]}}],
+            "model": "test/model"},
+            {"usage": {"prompt_tokens": 1000, "completion_tokens": 100, "cost": cost}})
+
+    def answer_round(cost):
+        return sse({"choices": [{"delta": {"content": "the review\nEND-01"}}],
+                    "model": "test/model"},
+                   {"usage": {"prompt_tokens": 2000, "completion_tokens": 300, "cost": cost}})
+
+    def run(responses, spend_guard=None, raise_at=None):
+        n = [0]
+
+        def fake_urlopen(req, timeout=None):
+            i = n[0]
+            n[0] += 1
+            if raise_at is not None and i == raise_at:
+                raise urllib.error.HTTPError(
+                    "u", 403, "Forbidden", {},
+                    io.BytesIO(b'{"error":{"message":"Key limit exceeded (monthly limit)."}}'))
+            if "tools" not in _json.loads(req.data.decode()):
+                return FakeResp(answer_round(0.50))    # tools removed = the answer is demanded
+            return FakeResp(responses[min(i, len(responses) - 1)])
+
+        real_open, real_fetch, real_log = (urllib.request.urlopen, o._safe_fetch_url, o.log)
+        urllib.request.urlopen = fake_urlopen
+        o._safe_fetch_url = lambda url: "PAGE TEXT " * 50
+        o.log = lambda *a, **k: None
+        try:
+            return o.call_oai_reviewer("brief", "END-01", None, model="test/model",
+                                       name="probe",
+                                       fetch_tool={"enabled": True, "max_calls": 8},
+                                       spend_guard=spend_guard), n[0]
+        finally:
+            urllib.request.urlopen, o._safe_fetch_url, o.log = real_open, real_fetch, real_log
+
+    r, _ = run([fetch_round(0.60), fetch_round(0.96), fetch_round(1.15), answer_round(2.10)])
+    check(abs((r.get("usd") or 0) - 4.81) < 1e-6,
+          "usd is the SUM over tool rounds (0.60+0.96+1.15+2.10)", "got %s" % r.get("usd"))
+    check(r.get("usd") != 2.10, "usd is not the last round alone - the pre-1.20.0 bug")
+    check(r.get("usd_rounds") == 4, "usd_rounds says how many calls that total covers",
+          "got %s" % r.get("usd_rounds"))
+    check(r.get("in_tokens") == 5000, "token summing is unchanged", "got %s" % r.get("in_tokens"))
+
+    seq = [fetch_round(1.60) for _ in range(6)] + [answer_round(0.50)]
+    free, n_free = run(seq)
+    cap, n_cap = run(seq, spend_guard={"max_usd_per_review": 4.0})
+    check(n_cap < n_free, "the ceiling ends the round earlier", "%d vs %d calls" % (n_cap, n_free))
+    check(cap["usd"] < free["usd"], "and therefore bills less",
+          "$%.2f vs $%.2f" % (cap["usd"], free["usd"]))
+    check(cap.get("spend_stopped") is True, "spend_stopped is recorded for the report")
+    check(free.get("spend_stopped") is None,
+          "CONTROL: a channel with no declared guard is untouched")
+    # ≥1, not ≥2, and the number moved on purpose: since the trigger reserves headroom for the
+    # final call (`usd_tot + usd_max_round >= ceiling`) it now stops one round EARLIER than the
+    # naive "already spent it" test, which is the whole point of the goog37flash correction. The
+    # assertion that matters is that reading happened at all and an answer still came back - a
+    # stop that fires before any page is opened would be a depth cap wearing a budget's name.
+    check((cap.get("fetches") or 0) >= 1,
+          "it read pages first - the ceiling is a STOP, not a depth cap",
+          "%s fetches" % cap.get("fetches"))
+    check((cap.get("text") or "").strip().endswith("END-01"),
+          "and it still returned a MARKED review rather than an empty answer")
+
+    # 🔴 A CEILING OF ZERO IS THE STRICTEST SETTING, NOT AN ABSENT ONE. Found by agy31pro on the
+    # day this shipped: `if usd_ceiling` read `max_usd_per_review: 0` - "never spend anything on
+    # this channel" - as no ceiling at all. Nothing in the registry uses 0, so this was a trap
+    # left for whoever set it first.
+    zero, _ = run([fetch_round(0.10) for _ in range(4)] + [answer_round(0.05)],
+                  spend_guard={"max_usd_per_review": 0})
+    check(zero.get("spend_stopped") is True,
+          "max_usd_per_review: 0 ARMS the guard (it is not read as absent)",
+          "usd=%s" % zero.get("usd"))
+    none_guard, _ = run([fetch_round(0.10) for _ in range(4)] + [answer_round(0.05)],
+                        spend_guard={"requires_ack": True})
+    check(none_guard.get("spend_stopped") is None,
+          "CONTROL: a guard with no ceiling declared does not stop anything")
+
+    # 🔴 THE MISSING-METER PATH, which the first version of this suite could not reach because
+    # every fake round returned a `cost`. spark12cont named it the same day: with no meter the
+    # ceiling is a dead switch, and the old code would have run to max_rounds in silence while
+    # reporting `usd: null`. It cannot be enforced without a price table this design refuses to
+    # trust, so what is asserted here is that the harness SAYS SO rather than pretending.
+    def costless_round():
+        return sse({"choices": [{"delta": {
+            "content": "opening a page",
+            "tool_calls": [{"index": 0, "id": "c1", "function": {
+                "name": "fetch_url",
+                "arguments": _json.dumps({"url": "https://example.gov/nc%d" % seq_n[0]})}}]}}],
+            "model": "test/model"},
+            {"usage": {"prompt_tokens": 1000, "completion_tokens": 100}})
+
+    def costless_answer():
+        # No `cost` key at all - NOT cost 0.0, which is a meter reading and would set usd_seen.
+        # The first draft of this fixture used answer_round(0.0) and therefore tested nothing;
+        # a probe that cannot fail is worth exactly as much as the code it certifies.
+        return sse({"choices": [{"delta": {"content": "the review\nEND-01"}}],
+                    "model": "test/model"},
+                   {"usage": {"prompt_tokens": 2000, "completion_tokens": 300}})
+
+    seq_n[0] += 100
+    nometer, _ = run([costless_round() for _ in range(3)] + [costless_answer()],
+                     spend_guard={"max_usd_per_review": 1.0})
+    warns = " ".join(nometer.get("warnings") or [])
+    check("SPEND CEILING NOT ENFORCEABLE" in warns,
+          "a declared ceiling with no cost meter WARNS instead of pretending to enforce",
+          warns[:70] or "no warnings")
+    check(nometer.get("ok") is False,
+          "and that warning makes the channel a PROBLEM, not a silent OK")
+    priced_ok, _ = run([fetch_round(0.10), answer_round(0.05)],
+                       spend_guard={"max_usd_per_review": 1.0})
+    check("SPEND CEILING NOT ENFORCEABLE" not in " ".join(priced_ok.get("warnings") or []),
+          "CONTROL: the same guard is silent when the vendor does report a meter")
+
+    r, _ = run([fetch_round(0.60), fetch_round(0.96), answer_round(2.10)], raise_at=2)
+    check(r.get("ok") is False, "a channel that raises is not ok")
+    check("Key limit exceeded" in (r.get("error") or ""), "the vendor's own message survives")
+    check(abs((r.get("usd") or 0) - 1.56) < 1e-6,
+          "money already spent is REPORTED on the failure path, not dropped",
+          "got %s" % r.get("usd"))
+    check(r.get("in_tokens") == 2000 and r.get("fetches") == 2,
+          "tokens and fetch count survive the failure too")
+
+    # The key-limit diagnosis, with the control that killed its predecessor: a bare "limit"
+    # pattern matched the codex preflight INFO line and invented a rate limit on every round.
+    c, _ = o.diagnose('HTTP 403 from OpenRouter: {"error":{"message":"Key limit exceeded '
+                      '(monthly limit)."}}')
+    check(c is not None and "KEY" in c, "OpenRouter key-cap has its own diagnosis, not the "
+                                        "generic rate-limit one", str(c)[:60])
+    check(c is not None and "free" in c.lower(),
+          "and it says the FREE channels die with it - the counter-intuitive half")
+    c2, _ = o.diagnose("status 429 from the vendor")
+    check(c2 is not None and "KEY" not in (c2 or ""),
+          "CONTROL: an ordinary 429 still gets the ordinary diagnosis")
+
+    # Two more shapes that printed `likely_cause: null` in AOS rounds 33 and 35. The Russian
+    # string is not decoration: Windows localises WinSock messages, so a pattern written against
+    # the English wording matches one machine and misses the identical failure on another.
+    for text, label in (
+            ("transport: RemoteDisconnected('Remote end closed connection without response')",
+             "transport drop, English message"),
+            ("transport: ConnectionResetError(10054, 'Удаленный хост принудительно разорвал "
+             "существующее подключение', None, 10054, None)",
+             "the SAME failure with a Russian OS message"),
+            ("EMPTY OUTPUT from stream - status=completed, output items=['reasoning', "
+             "'web_search_call'], reasoning_tokens=10276 of 10279 output tokens. A high reasoning "
+             "share with no message item means the turn ended inside the agentic loop",
+             "reasoned past its budget and never answered")):
+        c3, f3 = o.diagnose(text)
+        check(c3 is not None and f3 is not None, "diagnosed: %s" % label,
+              (c3 or "NO MATCH")[:60])
+    c4, _ = o.diagnose("the model answered normally and cited three sources")
+    check(c4 is None, "CONTROL: an ordinary success line is not diagnosed as a failure")
+
+    # The registry is the one home for the policy; the code must not carry a second copy.
+    reg = _json.load(open(os.path.join(HERE, "channels.json"), encoding="utf-8"))
+    guarded = {c: ch for c, ch in reg["channels"].items()
+               if not c.startswith("_") and (ch.get("spend_guard") or {}).get("requires_ack")}
+    check(guarded, "at least one channel declares spend_guard.requires_ack",
+          ", ".join(guarded) or "none")
+    for cname, ch in guarded.items():
+        check(ch.get("enabled") is False,
+              "%s: requires_ack implies default-off (an ack gate on an on-by-default channel "
+              "would fire on every ordinary round)" % cname)
+        check((ch["spend_guard"].get("max_usd_per_review") or 0) > 0,
+              "%s: declares a numeric ceiling" % cname)
+    # A ceiling is only enforceable on a transport that reports a per-response cost, and only
+    # call_oai_reviewer implements the stop. A guard declared on any other `kind` would print a
+    # promise in the plan that nothing keeps.
+    for cname, ch in reg["channels"].items():
+        if cname.startswith("_") or not isinstance(ch, dict):
+            continue
+        if (ch.get("spend_guard") or {}).get("max_usd_per_review") is not None:
+            check(ch.get("kind") == "openrouter",
+                  "%s declares a ceiling and runs on a transport that can enforce one" % cname,
+                  "kind=%r" % ch.get("kind"))
+    src = inspect.getsource(o.main)
+    check("--accept-spend" in inspect.getsource(o.build_parser) if hasattr(o, "build_parser")
+          else "--accept-spend" in src,
+          "--accept-spend exists as a flag")
+    check("requires_ack" in src and "REFUSING TO SPEND" in src,
+          "main() refuses rather than warns when an opt-in channel was selected without it")
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -1968,7 +2223,7 @@ def main():
                   suite_prose_matches_behaviour, suite_contract,
                   suite_citations, suite_dispatch, suite_tiers_and_grounding,
                   suite_settings_and_upgrade, suite_echocheck, suite_dev_tooling,
-                  suite_agy_plan_class):
+                  suite_agy_plan_class, suite_spend_guard):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

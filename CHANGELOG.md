@@ -1,5 +1,121 @@
 # Changelog
 
+## 1.20.0 — 2026-08-15
+
+**A metered channel ran away and the harness reported the round as cheap. One review billed
+$12.08 across eight tool rounds, produced no output at all, and exhausted the OpenRouter key's
+monthly cap — which then killed four channels in the next round, including the free one. The
+round summary printed `$0.9250`. This release makes money measurable, bounded, and separately
+authorised.**
+
+- 🔴🔴 **The per-channel cost was the LAST tool round, not the sum.** `usd` read
+  `usage.get("cost")` while `in_tokens`/`out_tokens` were accumulated across rounds — two meters
+  over one event, on adjacent lines, and the one spending money was the wrong one. Proven against
+  the vendor's own generation log: `qwen38max` billed $0.0984 + $0.102 + $0.159 + $0.185 + $0.43
+  across five generations and this harness reported **$0.4297**, the last one to four decimals.
+  Now summed, with `usd_rounds` saying how many calls the figure covers.
+
+- 🔴🔴 **A channel that failed reported no telemetry at all.** Both exception handlers returned
+  `{channel, ok, error}` and dropped everything measured, so the channel that spent $12.08 before
+  its ninth call met the key cap appeared under *"these channels report no price"*. A cost report
+  is most wrong on the round that spent the most — the exact inversion that makes a panel look
+  affordable. Partial tokens, dollars, fetches and seconds now survive the failure path, and the
+  round total marks such channels with `*`.
+
+- 🟢 **`spend_guard` in the registry — a STOP, never a depth cap.** A channel may declare
+  `max_usd_per_review`; when the vendor's own returned cost meter crosses it the harness stops
+  granting page fetches, tells the model to answer from what it has, drops `tools` and takes one
+  final turn. Nothing about effort, reasoning budget or answer length changes. Set to `4.0` on
+  `orgpt56terrapro`, whose good runs measured $1.76–$1.81.
+
+- 🟢 **`--accept-spend <channel>|all`: selecting a channel and authorising its bill are two
+  different acts.** The runaway was launched by an agent session whose `--only` enumerated fifteen
+  channels — which satisfied "ask for it by name" without anyone choosing anything. A default-off
+  channel that declares `requires_ack` now refuses to launch (exit 2) until the flag is passed,
+  naming the measured price and the exact flag. `--dry-run` never needs it: seeing what a round
+  would cost must not require agreeing to pay for it.
+
+- 🟢 **The plan prints the price.** The money line used to key on `cost == "expensive"`, a word
+  only `codex` carries, so the most expensive channel in the registry — tagged `metered`, the same
+  word as a $0.10 channel — printed nothing at all. It now keys on the presence of `spend_guard`.
+  `--only` also stopped resurrecting a default-off channel silently: the flag path now writes
+  *"named it explicitly (overrides default-off)"* into the plan, which only the prose path did.
+
+- 🟢 **Three new stock diagnoses, each for a failure that printed an empty "cause and fix" block
+  in a real round.** (a) `Key limit exceeded` — ordered BEFORE the generic rate-limit pattern,
+  because the generic advice ("route to another channel") is actively wrong when every OpenRouter
+  channel shares the capped key, free ones included. (b) transport drops, keyed on the exception
+  CLASS (`RemoteDisconnected`, `ConnectionReset`, errno `10054`) and never on the OS message,
+  which Windows localises — the same failure arrived in English on one channel and in Russian on
+  another in one round. (c) a turn that reasoned past its output budget and never emitted an
+  answer.
+
+- 🟢 **The forced-answer round has an exit.** After the harness removes `tools` and demands the
+  answer, the loop now breaks unconditionally on the next turn. Previously nothing stopped a
+  transport that echoed a tool call anyway from re-entering the same branch every iteration and
+  re-sending the whole conversation each time — benign against a well-behaved vendor, which is
+  not a property a spending stop should depend on.
+
+- 🔴 **The self-test was making one real paid call, per run, to the most expensive channel.** The
+  1.19.0 reachability check ran the real CLI with a real brief and no `--dry-run` against
+  `orgpt56terrapro` — invisible for the same reason the overspend was: nothing printed a price, so
+  a green line and a paid call looked identical. Now `--dry-run`, plus a check that reachability is
+  proved without paying, plus the two-step contract (selected → refused → authorised).
+
+**Applied the same day from an eight-channel review of this diff. Every item below was found by a
+reviewer, verified against the code, and fixed before release; three were named independently by
+more than one of them, which is the part worth trusting.**
+
+- 🔴🔴 **The guard was aimed at the visible failure, not the expensive one** (3 of 8, independently).
+  Over the same month the account's two largest spenders were the DEFAULT-ON channels — Kimi K3
+  $70.70 (34.8%) and Qwen3.8 Max $44.30 (21.8%) — against the rationed channel's $21.90 (10.8%).
+  Guarding only the rationed one left 56.6% of the bill unbounded, and a session that learns the
+  gate refuses Terra Pro simply shifts the work to the next most expensive default. Both now carry
+  `max_usd_per_review: 3.0` (~3x their worst observed round) and **no** `requires_ack`: an ack on
+  a default-on channel would refuse every ordinary round, which is breakage, not rationing.
+
+- 🔴 **The trigger now reserves headroom for the final call.** The arithmetic: $3.90 spent, one
+  round crossing at $2.10, then a forced answer at $2.10 = **$8.10 against a $4.00 setting**. It
+  now fires when `usd_tot + largest_round_so_far >= ceiling`, where the estimate is the biggest
+  round THIS run actually billed — measured, never a price from a config file. It still cannot be
+  exact, and the plan now says "a STOP, not a depth cap … enforced only while the vendor returns a
+  cost meter" instead of promising a hard number.
+
+- 🔴 **`requires_ack` is armed by the declaration alone**, not by "was it overridden". The first
+  cut fired only when a default-off channel was re-selected, so anything flipping the channel on
+  by default — including a user's own settings overlay, which no test covers — turned
+  `requires_ack: true` into a decorative field.
+
+- 🔴 **`max_usd_per_review: 0` now ARMS the guard.** `float(x) if x else None` read the strictest
+  possible setting — "never spend anything here" — as no setting at all.
+
+- 🔴 **`cached_in_tokens` had the same last-round bug as `usd`, two lines below it**, and survived
+  because the round was framed as "fix the money field" rather than "find every field read from
+  `usage` after a loop that overwrites `usage`". Summed now.
+
+- 🟢 **A ceiling that cannot be enforced says so.** The whole mechanism depends on the vendor
+  returning `usage.cost`; with no meter it was a dead switch, silently. There is no honest
+  fallback — a token estimate needs a price table, which is what this design refuses to trust — so
+  a declared ceiling with no meter behind it is now a WARNING that makes the channel a PROBLEM.
+  The probe that missed this returned a cost on every round; it now has a costless arm.
+
+- 🟢 The refusal now addresses automated sessions directly ("do not re-run with that flag unless a
+  human named this channel"), because three reviewers pointed out that the message prints its own
+  bypass and retry-on-error is exactly what agents do. This gate is hard against accident and soft
+  against an agent; nothing mechanical can be otherwise when the caller owns the command line.
+
+- 🟢 `usd_rounds` is printed beside the price — $4 over two generations and $4 over eight are
+  different facts about whether the fetch loop is the problem.
+
+- **Rejected, with proof.** "`--dry-run` is not exempt from the spend gate" — it is; the dry-run
+  return precedes the gate and both a live run and a self-test check prove it. "The forced-answer
+  branch sends a `tool` message with no preceding `assistant` message, so the vendor will 400" —
+  the assistant message is appended inside that same branch, seventeen lines above. "A failed free
+  channel is excluded from the billed-and-failed list by truthiness" — a channel that reported
+  $0.00 did not spend money; the marker means what it says.
+
+- 33 new self-test checks against a deliberately uncooperative fake transport. 355 total.
+
 ## 1.19.0 — 2026-08-14
 
 **The plan-instead-of-review failure class on the CLI channel is root-caused, fixed at three

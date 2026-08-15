@@ -716,7 +716,16 @@ def alias_index(reg):
 
 
 def initial_plan(reg):
+    # `default_enabled` is carried BESIDE `enabled`, never derived from it later, because the two
+    # answer different questions and the answer to the first is destroyed by the time anyone needs
+    # it: `enabled` is what will run after every flag and route word has been applied, while
+    # `default_enabled` is what the registry shipped. The spend gate needs the difference - "this
+    # channel is off unless someone asks" is only distinguishable from "this channel is on" once
+    # both values exist. Deriving it downstream would mean re-reading the registry in a second
+    # place, which is how the plan and the dispatcher came to disagree in round 23.
     return {c: {"enabled": ch.get("enabled", True), "model": ch.get("model"),
+                "default_enabled": ch.get("enabled", True),
+                "spend_guard": ch.get("spend_guard") or None,
                 "kind": ch["kind"], "label": ch.get("label", c),
                 "effort": ch.get("effort"), "agent": ch.get("agent"), "why": []}
             for c, ch in reg["channels"].items()}
@@ -972,6 +981,16 @@ def apply_flags(plan, reg, only=None, skip=None, sets=None):
                 plan[c]["enabled"] = False
                 plan[c]["why"].append("--only excluded it")
             else:
+                # 🔴 THE RESURRECTION WAS SILENT. This branch has always turned a default-OFF
+                # channel back on - that is the documented opt-in path - but it wrote nothing into
+                # `why`, so the one line in the plan that would have said «this channel does not
+                # normally run and something asked for it» did not exist. The route path prints
+                # exactly that sentence ("named explicitly (overrides default-off)"); the flag path
+                # did not, and the flag path is the one an agent session uses. Same defect shape as
+                # the two selection paths disagreeing on 2026-08-14, one field over: they agreed on
+                # the ACTION and disagreed on the EXPLANATION, which is the half a human reads.
+                if not plan[c]["enabled"] and not plan[c].get("default_enabled", True):
+                    plan[c]["why"].append("--only named it explicitly (overrides default-off)")
                 plan[c]["enabled"] = True
     return plan
 
@@ -1331,6 +1350,33 @@ def format_plan(plan, reg):
             lines.append("           - %s" % w)
         if p["enabled"] and cost == "expensive":
             lines.append("           - cost: EXPENSIVE channel")
+        # 🔴 THE PRICE LINE USED TO KEY ON THE WORD `expensive`, WHICH ONLY CODEX CARRIES - so the
+        # channel that actually ran away printed nothing at all. Measured 2026-08-14: orgpt56terrapro
+        # is tagged `metered`, the same word as a $0.10 channel, and billed $12.08 in one round while
+        # its plan block showed data/web/tier and no money. Keying on a declared `spend_guard`
+        # instead of on a cost WORD is the fix: the guard is the thing that knows a number, and a
+        # channel that declares one says so here whatever adjective it also carries.
+        sg = p.get("spend_guard") or {}
+        if p["enabled"] and sg:
+            if sg.get("max_usd_per_review") is not None:
+                # 🔴 THE CONDITION IS PART OF THE PROMISE. orgemini37flash, reviewing this the day
+                # it shipped: the first wording said "enforced from the vendor's own returned cost
+                # meter" for ANY channel declaring a guard, while the enforcement lives only in
+                # call_oai_reviewer and only fires when the vendor actually returns `usage.cost`.
+                # On a transport that reports no price the line would have promised a ceiling that
+                # cannot exist - a plan that reassures is worse than a plan that says nothing. No
+                # channel is in that state today; selftest now asserts it stays that way, and this
+                # line states the dependency rather than relying on the assertion staying true.
+                lines.append("           - spend: ceiling $%.2f per review - a STOP, not a depth "
+                             "cap. Enforced only while the vendor returns a cost meter with each "
+                             "response; a transport that reports no price cannot be stopped this "
+                             "way." % float(sg["max_usd_per_review"]))
+            if sg.get("measured_usd"):
+                lines.append("           - spend: measured %s" % sg["measured_usd"])
+            if sg.get("requires_ack"):
+                lines.append("           - spend: THIS CHANNEL NEEDS --accept-spend %s (or "
+                             "--accept-spend all). Selecting it is not the same act as "
+                             "authorising its bill; --dry-run never needs the flag." % c)
         # Printed for every enabled channel whose model declares one, not only for the alarming
         # ones: a policy line that appears only when something is wrong trains the eye to skip
         # the whole class. Spark's Contributor tier buys its ~12x discount with permission to
