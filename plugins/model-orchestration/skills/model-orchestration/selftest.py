@@ -2346,8 +2346,9 @@ def suite_panels():
     only_two = _r.format_plan(_r.resolve(reg4, only=["spark11", "codex"]), reg4)
     check("seats are" not in only_two,
           "CONTROL: no concentration warning when no vendor holds half the seats")
-    check("seats are google" in txt,
-          "and it DOES fire on the cheap panel, where 6 of 11 seats are one vendor")
+    check("largest bloc: google" in txt,
+          "and it names the largest bloc on the cheap panel by vendor",
+          next((ln.strip() for ln in txt.splitlines() if "largest bloc" in ln), "(no line)"))
 
     # ---- the cheap panel keeps a code voice ---------------------------------------------------
     # The reason ordeepseekv4pro was added in this round. Derived: if the only `role: code`
@@ -2377,9 +2378,15 @@ def suite_panels():
     check(sg.get("max_usd_per_review") is not None and not sg.get("requires_ack"),
           "it declares a ceiling and NO ack gate (an ack gate on a default-on channel would "
           "refuse every ordinary round)", "ceiling=%r" % sg.get("max_usd_per_review"))
-    check(sg.get("measured_usd") is None,
-          "measured_usd is null until a real round fills it - an estimate here would print "
-          "as «spend: measured ...» and read like a measurement")
+    # 🔴 It was null through the whole build, on purpose, and is filled from the first REVIEW
+    # (not from a probe, and never from a price × a token count). The check moved with it: what
+    # it asserts now is that the string carries a round's own number and says what produced it.
+    mu = sg.get("measured_usd") or ""
+    check("0.1334" in mu and "brief" in mu,
+          "measured_usd carries a REVIEW's own cost, with what produced it", mu[:90])
+    check("_measured_usd_was_null_until_the_first_real_round" in sg,
+          "and the note explaining why it was null survives the fill - deleting it would erase "
+          "the rule that a probe price is not a review price")
 
     # ---- what the round-42 panel of twelve reviewers found ------------------------------------
     # Each of these is a regression test for a defect that was SHIPPED in the first draft of this
@@ -2458,6 +2465,39 @@ def suite_panels():
     check(pr.get("allow_fallbacks") is False,
           "and fallbacks are explicitly off, so the doubt a reader has is answered in the file",
           repr(pr.get("allow_fallbacks")))
+
+    # 🔴🔴 THE TWO SILENT-EXPENSIVE PATHS THE LATE REVIEWERS FOUND. Both had the same shape: the
+    # flag or the word was accepted, the narrowing was not applied, and the round ran EVERY
+    # channel while looking restricted. That is the inverse of this project's own rule («keep
+    # failures LOUD, keep spending silent-proof») and it was written by the hand that documented
+    # the rule, in the same round.
+    check(route_err("дешовая панель без grok"),
+          "a near-miss panel word is refused, not silently ignored (a typo cost the default "
+          "panel before this)", (route_err("дешовая панель без grok") or "")[:80])
+    check(route_err("run the cheep panel"),
+          "...in English too - a stem that almost matches an alias is a near miss")
+    p = _r.resolve(_r.load_registry(), route="дешевая панель, без grok")
+    check(sum(1 for v in p.values() if v["enabled"]) < len(cheap_live),
+          "CONTROL: a CORRECT panel word plus a channel exclusion still works")
+    empty = _r.load_registry()
+    empty["panels"] = {}
+    try:
+        _r.resolve(empty, panel="cheap")
+        woke = "accepted and ignored"
+    except _r.RouteError as e:
+        woke = None if "no panels" in str(e) else "raised the wrong error: %s" % e
+    check(woke is None,
+          "--panel against a registry with NO panels is REFUSED, not accepted-then-ignored",
+          woke or "")
+
+    # The concentration line is printed for every set, and only the 🔴 escalates - a warning
+    # that disappears when you move from cheap (6/11) to standard (6/15) reads as «fixed».
+    reg5 = _r.load_registry()
+    std = _r.format_plan(_r.resolve(reg5), reg5)
+    check("largest bloc:" in std and "largest bloc:" in txt,
+          "the largest-vendor share is printed on BOTH panels, not only the alarming one")
+    check("🔴 Where those agree" in txt and "🔴 Where those agree" not in std,
+          "and only the 🔴 escalation is conditional on half the seats")
 
     # ---- the flag reaches the CLI --------------------------------------------------------------
     check(sorted(_o.load_panels()) == sorted(PANELS),

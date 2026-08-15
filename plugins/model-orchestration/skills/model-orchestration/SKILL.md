@@ -215,7 +215,7 @@ question.
 | `--panel` | who runs |
 |---|---|
 | **`standard`** (default) | every enabled channel — what ran before panels existed |
-| **`cheap`** | free, subscription and sub-$1/M channels only — everything **except** spark11, codex, kimik3, qwen38max and terra-pro. Ask the plan for the list; it prints both sets by name |
+| **`cheap`** | the free, subscription and low-rate channels — everything **except** spark11, codex, kimik3, qwen38max and terra-pro. Ask the plan for the list; it prints both sets by name |
 
 🔴 **A panel FILTERS DOWN and never enables anything** — unlike `--only`, which resurrects a
 default-off channel on purpose. So `--panel cheap` cannot turn on a channel whose key you do not

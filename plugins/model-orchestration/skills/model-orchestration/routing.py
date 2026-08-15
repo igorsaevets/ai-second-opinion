@@ -864,6 +864,26 @@ def extract_panel(reg, text):
             spans.append((m.start(), m.end()))
             found.append((m.start(), pname, al))
     if not found:
+        # 🔴🔴 A PANEL WORD THAT ALMOST MATCHED IS THE EXPENSIVE FAILURE, AND IT WAS SILENT.
+        # «дешовая панель без grok» - one transposed letter - found no alias, so the panel word
+        # vanished, `apply_route` happily handled `grok`, and the round ran the DEFAULT panel:
+        # a typo that costs money and prints nothing. Two reviewers found it on 2026-08-15 and
+        # both ranked it BLOCKER, correctly: this project's rule is «keep failures LOUD, keep
+        # spending silent-proof», and this was the inverse. The evidence that a panel was MEANT
+        # is either the head noun («панель» / «panel») or a token that starts like one of the
+        # aliases; the stems are derived from the alias table so they cannot drift away from it.
+        heads = ("панель", "панели", "панелью", "панелях", "panel", "panels")
+        stems = {a[:5] for a, _ in _panel_alias_index(reg) if " " not in a and len(a) >= 6}
+        words = re.findall(r"[\w\-]+", t)
+        near = [w for w in words
+                if w in heads or (len(w) >= 5 and any(w.startswith(s) for s in stems))]
+        if near:
+            raise RouteError(
+                "this route looks like it names a panel (%s) but nothing there matches one. A "
+                "near miss is the expensive failure: the word would be ignored and the round "
+                "would run the DEFAULT panel (%r) without saying so. The words that work: %s."
+                % (", ".join("%r" % w for w in sorted(set(near))), reg.get("default_panel"),
+                   ", ".join(sorted(a for a, _ in _panel_alias_index(reg)))))
         return None, text
     # 🔴 A NEGATED PANEL IS A SILENT INVERSION, AND THIS WAS A DEFECT WRITTEN IN THIS ROUND.
     # The first version of this function matched the alias wherever it appeared, so «не
@@ -1231,6 +1251,18 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
     # --only codex to an EMPTY round rather than to codex. Note --only stays exclusive - it
     # means "these and nothing else", so `--panel cheap --only codex` runs codex alone. The
     # additive form is the route's ADD mode, not a flag.
+    # 🔴🔴 `--panel X` AGAINST A REGISTRY WITH NO PANELS WAS ACCEPTED AND IGNORED. argparse gets
+    # its `choices` from the registry file and falls back to None when that file cannot be read,
+    # so the flag stayed spellable while `if reg.get("panels")` skipped every filter - a flag
+    # accepted, a narrowing not applied, and the round running EVERY channel. That is the
+    # decorative-knob defect this repository has now recorded four times, written by the same
+    # hand that documented it, in the same round. Two reviewers, independently. Refuse instead.
+    if panel and not reg.get("panels"):
+        raise RouteError(
+            "--panel %r was given but this registry defines no panels at all, so there is "
+            "nothing to narrow to. Accepting it silently would run EVERY enabled channel while "
+            "looking like a restriction. Add a `panels` object to channels.json, or drop the "
+            "flag." % panel)
     if reg.get("panels"):
         route_panel, route = extract_panel(reg, route)
         if route_panel and panel and route_panel != panel:
@@ -1722,10 +1754,17 @@ def format_plan(plan, reg):
         ranked = sorted(tally.items(), key=lambda kv: (-kv[1], kv[0]))
         lines.append("  from %d vendor(s): %s"
                      % (len(tally), ", ".join("%s %d" % kv for kv in ranked)))
+        # 🔴 THE SHARE IS PRINTED ALWAYS; ONLY THE ALARM IS CONDITIONAL. First draft printed the
+        # concentration line only above 50%, which meant moving from `cheap` (6/11 = 55%) to
+        # `standard` (6/15 = 40%) made the warning DISAPPEAR while the same vendor still held
+        # three times the next bloc - and a warning that vanishes reads as "fixed". A reviewer
+        # named exactly that. So the number is always visible and only the 🔴 escalates.
         top, n = ranked[0]
-        if n > 1 and n * 2 >= len(live):
-            lines.append("           - 🔴 %d of %d seats are %s. Where those agree, treat it as "
-                         "one voice repeated, not as corroboration." % (n, len(live), top))
+        if n > 1:
+            lines.append("           - largest bloc: %s holds %d of %d seats (%.0f%%)%s"
+                         % (top, n, len(live), 100.0 * n / len(live),
+                            ". 🔴 Where those agree, treat it as one voice repeated, not as "
+                            "corroboration." if n * 2 >= len(live) else "."))
     if not live:
         lines.append("  !! every channel is disabled - nothing would run")
     return "\n".join(lines)

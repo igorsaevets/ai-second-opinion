@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.21.1 — 2026-08-15
+
+**The last three reviewers of the twelve landed after 1.21.0 was tagged, and two of them found
+the same thing: a `--panel` that is accepted and then not applied. Both paths failed in the
+expensive direction and printed nothing, which is the inverse of this project's own rule.**
+
+- 🔴🔴 **`--panel X` against a registry with no `panels` was accepted and ignored.** argparse
+  takes its `choices` from the registry and falls back to `None` when that file cannot be read,
+  so the flag stayed spellable while `if reg.get("panels")` skipped every filter — a flag
+  accepted, a narrowing not applied, and the round running EVERY enabled channel while looking
+  restricted. Now a hard `RouteError`. **Two reviewers, independently.**
+
+- 🔴🔴 **A near-miss panel word was silently dropped.** «дешовая панель без grok» — one
+  transposed letter — matched no alias, so the word vanished, the channel exclusion was honoured
+  normally, and the round ran the DEFAULT (expensive) panel with no message at all. A route that
+  looks like it names a panel (the head noun `панель`/`panel`, or a token starting like one of
+  the aliases) and matches none is now refused, listing the words that do work. The stems are
+  derived from the alias table, so they cannot drift away from it. **Two reviewers.**
+
+- **The vendor-concentration share is printed for every panel; only the 🔴 escalates.** The
+  first draft printed the line only above 50%, so moving from `cheap` (google 6/11 = 55%) to
+  `standard` (6/15 = 40%) made the warning DISAPPEAR while the same vendor still held three
+  times the next bloc — and a warning that vanishes reads as "fixed".
+
+- **`measured_usd` filled from the first real review, and the ceiling's arithmetic corrected
+  twice.** The entry said "$2.00 sits 6–16× above a normal round" and then cited *probe* calls
+  of $0.0002–$0.0006, against which $2.00 is 3000–10000×: a ratio quoted beside a denominator
+  that does not produce it. The measured figures are now $0.1334 for a 93 KB review with four
+  page fetches (15×) and $0.0256 for a small one (78×). The number survived both corrections and
+  its justification was wrong both times — which is the argument for writing the arithmetic down
+  rather than the number.
+
+- `SKILL.md` no longer calls the cheap panel "sub-$1/M": Novita, one of the three allowed
+  DeepSeek hosts, is $1.168/M.
+
+- **Round outcome, for the record:** 11 of 12 channels returned a verified review;
+  `mimo25pro` produced empty output with no error event from the provider. Cost reported by the
+  vendors: **$0.2624** across the four channels that report one (grok420 $0.1029,
+  ordeepseekv4pro $0.1334, orgemini37flash $0.0191, ornemotron3ultra $0.0070 — the "free"
+  channel's price is its Exa searches). Eight channels report no price; that total is a floor.
+
 ## 1.21.0 — 2026-08-15
 
 **Two axes instead of one. `--tier` has always answered "how deep does each reviewer go"; the new
