@@ -413,6 +413,60 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, na
     return {"channel": "http", "ok": False, "error": last}
 
 
+def transport_damage(text):
+    """Characters a vendor's transport DROPPED, caught by structural imbalance.
+
+    🔴🔴 A VENDOR CAN CORRUPT THE ANSWER AND EVERY OTHER CHECK STILL PASSES. Measured
+    2026-08-15 on the asylum round and reproduced 2026-08-16 with a three-arm probe: MiMo
+    delivered a 26 KB review in which **35 '(' characters were simply absent**. The marker was
+    on the last line, the byte count was healthy, the citation audit was happy, `ok` was True.
+    Nothing looked wrong, and `INA § 208(a)(2)(D)` had become `INA § 208(a)2)(D)` - a legal
+    citation silently rewritten into a different one.
+
+    Proved to be the VENDOR, not us: the probe reconstructed the answer from the raw SSE frames
+    in a program sharing no code with this file, and the gap was already there on the wire,
+    sitting exactly on a frame boundary ('  INA 2' | '08(a)' | '2)(D)'). It appears only when
+    MiMo's native search is active, and it does NOT appear with `stream: false` - which is why
+    that channel is now unstreamed. This check stays anyway, because the next vendor to do it
+    will not be the one we already fixed: the standing R43 lesson is that a repair applied to
+    the channel that failed has not been applied to the CLASS.
+
+    Deliberately a NOTE and never a warning. `ok` is `not warn` everywhere in this file, so a
+    warning would throw away a 26 KB usable review over 35 characters, and an emoticon `:)`
+    would fail a perfectly good one. Same judgement the citation check already makes: worth
+    saying, not worth discarding. Measured false-positive rate on the 14 other channels of that
+    same real run: **zero** - every one of them balanced exactly.
+    """
+    if not text:
+        return []
+    out = []
+    for opener, closer, label in (("(", ")", "round brackets"),):
+        depth, orphan_close = 0, 0
+        for c in text:
+            if c == opener:
+                depth += 1
+            elif c == closer:
+                if depth == 0:
+                    orphan_close += 1
+                else:
+                    depth -= 1
+        if orphan_close or depth:
+            bits = []
+            if orphan_close:
+                bits.append("%d '%s' missing" % (orphan_close, opener))
+            if depth:
+                bits.append("%d '%s' never closed" % (depth, closer))
+            out.append(
+                "TEXT INTEGRITY: %s in %s. The answer is structurally unbalanced, which on this "
+                "harness has meant the vendor's transport dropped characters in flight rather "
+                "than the model writing badly - and the shape it damages most often is a "
+                "statutory citation like 208(a)(2)(D). Do NOT copy any quotation, section "
+                "number or figure out of this answer without checking it against the source. "
+                "A count of 1-2 can also just be an emoticon or an unpaired bracket in prose."
+                % (" and ".join(bits), label))
+    return out
+
+
 def _verify_http(data, marker, floor, secs, tier):
     """The four mandatory checks from SKILL.md 2.7. A call that ran is not a review that happened."""
     blocks = data.get("content", []) or []
@@ -1996,6 +2050,168 @@ def hermes_bin():
 HERMES_TOOLSETS = "web"
 
 
+def grok_bin():
+    return _resolve_bin("GROK_BIN", "grok.exe",
+                        [os.path.join(os.environ.get("USERPROFILE", ""), ".grok", "bin")])
+
+
+def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
+                 timeout=None, system=None, name="grokbuild"):
+    """Grok Build - xAI's own CLI, on the SUBSCRIPTION, not the metered api.x.ai key.
+
+    A different thing from the `grok420` channel despite the shared vendor: that one is
+    `api.x.ai` billed per token, this one authenticates with a session against
+    `cli-chat-proxy.grok.com` and carries no API key at all (`models_cache.json`:
+    `auth_method: "session"`, `api_key: null`, `env_key: null`). Same relationship codex and agy
+    have to their vendors' paid APIs.
+
+    Everything below was established by running it on 2026-08-16, not from the help text:
+
+    * `--output-format json` returns one object with `text`, `stopReason`, `num_turns`,
+      `total_cost_usd`, `modelUsage` and a `usage` block that includes **`reasoning_tokens`** -
+      richer telemetry than any other CLI channel here. codex reports nothing; agy needs
+      stream-json to report at all.
+    * The depth knob is real and was proved from the meter, not from the flag being accepted:
+      `low` gave [828, 1697] reasoning tokens over two runs, `xhigh` gave [1918, 4089]. DISJOINT,
+      so it reaches the model. An invented effort exits **1** - this CLI validates locally,
+      unlike codex, which printed «reasoning effort: r43_invented» and let the API refuse.
+    * 🔴 `grok-4.6` exposes **xhigh**, a rung ABOVE the `high` that the CLI's own config records
+      as current. The ladder is [xhigh, high, medium, low] and grok-4.5 has no xhigh at all.
+    * 🔴 The served model reports as `grok-4.6-build`, not `grok-4.6`, so the model-mismatch
+      check has to compare on a prefix or it fires on every healthy run.
+
+    Two leak controls, both mandatory rather than tidy:
+    * `--cwd` a neutral directory. This CLI's documented project-rules discovery reads
+      **`CLAUDE.md`** and `AGENTS.md` from the repo root down to the cwd and loads them in full -
+      so launching it in this project would hand xAI this project's instruction file. Same
+      confirmed leak neutral_cwd() exists for, with the same fix. (`~/.grok/rules/` is scanned
+      for EVERY project and no cwd can protect against it; it was verified absent on this
+      machine, and if it ever exists its contents go to the vendor on every call.)
+    * `--no-memory`, because the CLI otherwise keeps cross-session memory and a review brief is
+      not ours to leave on disk for the next unrelated session to reuse.
+
+    The brief goes through `--prompt-file`, never `-p`: a review brief is routinely tens of KB
+    and the Windows command line is not, which is the exact trap the agy channel documents.
+    """
+    binary = grok_bin()
+    os.makedirs(workdir, exist_ok=True)
+    # Position matters: R40 measured the same instruction obeyed 2/2 from the BRIEF and 0/1 from
+    # a persona slot, so the preset leads the file rather than going to --system-prompt-override
+    # (which would also replace the agent's own tool instructions wholesale).
+    # 🔴 THE PREAMBLE IS NOT DECORATION - WITHOUT IT THIS CHANNEL DOES NOT COMPLETE. Every other
+    # channel here is a chat model that answers a brief. This one is a coding AGENT whose default
+    # assumption is that it has been pointed at a repository, so it plans to explore, reaches for
+    # tools the harness does not grant, and the turn ends `stopReason: cancelled` after two turns
+    # with a sentence of narration. Measured three times on 2026-08-16 - unrestricted, with a
+    # narrow tool allowlist, and with the vendor's full read-only set - and the tool list was
+    # never the cause. Saying plainly that there is no codebase is what stops it looking.
+    NO_REPO = (
+        "OPERATING CONTEXT — read this first.\n"
+        "You are NOT pointed at a repository and there is no codebase to explore. Your working "
+        "directory is deliberately empty. Do not plan to open, list, grep or read project files, "
+        "and do not spawn subagents to look for them; those tools will refuse and the run will be "
+        "discarded mid-answer. Everything you are being asked about is in the text below, and the "
+        "only outside resource you have is web search and page fetching, which you should use "
+        "freely for vendor documentation. Write the finished review in a single reply.\n\n"
+        "---\n\n")
+    text_in = NO_REPO + ((system.strip() + "\n\n---\n\n") if system else "") + brief
+    pf = os.path.join(workdir, "PROMPT.md")
+    with open(pf, "w", encoding="utf-8") as f:
+        f.write(text_in)
+    # 🔴🔴 AN AGENTIC CODING CLI GIVEN A REVIEW BRIEF TRIES TO WORK ON THE REPOSITORY INSTEAD OF
+    # ANSWERING IT. Measured on this channel's first panel round, 2026-08-16: asked to review a
+    # design, it returned 520 bytes of narration - «The harness lives under the model-
+    # orchestration skill. Next I'll open the registry...» - and never produced a review or the
+    # end marker. It was not failing; it was doing its actual job, which is to go and edit code.
+    # The allowlist turns it into a REVIEWER: web search and page fetching, the same surface
+    # every other channel has, and no file, shell or edit tools at all. That is also a safety
+    # boundary, not only a quality one - the whole input is an untrusted brief, and this binary
+    # ships with a terminal tool. Same reasoning as HERMES_TOOLSETS one screen up.
+    cmd = [binary, "--prompt-file", pf, "--cwd", neutral_cwd(), "--no-memory", "--no-subagents",
+           # 🔴 THE VENDOR'S OWN READ-ONLY SET, MINUS NOTHING IT NEEDS TO THINK - and a narrower
+           # list than this DOES NOT WORK. Measured twice on 2026-08-16. First attempt had no
+           # restriction at all: the agent went off to work on the repository and returned 520
+           # bytes of narration («The harness lives under the model-orchestration skill. Next
+           # I'll open the registry…») with no review and no marker. Second attempt allowed only
+           # `web_search,web_fetch`: the run came back `stopReason: cancelled` after 2 turns and
+           # 127 bytes, because the model reached for `todo_write` - its planning tool, which the
+           # vendor documents as read-only and never-prompting - and ONE DENIED TOOL CANCELS THE
+           # WHOLE TURN. Exactly the failure mode the agy channel already documents, on a
+           # different binary.
+           # What is granted is the documented read-only list (read_file, list_dir, grep,
+           # web_search, todo_write) plus web_fetch. What is NOT granted is the shell, any edit
+           # or write tool, and subagents. That boundary is the point: the entire input is an
+           # untrusted brief and this binary ships a terminal tool. The read tools are harmless
+           # here only because --cwd is a neutral empty directory - remove that and this list
+           # becomes a file-exfiltration surface.
+           "--tools", "read_file,list_dir,grep,web_search,web_fetch,todo_write",
+           "--verbatim", "--output-format", "json", "--permission-mode", "dontAsk"]
+    if model:
+        cmd += ["-m", model]
+    if effort:
+        cmd += ["--reasoning-effort", effort]
+    log("  [%s] Grok Build CLI on the subscription (no API key); depth --reasoning-effort=%s, "
+        "brief via --prompt-file (%d chars), neutral cwd, memory off"
+        % (name, effort or "vendor default", len(text_in)))
+    t0 = time.time()
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                           timeout=_seconds(timeout, 2400))
+    except subprocess.TimeoutExpired:
+        return {"channel": name, "ok": False, "text": "", "seconds": round(time.time() - t0, 1),
+                "error": "TIMEOUT after %s" % (timeout or "40m"), "model": model,
+                "warnings": ["TIMEOUT"], "notes": []}
+    secs = time.time() - t0
+    raw = (p.stdout or "").strip()
+    warn, note = [], []
+    data, text = {}, ""
+    try:
+        data = json.loads(raw) if raw else {}
+        text = data.get("text") or ""
+    except ValueError:
+        # A non-JSON stdout is the CLI refusing before it ever ran - a bad flag, an expired
+        # session. Report what it actually said instead of «empty answer», which would send the
+        # next person to debug the model.
+        warn.append("CLI DID NOT RETURN JSON (exit=%d): %s"
+                    % (p.returncode, (raw or p.stderr or "")[:300]))
+    if p.returncode != 0 and not text:
+        warn.append("EXIT %d: %s" % (p.returncode, (p.stderr or raw or "")[:300]))
+    if text:
+        with open(outfile, "w", encoding="utf-8") as f:
+            f.write(text)
+    if marker and not text.strip().endswith(marker):
+        warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
+    if not text.strip() and not warn:
+        warn.append("EMPTY OUTPUT despite exit 0")
+    record_refusal(refusal_check(text, marker), warn, note)
+    u = data.get("usage") or {}
+    stop = data.get("stopReason")
+    if stop and stop not in ("end_turn", None):
+        # `max_tokens` here means the answer was cut off, which the marker check would also
+        # catch - but naming the vendor's own stop reason says WHY, and that is the difference
+        # between «re-run it» and «the brief asks for more than one turn can hold».
+        note.append("stopReason=%r (not 'end_turn')" % stop)
+    served = sorted((data.get("modelUsage") or {}).keys())
+    return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
+            "bytes": len(text.encode("utf-8")), "exit": p.returncode,
+            "model": model, "model_served": served or None,
+            "effort": effort,
+            "in_tokens": u.get("input_tokens"),
+            "cached_in_tokens": u.get("cache_read_input_tokens"),
+            "out_tokens": u.get("output_tokens"),
+            "reasoning_tokens": u.get("reasoning_tokens"),
+            # 🔴 REPORTED BY THE CLI, AND WHAT IT MEANS ON A SUBSCRIPTION IS NOT ESTABLISHED.
+            # The docs call it a cost and the channel authenticates with a session rather than a
+            # key, so it is most likely an accounting figure rather than a charge - but this
+            # project's rule is that an unverified number is written down as unverified, not
+            # rounded to zero. Kept out of the round's spend total for that reason; the total
+            # already lists channels that report no price, and a made-up zero is worse than an
+            # absence.
+            "usd_reported_unverified": data.get("total_cost_usd"),
+            "turns": data.get("num_turns"),
+            "warnings": warn, "notes": note}
+
+
 def neutral_cwd():
     """A directory containing none of your files, for any channel that reads its own cwd.
 
@@ -2132,6 +2348,17 @@ OAI_PROVIDERS = {
         "search": "native_tool",
         "search_tool": {"type": "web_search"},
         "usage_request": "openai",   # body["stream_options"] = {"include_usage": True}
+        # 🔴🔴 THE ONLY UNSTREAMED CHANNEL, AND IT IS NOT A PREFERENCE - THIS VENDOR'S STREAM
+        # DELIVERS TEXT WITH CHARACTERS MISSING. Asylum round, 2026-08-15: 35 '(' absent from a
+        # 26 KB review, turning `INA § 208(a)(2)(D)` into `INA § 208(a)2)(D)`. Isolated
+        # 2026-08-16 in five arms - the loss appears only when the native search has actually
+        # run, sits on an SSE frame boundary, and is already absent on the wire; two unstreamed
+        # arms with the same search active came back with every control string intact. Measured
+        # cost of the switch on those arms: 44.4 s and 42.3 s unstreamed against 53.9 s streamed,
+        # so it is not slower. Re-test with `stream: true` before removing this - the vendor may
+        # fix it, and a comment is not a check. See transport_damage(), which stays on for every
+        # channel either way.
+        "streaming": False,
     },
 }
 
@@ -2671,9 +2898,25 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # 2000-token ceiling, including the arm predicted to fail, all returned a complete answer
     # with the end marker. The ratio is a ceiling, not a reservation - so the mitigation is a
     # generous max_tokens, and depth is not traded away for a mechanism nothing demonstrated.
+    # 🔴🔴 STREAMING IS A PER-PROVIDER CHOICE SINCE R44, BECAUSE ONE VENDOR CORRUPTS THE TEXT
+    # WHEN IT STREAMS. MiMo's asylum review of 2026-08-15 arrived with 35 '(' characters simply
+    # missing - `INA § 208(a)(2)(D)` delivered as `INA § 208(a)2)(D)`, a legal citation rewritten
+    # into a different one, with the end marker present, the byte count healthy and ok=True.
+    # Five arms on 2026-08-16 isolated it: no tools -> clean; tools offered but search never
+    # fired -> clean; search ACTIVE and streaming -> corrupt, with the gap sitting exactly on an
+    # SSE frame boundary ('  INA 2' | '08(a)' | '2)(D)') and already absent on the wire, proved
+    # by reconstructing from raw frames in a program sharing no code with this file; search
+    # active and NOT streaming -> clean twice over, 50 annotations, every control string intact.
+    # So the damage is in the vendor's stream framing while its citation post-processor runs,
+    # and turning streaming off is a real repair rather than a warning label.
+    # The cost of unstreamed is that nothing arrives until the whole answer does, so a long
+    # generation holds an idle connection - which is why this is opt-in per provider and not the
+    # default. transport_damage() still runs on every channel regardless: fixing the vendor that
+    # failed is not fixing the class.
+    streaming = prov.get("streaming", True)
     body = {"model": model, "messages": msgs,
             "max_tokens": max_tokens or 64000,
-            "stream": True}
+            "stream": streaming}
     if prov["depth"] == "reasoning":
         body["reasoning"] = dict(reasoning) if reasoning else {"max_tokens": 24000}
     elif prov["depth"] == "thinking":
@@ -2686,7 +2929,9 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                 "single on/off thinking switch and no effort ladder" % (name, prov["label"]))
     if prov["usage_request"] == "openrouter":
         body["usage"] = {"include": True}
-    else:
+    elif streaming:
+        # `stream_options` is meaningless without a stream, and some gateways 400 on it. An
+        # unstreamed response carries `usage` in the body itself, so nothing is lost.
         body["stream_options"] = {"include_usage": True}
     # 🔴 OPENROUTER endpoint pinning, added 2026-08-13 (round 36). Igor gave a specific endpoint
     # UUID for gemini-3.7-flash - the same model is served by SIX OpenRouter endpoints across
@@ -2761,6 +3006,41 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                                     data=json.dumps(payload).encode("utf-8"), headers=headers)
         parts, rchars, use, calls = [], 0, {}, {}
         served = set()
+        if not streaming:
+            # One response object instead of a frame sequence. Same five return values, so every
+            # caller below is untouched - the tool loop, the spend guard and the telemetry cannot
+            # tell the difference. See the block comment on `streaming` above for why MiMo needs
+            # this: its streamed text is missing characters that its unstreamed text keeps.
+            with urllib.request.urlopen(rq, timeout=timeout) as resp:
+                ev = json.loads(resp.read().decode("utf-8", "replace"))
+            if ev.get("error"):
+                stream_error.append(ev["error"])
+            if ev.get("model"):
+                served.add(ev["model"])
+            use = ev.get("usage") or {}
+            for ch in ev.get("choices") or []:
+                msg = ch.get("message") or {}
+                if msg.get("content"):
+                    parts.append(msg["content"])
+                for rk in ("reasoning", "reasoning_content"):
+                    if msg.get(rk):
+                        rchars += len(msg[rk])
+                for an in (msg.get("annotations") or []):
+                    u = ((an or {}).get("url")
+                         or ((an or {}).get("url_citation") or {}).get("url"))
+                    if u:
+                        vendor_cites.append(u)
+                # Whole calls, not deltas: `arguments` is already a complete string here, so it
+                # is wrapped in a one-element list to match what the streaming path assembles.
+                for i, tc in enumerate(msg.get("tool_calls") or []):
+                    fn = tc.get("function") or {}
+                    calls[tc.get("index", i)] = {"id": tc.get("id"),
+                                                 "name": fn.get("name"),
+                                                 "args": [fn.get("arguments") or ""]}
+            return ("".join(parts), rchars, use,
+                    [{"id": v["id"], "name": v["name"], "args": "".join(v["args"])}
+                     for _, v in sorted(calls.items())],
+                    sorted(served))
         with urllib.request.urlopen(rq, timeout=timeout) as resp:
             for raw in resp:
                 line = raw.decode("utf-8", "replace").strip()
@@ -3630,7 +3910,8 @@ def agy_bin():
 # this, because they used to share a blind spot by construction - each had its own copy of the
 # same five literals, so a kind unknown to one was unknown to the other, and a misspelled kind
 # produced neither a preflight warning nor a result, only a log line that scrolls away.
-KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "hermes")
+KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "hermes",
+               "grokcli")
 
 # The degraded path only. When channels.json cannot be loaded there is no `kind` field to read,
 # so these are the names the harness has used, mapped to what they were. Both the historical
@@ -3710,11 +3991,26 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
         else:
             yield "%s: key present (len %d), endpoint %s" % (
                 c, len(key), os.environ.get("MODEL_API_BASE", "https://api.meta.ai/v1"))
-    for kind, resolver in (("codex", codex_bin), ("agy", agy_bin), ("hermes", hermes_bin)):
+    for kind, resolver in (("codex", codex_bin), ("agy", agy_bin), ("hermes", hermes_bin),
+                           ("grokcli", grok_bin)):
         for c in sorted(by_kind.get(kind, [])):
             b = resolver()
             if not (os.path.isfile(b) or shutil.which(b)):
                 yield "%s: binary not found (%s). Install it or exclude the channel." % (c, b)
+    for c in sorted(by_kind.get("grokcli", [])):
+        # 🔴 A MACHINE-WIDE RULES DIRECTORY NO cwd CAN PROTECT AGAINST. This CLI scans
+        # `~/.grok/rules/*.md` for EVERY project, on top of the CLAUDE.md/AGENTS.md discovery
+        # that `--cwd` does neutralise. If it exists, its contents go to the vendor on every
+        # single call, outside the PII gate, and nothing else in this harness would ever say so.
+        rules = os.path.join(os.environ.get("USERPROFILE", ""), ".grok", "rules")
+        n = len([f for f in os.listdir(rules)]) if os.path.isdir(rules) else 0
+        if n:
+            yield ("%s: 🔴 %d file(s) in %s are injected into EVERY grok call, including this "
+                   "one, and --cwd cannot stop it. Read them before this round or move them "
+                   "aside - they leave this machine unfiltered." % (c, n, rules))
+        else:
+            yield ("%s: subscription session (no API key); %s absent, so nothing machine-wide is "
+                   "injected" % (c, rules))
     for c in sorted(by_kind.get("codex", [])):
         quota = codex_quota_snapshot()
         if quota:
@@ -4814,6 +5110,12 @@ def main():
                                         effort=p.get("effort") or "high",
                                         timeout=p.get("timeout") or "25m",
                                         system=_system_for(system, p))
+            elif kind == "grokcli":
+                jobs[cname] = ex.submit(call_grokcli, brief, a.marker, workdir, outfile,
+                                        model=p.get("model"),
+                                        effort=p.get("effort"),
+                                        timeout=p.get("timeout") or "40m",
+                                        system=_system_for(system, p), name=cname)
             elif kind == "hermes":
                 jobs[cname] = ex.submit(call_hermes, brief, a.marker, outfile,
                                         model=p.get("model"), toolsets=p.get("toolsets"),
@@ -4887,8 +5189,36 @@ def main():
     log("\n" + "=" * 78)
     ok_count = 0
     for name, r in results.items():
+        # 🔴 ONE CHOKE POINT, ON PURPOSE. Every channel's text passes through here on its way to
+        # disk, whichever function produced it, so the integrity check is keyed on the DATA and
+        # not on a call site - a channel added next month is covered without anyone remembering
+        # to add it. Wiring it into each of the six `warn`-building blocks instead is how the
+        # per-channel diagnoses in this file went stale one transport at a time.
+        # It runs AFTER `ok` has been decided by the channel function, so it cannot flip a
+        # review to FAILED. That is the intent, not an accident - see transport_damage().
+        _dmg = transport_damage(r.get("text"))
+        for _d in _dmg:
+            r.setdefault("notes", []).append(_d)
         if r.get("text"):
             with open(os.path.join(a.out, name.upper() + ".md"), "w", encoding="utf-8") as f:
+                # 🔴🔴 THE DAMAGE HAS TO BE UNMISSABLE IN THE ARTIFACT, NOT ONLY IN THE LOG.
+                # Seven of the thirteen reviewers of this change, independently, said a `note`
+                # is too weak for a corrupted statutory citation - and they were right about the
+                # risk while wrong about the remedy: their fix was to fail the channel, which
+                # throws away 26 KB of good review to punish 35 characters. orglm52 found the
+                # third option, which is the one taken here: do not escalate the severity, make
+                # the damage impossible to consume silently. The banner goes in the FILE a human
+                # or a downstream tool actually opens, above the answer and clearly marked as
+                # harness output, so nothing the model wrote is altered - the one thing this
+                # project must never do to a reviewer's words.
+                if _dmg:
+                    f.write("> 🔴 **HARNESS WARNING — NOT PART OF THE ANSWER BELOW.**\n>\n"
+                            + "".join("> %s\n" % d for d in _dmg)
+                            + ">\n> The text under this line arrived from the vendor already "
+                              "damaged. It has NOT been altered or repaired here: repairing a "
+                              "model's words is fabrication, so what follows is exactly what was "
+                              "received. Do not lift a quotation, a section number or a figure "
+                              "out of it without opening the source.\n\n---\n\n")
                 f.write(r["text"])
         status = "OK" if r.get("ok") else "PROBLEM"
         slot = (plan or {}).get(name) or {}
@@ -4933,6 +5263,23 @@ def main():
                 % (r.get("in_tokens_total"), r.get("tool_calls") or 0, r.get("cached_in_tokens"),
                    r.get("out_tokens"), r.get("reasoning_chars"), r.get("stop_reason"),
                    r.get("effort"), r.get("block_types")))
+        if kind == "grokcli":
+            # The richest telemetry of any CLI channel here: codex reports nothing at all and agy
+            # needs stream-json to report anything, while this one returns reasoning_tokens in
+            # its ordinary `json` output. `served` is printed because the CLI answers as
+            # `grok-4.6-build` when asked for `grok-4.6` - a mismatch that is normal here and
+            # would look alarming anywhere else.
+            log("    tokens in=%s (cached %s) out=%s | reasoning=%s | turns=%s | served=%s | "
+                "effort=%s"
+                % (r.get("in_tokens"), r.get("cached_in_tokens"), r.get("out_tokens"),
+                   r.get("reasoning_tokens"), r.get("turns"),
+                   ",".join(r.get("model_served") or []) or "-", r.get("effort")))
+            if r.get("usd_reported_unverified") is not None:
+                log("    the CLI reports $%s for this call. NOT added to the round total: this "
+                    "channel authenticates with a subscription session and carries no API key, "
+                    "so whether that figure is a charge or an accounting entry is UNVERIFIED. "
+                    "An unverified number is not rounded to zero here."
+                    % r["usd_reported_unverified"])
         if kind in ("openrouter", "oai") and r.get("out_tokens") is not None:
             # The direct channel finally has real usage numbers; Hermes reported none.
             log("    tokens in=%s (cached %s) out=%s | reasoning=%s tok / %s chars | web=%s | "

@@ -32,50 +32,49 @@ Nothing was inherited from a vendor's documentation without being reproduced.
 
 ## 0.0 Hard rules — these decide outcomes, read them before §0
 
-Auto-compaction re-attaches the most recent invocation of each skill after the summary, **keeping
-the first 5,000 tokens of each**, with a 25,000-token budget shared across all re-attached skills
-and filled most-recent-first — so an older skill can be dropped entirely. This file is therefore
-kept **under** that budget (~4.3K tokens, ~300 lines) and is never clipped; the detail lives in
-`references/` and is read on demand (§0.3). Everything that changes a decision is in this block.
+Auto-compaction re-attaches each skill's most recent invocation after the summary, **keeping the
+first 5,000 tokens**, inside a 25,000-token budget shared across skills and filled
+most-recent-first — so an older skill can be dropped entirely. This file is kept **under** that
+budget and never clipped; detail lives in `references/`, read on demand (§0.3). Everything that
+changes a decision is in this block.
 
 - **A channel that "ran" is not a review that happened.** Exit code, `status`, and even the end
   marker can all be satisfied by a failure. agy returns `status:"SUCCESS"` + exit 0 on an empty
   answer, and `status:"ERROR"` on a complete one (`references/channels.md`). Codex returned a 162-byte **refusal**
   ending in the end marker and was reported OK. Gate on content, never on status.
+- 🔴 **A vendor can deliver the answer with characters MISSING and every other check still passes.**
+  35 `(` absent from a 26 KB review: `INA § 208(a)(2)(D)` arrived as `208(a)2)(D)`, marker present,
+  `ok` true. One vendor's *streamed* transport during its own citation post-processing; that channel
+  is unstreamed now. Every channel is bracket-checked, as a `note` not a warning (a warning would
+  bin the other 26 KB). On `TEXT INTEGRITY:`, copy no quotation or section number from that answer
+  without opening the source.
 - **A refusal on a legal/immigration brief is a FRAMING bug, not a subject ban.** Pass
-  `--system legal-research` and write the brief as source-verification for attorney review, not
-  as filing strategy. Codex then answers 6/6 with perfect citations. Full recipe: **`references/legal-briefs.md`** — read it BEFORE writing the brief.
-- **agy dies silently if a tool is denied.** One auto-denied MCP call discards the whole run.
-  Fixed once by `python patch_agy_permissions.py` (already applied 2026-07-31). If agy starts
-  returning empty answers again, that is the first thing to check (`references/channels.md`).
-- **agy re-runs itself once, automatically, if it cites sources and opened none** — a second agy
-  call, announced before it spends (measured: 0/3 grounded → 8/8). If the retry also grounds
-  nothing the *first* answer is returned, both marked unverified. Never edit this into a loop.
-- **Citations are not evidence — the most reliable failure there is.** Read the `CITATIONS:` line,
-  printed for every channel that reports which pages it opened. For **Codex, which reports no tool
-  telemetry**, "was it opened" is unanswerable, so ask the only remaining question:
-  `citecheck.py --answer reviews\CODEX.md --resolve-urls`, which needs no event log. `DEAD` means
-  the page is not there; `BLOCKED`/`UNKNOWN` mean the check failed and prove nothing — one real
-  DEAD URL was a probe for a tag that does not exist, i.e. the answer.
+  `--system legal-research` and write the brief as source-verification for attorney review, not as
+  filing strategy: codex then answers 6/6. Recipe: **`references/legal-briefs.md`**, read it FIRST.
+- **agy dies silently if a tool is denied** — one auto-denied MCP call discards the whole run.
+  Fixed by `python patch_agy_permissions.py` (applied). Check it first if agy returns empty.
+- **agy re-runs itself once if it cites sources and opened none** — announced before it spends
+  (0/3 grounded → 8/8). If the retry also grounds nothing the *first* answer is returned, both
+  marked unverified. Never edit this into a loop.
+- **Citations are not evidence — the most reliable failure there is.** Read the `CITATIONS:` line.
+  For **Codex, which reports no tool telemetry**, "was it opened" is unanswerable, so ask the only
+  remaining question: `citecheck.py --answer reviews\CODEX.md --resolve-urls`, which needs no event
+  log. `DEAD` = the page is not there; `BLOCKED`/`UNKNOWN` = the check failed and prove nothing.
   Details and the FR-number resolver: `references/verification.md`.
-- **Every model answers in English**, enforced by the default system preset — the report is
-  machine-read, and Russian costs ~2× the tokens (§0.2 below).
-- **Choosing models is config, not code.** `--route "не используй 5.6 Sol, вместо нее 5.5"`,
-  `--skip`, `--set`; check free with `--dry-run` (§0.1 below).
-- **Codex is expensive and slow (~6-25 min).** Never send it a lookup — that is Spark's job, and
-  since 2026-08-07 a lookup is one command: `--ask "…"`.
-- 🔴 **CONTEXT IS ALMOST FREE; SEARCHING IS NOT.** Measured on the round-26 legal brief:
-  `spark12cont` consumed **2,026,852** input tokens (≈ $0.20, no long-context premium) and issued
-  **128 web searches** at $2.50/1,000 — **$0.32, 60 % of that channel's bill.** Caching is
-  automatic and cached input is **50× cheaper**. Sending more material is the cheap lever; asking
-  for more searching is the expensive one — the opposite of how both feel.
+- **Every model answers in English**, enforced by the default preset: Russian costs ~2× the
+  tokens (§0.2).
+- **Choosing models is config, not code.** `--route`, `--skip`, `--set`; free `--dry-run` (§0.1).
+- **Codex is expensive and slow (~6-25 min).** Never send it a lookup: `--ask "…"` is one command.
+- 🔴 **CONTEXT IS ALMOST FREE; SEARCHING IS NOT.** Round-26 legal brief: **2,026,852** input
+  tokens ≈ $0.20 with no long-context premium, against **128 searches** at $2.50/1,000 = **$0.32,
+  60 % of that channel's bill.** Caching is automatic, cached input **50× cheaper**. Sending more
+  material is the cheap lever; asking for more searching is the expensive one.
 
 ## 0.3 Reference files — read on demand
 
-`SKILL.md` is deliberately kept under the 5,000-token budget that an auto-compaction re-attaches,
-so it is never truncated. The detail lives beside it and is read with the Read tool only when
-needed — that costs nothing until it is, and a file read after a compaction returns the material
-complete instead of clipped.
+`SKILL.md` stays under the 5,000-token budget an auto-compaction re-attaches, so it is never
+truncated. The detail lives beside it, read on demand — which costs nothing until it is needed,
+and a file read after a compaction comes back complete instead of clipped.
 
 | file | read it when |
 |---|---|
@@ -108,10 +107,9 @@ That runs **every enabled channel in parallel**, writes one `<CHANNEL>.md` per c
 `--out`, renders `REPORT.md`, and prints a verification block.
 
 🔴 **Do not count the channels from this file, and do not list them.** The number is whatever
-`channels.json` enables; it went three → five → eight → fourteen inside four weeks, and every prose
-copy has been wrong within days — including the `--only` row of this table, which listed seven
-channels three lines under this warning until 2026-08-08. `python routing.py` prints the live set
-and spends nothing. Output filenames are the registry key, upper-cased.
+`channels.json` enables; every prose copy has been wrong within days — including the `--only` row
+below, which listed seven channels three lines under this warning. `python routing.py` prints the
+live set and spends nothing. Output filenames are the registry key, upper-cased.
 
 🔴 **Some channels are deliberately off HERE and on in the published kit, and vice versa**, decided
 by the registry's `distribution` field: this machine has direct vendor keys (Google, Xiaomi, xAI)
@@ -194,7 +192,8 @@ stable and worth knowing:
 | HTTPS endpoint / model | `https://api.meta.ai/v1`; the model comes from `channels.json` and the **registry wins over `MODEL_NAME`** — one process-wide variable cannot address one of two channels on one endpoint. Docs: `dev.meta.ai/docs` (public; the login wall is the console, not the docs) |
 | Codex CLI | resolved via `CODEX_BIN` → PATH → known install dirs |
 | Antigravity CLI | `agy`, **not on PATH** on Windows; resolved via `AGY_BIN` → PATH → `%LOCALAPPDATA%\agy\bin\agy.exe` |
-| agy models | two channels, one model each: **`gemini-3.1-pro`** (agy31pro) and **`gemini-3.6-flash`** (agy36flash), base slug plus `--effort`. **Not** `gemini-3.1-pro-high` — a suffixed slug plus a disagreeing `--effort` is exit 1 in 3 seconds (`references/channels.md` §6.3) |
+| agy models | one model per channel, base slug plus `--effort`. **Not** `gemini-3.1-pro-high` — a suffixed slug plus a disagreeing `--effort` is exit 1 in 3 s (`references/channels.md` §6.3). 🔴 This row said "two channels" while there were three: ask `routing.py`, never this table |
+| Grok Build CLI | `grok`, **not on PATH**; `GROK_BIN` → PATH → `%USERPROFILE%\.grok\bin`. Subscription session, no API key. **Ships OFF**: it will not finish a long review (`stopReason: cancelled`). Reads `CLAUDE.md` from its cwd upward → neutral cwd. Details in `channels.json` |
 | harness | `orchestrate.py`, standard library only, no `pip install`, Python 3.8+ |
 
 **Secrets.** Never `Read`, `cat`, `echo` or `Write-Output` the key. The script reads it from the

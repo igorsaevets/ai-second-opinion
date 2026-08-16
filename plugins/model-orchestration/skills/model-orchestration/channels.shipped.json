@@ -79,7 +79,8 @@
         "orgrok420",
         "ornemotron3ultra",
         "orgpt56terrapro",
-        "ordeepseekv4pro"
+        "ordeepseekv4pro",
+        "orglm52"
       ],
       "aliases": [
         "openrouter",
@@ -109,7 +110,8 @@
       "label": "every Grok, both transports",
       "channels": [
         "grok420",
-        "orgrok420"
+        "orgrok420",
+        "grokbuild"
       ],
       "_added": "2026-08-08 with the Grok channels. Same rule that created the `gemini` group one day earlier: the moment one model is reachable two ways, the vendor word has to mean the FAMILY and the transport words have to mean the transport. `grok420` spends the direct xAI key, `orgrok420` spends the OpenRouter key.",
       "aliases": [
@@ -1066,6 +1068,148 @@
       ],
       "_first_real_run_2026_08_15": "🟢 END TO END THROUGH THE HARNESS, not a raw HTTP probe: an 881-char brief with a live-search question and a planted false claim. 25.6 s, three generations, in=28 837 out=1 149, reasoning 272 tokens, three pages fetched by US (github.com/astral-sh/ruff releases + CHANGELOG + repo root), marker on the last line, citation audit ran (2 cited / 1 LIVE / 1 BLOCKED). It answered correctly with [OPENED] tags and REFUTED the planted claim by quoting the source: «An extremely fast Python linter and code formatter, written in Rust». Cost reported BY THE PROVIDER: $0.025587. 🔴 THE INTERESTING NUMBER IS `cached 21357` OF 28 837 INPUT - 74% of the re-sent conversation came back marked cached, on a route whose catalogue entries all say `supports_implicit_caching: false`. So that flag describes something narrower than «this endpoint caches», and the tool-loop re-send is not being billed at full rate here. Recorded as MEASURED but NOT ATTRIBUTED: the cached count is telemetry, whether the discount reached the price cannot be separated from a three-generation total that may have crossed two providers.",
       "notes": "1.6T MoE (49B active), 1M context, ~$0.35-1.17 per M depending on which of the three allowed hosts serves the call. The cheap panel's CODE voice, the seat kimik3 holds in the standard panel. 🔴 Its agreement with another channel is not corroboration until a quotation has been checked byte-for-byte: the AOS corpus measured kimik3 at 0 of 32 byte-exact quotations because it quoted the BRIEF back rather than the source, and nothing about this vendor makes that failure less likely."
+    },
+    "grokbuild": {
+      "kind": "grokcli",
+      "panel": "cheap",
+      "vendor": "xai",
+      "enabled": false,
+      "🔴🔴_OFF_BY_DEFAULT_2026_08_16_BECAUSE_IT_DOES_NOT_FINISH_A_REVIEW": "Everything else in this block - depth, telemetry, auth, the leak controls - is MEASURED and holds. What does NOT work is the only thing a panel needs: on a 13.6 KB review brief this CLI returns `stopReason: cancelled` after 1-2 turns with 130-330 bytes of planning narration and no review. FOUR arms on 2026-08-16, and the flags were never the cause: (1) no restrictions -> 520 B of narration, «The harness lives under the model-orchestration skill. Next I'll open the registry…»; (2) --tools web_search,web_fetch -> cancelled at 2 turns; (3) the vendor's full documented read-only set including todo_write -> cancelled at 2 turns; (4) that plus an explicit «there is no repository, do not explore» preamble -> cancelled at 1 turn. A SHORT brief works end to end (smoke test: 325 B, marker present, bracket controls intact), so the wiring is right - this is an agentic coding CLI that will not sit still and write a long analytical answer in headless mode. Kept in the registry rather than deleted because the measurements are worth having and `--only grokbuild` still starts it BY NAME for anyone who wants to push on it. 🔴 Do not turn this back on without a run that ends `stopReason: end_turn` with the marker on the last line.",
+      "label": "Grok Build 4.6",
+      "cost": "subscription",
+      "model": "grok-4.6",
+      "effort": "xhigh",
+      "role": "code",
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ],
+      "timeout": "40m",
+      "_added": "2026-08-16 (R44), the operator: «Добавь еще модели: через grok build - Grok 4.6 High. Она по подписке.» A SUBSCRIPTION channel, like codex and agy and unlike grok420: the binary authenticates with a session against cli-chat-proxy.grok.com and holds no API key at all (models_cache.json: auth_method 'session', api_key null, env_key null). grok420 is the same vendor billed per token through api.x.ai; this is not a second transport for one voice, it is a different MODEL (4.6 against 4.20-0309-reasoning), which is why both may run.",
+      "🔴_IGOR_SAID_HIGH_AND_THE_MODEL_HAS_A_RUNG_ABOVE_IT": "He named «Grok 4.6 High», and `high` is indeed what the CLI's own config records as current - but the vendor's model list gives grok-4.6 the ladder [xhigh, high, medium, low], labels xhigh «Highest effort and reasoning level», and grok-4.5 has no xhigh at all. His standing rule is «мозги у всех режимов должны быть на максимум», so the ladder wins over the spoken value and this ships at xhigh. MEASURED rather than assumed, 2026-08-16, two samples per arm: low gave [828, 1697] reasoning tokens, xhigh gave [1918, 4089] - DISJOINT, so the flag reaches the model. A single `high` sample landed at 3859, INSIDE the xhigh range, so high and xhigh are not distinguishable from that evidence and nothing here claims they are.",
+      "_negative_control": "An invented effort value exits 1 - this CLI validates locally, which codex does NOT (it printed «reasoning effort: r43_invented» and let the API refuse). Worth knowing: on this channel a clean exit IS evidence the flag was understood, and on codex it is not.",
+      "_telemetry": "The richest of any CLI channel here. `--output-format json` returns text, stopReason, num_turns, modelUsage and a usage block carrying input_tokens, cache_read_input_tokens, output_tokens and reasoning_tokens. codex reports nothing at all; agy needs stream-json to report anything.",
+      "🔴_THIS_CLI_READS_CLAUDE_MD": "Its documented project-rules discovery loads CLAUDE.md and AGENTS.md from the repo root down to the working directory, in full, at session start - so launched in this project it would hand xAI this project's instruction file, outside the PII gate. The runner passes --cwd neutral_cwd() for exactly that. NOT fully closable: ~/.grok/rules/*.md is scanned for EVERY project and no cwd can prevent it. Verified ABSENT on this machine 2026-08-16, and the preflight now counts it out loud on every run rather than assuming it stayed empty.",
+      "_no_memory": "--no-memory is passed because the CLI otherwise keeps cross-session memory (11 files already under ~/.grok/memory). A review brief is not ours to leave on disk for an unrelated later session to reuse.",
+      "_prompt_file_not_dash_p": "The brief goes through --prompt-file. A review brief is routinely tens of KB and the Windows command line is not - the same trap agy documents, avoided here before it could be hit.",
+      "_usd": "The CLI reports total_cost_usd (~$0.008-0.012 on the probe calls). What that means on a session-authenticated subscription is UNVERIFIED, so it is printed with that word attached and deliberately kept OUT of the round's spend total. A made-up zero would be worse than an absence.",
+      "models": {
+        "grok-4.6": {
+          "label": "Grok 4.6",
+          "data_policy": "xAI subscription through the Grok Build CLI, session-authenticated. This project has NOT verified xAI's consumer-subscription data terms, which are not necessarily the API terms - read them before sending client material.",
+          "aliases": [
+            "grok-4.6",
+            "грок 4.6",
+            "4.6"
+          ],
+          "efforts": [
+            "xhigh",
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "grok-4.5": {
+          "label": "Grok 4.5",
+          "aliases": [
+            "grok-4.5",
+            "грок 4.5",
+            "4.5"
+          ],
+          "efforts": [
+            "high",
+            "medium",
+            "low"
+          ]
+        }
+      },
+      "aliases": [
+        "grokbuild",
+        "grok build",
+        "грок билд",
+        "grokcli",
+        "grok-build",
+        "билд"
+      ],
+      "notes": "The subscription Grok voice, free at the margin like agy and codex. Its web_search and web_fetch are ON by default (the flag is --disable-web-search), the vendor runs the loop, and the harness fetches nothing here - so its grounding is its own claim and only the citation-existence audit can test it."
+    },
+    "orglm52": {
+      "kind": "openrouter",
+      "panel": "cheap",
+      "vendor": "zai",
+      "provider": "openrouter",
+      "enabled": true,
+      "distribution": "both",
+      "label": "GLM 5.2",
+      "cost": "metered",
+      "model": "z-ai/glm-5.2",
+      "role": "code",
+      "provider_route": {
+        "only": [
+          "streamlake",
+          "baidu",
+          "novita"
+        ],
+        "order": [
+          "streamlake",
+          "baidu",
+          "novita"
+        ],
+        "allow_fallbacks": false
+      },
+      "_added": "2026-08-16 (R44), the operator: «https://openrouter.ai/z-ai/glm-5.2 (не забудь прочитать с официальных сайтов документацию по всем параметрам и интернету)». Tenth vendor family. 1M context, open-weights flagship from Z.ai; OpenRouter lists 35 endpoints for it at prices spanning 7x.",
+      "🔴_THE_GATEWAY_RENAMES_THE_LADDER_AND_BOTH_DOCS_ARE_RIGHT": "Z.ai's own documentation, opened live 2026-08-16 at docs.z.ai/guides/llm/glm-5.2, says reasoning_effort takes `max` or `high` and that the DEFAULT is max. OpenRouter's catalogue for the same model says supported_efforts ['xhigh','high'] with default_effort 'high'. Neither is wrong: OpenRouter normalises effort names across vendors and its `xhigh` IS Z.ai's `max`. Consequence with teeth - through THIS channel the top rung is spelled `xhigh`, and sending Z.ai's own spelling would be the unknown value; a direct api.z.ai channel would need `max`. Note also that OpenRouter's default is a rung BELOW its own top, so leaving effort unset would quietly run this channel short.",
+      "reasoning": {
+        "effort": "xhigh"
+      },
+      "supported_efforts": [
+        "xhigh",
+        "high"
+      ],
+      "max_tokens": 128000,
+      "_why_128000_and_not_131072": "The pinned providers do NOT agree: StreamLake caps completions at 128000 while Baidu and Novita allow 131072. A request may be served by any of the three, so the binding limit is the MINIMUM across the pinned set, not the best of them - asking 131072 and landing on StreamLake is a 400 that would look like a channel failure. Z.ai's own overview page independently states 'Maximum Output Tokens 128K', so two sources agree on the floor. This is the general form of the max_tokens rule: min(vendor cap, 131072) becomes min(cap of every provider that could serve it, 131072) the moment a pin lists more than one.",
+      "_why_these_three_providers": "Cheapest three of the 35, AND the same three already proven to serve this account on ordeepseekv4pro. R42's lesson is that a catalogue lists what EXISTS while the account decides what is REACHABLE - the best-argued pin that round 404'd on the account's data policy, and neither /models nor /endpoints shows that. Reusing a provider set with a live track record is a hypothesis with evidence behind it rather than a fresh guess; it is still a hypothesis until this channel itself returns.",
+      "spend_guard": {
+        "max_usd_per_review": 2.0,
+        "_arithmetic": "Same shape as ordeepseekv4pro and the same $2.00, computed not copied. This model's blended price across the pinned three is $0.308-0.339 per M input and $0.968-1.065 per M output - very slightly cheaper than DeepSeek V4 Pro on input. The worst runaway this project has measured is 7.4M billed input tokens in one round, which here would be $2.28-2.51: so $2.00 stops that runaway on all three providers while sitting well above any real review this harness has produced.",
+        "measured_usd": null,
+        "_measured_usd_is_null_on_purpose": "It stays null until a real REVIEW through the harness fills it from that round's own diagnostics. A probe price written here would print in the plan as «spend: measured ...» and read exactly like a measured round. Never fill it from a price multiplied by a token count."
+      },
+      "web": {
+        "enabled": true,
+        "engine": "exa",
+        "max_results": 5,
+        "_engine": "Z.ai is not on OpenRouter's native-search list, so this is Exa whether or not it is named - naming it keeps the per-search cost visible rather than implicit. Exa returns query-selected EXCERPTS with elision markers, not whole pages, which is why the fetch tool below is what makes a quotation from this channel groundable."
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8
+      },
+      "models": {
+        "z-ai/glm-5.2": {
+          "label": "GLM 5.2",
+          "data_policy": "Metered API through OpenRouter, restricted to three third-party hosts (StreamLake, Baidu, Novita) - the payload goes to whichever of them serves the call, NOT to Z.ai itself. OpenRouter documents `provider.data_collection: deny` and `provider.zdr: true` as per-request controls; NEITHER IS SET HERE - see _data_controls_not_wired at the end of this file.",
+          "aliases": [
+            "z-ai/glm-5.2",
+            "glm-5.2",
+            "glm 5.2",
+            "glm52",
+            "глм 5.2",
+            "глм-5.2"
+          ]
+        }
+      },
+      "aliases": [
+        "orglm52",
+        "glm",
+        "глм",
+        "zai",
+        "z.ai",
+        "зетай"
+      ],
+      "notes": "1M context, open weights, and the cheapest frontier-class voice in the panel. Benchmarked by its vendor as the strongest open-source model on Terminal-Bench 2.1 - a vendor's own benchmark claim, recorded as such and not as a finding. Its agreement with another channel is not corroboration until a quotation has been checked byte-for-byte."
     },
     "orgpt56terrapro": {
       "kind": "openrouter",

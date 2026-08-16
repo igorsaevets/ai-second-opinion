@@ -94,6 +94,9 @@ def _rows(d):
             "grounding_basis": r.get("grounding_basis"),
             "fetched_by_us": r.get("fetched_by_us"),
             "vendor_opened": r.get("vendor_opened"),
+            # Annotations the vendor attached, as opposed to URLs found in the prose. The two
+            # disagree often and widely, and until R44 only the prose count was ever printed.
+            "vendor_cited": r.get("vendor_citations"),
             "live": tally.get("LIVE"),
             "dead": c.get("dead"),
             "data_policy": p.get("data_policy"),
@@ -138,8 +141,23 @@ def render(d):
         # the reason it was added: a tier is invisible in the output, and a reader comparing two
         # reports months apart needs to see which regime produced each. The retired words still
         # appear here when someone passes one, which is what makes the row worth reading.
-        L.append("| **TIER** | **%s** | one tier since 2026-08-15: every channel at the maximum "
-                 "depth its vendor accepts. `strategic`/`deep` are aliases of it. |" % tier)
+        # 🔴 PRINT WHAT RAN, NOT WHAT WAS ASKED FOR - and print both when they differ. The
+        # asylum round of 2026-08-15 was launched with `--tier strategic`; the run log correctly
+        # said «tier: max (you asked for 'strategic'; it is an alias)» while THIS row said only
+        # «strategic», a word that has named nothing since the tiers were collapsed. Small, but
+        # it is the same defect as every other one this file records: the report showed the
+        # request where the reader needed the outcome, and a reader comparing two reports months
+        # apart would conclude the runs used different depths.
+        canon = None
+        try:
+            import routing as _rt
+            canon = _rt.canon_tier(_rt.load_registry(), tier)
+        except Exception:                                       # noqa: BLE001
+            canon = None
+        shown = ("**%s** (you asked for `%s`, which is an alias of it)" % (canon, tier)
+                 if canon and canon != tier else "**%s**" % tier)
+        L.append("| **TIER** | %s | one tier since 2026-08-15: every channel at the maximum "
+                 "depth its vendor accepts. `strategic`/`deep` are aliases of it. |" % shown)
     else:
         L.append("| **TIER** | 🔴 **NOT RECORDED - DO NOT TRUST THIS RUN'S DEPTH** | "
                  "`invocation.tier` is absent from diagnostics.json. Either the schema changed "
@@ -249,23 +267,54 @@ def render(d):
     # ---- grounding. The section that stops a citation count being mistaken for evidence. ----
     L.append("## Citations - existence, and separately, grounding")
     L.append("")
-    L.append("| channel | cited | resolved LIVE | DEAD | actually opened |")
-    L.append("|---|---|---|---|---|")
+    L.append("| channel | cited | resolved LIVE | DEAD | actually opened | vendor said it cited |")
+    L.append("|---|---|---|---|---|---|")
     for r in rows:
-        if r["cited"] is None:
+        if r["cited"] is None and r["vendor_cited"] is None:
             continue
-        opened = _UNKNOWN if r["grounded"] is None else "%s of %s" % (r["grounded"], r["cited"])
-        L.append("| `%s` | %s | %s | %s | %s |"
+        # 🔴🔴 THIS COLUMN READ ONE FIELD AND THE ROW CARRIED THREE, so every channel whose
+        # VENDOR does the opening was printed as `-` - which the paragraph below then explains
+        # as "reports no tool telemetry, grounding unknown". Measured on the asylum run of
+        # 2026-08-15, against this file's own diagnostics: goog37flash cited 50 URLs with
+        # vendor_opened=10, goog36flash 3 with 3, grok420 13 with 2. Three channels, all of
+        # them the ones where grounding is actually PROVABLE, reported as unknown. The fields
+        # `vendor_opened` and `grounding_basis` were collected in R29 for exactly this and were
+        # never wired to the only place a human reads them - the same shape as R41's two
+        # counters and R43's truncation reason: the evidence was gathered and not connected.
+        # 🔴 They are NOT summed and NOT merged into one number. That is D6, the defect this
+        # section exists to prevent: "pages WE fetched" is evidence, "pages the vendor SAYS it
+        # opened" is an assertion, and a single column that can mean either is worse than no
+        # column. Hence the label travels with the number.
+        if r["grounded"] is not None:
+            opened = "%s of %s" % (r["grounded"], r["cited"])
+        elif r["vendor_opened"] is not None:
+            opened = "%s — VENDOR-STATED" % _fmt_int(r["vendor_opened"])
+        else:
+            opened = _UNKNOWN
+        L.append("| `%s` | %s | %s | %s | %s | %s |"
                  % (r["name"], _fmt_int(r["cited"]), _fmt_int(r["live"]),
-                    _fmt_int(r["dead"]), opened))
+                    _fmt_int(r["dead"]), opened, _fmt_int(r["vendor_cited"])))
     L.append("")
-    L.append("🔴 **These two columns are not the same claim and the difference is the whole "
+    L.append("🔴 **These columns are not the same claim and the difference is the whole "
              "point.** *LIVE* means the URL resolves - it does not mean the model read it. "
-             "*actually opened* comes from that channel's own tool telemetry and is the only "
-             "grounding evidence there is. A channel can cite seven live government URLs having "
+             "*actually opened* is grounding evidence, and it comes in two grades that are "
+             "never added together: a bare `N of M` counts pages **we** fetched through the "
+             "harness's own tool, which is proof; `N — VENDOR-STATED` is the vendor's own claim "
+             "about pages it opened server-side, which is testimony from the same party whose "
+             "citations are in question. A channel can cite seven live government URLs having "
              "opened two of them; the other five came from memory and are exactly where "
-             "fabricated document numbers appear. Where *actually opened* shows `-`, the channel "
-             "reports no tool telemetry and grounding is **unknown, not good**.")
+             "fabricated document numbers appear. Only where *actually opened* shows `-` does "
+             "the channel report no telemetry at all, and there grounding is "
+             "**unknown, not good**.")
+    L.append("")
+    L.append("*vendor said it cited* is the count of citation annotations the vendor attached to "
+             "the response, and it is here because it routinely disagrees with the URLs present "
+             "in the answer text - the `cited` column. Same run: mimo25pro returned **49** "
+             "annotations while its prose named 2 URLs, orgemini37flash 39 against none at all. "
+             "A large gap is not misconduct; it means the model read sources and then wrote "
+             "about them without linking, so a reader cannot follow its work and the citation "
+             "audit has almost nothing to check. Treat a wide gap as a reason to ask that "
+             "channel for its sources, not as evidence either way.")
     L.append("")
 
     # ---- problems ----

@@ -1539,6 +1539,16 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                 p["_tier_note"] = ("timeout %s only - effort stays %s, pinned in this channel's "
                                    "own block because the subscription has no cheaper setting "
                                    "worth having" % (p["timeout"], p.get("effort")))
+            elif p.get("kind") == "grokcli":
+                # Same shape as codex: a subscription CLI whose depth is pinned in its own block
+                # at the top of the vendor's ladder, so the tier contributes wall-clock only.
+                # Unlike codex, the flag here was proved to move the meter (low [828,1697] vs
+                # xhigh [1918,4089] reasoning tokens, disjoint), so `effort` is load-bearing and
+                # the note says which rung is being bought.
+                p["timeout"] = t.get("grokcli_timeout", p.get("timeout") or "40m")
+                p["_tier_note"] = ("timeout %s only - effort stays %s, the top of this model's "
+                                   "own ladder and proved to move reasoning_tokens"
+                                   % (p["timeout"], p.get("effort")))
         # 🔴 THE TIER DID NOTHING TO THE SPARK CHANNELS, and it looked like it did. The tier
         # varied `thinking.budget_tokens`, but Meta documents that field as "accepted for
         # compatibility but not translated into an effort value" - depth on this endpoint is set
@@ -1756,6 +1766,11 @@ def _web_line(p):
         return "web: built-in search via `-c tools.web_search=true`, plus its MCP page readers"
     if kind == "agy":
         return "web: the CLI's own agent tools plus its MCP servers (search, fetch, browser)"
+    if kind == "grokcli":
+        return ("web: the CLI's built-in web_search and web_fetch, ON by default - the flag is "
+                "--disable-web-search, so access here is opt-OUT, not opt-in. The vendor runs the "
+                "loop and opens the pages, so this channel's grounding is its own claim and the "
+                "harness fetches nothing to check it against")
     return None
 
 

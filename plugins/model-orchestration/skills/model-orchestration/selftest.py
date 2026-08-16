@@ -561,6 +561,7 @@ def suite_dispatch():
         # the sixth kind by the same mechanism.
         "o.call_gemini_direct = stub('gemini')\n"
         "o.call_hermes = stub('hermes')\n"
+        "o.call_grokcli = stub('grokcli')\n"
         # 🔴 THE STUBS MUST REPLACE SOMETHING THAT EXISTS. Found while renaming
         # call_openrouter_reviewer -> call_oai_reviewer on 2026-08-08: `o.old_name = stub(...)`
         # does not fail on a name the module no longer has, it CREATES it. The dispatcher then
@@ -727,6 +728,7 @@ def suite_dispatch():
         "    def boom(*a, **k): raise RuntimeError('simulated wrapper crash')\n"
         "    o.call_http_reviewer = ok; o.call_codex = ok; o.call_oai_reviewer = ok\n"
         "    o.call_hermes = ok; o.call_gemini_direct = ok; o.call_xai_responses = ok\n"
+        "    o.call_grokcli = ok\n"
         "    o.call_agy = boom\n"
         "    t = tempfile.mkdtemp(); b = os.path.join(t, 'b.md')\n"
         "    open(b, 'w', encoding='utf-8').write('hi\\nREVIEW-COMPLETE\\n')\n"
@@ -2300,7 +2302,13 @@ def suite_max_depth_and_explicit_only():
         ladder = ch.get("supported_efforts")
         if not ladder:
             continue
-        got = (ch.get("reasoning") or {}).get("effort")
+        # 🔴 ONE CONCEPT, TWO SPELLINGS, AND READING ONLY ONE IS THIS PROJECT'S OLDEST BUG.
+        # The HTTP-protocol channels carry `reasoning.effort` because that is the wire field;
+        # the CLI channels carry a flat `effort` because that is the command-line flag. Reading
+        # only the nested one would have silently skipped every CLI channel that declares a
+        # ladder - passing green while the check covered nothing, exactly like the telemetry
+        # keyed on retired names and the `n_grounded`-only grounding column. Ask for both.
+        got = ch.get("effort") or (ch.get("reasoning") or {}).get("effort")
         check(got == ladder[0],
               "%s runs at the TOP of its declared ladder" % cname,
               "effort=%r ladder=%s (highest first)" % (got, ladder))
@@ -2461,13 +2469,35 @@ def suite_panels():
         "goog36flash", "goog37flash", "orgemini36flash", "orgemini37flash",
         "mimo25pro", "ormimo25pro", "ornemotron3ultra", "spark12cont",
     }
+    # 🔴 THE DICTATED SET IS AN ANCHOR AND MUST NEVER SHRINK SILENTLY; growth is a SEPARATE,
+    # NAMED list. Equating the two was right while the roster was frozen, and wrong the first
+    # time a channel was added - it turned "did anyone quietly drop one of Igor's channels",
+    # which is the question worth asking, into "has the roster changed at all", which goes red
+    # on every legitimate addition and trains the next person to edit the expected value until
+    # it matches. Splitting them keeps the alarm on the half that matters: a name leaving
+    # DICTATED_CHEAP is still a hard failure, while an addition costs one deliberate line here
+    # that has to say WHY the channel is cheap.
+    ADDED_TO_CHEAP_SINCE = {
+        # R44, 2026-08-16. Both belong by the criterion the panel names - cost - and both were
+        # added at Igor's request in the same message that asked for the models.
+        # NOTE grokbuild carries `enabled: false`: panel membership and enablement are different
+        # questions, and it is filed here as cheap so that turning it on later needs no second
+        # decision about which room it belongs in.
+        "grokbuild":  "subscription CLI, free at the margin exactly like the agy seats",
+        "orglm52":    "$0.308/M in, cheaper than ordeepseekv4pro which he did name as cheap",
+    }
     actual_cheap = {c for c, v in CH.items() if v.get("panel") == "cheap"}
-    check(actual_cheap == DICTATED_CHEAP, "the cheap panel is exactly what Igor dictated",
-          "extra=%s missing=%s" % (sorted(actual_cheap - DICTATED_CHEAP),
-                                   sorted(DICTATED_CHEAP - actual_cheap)))
-    standard_only = {c for c in CH} - DICTATED_CHEAP
+    check(not (DICTATED_CHEAP - actual_cheap),
+          "every channel Igor named as cheap is STILL cheap",
+          "dropped=%s" % sorted(DICTATED_CHEAP - actual_cheap))
+    check(actual_cheap == DICTATED_CHEAP | set(ADDED_TO_CHEAP_SINCE),
+          "the cheap panel is what Igor dictated plus the additions recorded here",
+          "unrecorded=%s" % sorted(actual_cheap - DICTATED_CHEAP - set(ADDED_TO_CHEAP_SINCE)))
+    check(all(ADDED_TO_CHEAP_SINCE.values()),
+          "every later addition to the cheap panel states why it is cheap")
+    standard_only = {c for c in CH} - actual_cheap
     check({c for c, v in CH.items() if v.get("panel") == "standard"} == standard_only,
-          "everything he did not name is standard-only", ", ".join(sorted(standard_only)))
+          "everything outside the cheap panel is standard-only", ", ".join(sorted(standard_only)))
     # The ladder is NESTED, not a partition: «стандартная» has to mean "what normally runs".
     reg = _r.load_registry()
     check(_r.panel_members(reg, "cheap") < _r.panel_members(reg, "standard"),
@@ -2705,8 +2735,29 @@ def suite_panels():
     std = _r.format_plan(_r.resolve(reg5), reg5)
     check("largest bloc:" in std and "largest bloc:" in txt,
           "the largest-vendor share is printed on BOTH panels, not only the alarming one")
-    check("🔴 Where those agree" in txt and "🔴 Where those agree" not in std,
-          "and only the 🔴 escalation is conditional on half the seats")
+    # 🔴 DERIVED FROM THE SEATS, NOT PINNED TO A PANEL. This used to assert literally «cheap
+    # escalates and standard does not», which was true at 6/11 vs 6/15 and became false the
+    # moment R44 added two non-Google channels to the cheap panel and diluted that bloc to
+    # 6/13 = 46%. The escalation correctly stopped firing, and a test pinned to the old roster
+    # called the correct behaviour a regression - the test-the-human defect this file records
+    # four times elsewhere. What the rule actually says is «escalate iff the largest bloc holds
+    # at least half the seats», so compute the share and assert the marker tracks it.
+    def _bloc_share(reg_, **kw):
+        pl = _r.resolve(reg_, **kw)
+        live_ = [c for c, v in pl.items() if v.get("enabled")]
+        t = {}
+        for c in live_:
+            t[pl[c].get("vendor") or c] = t.get(pl[c].get("vendor") or c, 0) + 1
+        top = max(t.values()) if t else 0
+        return top, len(live_)
+
+    for label, kw, text in (("cheap", {"panel": "cheap"}, txt), ("standard", {}, std)):
+        top, seats = _bloc_share(_r.load_registry(), **kw)
+        want = seats and top * 2 >= seats
+        check(("🔴 Where those agree" in text) == bool(want),
+              "the 🔴 escalation on the %s panel tracks the actual bloc share" % label,
+              "largest bloc %d of %d seats; marker %s" % (
+                  top, seats, "present" if "🔴 Where those agree" in text else "absent"))
 
     # ---- the flag reaches the CLI --------------------------------------------------------------
     check(sorted(_o.load_panels()) == sorted(PANELS),

@@ -1,5 +1,78 @@
 # Changelog
 
+## 1.23.0 — 2026-08-16
+
+**A vendor was caught silently deleting characters from its own answers — 35 of them from one
+26 KB legal review, turning `INA § 208(a)(2)(D)` into `INA § 208(a)2)(D)` — while every check
+this harness had reported the review as healthy. That is the failure this whole project exists to
+prevent, found in the one place nothing was looking: not whether the answer arrived, but whether
+it arrived intact.**
+
+### The corruption, and why nothing saw it
+
+- 🔴🔴 **A channel's text can be wrong without anything being missing.** End marker present, byte
+  count healthy, `ok` true, citation audit content — and 35 `(` gone. Five arms isolated the
+  cause: no tools → clean; tools offered but the search never fired → clean; **search actually
+  running and streaming → corrupt**; the same search unstreamed → clean, twice. The damage was
+  already on the wire, proved by reconstructing the answer from raw SSE frames in a program
+  sharing no code with the harness, and it sat exactly on a frame boundary
+  (`'  INA 2'` | `'08(a)'` | `'2)(D)'`). So it is the vendor's stream framing during its citation
+  post-processing, not our assembler.
+- **Streaming is now a per-provider choice** and the affected channel runs unstreamed. Measured
+  44.4 s and 42.3 s unstreamed against 53.9 s streamed, so nothing was traded for it.
+- **`transport_damage()` runs on EVERY channel**, at the single point where each answer is written
+  to disk — keyed on the data, not on a call site, so a channel added next month is covered
+  without anyone remembering. Replayed over the real 14-answer round it flags exactly one answer:
+  the corrupt one. **Zero false positives.**
+- It is a NOTE, never a warning. `ok` is `not warn` everywhere in this codebase, so a warning
+  would throw away a 26 KB usable review over 35 characters, and an unpaired bracket in prose
+  would fail a perfectly good one. Same judgement the citation check already makes.
+
+### Grounding evidence that was collected and never shown
+
+- 🔴 **The "actually opened" column read one field while the record carried three.** Channels
+  whose VENDOR does the opening store it in `vendor_opened`, so they printed `-`, which the
+  paragraph underneath explained as "reports no tool telemetry, grounding unknown". In one real
+  round that mislabelled the three channels where grounding was actually provable: 50 citations
+  with 10 pages opened, 3 with 3, 13 with 2. They now print `N — VENDOR-STATED`, deliberately
+  **not** summed with harness-fetched counts — testimony and evidence stay in different grades.
+- **A new column shows the vendor's own citation count**, which disagreed with the URLs in the
+  prose on seven channels in that round (49 annotations against 2 URLs on one of them). A wide
+  gap is not misconduct; it means the model read sources and wrote about them without linking, so
+  the citation audit has almost nothing to check.
+- The report's TIER row printed the word you typed rather than the tier that ran, so a round
+  launched with the retired `--tier strategic` was filed under a name that has meant nothing
+  since the tiers were collapsed. It now prints both.
+
+### Two channels
+
+- **Grok 4.6 through xAI's own CLI, on a subscription** — session-authenticated, no API key, free
+  at the margin like the other CLI channels. Ships at `xhigh`, the top of the ladder the vendor
+  publishes for this model, proved from the meter rather than from the flag being accepted:
+  `low` produced [828, 1697] reasoning tokens over two runs and `xhigh` [1918, 4089] — disjoint.
+  An invented effort value is rejected locally by this CLI, which is not true of every CLI here.
+  🔴 It reads `CLAUDE.md` and `AGENTS.md` from its working directory upward, so it is launched in
+  a neutral directory; its machine-wide rules directory cannot be neutralised by any working
+  directory and is therefore counted in the preflight on every run.
+- **GLM 5.2 via OpenRouter**, pinned to three providers already proven reachable on this account.
+  🔴 **The gateway renames the depth ladder.** The vendor's own documentation says the top rung is
+  `max`; the gateway's catalogue calls the same rung `xhigh` and defaults a rung below it. Both
+  are correct for their own surface, and a channel that copied the vendor's spelling would be
+  sending an unknown value. `max_tokens` is the **minimum** across the pinned providers, not the
+  best of them: they disagree, any of them may serve the call, and asking for more than the
+  smallest allows is a 400 that would read as a channel failure.
+
+### Tests
+
+- The ladder check read only the nested spelling of `effort`, so it would have silently skipped
+  every CLI channel that declares a ladder — passing green while covering nothing.
+- The cheap-panel roster test equated "what the owner dictated" with "the current roster", so
+  every legitimate addition went red and trained the reader to edit the expected value. Split
+  into an anchor that may never shrink and a named additions list, each entry stating why.
+- The vendor-concentration test asserted which panel escalates. Adding two channels correctly
+  diluted the largest bloc below the threshold, and the pinned test called that a regression. Now
+  derived from the actual seat share.
+
 ## 1.22.0 — 2026-08-15
 
 **Depth stops being a choice: every channel runs at the maximum its own vendor accepts, in every
