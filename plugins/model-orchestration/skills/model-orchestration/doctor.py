@@ -476,8 +476,15 @@ def main():
         except Exception as e:
             r.fail("harness import", repr(e), "orchestrate.py could not be imported")
     if mod:
-        codex_b = check_cli(r, mod, "codex", mod.codex_bin, ["--version"])
-        check_cli(r, mod, "agy", mod.agy_bin, ["--version"])
+        # 🔴 DERIVED FROM CLI_RESOLVERS, NOT TWO LITERALS. Until 2026-08-16 this checked exactly
+        # `codex` and `agy`, so `doctor` was silent about hermes (added 08-01) and grokcli (added
+        # 08-16) - the tool whose whole job is "tell me what is installed" could not see half the
+        # command-line channels. Someone whose Grok Build channel failed every run got a clean
+        # bill of health from the one command they would think to run.
+        bins = {}
+        for kind, resolver in sorted(mod.CLI_RESOLVERS.items()):
+            bins[kind] = check_cli(r, mod, kind, resolver, ["--version"])
+        codex_b = bins.get("codex")
         # A version string is not a capability. See check_codex_sandbox.
         if codex_b:
             check_codex_sandbox(r, mod, codex_b)

@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.24.1 — 2026-08-16
+
+**1.24.0 turned the Grok Build channel on and shipped it broken for everyone except the author.
+Asked "would a colleague's install actually work?", the answer was measured rather than assumed —
+by pointing `GROK_BIN` at a path that does not exist — and it was no.**
+
+- 🔴🔴 **The channel CRASHED instead of degrading.** A missing binary produced a raw
+  `FileNotFoundError` in the operating system's own language, was reported as
+  `(no stock diagnosis)`, and exited 1. `codex` and `kimi` have had a `except FileNotFoundError`
+  guard for months returning `binary not found: <path>`; the fourth CLI kind was added without
+  it. Now identical to its siblings — verified by running all of them with a bad path and
+  comparing: one problem each, no crash, same wording.
+- 🔴 **The advice named every `<CHANNEL>_BIN` variable except the one that would have helped.**
+  The text listed `CODEX_BIN / AGY_BIN / HERMES_BIN`, so the single channel that failed was the
+  single channel not offered a fix. The comment above that line had already predicted this —
+  "repeating a frozen list here could only ever go stale" — and then froze a list. Derived from
+  `CLI_BINARIES` now.
+- 🔴🔴 **`doctor.py` checked two literal binaries and was blind to half the command-line
+  channels.** It knew `codex` and `agy`; it did not know `hermes` (added six weeks earlier) or
+  `grokcli`. So the one command a confused user would run reported a clean bill of health while
+  a channel failed every round. Derived from `CLI_RESOLVERS`; it now reports four.
+- **A first attempt at the fix printed the same diagnosis twice** — the error string and an extra
+  `warnings` entry both matched the same pattern. Caught by comparing against `codex` side by
+  side rather than by reading the output alone. A channel that reports a failure differently
+  from its siblings is a reporting bug even when every fact in it is true.
+- **Six new checks** make a fifth CLI impossible to half-wire: the two halves of the CLI registry
+  must name the same kinds, every CLI kind in the channel registry must have a resolver, the
+  missing-binary advice must name every variable, `doctor` must not go back to literals, and the
+  grok channel must keep its guard. **534/534.**
+- **Documentation.** `INSTALL.md` had no Grok Build section at all and `TROUBLESHOOTING.md` did
+  not mention it once. Added: install and sign-in, the `GROK_BIN` fallback, why the three shipped
+  flags must not be undone, a "command-line reviewer is not installed" entry, and the symptom
+  that is hardest to recognise — a few hundred bytes of *planning* narration and
+  `stopReason: cancelled`, which is a denied tool and not a lazy model.
+
 ## 1.24.0 — 2026-08-16
 
 **A channel that "would not finish a long review" was being denied a tool, and three rounds of

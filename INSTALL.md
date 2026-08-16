@@ -316,7 +316,8 @@ produce. Everything else is optional.
 | `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
 | `MODEL_API_KEY` | the two Spark voices | metered API |
 | the Codex CLI, signed in | `codex` | your existing subscription |
-| the Antigravity CLI, signed in | the two `agy` Gemini channels | your existing subscription |
+| the Antigravity CLI, signed in | the `agy` Gemini channels | your existing subscription |
+| the Grok Build CLI, signed in | `grokbuild` — Grok 4.6, and it opens pages itself | your existing subscription |
 | `GEMINI_API_KEY` | Gemini on Google's **own** API — the best-grounded channel here, and the only one whose citations carry character spans. **Off by default**, see below | metered, free tier available |
 | `XAI_API_KEY` | Grok on xAI's **own** API — adds X/Twitter search and reports the dollar cost of each call. **Off by default** | metered |
 | `MIMO_API_KEY` | MiMo on Xiaomi's **own** API — its search opens whole pages instead of returning excerpts. **Off by default** | metered |
@@ -471,6 +472,40 @@ codex login
 ```
 
 No key needed — it uses your subscription. If you do not have one, run with `--skip codex`.
+
+### Grok Build CLI (Grok 4.6)
+
+```
+grok --version      # expect: grok 1.0.4 (…) [stable] or newer
+grok login
+```
+
+No key needed — it authenticates with a subscription session, and the channel carries no API key
+at all. If you do not have a Grok subscription, run with `--skip grokbuild`; a missing CLI is
+reported and skipped, not fatal.
+
+🔴 **The binary is not on `PATH` on Windows.** The harness looks in `%USERPROFILE%\.grok\bin`
+before giving up, so a default install is usually found without configuration. If yours is
+elsewhere, set `GROK_BIN` to the full path. `python doctor.py` prints which CLIs it found and
+where.
+
+**What this channel is, and what it is not.** It is an agentic *coding* CLI pointed at a review
+brief, and that is the whole difficulty: it runs the tool loop itself, opens pages itself, and
+takes several minutes. In exchange it produced the longest and most-cited answer of any channel
+in the panel it was first enabled for. Three things are configured for you and should not be
+undone:
+
+- **`--allow WebFetch`.** Without it the CLI silently denies any page fetch outside its own
+  vendor's domain, and **one denied tool discards the whole turn** — you get a couple of hundred
+  bytes of planning narration and `stopReason: cancelled`, with nothing saying why. Note the
+  spelling: `--allow` wants `WebFetch`, `--tools` wants `web_fetch`, and the wrong one is
+  accepted while granting nothing.
+- **`--disallowed-tools search_tool,use_tool`.** These are the CLI's gateway to whatever MCP
+  servers you have configured, and `--tools` does **not** bound them. They are removed rather
+  than granted because a review brief is untrusted input and your MCP servers may hold
+  credentials. Web search and page fetching are unaffected — they are built in, not MCP.
+- **No file tools.** `--cwd` bounds where the agent *starts*, not what `read_file` can *open*, so
+  the read tools are not granted at all.
 
 ### Antigravity CLI (Gemini)
 

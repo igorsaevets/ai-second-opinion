@@ -134,6 +134,27 @@ Two different faults look identical:
 2. **The Antigravity channel hit a denied tool permission**, which discards the whole run and
    returns an empty answer with a `SUCCESS` status and exit code `0`. Fix:
    `python patch_agy_permissions.py`. See [INSTALL.md](INSTALL.md).
+3. **A command-line channel had a tool denied mid-answer.** Same failure as (2), different
+   vendor, and it is the single most confusing fault here because the run looks deliberate: a
+   few hundred bytes of *planning* narration — "I will verify the vendor claims first, then…" —
+   and then it stops. On the Grok Build channel the give-away is `stopReason: cancelled`.
+   **One denied tool discards the entire turn**, so the answer you get is whatever the model had
+   said before it reached for the tool. If you have edited the flags for that channel, put them
+   back; the shipped ones are chosen for exactly this.
+
+### "A command-line reviewer is not installed"
+
+The run says `binary not found` and names a path. Three possibilities, in order of likelihood:
+
+1. **You do not have that subscription.** Normal. Run with `--skip <channel>` — the tool is
+   designed to run any subset, and every other channel is unaffected.
+2. **It is installed somewhere the tool did not look.** Set the matching variable — `CODEX_BIN`,
+   `AGY_BIN`, `HERMES_BIN` or `GROK_BIN` — to the full path of the executable.
+3. **It is on `PATH` for your shell but not for this process.** Restart the shell, or use (2).
+
+`python doctor.py` prints every command-line channel it knows about, whether the binary was
+found, where, and what version answered. A channel missing from that list is a bug in the tool,
+not in your setup — please report it.
 
 ### "It refuses to send my document"
 

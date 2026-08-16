@@ -1286,6 +1286,38 @@ def suite_tiers_and_grounding():
     check(not nolog, "every dispatchable kind prints a telemetry line, not only a byte count",
           "silent in the reporter: %s" % nolog)
 
+    # --- every command-line channel is wired into ALL of the places that list CLIs ----------
+    # 🔴 THREE HAND-WRITTEN LISTS OF THE SAME THING, AND ADDING A FOURTH CLI UPDATED NONE OF
+    # THEM. Measured 2026-08-16: `grokcli` shipped, and then the missing-binary advice still
+    # named three env vars (so the channel that failed was the one not offered a fix), doctor.py
+    # checked two literal binaries (so it was blind to grokcli AND hermes), and the preflight had
+    # its own copy. This is the dispatch-on-literals class as an OMISSION rather than a wrong
+    # branch, which is harder to see because nothing errors - the tooling is just quietly silent
+    # about a channel. These four checks are what makes the fifth CLI impossible to half-wire.
+    o_src = (HERE / "orchestrate.py").read_text(encoding="utf-8")
+    d_src = (HERE / "doctor.py").read_text(encoding="utf-8")
+    cli_kinds = {k for k, _, _ in o.CLI_BINARIES}
+    check(cli_kinds == set(o.CLI_RESOLVERS),
+          "CLI_BINARIES and CLI_RESOLVERS name the same kinds",
+          "binaries=%s resolvers=%s" % (sorted(cli_kinds), sorted(o.CLI_RESOLVERS)))
+    # Every CLI kind the REGISTRY actually uses must be one this pair knows about.
+    reg_cli = {v.get("kind") for v in reg["channels"].values()
+               if v.get("kind") in o.KNOWN_KINDS} & cli_kinds
+    missing = {v.get("kind") for v in reg["channels"].values()
+               if v.get("kind") in ("codex", "agy", "hermes", "grokcli")} - cli_kinds
+    check(not missing, "every CLI kind in the registry has a binary resolver", str(missing))
+    check(bool(reg_cli), "at least one CLI channel is in the registry", str(sorted(reg_cli)))
+    # The advice a user reads must name the variable that would fix THEIR channel.
+    advice = next(a for pat, _c, a in o.KNOWN_FAILURES if pat == "binary not found")
+    absent = [env for _, env, _ in o.CLI_BINARIES if env not in advice]
+    check(not absent, "the missing-binary advice names every <CHANNEL>_BIN variable",
+          "not offered as a fix: %s" % absent)
+    # doctor must not go back to naming binaries by hand.
+    check("CLI_RESOLVERS" in d_src,
+          "doctor derives its CLI checks from the registry, not from literal names")
+    check("except FileNotFoundError" in o_src.split("def call_grokcli", 1)[1].split("\ndef ", 1)[0],
+          "the grok CLI channel degrades on a missing binary instead of raising")
+
     # --- the MCP fallback hint is wired, and reaches the prompt ----------------------------
     ch = reg["channels"]["codex"]
     ref = ch.get("fetch_fallback_hint_ref")

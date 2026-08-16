@@ -952,6 +952,22 @@ def scrub_deep(obj):
 # Signature -> (plain-language cause, what to actually do). Matched case-insensitively against
 # the error text. This is what turns diagnostics.json from a stack trace into something an
 # assistant - or a non-technical user pasting the file into a chat - can act on.
+# 🔴 EVERY COMMAND-LINE CHANNEL, IN ONE PLACE, BECAUSE THREE PLACES LISTED THEM BY HAND AND ALL
+# THREE WENT STALE THE DAY A FOURTH WAS ADDED. Measured 2026-08-16: `grokcli` shipped and then
+# (a) the missing-binary advice below still named only three env vars, so the one channel that
+# failed was the one channel not offered a fix; (b) `doctor.py` checked two literal binaries and
+# reported nothing about grok OR hermes; (c) the preflight had its own hand-written tuple.
+# The pairing with CLI_RESOLVERS below is asserted by selftest, so adding a fifth CLI cannot
+# leave half of this wired.
+CLI_BINARIES = (
+    ("codex", "CODEX_BIN", "codex"),
+    ("agy", "AGY_BIN", "agy"),
+    ("hermes", "HERMES_BIN", "hermes.exe"),
+    ("grokcli", "GROK_BIN", "grok.exe"),
+)
+CLI_ENV_VARS = " / ".join(env for _, env, _ in CLI_BINARIES)
+
+
 KNOWN_FAILURES = [
     ("MODEL_API_KEY not set",
      "The Spark channel has no API key.",
@@ -967,7 +983,7 @@ KNOWN_FAILURES = [
      # here could only ever go stale.
      "Either install it, or exclude that channel with --skip <channel>. If it IS installed, point "
      "the harness at it explicitly with the matching <CHANNEL>_BIN environment variable "
-     "(CODEX_BIN / AGY_BIN / HERMES_BIN). `python doctor.py` reports which ones were found."),
+     "(" + CLI_ENV_VARS + "). `python doctor.py` reports which ones were found."),
     # Two spellings of one failure: the agy path says "END MARKER ABSENT", the HTTP path says
     # "END MARKER NOT ON LAST LINE". Until 2026-08-14 this pattern knew only the first, so the
     # second was recorded with likely_cause=null and the console's "cause and fix for each"
@@ -2244,6 +2260,24 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                            timeout=_seconds(timeout, 2400))
+    except FileNotFoundError:
+        # 🔴 WITHOUT THIS THE CHANNEL CRASHES ON EVERY MACHINE THAT DOES NOT HAVE THE CLI, which
+        # is every machine except the author's. Measured 2026-08-16 by pointing GROK_BIN at a
+        # path that does not exist: the run printed a raw `FileNotFoundError(2, ...)` in the
+        # operating system's own language, was reported as «(no stock diagnosis)», and exited 1.
+        # codex and kimi have had this exact guard for months; the fourth CLI kind was added
+        # without it, which is this project's dispatch-on-literals class showing up as an
+        # OMISSION rather than a wrong branch. The wording matches theirs on purpose - the
+        # KNOWN_FAILURES table keys on the substring "binary not found", so a channel that
+        # phrases it differently gets no plain-language diagnosis.
+        # Shape copied from call_codex EXACTLY, including what it does NOT contain. A first
+        # version added `"warnings": ["BINARY NOT FOUND"]`, which looks like more information and
+        # is worse: the KNOWN_FAILURES table matches on the substring, so the error and the
+        # warning both matched it and the console printed the same plain-language diagnosis
+        # TWICE for one missing file. codex printed it once. Measured side by side before and
+        # after - a channel that reports a failure differently from its siblings is a reporting
+        # bug even when every fact in it is true.
+        return {"channel": name, "ok": False, "error": "binary not found: " + binary}
     except subprocess.TimeoutExpired:
         return {"channel": name, "ok": False, "text": "", "seconds": round(time.time() - t0, 1),
                 "error": "TIMEOUT after %s" % (timeout or "40m"), "model": model,
@@ -3993,6 +4027,18 @@ def agy_bin():
     ])
 
 
+# The other half of CLI_BINARIES: kind -> the function that finds that binary. Split from the
+# tuple only because the resolvers carry per-platform search paths and have to be defined after
+# _resolve_bin. selftest asserts the two halves have identical keys, which is what stops the
+# next CLI from being added to one and not the other - the failure this pair exists to prevent.
+CLI_RESOLVERS = {
+    "codex": codex_bin,
+    "agy": agy_bin,
+    "hermes": hermes_bin,
+    "grokcli": grok_bin,
+}
+
+
 # Every `kind` the dispatcher can launch. ONE home: both main() and channel_preflight() read
 # this, because they used to share a blind spot by construction - each had its own copy of the
 # same five literals, so a kind unknown to one was unknown to the other, and a misspelled kind
@@ -4078,8 +4124,7 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
         else:
             yield "%s: key present (len %d), endpoint %s" % (
                 c, len(key), os.environ.get("MODEL_API_BASE", "https://api.meta.ai/v1"))
-    for kind, resolver in (("codex", codex_bin), ("agy", agy_bin), ("hermes", hermes_bin),
-                           ("grokcli", grok_bin)):
+    for kind, resolver in sorted(CLI_RESOLVERS.items()):
         for c in sorted(by_kind.get(kind, [])):
             b = resolver()
             if not (os.path.isfile(b) or shutil.which(b)):
