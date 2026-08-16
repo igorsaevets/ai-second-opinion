@@ -66,8 +66,15 @@ ONLY = ["только", "лишь", "исключительно", "only", "just 
 # the same over-matching that made a bare `5.6` route to the wrong model in this very round.
 # Only unambiguous ADDITIVE phrases are listed, and "и ещё" is included because the "ещё"
 # carries the meaning that "и" alone does not.
+# 🔴 «включая» WAS MISSING AND IT IS THE WORD IGOR ACTUALLY USES. R43, verbatim: «он не должен
+# запускаться, без явного: "Запусти все, включая Terra pro"». That exact sentence was a hard
+# ROUTE ERROR - the router recognised the channel, found no instruction word, and refused. So the
+# one phrasing named in the instruction that AUTHORISES the channel was the one phrasing that
+# could not authorise it. Found by running his sentence verbatim instead of a paraphrase of it,
+# which is the only way this class is ever found: every ADD word already here was one someone
+# imagined, and «и ещё»/«плюс» were imagined by the same person who then wrote «включая».
 ADD = ["и ещё", "и еще", "а также", "плюс ", "добавь", "добавить", "дополнительно", "вместе с",
-       "and also", "plus ", "add "]
+       "включая", "включительно", "в том числе", "and also", "plus ", "add ", "including"]
 
 
 class RouteError(Exception):
@@ -547,6 +554,45 @@ def _check_tiers(reg):
                 % (tname, lvl, ", ".join(sorted(legal))))
 
 
+def tier_alias_index(reg):
+    """Every word that may follow `--tier`, mapped to the canonical tier it names.
+
+    Includes each tier's own key, so this is the whole accepted vocabulary in one place.
+    """
+    out = {}
+    for tname, t in (reg.get("tiers") or {}).items():
+        if tname.startswith("_") or not isinstance(t, dict):
+            continue
+        out[tname.lower()] = tname
+        for a in t.get("aliases") or []:
+            out[str(a).lower().replace("ё", "е")] = tname
+    return out
+
+
+def canon_tier(reg, name):
+    """
+    Resolve a tier word to the tier it names, or raise with the accepted vocabulary.
+
+    🔴 THIS EXISTS BECAUSE R43 COLLAPSED TWO TIERS INTO ONE AND `strategic`/`deep` HAD TO KEEP
+    WORKING. They are now aliases of `max`. The alternative - deleting the words - would have
+    broken every stored command in the other project, and the alternative to THAT - accepting
+    them and silently resolving to the default - is the flag-accepted-but-not-applied class this
+    repository has recorded five times. So they resolve, and the caller is told which word it
+    honoured so the plan can print it.
+    """
+    if not name:
+        return None
+    idx = tier_alias_index(reg)
+    key = str(name).lower().replace("ё", "е")
+    if key in idx:
+        return idx[key]
+    raise RouteError(
+        "unknown tier %r. Accepted: %s. (Since 2026-08-15 there is exactly ONE tier - every "
+        "channel runs at the maximum depth its vendor accepts - and the old names strategic|deep "
+        "are kept as aliases of it so nothing anyone typed before breaks.)"
+        % (name, ", ".join(sorted(idx))))
+
+
 def _check_panels(reg):
     """
     Validate the `panels` ladder and normalise every channel's membership.
@@ -823,6 +869,7 @@ def initial_plan(reg):
                 "default_enabled": ch.get("enabled", True),
                 "spend_guard": ch.get("spend_guard") or None,
                 "panel": ch.get("panel"), "vendor": ch.get("vendor") or c,
+                "explicit_only": bool(ch.get("explicit_only")),
                 "kind": ch["kind"], "label": ch.get("label", c),
                 "effort": ch.get("effort"), "agent": ch.get("agent"), "why": []}
             for c, ch in reg["channels"].items()}
@@ -958,6 +1005,20 @@ def _scan(text, idx):
     for kind, words in (("neg", NEG), ("subst", SUBST), ("only", ONLY), ("add", ADD)):
         for w in words:
             for m in re.finditer(re.escape(w), t):
+                # 🔴🔴 A NEGATED ADD IS A NEGATION, AND GETTING THIS WRONG PUT THE $12 CHANNEL IN
+                # A ROUND THAT SAID «NOT». Found by a reviewer, by execution, in the round that
+                # created it: «Запусти все, НЕ включая Terra pro» matched the ADD word «включая»
+                # inside «не включая», the ADD branch enabled the channel, and the user's «не»
+                # became decoration. The inverse of the very bug this ADD word was added to fix,
+                # one sentence away from the phrasing that authorises the channel - so the two
+                # sentences a human would actually write meant the SAME thing and one of them
+                # was a lie. Checked here rather than in apply_route because a marker's polarity
+                # is a property of the token, not of the branch that later consumes it.
+                if kind in ("add", "only", "subst"):
+                    before = t[max(0, m.start() - 14):m.start()]
+                    if re.search(r"(?:^|\s)(?:не|нe|without|not|кроме|без)\s*$", before):
+                        marks.append((m.start(), "neg", w))
+                        continue
                 marks.append((m.start(), kind, w))
     ents = []
     taken = []
@@ -1088,8 +1149,17 @@ def apply_route(plan, reg, text):
 
         else:
             raise RouteError(
-                "%r mentions %s but no instruction word (не использовать / вместо / только). "
-                "Say what to do with it." % (text, cname))
+                # 🔴 THE MESSAGE LISTED THREE OF THE FOUR MODES AND OMITTED THE ONE THE READER
+                # MOST OFTEN WANTS. ADD has existed since R38 and this sentence never mentioned
+                # it, so «используй терра» - a natural way to ask for an opt-in channel - was
+                # refused with a list of alternatives that did not contain the right answer.
+                # A refusal is only as good as the instruction it gives.
+                "%r mentions %s but no instruction word. Say what to do with it: «только %s» "
+                "(that one and nothing else), «включая %s» / «плюс %s» (the usual set AND that "
+                "one), «не используй %s» (drop it), or «X вместо %s» (swap). A bare name is not "
+                "an instruction, and guessing between «only» and «also» is exactly the guess "
+                "that would spend money on the wrong set."
+                % (text, cname, cname, cname, cname, cname, cname))
 
     if only_list:
         for c in plan:
@@ -1161,6 +1231,18 @@ def canon_channel(reg, name):
     for cname, ch in reg["channels"].items():
         if key in [a.lower() for a in ch.get("aliases", [])]:
             return [cname]
+    # 🔴 MODEL ALIASES ARE THE LAST RESORT, AND THEY WERE MISSING ENTIRELY UNTIL R43. The free-text
+    # router resolves them (`_scan` indexes model aliases too), so «только 5.6 terra» worked while
+    # `--only "5.6 terra"` died with «unknown channel» - the two selection paths accepting
+    # different vocabularies, which is the same defect shape as `--only http` in July and as the
+    # two paths disagreeing about default-off channels in August. Named by a reviewer this round.
+    # Tried LAST so a channel or group word always wins: a model name is the more specific thing
+    # to say, but it must never shadow the name of a channel.
+    for cname, ch in reg["channels"].items():
+        for mid, mv in (ch.get("models") or {}).items():
+            if key == mid.lower() or key in [str(a).lower()
+                                             for a in (mv or {}).get("aliases", [])]:
+                return [cname]
     raise RouteError("unknown channel %r. Channels: %s. Groups: %s. Accepted aliases: %s"
                      % (name, ", ".join(plan_names(reg)),
                         ", ".join(sorted(reg.get("groups") or {})),
@@ -1222,6 +1304,103 @@ def apply_flags(plan, reg, only=None, skip=None, sets=None):
     return plan
 
 
+def _group_alias_words(reg):
+    """Every lowercase word that names a GROUP rather than a single channel."""
+    out = set()
+    for gname, g in (reg.get("groups") or {}).items():
+        if gname.startswith("_") or not isinstance(g, dict):
+            continue
+        out.add(gname.lower())
+        out.update(str(a).lower().replace("ё", "е") for a in g.get("aliases") or [])
+    return out
+
+
+def explicitly_named(reg, route=None, only=None, sets=None):
+    """
+    The channels the human named BY THEIR OWN NAME - never through a group.
+
+    🔴 THIS INFORMATION IS DESTROYED EVERYWHERE ELSE, ON PURPOSE. `canon_channel` maps a group
+    word to its member channels and `_expand_groups` rewrites a group token into channel tokens,
+    both of them precisely so that every downstream branch can stop caring about the difference.
+    By the time a plan exists, `--only openrouter` and `--only terra` are the same object. This
+    function is the one place that still knows, and it therefore has to be computed from the
+    WORDS rather than recovered from the plan.
+    """
+    named = set()
+    gwords = _group_alias_words(reg)
+    for spec in sets or []:
+        nm = str(spec).split("=", 1)[0].strip()
+        if nm.lower().replace("ё", "е") not in gwords:
+            named.update(canon_channel_safe(reg, nm))
+    for nm in only or []:
+        if str(nm).strip().lower().replace("ё", "е") not in gwords:
+            named.update(canon_channel_safe(reg, nm))
+    if route:
+        # Scanned WITHOUT _expand_groups: a group token stays a group token and is not counted.
+        for tok in _scan(route, alias_index(reg)):
+            if tok[1] != "entity":
+                continue
+            # 🔴 BOTH ENTITY KINDS CARRY THE CHANNEL IN SLOT 1; the model id is in slot 2.
+            # ('model', 'orgpt56terrapro', 'openai/gpt-5.6-terra-pro'). The first draft here read
+            # slot 1 as the model id for kind=='model' and searched the registry for it, which
+            # found nothing - so «Запусти все, включая Terra pro», Igor's own authorising
+            # sentence, resolved the channel and then did not count it as named, and Terra
+            # stayed off. Naming a channel by its MODEL is naming it MORE precisely, not less.
+            if tok[2][0] in ("channel", "model"):
+                named.add(tok[2][1])
+    return named
+
+
+def apply_explicit_only(plan, reg, named):
+    """
+    A channel marked `explicit_only` runs ONLY when the human named it. Never via a group.
+
+    🔴 IGOR, R43: «Terra Pro не тестируй и он не должен запускаться, без явного ... только если
+    явно назовут: Terra». `enabled: false` was ALREADY true of that channel and was not enough,
+    and the gap is worth stating precisely because it is invisible from the channel's own block:
+    `--only <group>` deliberately RESURRECTS a default-off channel - that is the documented
+    opt-in path - and orgpt56terrapro sits in TWO groups, `openrouter` (aliases openrouter,
+    опенроутер, **or**) and `openai` (aliases openai, gpt, гпт, chatgpt, чатгпт). So «--only
+    openrouter», «--only gpt» or a route saying «только openrouter» would each have woken the one
+    channel in this registry with a measured $12.08 runaway, and the plan would have called it an
+    explicit opt-in because at that point in the pipeline it could no longer tell.
+
+    Filtering DOWN is safe to do silently; this is not silent. The whole point of the change is
+    that a word which used to include this channel now does not, and a human who typed that word
+    is entitled to see the difference. Hence a line in `why` AND a warning collected for the plan.
+    """
+    for cname, p in plan.items():
+        ch = reg["channels"].get(cname) or {}
+        hard = bool(ch.get("explicit_only"))
+        # 🔴🔴 THE SAME RULE, GENERALISED - AND IT CLOSED A MONEY BUG NOBODY HAD LOOKED FOR.
+        # Testing Igor's own phrasings, «запусти только грок» resolved to TWO channels: grok420
+        # (the direct xAI key) and orgrok420 (the OpenRouter twin, `enabled: false` here because
+        # its `distribution` is `kit`). The group word woke a channel that exists for people who
+        # do NOT have the direct key, so this machine would have paid OpenRouter's margin for a
+        # second copy of an answer it was already buying directly. Same for «только mimo» and
+        # «только gemini» (which also woke orgemini36flash).
+        #
+        # The registry already contains this exact argument - `_panels_doc` explains that a panel
+        # must never resurrect, because `enabled` is what package.py flips per distribution and
+        # resurrecting means «paying twice for one voice». That reasoning was written about
+        # panels and never carried across to groups, which had the identical shape. Naming the
+        # channel still works, in both flag and prose form; only the GROUP word stops doing it.
+        off_by_default = not p.get("default_enabled", True)
+        if not p.get("enabled") or not (hard or off_by_default):
+            continue
+        if cname in named:
+            p["why"].append("named directly, which is the only way to start a channel that is "
+                            "off by default")
+            continue
+        p["enabled"] = False
+        p["why"].append(("explicit_only: " if hard else "")
+                        + "NOT named directly - a group, a panel or a default cannot start "
+                          "a channel that is off by default")
+        reg.setdefault("_explicit_only_blocked" if hard else "_default_off_blocked",
+                       []).append(cname)
+    return plan
+
+
 def apply_panel(plan, reg, panel):
     """
     Narrow the plan to one panel. FILTERS DOWN ONLY - it never enables a channel.
@@ -1245,6 +1424,14 @@ def apply_panel(plan, reg, panel):
 
 def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=None):
     plan = initial_plan(reg)
+    # Computed BEFORE anything expands a group, and kept for the explicit_only gate below. The
+    # route is re-scanned there rather than passed through, because extract_panel is about to
+    # rewrite it and the panel word is not a channel name.
+    named_directly = explicitly_named(reg, route=route, only=only, sets=sets)
+    reg["_tier_asked"] = tier
+    tier = canon_tier(reg, tier)
+    reg["_tier_chosen"] = tier
+    reg.pop("_explicit_only_blocked", None)
     # PANEL FIRST, so that a name given afterwards can still put a channel back. «дешевая
     # панель, плюс codex» is a sentence a human will write, and it can only mean what it says
     # if the narrowing happens before the naming; the reverse order would resolve --panel cheap
@@ -1312,6 +1499,12 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
             % (", ".join(clash), " and ".join(clash),
                " | ".join("%s: %s" % (c, "; ".join(plan[c]["why"])) for c in clash)))
 
+    # AFTER every selection path has had its say, and before the tier decorates anything: a
+    # channel that may only be started by name is either named or it is off. Placed here rather
+    # than inside apply_flags/apply_route so that adding a THIRD selection path later cannot
+    # reopen the hole - the gate does not care which path enabled the channel.
+    plan = apply_explicit_only(plan, reg, named_directly)
+
     # 🔴 DECORATE BEFORE APPLYING THE TIER, not after. The tier now SCALES per-channel values
     # (`reasoning.max_tokens`, `fetch_tool.max_calls`) and OVERRIDES one (`thinking_level`), and
     # all three arrive in the plan through _decorate. Run the other way round - which is how this
@@ -1366,24 +1559,24 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
         # absolute numbers, so `strategic` (scale 1) is bit-for-bit what ran before and only
         # `deep` costs anything new. An absolute value here would have quietly DOWNGRADED
         # qwen38max, whose registry effort is already xhigh.
+        # 🔴 THE TIER STOPPED TOUCHING THESE CHANNELS IN R43, AND THE NOTE HAD TO CHANGE WITH IT.
+        # It used to multiply `reasoning.max_tokens` and `fetch_tool.max_calls` by the tier's two
+        # scales; with one tier a multiplier is an obfuscated constant, so both are gone and the
+        # depth is declared in each channel's own block at that vendor's ceiling. What the note
+        # prints now is therefore the RESOLVED DEPTH rather than a delta - because with nothing to
+        # compare against, "nothing this tier can raise on this channel" is technically true, says
+        # nothing a reader can act on, and reads like a limitation rather than like a ceiling.
             elif p.get("kind") in ("openrouter", "oai"):
-                changed = []
-                rs = float(t.get("or_reasoning_scale") or 1)
-                if rs != 1 and isinstance(p.get("reasoning"), dict):
-                    r = dict(p["reasoning"])
-                    if r.get("max_tokens"):
-                        r["max_tokens"] = int(r["max_tokens"] * rs)
-                        changed.append("reasoning cap %s" % r["max_tokens"])
-                    p["reasoning"] = r
-                fs = float(t.get("fetch_scale") or 1)
-                if fs != 1 and isinstance(p.get("fetch_tool"), dict) \
-                        and p["fetch_tool"].get("enabled"):
-                    ftl = dict(p["fetch_tool"])
-                    ftl["max_calls"] = int((ftl.get("max_calls") or 8) * fs)
-                    p["fetch_tool"] = ftl
-                    changed.append("page-fetch budget %s" % ftl["max_calls"])
-                p["_tier_note"] = ", ".join(changed) if changed else \
-                    "nothing this tier can raise on this channel"
+                r = p.get("reasoning") if isinstance(p.get("reasoning"), dict) else {}
+                if r.get("effort"):
+                    depth = "reasoning effort %s (this model's declared ceiling)" % r["effort"]
+                elif r.get("max_tokens"):
+                    depth = "reasoning budget %s tokens" % r["max_tokens"]
+                else:
+                    depth = "no reasoning knob on this model"
+                room = ("; %s tokens for reasoning+answer together" % p["max_tokens"]
+                        ) if p.get("max_tokens") else ""
+                p["_tier_note"] = depth + room
             elif p.get("kind") == "gemini":
                 # Believed impossible until 2026-08-08: the 08-07 probe sent `thinking_level` at
                 # the top level, got "Unknown parameter", and concluded the knob did not exist.
@@ -1404,11 +1597,10 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                     if before and before != lvl:
                         p["_tier_note"] = "thinking_level %s -> %s" % (before, lvl)
                     elif ladder and lvl == ladder[-1]:
-                        p["_tier_note"] = ("nothing this tier can raise on this channel - "
-                                           "thinking_level is already %s, the top of %s"
-                                           % (lvl, "|".join(ladder)))
+                        p["_tier_note"] = ("thinking_level %s, the top of %s - this channel's "
+                                           "ceiling" % (lvl, "|".join(ladder)))
                     else:
-                        p["_tier_note"] = "thinking_level=%s (unchanged by this tier)" % lvl
+                        p["_tier_note"] = "thinking_level=%s" % lvl
             elif p.get("kind") == "xai":
                 # 🔴 "no depth knob on this VENDOR" was the first wording and it was wrong in a
                 # way that mattered: xAI's own docs document `reasoning_effort` on grok-4.5 and
@@ -1422,8 +1614,9 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                 # It also gets the tier's TIMEOUT now; before 2026-08-08 the dispatcher passed
                 # none, so `deep` was a literal no-op here while this line said "wall-clock".
                 p["timeout"] = t.get("codex_timeout", "50m")
-                p["_tier_note"] = ("no depth knob on THIS MODEL (other xAI models have one) - "
-                                   "the tier buys wall-clock only: timeout %s" % p["timeout"])
+                p["_tier_note"] = ("no depth knob on THIS MODEL (other xAI models have one); "
+                                   "%s tokens for reasoning+answer together, timeout %s"
+                                   % (p.get("max_tokens"), p["timeout"]))
     return plan
 
 
@@ -1666,6 +1859,33 @@ def format_plan(plan, reg):
                          "always declare one, so this is a channel your settings file added."
                          % (cname, reg.get("default_panel")))
         lines.append("-" * 78)
+    # 🔴 THE TIER LINE PRINTS THE WORD THAT WAS TYPED AND THE TIER THAT RESOLVED, even when they
+    # are the same. A collapse from two names to one is exactly the moment when a human keeps
+    # typing the old word for months; saying nothing would let `--tier deep` look like it still
+    # selects something. The second sentence is what stops the first from being a boast.
+    if reg.get("_tier_chosen"):
+        asked, got = reg.get("_tier_asked"), reg["_tier_chosen"]
+        extra = ("" if str(asked).lower() == got.lower() else
+                 " (you asked for %r; it is an alias)" % asked)
+        lines.append("  tier: %s%s - how deep each reviewer goes. There is exactly ONE tier since "
+                     "2026-08-15" % (got, extra))
+        lines.append("           and it is every channel's own ceiling, so this is not a choice "
+                     "and cannot be lowered.")
+        lines.append("           A panel changes WHO is in the room; it never changes this.")
+        lines.append("-" * 78)
+    # Channels that a word ALMOST reached. Printed by name, because the whole point of the change
+    # is that «--only openrouter» now means one channel fewer than it did, and a set that silently
+    # shrinks is indistinguishable from a set that did not.
+    blocked = reg.get("_explicit_only_blocked") or []
+    if blocked:
+        for cname in blocked:
+            lines.append("  🔴 %s was NOT started: it runs only when named directly (%s), never "
+                         "through a group," % (cname, "/".join(
+                             (reg["channels"][cname].get("aliases") or [cname])[:3])))
+            lines.append("     a panel or a default. A group word that used to include it - e.g. "
+                         "`--only openrouter` -")
+            lines.append("     silently woke it before 2026-08-15.")
+        lines.append("-" * 78)
     for c, p in plan.items():
         mark = "RUN " if p["enabled"] else "skip"
         cost = reg["channels"][c].get("cost", "?")
@@ -1770,7 +1990,16 @@ def format_plan(plan, reg):
     return "\n".join(lines)
 
 
-def _cli_choices(path, key):
+def _cli_default(path, key, fallback=None):
+    """A default declared in the registry, so the flag and the file cannot disagree."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh).get(key) or fallback
+    except Exception:                                     # noqa: BLE001
+        return fallback
+
+
+def _cli_choices(path, key, with_aliases=False):
     """
     Names declared under `key` in the registry, for an argparse `choices`, or None.
 
@@ -1789,8 +2018,20 @@ def _cli_choices(path, key):
     try:
         with open(path, encoding="utf-8") as fh:
             d = json.load(fh).get(key)
-        names = sorted(k for k in d if not k.startswith("_")) if isinstance(d, dict) else []
-        return names or None
+        if not isinstance(d, dict):
+            return None
+        names = [k for k in d if not k.startswith("_")]
+        if with_aliases:
+            # 🔴 WITHOUT THIS, R43's TIER COLLAPSE WOULD HAVE BROKEN EVERY STORED COMMAND.
+            # `strategic` and `deep` became aliases of the single `max` tier; argparse validates
+            # against `choices` BEFORE any of our code runs, so a choices list built from the
+            # tier KEYS alone would reject `--tier deep` with a bare argparse error and no
+            # explanation, in the other project's scripts, at the worst possible moment.
+            for k in names[:]:
+                for a in (d[k] or {}).get("aliases") or []:
+                    if a not in names:
+                        names.append(a)
+        return sorted(names) or None
     except Exception:                                     # noqa: BLE001
         return None
 
@@ -1802,10 +2043,11 @@ def main():
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--skip", nargs="*")
     ap.add_argument("--set", dest="sets", nargs="*")
-    ap.add_argument("--tier", default="strategic",
-                    choices=_cli_choices(DEFAULT_REGISTRY, "tiers"),
-                    help="depth per channel. Choices come from the registry, so a tier deleted "
-                         "there is really deleted here")
+    ap.add_argument("--tier", default=_cli_default(DEFAULT_REGISTRY, "default_tier", "max"),
+                    choices=_cli_choices(DEFAULT_REGISTRY, "tiers", with_aliases=True),
+                    help="depth per channel. Since 2026-08-15 there is exactly ONE tier and it "
+                         "is the ceiling; strategic|deep still parse as aliases of it. Choices "
+                         "and the default both come from the registry")
     ap.add_argument("--panel", default=None,
                     choices=_cli_choices(DEFAULT_REGISTRY, "panels"),
                     help="which reviewers are in the room. Orthogonal to --tier, which is how "

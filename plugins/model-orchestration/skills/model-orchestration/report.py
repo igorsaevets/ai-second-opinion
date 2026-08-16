@@ -133,8 +133,13 @@ def render(d):
     # spelled the same way as a value.
     tier = inv.get("tier")
     if tier:
-        L.append("| **TIER** | **%s** | depth and timeouts for every channel. A weak tier "
-                 "produces a fluent, shallow review that reads exactly like a deep one. |" % tier)
+        # 🔴 R43: there is ONE tier and it is every vendor's ceiling, so this row no longer warns
+        # about a weak setting - it CONFIRMS the maximum was used. Kept rather than deleted for
+        # the reason it was added: a tier is invisible in the output, and a reader comparing two
+        # reports months apart needs to see which regime produced each. The retired words still
+        # appear here when someone passes one, which is what makes the row worth reading.
+        L.append("| **TIER** | **%s** | one tier since 2026-08-15: every channel at the maximum "
+                 "depth its vendor accepts. `strategic`/`deep` are aliases of it. |" % tier)
     else:
         L.append("| **TIER** | 🔴 **NOT RECORDED - DO NOT TRUST THIS RUN'S DEPTH** | "
                  "`invocation.tier` is absent from diagnostics.json. Either the schema changed "

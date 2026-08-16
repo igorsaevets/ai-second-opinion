@@ -392,9 +392,70 @@ def check_skill_size(r):
         r.ok("skill size", "; ".join(bits))
 
 
+def check_effort_ladders_live(r):
+    """Compare each channel's declared `supported_efforts` against the VENDOR's live catalogue.
+
+    🔴🔴 THIS EXISTS BECAUSE THE SELF-TEST'S LADDER CHECK IS A TAUTOLOGY, and reviewers of round
+    43 said so independently. That check asserts `reasoning.effort == supported_efforts[0]` — and
+    BOTH values live in `channels.json`, so it proves the file agrees with itself and can never
+    notice a vendor adding a rung above the one we copied. That is exactly the failure the whole
+    max-depth change exists to prevent, reproduced inside the instrument built to prevent it —
+    the same shape as the decorative `channels.spark.model` and the telemetry keyed on dead
+    names. The self-test must run offline, so the live half belongs HERE.
+
+    Off unless `--online`: doctor is what a person runs when something is already wrong, and it
+    must not need a network or a key to answer the other twenty questions.
+    """
+    import urllib.request
+    key = os.environ.get("OPENROUTER_API_KEY")
+    try:
+        with open(os.path.join(HERE, "channels.json"), encoding="utf-8") as fh:
+            chans = json.load(fh)["channels"]
+    except Exception as e:                                  # noqa: BLE001
+        r.warn("effort ladders", "registry unreadable (%r)" % e, "fix channels.json first")
+        return
+    want = {n: c for n, c in chans.items()
+            if c.get("kind") == "openrouter" and c.get("supported_efforts")}
+    if not want:
+        r.ok("effort ladders", "no channel declares supported_efforts - nothing to compare")
+        return
+    try:
+        req = urllib.request.Request("https://openrouter.ai/api/v1/models",
+                                     headers={"Authorization": "Bearer " + (key or "")})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            live = {m["id"]: m for m in json.loads(resp.read().decode("utf-8"))["data"]}
+    except Exception as e:                                  # noqa: BLE001
+        r.warn("effort ladders", "catalogue not reachable (%r)" % e,
+               "harmless offline; re-run with a network to compare the declared ladders")
+        return
+    drift = []
+    for name, c in want.items():
+        m = live.get(c["model"])
+        if not m:
+            drift.append("%s: %s is no longer in the catalogue" % (name, c["model"]))
+            continue
+        vendor = ((m.get("reasoning") or {}).get("supported_efforts")) or []
+        if vendor and list(vendor) != list(c["supported_efforts"]):
+            drift.append("%s: vendor says %s, we declare %s"
+                         % (name, vendor, c["supported_efforts"]))
+        elif vendor and (c.get("reasoning") or {}).get("effort") != vendor[0]:
+            drift.append("%s: vendor's top rung is %r, we send %r"
+                         % (name, vendor[0], (c.get("reasoning") or {}).get("effort")))
+    if drift:
+        r.warn("effort ladders", "; ".join(drift),
+               "the vendor moved. Update supported_efforts AND reasoning.effort in channels.json "
+               "- the self-test only checks those two agree with EACH OTHER, never with the "
+               "vendor, so it stays green while the depth is a rung short.")
+    else:
+        r.ok("effort ladders", "%d channel(s) match the vendor catalogue exactly" % len(want))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Check that a review round can actually run here.")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--online", action="store_true",
+                    help="also compare each channel's declared effort ladder against the "
+                         "vendor's LIVE catalogue. Needs a network and OPENROUTER_API_KEY.")
     a = ap.parse_args()
 
     r = Report()
@@ -405,6 +466,8 @@ def main():
     check_registry_pristine(r)
     check_skill_size(r)
     check_key(r)
+    if a.online:
+        check_effort_ladders_live(r)
 
     mod = None
     if have:

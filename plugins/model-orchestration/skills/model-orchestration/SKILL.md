@@ -65,12 +65,10 @@ kept **under** that budget (~4.3K tokens, ~300 lines) and is never clipped; the 
 - **Codex is expensive and slow (~6-25 min).** Never send it a lookup — that is Spark's job, and
   since 2026-08-07 a lookup is one command: `--ask "…"`.
 - 🔴 **CONTEXT IS ALMOST FREE; SEARCHING IS NOT.** Measured on the round-26 legal brief:
-  `spark12cont` consumed **2,026,852** input tokens (≈ $0.20 at the Contributor tier, which has
-  **no long-context premium**) and issued **128 web searches** at $2.50/1,000 — **$0.32, i.e. 60 %
-  of that channel's bill was search.** Caching is automatic on this endpoint and cached input is
-  **$0.002/M — 50× cheaper**; `cache_control` breakpoints are accepted, validated, and change
-  nothing. So sending more material is the cheap lever and asking for more searching is the
-  expensive one, which is the opposite of how both feel.
+  `spark12cont` consumed **2,026,852** input tokens (≈ $0.20, no long-context premium) and issued
+  **128 web searches** at $2.50/1,000 — **$0.32, 60 % of that channel's bill.** Caching is
+  automatic and cached input is **50× cheaper**. Sending more material is the cheap lever; asking
+  for more searching is the expensive one — the opposite of how both feel.
 
 ## 0.3 Reference files — read on demand
 
@@ -102,7 +100,6 @@ does not live in your project folder:
 ```powershell
 python "<SKILL_DIR>\orchestrate.py" `
   --brief "$env:TEMP\brief.md" `
-  --tier strategic `
   --marker REVIEW-DONE-01 `
   --out "$env:TEMP\reviews"
 ```
@@ -112,20 +109,21 @@ That runs **every enabled channel in parallel**, writes one `<CHANNEL>.md` per c
 
 🔴 **Do not count the channels from this file, and do not list them.** The number is whatever
 `channels.json` enables; it went three → five → eight → fourteen inside four weeks, and every prose
-copy of that list has been wrong within days — including the `--only` row of this very table, which
-listed seven channels three lines under this warning until 2026-08-08. `python routing.py` prints
-the live set and spends nothing. Output filenames are the registry key, upper-cased.
+copy has been wrong within days — including the `--only` row of this table, which listed seven
+channels three lines under this warning until 2026-08-08. `python routing.py` prints the live set
+and spends nothing. Output filenames are the registry key, upper-cased.
 
-🔴 **Some channels are deliberately off HERE and on in the published kit, and vice versa.** The
-registry's `distribution` field decides: this machine has direct vendor keys (Google, Xiaomi, xAI)
-and the kit's install story is one OpenRouter key to the same models. `--dry-run` shows which are
+🔴 **Some channels are deliberately off HERE and on in the published kit, and vice versa**, decided
+by the registry's `distribution` field: this machine has direct vendor keys (Google, Xiaomi, xAI)
+where the kit's install story is one OpenRouter key to the same models. `--dry-run` shows which is
 which. A channel that is off is one `enabled: true` away, not a missing feature.
 
 | flag | what it does |
 |---|---|
 | `--brief` | file with the question. Required unless you pass `--ask`. Its last line should instruct the model to end with your marker |
 | `--ask` | **one-shot question instead of a round.** `--ask "text"` or `--ask @file`. Defaults to `spark12cont` (cheapest); `--ask-channel <name>` picks another. Prints the ANSWER to stdout, skips the citation audit. ~20 s |
-| `--tier` | `strategic` (default) · `deep`. Two only. See §2 |
+| `--tier` | **one tier, `max`, and it is the default.** `strategic`/`deep` are aliases kept so old commands run. Depth is never a choice — see §2 |
+| `--panel` | `standard` (default) · `cheap`. WHO is in the room; never changes depth. See §2 |
 | `--marker` | literal string the reply must end with. If it is absent the output is incomplete |
 | `--out` | output directory. Default `./reviews` |
 | `--system` | preset name or path (§0.2). The harness **appends the no-non-existence rule** to whatever you pass — end the file with a newline or that sentence collides with your last word |
@@ -206,34 +204,26 @@ and `orchestrate.py` refuses to SEND one, with no override at any setting. Ident
 
 ---
 
-## 2. Two axes — WHO is in the room, and HOW DEEP each one goes
+## 2. ONE axis — WHO is in the room. Depth is always maximum.
 
-**`--panel`** picks the reviewers. **`--tier`** picks the depth. They compose freely, and
-`--panel cheap --tier deep` (few voices, thinking hard) is a sensible, cheap way to ask a hard
-question.
+**`--panel`** picks the reviewers. That is the only choice. Since 2026-08-15 every channel runs
+at the ceiling its own vendor accepts, in every mode: **only the number of models differs.**
 
 | `--panel` | who runs |
 |---|---|
-| **`standard`** (default) | every enabled channel — what ran before panels existed |
-| **`cheap`** | the free, subscription and low-rate channels — everything **except** spark11, codex, kimik3, qwen38max and terra-pro. Ask the plan for the list; it prints both sets by name |
+| **`standard`** (default) | every enabled channel — what ran before panels existed. Route words: *«запусти все»*, *«стандартная панель»* |
+| **`cheap`** | the free, subscription and low-rate channels — everything **except** spark11, codex, kimik3, qwen38max and terra-pro. Route words: *«запусти дешевые»*, *«дешевая панель, без grok»*. Ask the plan for the list; it prints both sets by name |
 
-🔴 **A panel FILTERS DOWN and never enables anything** — unlike `--only`, which resurrects a
-default-off channel on purpose. So `--panel cheap` cannot turn on a channel whose key you do not
-have. 🔴 **What `cheap` really costs is vendor diversity, not depth**: it drops OpenAI, Moonshot,
-Alibaba and Meta-Standard, and over half its remaining seats are Google. The plan prints the
-vendor tally of whatever resolves and warns when one vendor holds half the room — six Geminis
-agreeing is one opinion repeated, not corroboration. Route words work too: *«дешевая панель, без
-grok»*.
+🔴 **Neither a panel nor a GROUP enables anything.** `--only openrouter`, *«только грок»* run only
+the members already on. **Naming a channel is the one way to start one that ships off** —
+`--only terra`, *«включая Terra pro»*. 🔴 **What `cheap` costs is vendor diversity, not depth**:
+it drops OpenAI, Moonshot, Alibaba and Meta-Standard, and over half its seats are Google. The
+plan prints the vendor tally and warns at half the room — six Geminis agreeing is one opinion
+repeated, not corroboration.
 
-| `--tier` | what it buys |
-|---|---|
-| **`strategic`** (default) | every vendor at the depth it supports; agy 25m, codex 50m; Spark budget 60k, floor ≥15,000 |
-| **`deep`** | agy 40m, codex 75m; Spark budget 100k, floor ≥25,000; **reasoning cap and page-fetch budget DOUBLED** on every OpenRouter/MiMo channel |
-
-`quick`/`standard` are gone **as tiers** (argparse error); `standard` is now a PANEL, a different
-flag. **Read both from the plan, not this table** — it prints per channel what the tier resolved
-to, including "nothing this tier can raise here". `deep` costs money: double the fetch budget is
-double the context, and context is the bill.
+**`--tier` parses and chooses nothing.** One tier, `max`; `strategic`/`deep` are aliases so old
+commands work, and the plan says which word it honoured. `quick` is still an argparse error.
+Resolved depth is printed per channel — that is the only place to read it.
 
 **The floor is waived when your brief caps the length.** "Under 250 words" makes a short reply
 correct — the floor only means "under-allocated" when the brief did not ask for brevity.
@@ -259,15 +249,18 @@ A call that ran is not a review that happened. The harness prints all of this; r
 **Hard failures — the answer is unusable, never report it as a review:**
 1. `stop_reason` is anything other than `end_turn` → truncated, the tail of the analysis is gone.
 2. The marker is not present → output is incomplete.
-3. Empty body despite HTTP 200.
+3. Empty body despite HTTP 200. 🔴 **Read the warning before diagnosing it.** If it says
+   `OUTPUT BUDGET EXHAUSTED BY REASONING`, the reasoning trace filled `max_tokens` and the answer
+   never started — raise that channel's `max_tokens`, or split the brief. Measured: mimo25pro,
+   766 s, 60 002 reasoning tokens against a 60 000 cap, zero bytes.
 
 **Soft signals — the answer exists, judge it yourself:**
 4. **Tool-invocation count is 0.** `tools:` is *permission*, not instruction. A model handed web
    search may never call it and then answer dated questions from training data. The harness reads
    `usage.server_tool_use.web_search_requests` and falls back to counting `server_tool_use` blocks.
    **Zero means every dated fact in that answer is unverified.**
-5. Output tokens below the tier floor, *with an uncapped brief* → the model under-allocated. Raise
-   the tier, or split the question into more sub-questions to force more reasoning.
+5. Output tokens below the floor, *with an uncapped brief* → the model under-allocated. There is
+   no deeper setting to raise it to; split the question into more sub-questions instead.
 
 Never let a soft signal mark a run failed. A check that cries wolf on a good answer trains you to
 ignore the alarm that matters — made twice in this harness, and fixed twice.

@@ -162,41 +162,65 @@ channel is an edit to that file, never to `orchestrate.py`.
 --skip gemini               exclude
 --set codex=gpt-5.4         pin a specific model
 --route "<free text>"       parse an instruction as written, in Russian or English
---tier strategic|deep       HOW DEEP each reviewer goes; the plan prints what it resolved to
 --panel cheap|standard      WHO is in the room; filters down only, never enables
+--tier max                  ONE tier, and it is every vendor's ceiling. strategic|deep are
+                            aliases kept so older commands keep working
 --system legal-research     system-prompt preset
 --dry-run                   complete preflight, spends nothing
 ```
 
-**`--panel` and `--tier` are two axes, not two spellings of one.** A panel is which reviewers
-are in the room; a tier is how hard each of them thinks. `--panel cheap --tier deep` — few
-voices, thinking hard — is a legal and often sensible combination. Membership is declared per
-channel (`"panel": "cheap"`) and the ladder in the `panels` object, so `standard` INCLUDES
-everything `cheap` has: «standard» has to mean "what normally runs", and it does — the default
-is bit-for-bit the behaviour that shipped before panels existed.
+**There is ONE axis you choose: who is in the room.** Membership is declared per channel
+(`"panel": "cheap"`) and the ladder in the `panels` object, so `standard` INCLUDES everything
+`cheap` has: «standard» has to mean "what normally runs", and it does — the default is
+bit-for-bit the behaviour that shipped before panels existed.
 
-🔴 **A panel filters DOWN and never enables anything.** `--only` deliberately resurrects a
-channel the registry has `enabled: false`; a panel must not, because `enabled` is exactly the
-field the packaging step flips per `distribution`. Implementing `cheap` as a *group* would have
-been one line of config and would have silently resurrected every channel whose vendor key you
-do not have. Same word, opposite semantics — they cannot share a mechanism.
+🔴 **A panel filters DOWN and never enables anything — and since 1.22.0 neither does a GROUP.**
+`--only openrouter` used to resurrect every disabled member; it now runs only the members that
+are already on. That change closed a real cost: on a machine holding a direct vendor key, the
+group word woke the OpenRouter twin of a channel it was already buying directly — two bills for
+one voice. `enabled` is exactly the field the packaging step flips per `distribution`, so
+resurrecting on a group word means calling a vendor whose key the user may not have. **Naming a
+channel still works and is now the only way in**: `--only <name>`, or «включая <name>» in prose.
+
+🔴 **A channel may declare `explicit_only`.** Then even naming its group is not enough — it runs
+only when something names *it*. One channel ships that way (the most expensive one), because
+`enabled: false` alone was not a lock: `--only` overrides it by design, and `--only <group>`
+reached it through two different vendor words.
 
 🔴 **What the cheap panel really costs is vendor diversity, not depth.** The plan prints the
 vendor tally of whatever resolves and warns when one vendor holds half the seats, because six
 channels reaching one company's weights that agree with each other are one opinion reported six
 times. Read that line before treating convergence as corroboration.
 
-**Why two tiers and not four.** There were four; the two at the top differed by a *timeout* and
-nothing else, so the word "deep" advertised a depth the configuration did not contain. `deep`
-now buys more time, **twice** the pages each channel may fetch, twice the reasoning ceiling where
-the vendor exposes one, and a higher Gemini `thinking_level`. It does not buy "more effort",
-because several vendors are already at their maximum on `strategic` — and where that is true the
-plan says so in the channel's own line rather than leaving you to infer it. `strategic` is
-bit-for-bit the old default, so upgrading changes no cost until you ask for `deep`.
+**Why ONE tier and not two.** There were four, then two, now one. The pair that survived
+differed, at the end, in a timeout and two multipliers — depth was already identical on Spark
+(`xhigh`; `max` returns 400), on the Gemini CLI (`high` is the model's ceiling), on the direct
+Gemini API (top of `thinking_levels`) and on the xAI model (which refuses the field at every
+value and placement). A knob whose range shrinks to a point every time the underlying values
+improve is not a knob, so the second tier was removed rather than re-justified.
 
-A tier that no longer exists is refused by name (`invalid choice: 'quick'`). The tier list lives
-in `channels.json` only; before that it lived in two places, and deleting one entry would have
-left the flag accepting it and quietly falling through to defaults.
+**Every channel now runs at the maximum depth its own vendor accepts, always.** Each one's
+ceiling is declared beside it — `supported_efforts` for the OpenRouter models, `thinking_levels`
+for the direct Gemini ones — and the self-test asserts the configured value is the top of that
+list, so a vendor adding a rung shows up as a failing test rather than as a silent shortfall.
+Two channels were found below their ceiling when this was first checked: one running an effort
+one rung down, and one whose "reasoning budget" was being converted by the gateway into roughly
+*medium* on a model whose own default is *max*.
+
+**A panel may never change depth.** That is asserted mechanically: every panel is resolved and
+every surviving channel's depth fields are compared field-by-field against the unfiltered plan.
+Only the number of reviewers may differ between modes.
+
+`--tier quick` is still refused by name (`invalid choice`). `strategic` and `deep` resolve to
+`max` and the plan says which word it honoured — accepted-and-ignored is the failure this
+project has recorded most often, and a rename is exactly when it happens.
+
+🔴 **`max_tokens` covers reasoning AND the answer on these protocols.** If a channel returns
+nothing, the run reports `OUTPUT BUDGET EXHAUSTED BY REASONING` with both numbers: that is a
+truncation, not an empty response, and the fix is a larger ceiling or a smaller brief. Measured:
+766 seconds, 60,002 reasoning tokens against a 60,000 cap, zero bytes of answer — while the
+diagnosis at the time said "the provider gave no reason" and the reason sat three fields away in
+the same record.
 
 `--route` is deterministic rule-based parsing, not a model call. It handles negation
 («не использовать», «без», «кроме», "don't use"), substitution («вместо», including the «вместо

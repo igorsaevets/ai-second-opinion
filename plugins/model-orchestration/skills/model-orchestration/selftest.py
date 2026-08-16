@@ -241,13 +241,28 @@ def suite_routing():
     # GROUPS["agy"] because it was an alias of that group at the time. The day a Gemini appeared on
     # a second transport, `gemini` became its own group covering all three, both cases went red,
     # and the code under test was correct. Half a derivation freezes the other half.
+    # 🔴 R43: A GROUP EXPANDS TO ITS MEMBERS AND THEN THE DEFAULT-OFF ONES ARE DROPPED. Until
+    # 2026-08-15 `--only <group>` RESURRECTED every disabled member, and testing Igor's own
+    # phrasing found what that cost: «запусти только грок» ran grok420 (the direct xAI key) AND
+    # orgrok420 (the OpenRouter twin, off here because its `distribution` is `kit`) - two bills
+    # for one voice, on a machine that already holds the cheaper key. The registry had the
+    # argument written down for PANELS and nobody carried it to groups. Naming the channel still
+    # wakes it; the group word no longer does. So the expected set is the members that are
+    # ENABLED, which is a registry fact and stays derived.
     def group_of(word):
-        """Which channels does a human word expand to? Answered by the registry, never by memory."""
+        """Which channels does a human word expand to, AND actually run? From the registry."""
+        for g, v in _groups_raw.items():
+            if word == g or word in (v.get("aliases") or []):
+                return GROUPS[g] & ALL
+        raise AssertionError("no group answers to %r - this test names a word the registry lost"
+                             % word)
+
+    def group_members_all(word):
+        """Every member the group NAMES, enabled or not - for the non-resurrection assertion."""
         for g, v in _groups_raw.items():
             if word == g or word in (v.get("aliases") or []):
                 return GROUPS[g]
-        raise AssertionError("no group answers to %r - this test names a word the registry lost"
-                             % word)
+        raise AssertionError("no group answers to %r" % word)
 
     # Properties, not counts. `len(GROUPS["agy"]) == 2` was true for exactly one day.
     check(all(len(v) >= 2 for v in GROUPS.values()),
@@ -261,6 +276,19 @@ def suite_routing():
     # channel that does not exist, and that one still holds.
     check(all(c in EXISTS for v in GROUPS.values() for c in v),
           "every channel named by a group exists in the registry", f"groups={GROUPS}")
+    # 🔴 THE NON-RESURRECTION INVARIANT, OVER EVERY GROUP x EVERY DEFAULT-OFF CHANNEL - not over
+    # the one case that was found. A group word must never start a channel that ships disabled,
+    # because `enabled` is what package.py flips per `distribution`: waking one here means paying
+    # OpenRouter for a voice this machine already buys directly, and waking one in the kit means
+    # calling a vendor whose key the user does not have. Naming the channel is tested separately
+    # and must still work - a lock nobody can open is an outage, not a safeguard.
+    _off = sorted(EXISTS - ALL)
+    for _g in sorted(_groups_raw):
+        _resurrected = sorted(group_members_all(_g) & set(_off))
+        if _resurrected:
+            check(not (group_of(_g) & set(_off)),
+                  "group %r does NOT resurrect its default-off members (%s)"
+                  % (_g, ", ".join(_resurrected)))
 
     cases = [
         (["--only", "spark11"], {"spark11"}, "--only spark11"),
@@ -624,6 +652,10 @@ def suite_dispatch():
         # never reaches the function is the defect class this repository has now recorded seven
         # times (`channels.spark.model`, the four dispatch literals, the telemetry keyed on old
         # names, `tools` on goog36flash, the renamed flag that missed its own reporter, ...).
+        # 🔴 SAME COMPARISON, OPPOSITE ASSERTION SINCE R43. The two dispatches are now made with
+        # two ALIASES of one tier, so every argument that reaches the call must be IDENTICAL.
+        # That is a stronger statement than the old «deep doubles it»: it catches a half-finished
+        # re-split, where someone re-adds a second tier and only some kinds notice.
         deep = {r["name"]: r for r in data.get("deep") or []}
         for r in launched:
             d = deep.get(r["name"])
@@ -631,16 +663,21 @@ def suite_dispatch():
                 continue
             if (r.get("fetch_tool") or {}).get("enabled"):
                 check((d.get("fetch_tool") or {}).get("max_calls")
-                      == (r["fetch_tool"].get("max_calls") or 8) * 2,
-                      "deep's doubled fetch budget REACHES the %s call" % r["name"],
+                      == (r["fetch_tool"].get("max_calls") or 8),
+                      "'deep' and 'strategic' send the SAME fetch budget to %s" % r["name"],
                       "%s -> %s" % (r["fetch_tool"].get("max_calls"),
                                     (d.get("fetch_tool") or {}).get("max_calls")))
             if (r.get("reasoning") or {}).get("max_tokens"):
                 check((d.get("reasoning") or {}).get("max_tokens")
-                      == r["reasoning"]["max_tokens"] * 2,
-                      "deep's doubled reasoning ceiling REACHES the %s call" % r["name"],
+                      == r["reasoning"]["max_tokens"],
+                      "'deep' and 'strategic' send the SAME reasoning ceiling to %s" % r["name"],
                       "%s -> %s" % (r["reasoning"]["max_tokens"],
                                     (d.get("reasoning") or {}).get("max_tokens")))
+            if (r.get("reasoning") or {}).get("effort"):
+                check((d.get("reasoning") or {}).get("effort") == r["reasoning"]["effort"],
+                      "'deep' and 'strategic' send the SAME effort to %s" % r["name"],
+                      "%s -> %s" % (r["reasoning"]["effort"],
+                                    (d.get("reasoning") or {}).get("effort")))
             if r["kind"] == "gemini":
                 # 🔴 THIS USED TO ASSERT THE LITERALS "medium" AND "high", and it went red the
                 # moment Igor raised strategic to `high` on 2026-08-08 - against code that was
@@ -651,8 +688,15 @@ def suite_dispatch():
                 # the tier list already follow, and the fourth place it has had to be applied.
                 reg_t = json.loads(Path(HERE, "channels.json")
                                    .read_text(encoding="utf-8"))["tiers"]
+                # 🔴 `reg_t["strategic"]` WAS A KeyError THE MOMENT THE TIER WAS RENAMED, and it
+                # aborted the whole dispatch suite - 60-odd checks lost to one lookup. The two
+                # words the CLI still accepts are ALIASES now, so the registry must be asked
+                # which tier each word resolves to instead of being indexed by the word.
+                sys.path.insert(0, HERE)
+                import routing as _rt                                  # noqa: E402
+                _reg = _rt.load_registry(str(Path(HERE, "channels.json")))
                 for tier_name, row in (("strategic", r), ("deep", d)):
-                    want = reg_t[tier_name].get("gemini_thinking_level")
+                    want = reg_t[_rt.canon_tier(_reg, tier_name)].get("gemini_thinking_level")
                     check(row.get("thinking_level") == want,
                           "the %s tier's thinking_level REACHES the %s call"
                           % (tier_name, r["name"]),
@@ -978,12 +1022,18 @@ def suite_tiers_and_grounding():
           "every running channel says what the tier did to it (or that it did nothing)",
           "silent: %s" % missing)
 
+    # 🔴 THIS USED TO ASSERT «deep doubles the page-fetch budget» AND IT NOW ASSERTS THE OPPOSITE,
+    # on purpose. R43 collapsed the two tiers into one, so `strategic` and `deep` are aliases of
+    # `max` and MUST resolve identically - including the fetch budget, which is deliberately not
+    # doubled any more (reading is not thinking, and a doubled fetch budget is the one lever
+    # measured to produce a token runaway). The check is kept rather than deleted because the
+    # alias equivalence is exactly what would break silently if someone re-added a second tier.
     for c in live:
         ft_s = (strat[c].get("fetch_tool") or {})
         ft_d = (deep[c].get("fetch_tool") or {})
         if ft_s.get("enabled"):
-            check((ft_d.get("max_calls") or 0) == (ft_s.get("max_calls") or 8) * 2,
-                  "deep doubles the page-fetch budget on %s" % c,
+            check((ft_d.get("max_calls") or 0) == (ft_s.get("max_calls") or 8),
+                  "the retired tier names resolve to the SAME fetch budget on %s" % c,
                   "%s -> %s" % (ft_s.get("max_calls"), ft_d.get("max_calls")))
     # 🔴 THE OLD CHECK WAS "the depth knob MOVES with the tier", pinned to medium->high. On
     # 2026-08-08 Igor raised strategic to `high` and it went red against correct code. What is
@@ -999,14 +1049,19 @@ def suite_tiers_and_grounding():
               "level=%s ladder=%s" % (strat[c].get("thinking_level"), ladder))
         for tier_name, p in (("strategic", strat[c]), ("deep", deep[c])):
             note, lvl = p.get("_tier_note") or "", p.get("thinking_level")
-            moved = lvl != strat[c].get("thinking_level") if tier_name == "deep" else None
-            if ladder and lvl == ladder[-1] and not moved:
-                check("nothing this tier can raise" in note,
-                      "%s on %s admits the tier changes nothing at the ceiling" % (tier_name, c),
+            # 🔴 WORDING CHANGED WITH THE TIER COLLAPSE AND THE ASSERTION HAD TO FOLLOW THE
+            # INTENT, NOT THE STRING. The old note said «nothing this tier can raise on this
+            # channel», which was informative while a second tier existed - it answered «would
+            # deep help here?». With one tier that sentence answers a question nobody can ask,
+            # and it reads as a limitation rather than as «you are at the ceiling». What still
+            # has to be true is that the note names the level AND says it is the top.
+            if ladder and lvl == ladder[-1]:
+                check(str(lvl) in note and "ceiling" in note,
+                      "%s on %s names the level and says it is the ceiling" % (tier_name, c),
                       "note=%r" % note)
             else:
-                check("->" in note or "unchanged" in note,
-                      "%s on %s reports what CHANGED, not just what was sent" % (tier_name, c),
+                check("->" in note or str(lvl) in note,
+                      "%s on %s reports the resolved level" % (tier_name, c),
                       "note=%r" % note)
     # 🔴 THE REGRESSION THAT MADE THIS CHECK NECESSARY. The tier used to be applied BEFORE
     # _decorate copied per-channel registry values into the plan, so it scaled fields that were
@@ -1604,7 +1659,14 @@ def suite_echocheck():
     import routing
 
     reg = routing.load_registry(overlay=False)
-    plan = routing.resolve(reg, tier="strategic")
+    # 🔴 THE TIER NAME IS READ, NOT TYPED. Every `TIER` literal in this suite became a
+    # LIVE FAILURE the day R43 renamed the tier: echocheck writes its arms into an overlay
+    # fragment under `tiers.<name>`, and the overlay validator refuses a tier the registry does
+    # not declare - so seven channels' fragment checks went red at once, against a tool that was
+    # working. Third instance of the same lesson in this file: a test that hard-codes a value a
+    # human is expected to change is testing the human.
+    TIER = reg.get("default_tier") or next(k for k in reg["tiers"] if not k.startswith("_"))
+    plan = routing.resolve(reg, tier=TIER)
 
     # 🔴 Keyed on `kind`, never on channel names - the defect this project has now hit at six
     # layers. Every kind in the registry either declares a knob or is named as having none, and a
@@ -1613,11 +1675,11 @@ def suite_echocheck():
     described = {k for k in kinds
                  if e.knob_for(next(c for c, p in plan.items() if p.get("kind") == k),
                                next(p for p in plan.values() if p.get("kind") == k),
-                               "strategic")[0]}
+                               TIER)[0]}
     check(bool(described), "at least one kind declares a depth knob", str(sorted(described)))
     for k in kinds:
         cname = next(c for c, p in plan.items() if p.get("kind") == k)
-        desc, ladder, frag = e.knob_for(cname, plan[cname], "strategic")
+        desc, ladder, frag = e.knob_for(cname, plan[cname], TIER)
         check(desc is None or callable(frag),
               "kind %r either declares a knob with a fragment builder, or none" % k, str(desc))
         if desc and ladder:
@@ -1629,17 +1691,17 @@ def suite_echocheck():
     # instrument must answer INERT or NO METER, never CONFIRMED.
     http_c = next((c for c, p in plan.items() if p.get("kind") == "http"), None)
     if http_c:
-        check("http_effort" in (e.knob_for(http_c, plan[http_c], "strategic")[0] or ""),
+        check("http_effort" in (e.knob_for(http_c, plan[http_c], TIER)[0] or ""),
               "the Spark knob under test is the one the vendor documents as live")
-        d, f = e.knob_override("http_thinking_budget", http_c, "strategic")
-        check(f(http_c, 4000) == {"tiers": {"strategic": {"http_thinking_budget": 4000}}},
+        d, f = e.knob_override("http_thinking_budget", http_c, TIER)
+        check(f(http_c, 4000) == {"tiers": {TIER: {"http_thinking_budget": 4000}}},
               "--knob reaches the documented-inert field, for calibration", d)
 
     # Every fragment this tool writes must be acceptable from a REDIRECTED settings file, because
     # that is how it drives the product. If a fragment needed the home path, the tool would be
     # testing a configuration nobody can reach from a script.
     for cname, p in plan.items():
-        _d, ladder, frag = e.knob_for(cname, p, "strategic")
+        _d, ladder, frag = e.knob_for(cname, p, TIER)
         if not frag or not ladder:
             continue
         err = routing.validate_overlay_data(Path(HERE, "channels.json"),
@@ -2195,6 +2257,153 @@ def suite_spend_guard():
           "main() refuses rather than warns when an opt-in channel was selected without it")
 
 
+def suite_max_depth_and_explicit_only():
+    """
+    Round-43. Two invariants, both of them things Igor said in words and neither checkable by
+    reading: (a) «мозги у всех режимов должны быть на максимум» - only the NUMBER of models may
+    differ between modes, never the depth; (b) «Terra Pro ... не должен запускаться ... только
+    если явно назовут: Terra».
+
+    Every check here is over the WHOLE cross-product rather than over the case that was found.
+    The Terra hole was reachable through eight different words in two groups, and the one that
+    surfaced it was `--only openrouter`; enumerating them all is the difference between fixing a
+    bug and closing a class.
+    """
+    sys.path.insert(0, HERE)
+    import routing
+
+    reg = routing.load_registry(str(Path(HERE, "channels.json")), overlay=False)
+
+    # --- (a1) there is exactly ONE tier, and the retired names still resolve ------------------
+    tiers = [t for t in reg["tiers"] if not t.startswith("_")]
+    check(len(tiers) == 1,
+          "exactly one tier is declared - depth is not a choice any more", str(tiers))
+    canon = tiers[0]
+    check(reg.get("default_tier") == canon,
+          "default_tier names the tier that exists", "%r vs %r" % (reg.get("default_tier"), canon))
+    for old in ("strategic", "deep"):
+        check(routing.canon_tier(reg, old) == canon,
+              "the retired tier name %r still resolves, so stored commands keep working" % old)
+    err = None
+    try:
+        routing.canon_tier(reg, "quick")
+    except routing.RouteError as e:
+        err = str(e)
+    check(err and "unknown tier" in err,
+          "a tier that never existed is still REFUSED, not silently defaulted", str(err)[:80])
+
+    # --- (a2) every channel sits at the top of its own declared ladder ------------------------
+    # 🔴 DERIVED FROM THE LADDER, NEVER PINNED TO A VALUE. Pinning `effort == "xhigh"` here would
+    # be the fourth instance of the test-the-human defect this file already records three times:
+    # the day a vendor adds a rung, the correct change goes red.
+    for cname, ch in reg["channels"].items():
+        ladder = ch.get("supported_efforts")
+        if not ladder:
+            continue
+        got = (ch.get("reasoning") or {}).get("effort")
+        check(got == ladder[0],
+              "%s runs at the TOP of its declared ladder" % cname,
+              "effort=%r ladder=%s (highest first)" % (got, ladder))
+    for cname, ch in reg["channels"].items():
+        lv = ch.get("thinking_levels")
+        if lv:
+            check(ch.get("thinking_level") == lv[-1],
+                  "%s runs at the top of its thinking_levels" % cname,
+                  "%r vs %s" % (ch.get("thinking_level"), lv))
+
+    # --- (a3) A PANEL MAY NOT CHANGE DEPTH. The whole point of Igor's sentence ----------------
+    # Compared field by field against the unfiltered plan, for every panel, for every channel
+    # that survives it. A panel that quietly lowered a knob would look exactly like a panel that
+    # only removed channels - which is the failure mode that cannot be seen in an output file.
+    DEPTH_FIELDS = ("reasoning", "thinking_level", "max_tokens", "effort", "timeout",
+                    "fetch_tool", "web")
+    base = routing.resolve(routing.load_registry(str(Path(HERE, "channels.json")),
+                                                 overlay=False), tier=canon)
+    for pname in [p for p in (reg.get("panels") or {}) if not p.startswith("_")]:
+        pl = routing.resolve(routing.load_registry(str(Path(HERE, "channels.json")),
+                                                   overlay=False), tier=canon, panel=pname)
+        for cname, slot in pl.items():
+            if not slot.get("enabled"):
+                continue
+            diffs = [f for f in DEPTH_FIELDS if slot.get(f) != base[cname].get(f)]
+            check(not diffs,
+                  "--panel %s leaves %s's depth untouched" % (pname, cname),
+                  "differs on: %s" % diffs)
+
+    # --- (a4) the two retired tier words resolve to identical plans --------------------------
+    for old in ("strategic", "deep"):
+        alt = routing.resolve(routing.load_registry(str(Path(HERE, "channels.json")),
+                                                    overlay=False), tier=old)
+        diffs = [c for c in alt
+                 if any(alt[c].get(f) != base[c].get(f) for f in DEPTH_FIELDS)]
+        check(not diffs, "--tier %s resolves identically to --tier %s" % (old, canon),
+              "differs on: %s" % diffs)
+
+    # --- (b) explicit_only: every group word, every panel, the default -----------------------
+    expl = [c for c, ch in reg["channels"].items() if ch.get("explicit_only")]
+    check(bool(expl), "at least one channel is declared explicit_only",
+          "otherwise every check below passes vacuously")
+
+    def enabled(**kw):
+        """The channels a selection starts. A RouteError counts as «started nothing».
+
+        🔴 That is not laxity: a refusal is the SAFEST outcome and the one this router promises
+        for an ambiguous instruction. «все, но не terra» has no instruction word the grammar
+        knows — bare «не» is not a marker — so it raises, names the channel, and lists the four
+        modes. What must never happen is the channel starting; a loud stop satisfies that, and
+        collapsing the two here keeps the assertion about the thing that costs money.
+        """
+        r = routing.load_registry(str(Path(HERE, "channels.json")), overlay=False)
+        try:
+            return {c for c, p in routing.resolve(r, **kw).items() if p["enabled"]}
+        except routing.RouteError:
+            return set()
+
+    check(not (set(expl) & enabled()), "the zero-flag default does not start an explicit_only "
+                                       "channel")
+    for pname in [p for p in (reg.get("panels") or {}) if not p.startswith("_")]:
+        check(not (set(expl) & enabled(panel=pname)),
+              "--panel %s does not start an explicit_only channel" % pname)
+    for gname, g in (reg.get("groups") or {}).items():
+        if gname.startswith("_") or not isinstance(g, dict):
+            continue
+        if not (set(g.get("channels") or []) & set(expl)):
+            continue
+        for word in [gname] + list(g.get("aliases") or []):
+            check(not (set(expl) & enabled(only=[word])),
+                  "--only %r does not start an explicit_only channel" % word)
+            check(not (set(expl) & enabled(route="только %s" % word)),
+                  "route 'только %s' does not start an explicit_only channel" % word)
+
+    # THE LOCK MUST OPEN FOR ITS OWN KEY. A safeguard that cannot be lifted is an outage, and
+    # this half is what the whole change is FOR - Igor authorises the channel by naming it.
+    for c in expl:
+        for word in [c] + list(reg["channels"][c].get("aliases") or []):
+            check(c in enabled(only=[word]),
+                  "--only %r DOES start it - naming is the way in" % word)
+    # 🔴 IGOR'S OWN SENTENCE, VERBATIM. It was a hard ROUTE ERROR until R43 because «включая» was
+    # not an instruction word - so the one phrasing named in the instruction that authorises this
+    # channel was the one phrasing that could not authorise it.
+    check(set(expl) <= enabled(route="Запусти все, включая Terra pro"),
+          "«Запусти все, включая Terra pro» starts it (Igor's own authorising sentence)")
+    check(not (set(expl) & enabled(route="запусти все")),
+          "«запусти все» does NOT start it - «все» is the standard panel, not everything")
+    # 🔴🔴 THE INVERSE SENTENCE, ONE WORD APART, AND IT USED TO DO THE OPPOSITE OF WHAT IT SAYS.
+    # Found by a reviewer in the round that introduced «включая»: the ADD word matched INSIDE
+    # «не включая», so the user's «не» became decoration and the round ran the most expensive
+    # channel in the registry. Every selection marker is now checked for a preceding negation.
+    # The negated forms are asserted for EVERY mode word, not just the one that was broken.
+    for neg in ("Запусти все, не включая Terra pro", "запусти все, кроме terra",
+                "запусти все без terra", "не используй terra",
+                "запусти все, не включая terra", "все, но не terra"):
+        check(not (set(expl) & enabled(route=neg)),
+              "a NEGATED mention does not start it: %r" % neg)
+    # And naming by MODEL id must reach the channel through the FLAG path too, not only prose.
+    for word in ("terra pro", "5.6 terra", "openai/gpt-5.6-terra-pro"):
+        check(set(expl) & enabled(only=[word]),
+              "--only %r resolves through a MODEL alias to the channel" % word)
+
+
 def suite_panels():
     """
     Round-42: a PANEL is who is in the room; a TIER is how deep each of them goes.
@@ -2550,7 +2759,8 @@ def main():
                   suite_prose_matches_behaviour, suite_contract,
                   suite_citations, suite_dispatch, suite_tiers_and_grounding,
                   suite_settings_and_upgrade, suite_echocheck, suite_dev_tooling,
-                  suite_agy_plan_class, suite_spend_guard, suite_panels):
+                  suite_agy_plan_class, suite_spend_guard, suite_panels,
+                  suite_max_depth_and_explicit_only):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

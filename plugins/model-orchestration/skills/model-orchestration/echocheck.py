@@ -119,7 +119,15 @@ def knob_for(cname, slot, tier):
     if kind in ("openrouter", "oai"):
         if not isinstance(slot.get("reasoning"), dict):
             return (None, [], None)
-        return ("channel %s.reasoning.effort" % cname, ["low", "medium", "high"], _reasoning_frag)
+        # 🔴 THE LADDER COMES FROM THE CHANNEL NOW, NOT FROM A LITERAL. Until R43 this returned
+        # ["low", "medium", "high"] for every OpenRouter channel, which meant the instrument
+        # could never reach the rungs the registry actually uses: ordeepseekv4pro runs `xhigh`,
+        # kimik3 runs `max`, and neither value was in the arms. So an A/B «is this knob real»
+        # was being run at values the product does not send - the calibration equivalent of
+        # testing a different build. Each channel now declares `supported_efforts` (highest
+        # first, copied from the vendor catalogue), and the arms are its two ends.
+        ladder = list(reversed(slot.get("supported_efforts") or [])) or ["low", "medium", "high"]
+        return ("channel %s.reasoning.effort" % cname, ladder, _reasoning_frag)
     if kind == "http":
         # 🔴 `http_effort`, NOT `http_thinking_budget`. Meta's own documentation says
         # `thinking.budget_tokens` is "accepted for compatibility but not translated into an effort
@@ -134,6 +142,24 @@ def knob_for(cname, slot, tier):
     return (None, [], None)          # codex: timeout only. xai: this model refuses the field.
 
 
+def _default_tier():
+    """The registry's own default tier. See the note on --tier for why this is not a literal."""
+    try:
+        import routing
+        reg = routing.load_registry()
+        d = reg.get("default_tier")
+        if d:
+            return d
+        return next(k for k in (reg.get("tiers") or {}) if not k.startswith("_"))
+    except Exception:                                     # noqa: BLE001
+        return "max"
+
+
+# `or_reasoning_scale` and `fetch_scale` were REMOVED from the tier block in R43 when the second
+# tier went away - a multiplier over per-channel values is an obfuscated constant once there is
+# only one tier to multiply from. They are kept in this list on purpose: `--knob` is a
+# calibration tool, and pointing it at a field the tier no longer carries is a legitimate way to
+# ask "is this inert?", which is exactly the answer an honest instrument should give.
 TIER_FIELDS = ("gemini_thinking_level", "http_effort", "http_thinking_budget", "http_floor",
                "agy_effort", "agy_timeout", "codex_timeout", "or_reasoning_scale", "fetch_scale")
 
@@ -248,7 +274,13 @@ def main():
     ap.add_argument("--only", action="extend", nargs="*", default=None,
                     help="channels to test; any alias in channels.json works")
     ap.add_argument("--all", action="store_true", help="every enabled channel that has a knob")
-    ap.add_argument("--tier", default="strategic", help="the tier the arms are written into")
+    # 🔴 NOT A LITERAL. R43 collapsed strategic|deep into a single `max`, and a hard-coded
+    # default here would have made every tier-scoped arm write an overlay fragment naming a tier
+    # that no longer exists - which the overlay validator refuses, so this whole tool would have
+    # died on 7 of 11 channels the moment the registry changed. The same "two homes for one list"
+    # shape the tier list itself was fixed for on 2026-08-08.
+    ap.add_argument("--tier", default=_default_tier(),
+                    help="the tier the arms are written into (default: the registry's)")
     ap.add_argument("--levels", help="two values, comma separated (default: the ends of the "
                                      "channel's own ladder)")
     ap.add_argument("--knob", help="vary this field instead of the channel's default depth "

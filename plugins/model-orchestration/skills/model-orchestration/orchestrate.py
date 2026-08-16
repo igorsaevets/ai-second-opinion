@@ -53,10 +53,32 @@ if hasattr(sys.stdout, "reconfigure"):
 # the shape of every decorative-knob defect this project has recorded. The registry is now the
 # single home; the literal below survives only for the degraded no-registry path, where a
 # reasonable run beats an exception.
+# 🔴 ONE TIER SINCE R43 (2026-08-15). Igor: «мозги у всех режимов должны быть на максимум» - the
+# panel decides who is in the room, and depth is no longer a choice at all. `strategic` and `deep`
+# survive as ALIASES of `max` so that nothing anyone typed before breaks; the aliases live in the
+# registry beside the tier, and routing.canon_tier resolves them.
 _TIERS_FALLBACK = {
-    "strategic": {"http_thinking_budget": 60000,  "http_floor": 15000, "http_effort": "xhigh"},
-    "deep":      {"http_thinking_budget": 100000, "http_floor": 25000, "http_effort": "xhigh"},
+    "max": {"http_thinking_budget": 100000, "http_floor": 15000, "http_effort": "xhigh",
+            "aliases": ["strategic", "deep", "максимум", "глубокий"]},
 }
+
+
+def canon_tier_name(name):
+    """Resolve a tier word against the registry's tier aliases; unknown words fall through.
+
+    Kept separate from routing.canon_tier because this module must survive an unreadable
+    registry - the fallback above is a degraded run, and a degraded run beats an exception.
+    """
+    tiers = load_tiers()
+    if not name or name in tiers:
+        return name
+    key = str(name).lower().replace("ё", "е")
+    for tname, t in tiers.items():
+        if tname.startswith("_") or not isinstance(t, dict):
+            continue
+        if key == tname.lower() or key in [str(a).lower() for a in t.get("aliases") or []]:
+            return tname
+    return name
 
 
 def load_tiers():
@@ -68,6 +90,36 @@ def load_tiers():
         return t if isinstance(t, dict) and t else dict(_TIERS_FALLBACK)
     except Exception:                                     # noqa: BLE001
         return dict(_TIERS_FALLBACK)
+
+
+def _tier_choices():
+    """Every word `--tier` accepts: the tier names AND their aliases.
+
+    🔴 argparse validates `choices` before any of this module's code runs, so leaving the aliases
+    out would reject `--tier deep` with a bare usage error - in the other project's stored scripts,
+    on the first run after the R43 collapse, with no explanation. The aliases are what make a
+    breaking rename non-breaking.
+    """
+    out = []
+    for tname, t in load_tiers().items():
+        if tname.startswith("_") or not isinstance(t, dict):
+            continue
+        out.append(tname)
+        out.extend(str(a) for a in t.get("aliases") or [])
+    return sorted(set(out))
+
+
+def _default_tier():
+    """The default tier, declared in the registry so the flag and the file cannot disagree."""
+    try:
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "channels.json")
+        with open(p, encoding="utf-8") as fh:
+            d = json.load(fh).get("default_tier")
+        if d:
+            return d
+    except Exception:                                     # noqa: BLE001
+        pass
+    return next(iter(_TIERS_FALLBACK))
 
 
 def load_panels():
@@ -100,8 +152,10 @@ def tier_config(tier):
     the call streams (see STREAM_ABOVE_BUDGET), and the floor derived beside it is what
     _verify_http asserts the answer against.
     """
-    t = load_tiers().get(tier) or _TIERS_FALLBACK.get(tier) or _TIERS_FALLBACK["strategic"]
-    budget = int(t.get("http_thinking_budget") or 60000)
+    tier = canon_tier_name(tier)
+    t = (load_tiers().get(tier) or _TIERS_FALLBACK.get(tier)
+         or next(iter(_TIERS_FALLBACK.values())))
+    budget = int(t.get("http_thinking_budget") or 100000)
     return {"thinking": {"type": "enabled", "budget_tokens": budget},
             "floor": int(t.get("http_floor") or 0)}
 
@@ -849,7 +903,21 @@ KNOWN_FAILURES = [
      "The model stopped before finishing, or never emitted the agreed end-of-review marker.",
      "The harness appends the marker instruction automatically when the brief does not contain "
      "it. If this still fires, the model most likely hit a length or time limit - re-run that "
-     "channel alone, or lower --tier."),
+     "channel alone. 🔴 If an OUTPUT BUDGET EXHAUSTED warning appears beside this one, that is "
+     "the real cause and it names the fix; do NOT reach for the tier, which has had exactly one "
+     "level since 2026-08-15 and cannot be lowered."),
+    # Placed ABOVE the provider-error entry so it wins the match on a record that has both: the
+    # budget cause is specific and actionable, the provider one is generic. R43, after mimo25pro
+    # spent 766 seconds and 60 002 reasoning tokens against a 60 000 cap and the round reported
+    # «the provider ... gave no reason» while holding the reason in the next field.
+    ("OUTPUT BUDGET EXHAUSTED",
+     "The channel did not fail - it was CUT OFF. Its reasoning trace consumed the whole "
+     "max_tokens allowance, which on these protocols covers reasoning and answer together, so "
+     "the answer never began.",
+     "Raise that channel's `max_tokens` in channels.json toward the vendor's declared "
+     "max_completion_tokens (the warning prints both numbers). If it is already at the ceiling, "
+     "the brief is too hard for that channel and the only remedy is to split it. This is NOT a "
+     "timeout and NOT a tier problem."),
     ("PROVIDER ERROR MID-STREAM|Upstream error|Internal server error",
      "The vendor's own upstream failed while streaming - their infrastructure, not the brief "
      "and not this harness.",
@@ -938,8 +1006,9 @@ KNOWN_FAILURES = [
      "before repeating any of them."),
     ("timed out|timeout",
      "The channel took longer than its allotted time.",
-     "Raise the timeout for that channel, lower --tier, or split the brief into smaller "
-     "questions. Deep tiers on large briefs can legitimately run for many minutes."),
+     "Raise that channel's timeout in the tier block, or split the brief into smaller questions. "
+     "Every channel now runs at its vendor's maximum depth, so a large brief can legitimately "
+     "occupy many minutes and there is no shallower setting to fall back to."),
     ("EMPTY ANSWER|response.*\"\"",
      "The channel returned nothing at all.",
      "On the Antigravity channel this is the classic symptom of a denied tool permission "
@@ -3102,18 +3171,53 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     if marker and not text.strip().endswith(marker):
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip():
-        # Say WHOSE failure it was. An empty answer with a provider message attached is a
-        # different problem from an empty answer without one, and only the first tells you
-        # whether to retry, change channel, or look at our own code.
+        # 🔴🔴 THE HARNESS HELD THE REASON AND PRINTED «no reason». R42's mimo25pro round returned
+        # zero bytes after 766 seconds and this branch said «the connection produced no content and
+        # gave no reason», while the record it was writing carried out_tokens 60000 - EXACTLY
+        # max_tokens - beside reasoning_tokens 60002. The trace had eaten the entire budget and the
+        # answer never started. Every fact needed to say so was already collected, three fields
+        # apart, and nothing joined them; the stock advice printed underneath was «lower --tier»,
+        # which on that channel changes nothing at all. Same family as R41's two-counters-over-one-
+        # event: the evidence existed and the diagnosis did not read it.
+        #
+        # The xAI path has had a rich version of this since R29 (see call_xai_responses, which
+        # prints status, incomplete_reason, output-item kinds and the reasoning share). It was
+        # written for the channel that had failed, not for the CLASS - so the identical failure
+        # arrived on a sibling transport nine days later and met the generic sentence again.
+        # 🔴 THE LAST ROUND'S NUMBERS, NOT THE SUM. `max_tokens` bounds ONE call; `out_tot` is
+        # accumulated across tool rounds and legitimately exceeds it - ordeepseekv4pro billed
+        # 88 530 output tokens against a 60 000 cap in R42 and was perfectly healthy. Comparing
+        # the sum against a per-call ceiling would fire on every fetch-heavy round that happened
+        # to end empty, which is the false-positive-in-a-safety-gate class this project already
+        # names: a gate that cries wolf teaches you to walk past the whole category. `usage` is
+        # the LAST round's block (`usage = use or usage` in the loop above), which is the only
+        # one the ceiling can have bitten.
+        cap = max_tokens or 64000
+        last = usage or {}
+        reas = (last.get("completion_tokens_details") or {}).get("reasoning_tokens")
+        spent = last.get("completion_tokens") or 0
+        starved = spent >= cap or (isinstance(reas, int) and reas >= cap)
         if stream_error:
             e0 = stream_error[0]
             msg = e0.get("message") if isinstance(e0, dict) else str(e0)
             code = e0.get("code") if isinstance(e0, dict) else None
             warn.append("PROVIDER ERROR MID-STREAM (HTTP 200, error event): %s%s"
                         % (msg or e0, (" [code %s]" % code) if code else ""))
+        elif starved:
+            warn.append(
+                "OUTPUT BUDGET EXHAUSTED BY REASONING - this is not an empty response, it is a "
+                "TRUNCATED one. The reasoning trace used %s of this channel's %s-token max_tokens "
+                "(output tokens counted: %s), leaving nothing for the answer. On this protocol "
+                "max_tokens covers reasoning AND answer together. Fixes, in order: raise "
+                "channels.json -> %s.max_tokens toward the vendor's max_completion_tokens; if it "
+                "is already there, the brief is too hard for this channel and splitting it is the "
+                "only remedy. Lowering the tier does NOT help - depth is at each vendor's ceiling "
+                "by design since 2026-08-15." % (reas, cap, spent, name))
         else:
             warn.append("EMPTY OUTPUT from stream, and the provider sent no error event - the "
-                        "connection produced no content and gave no reason")
+                        "connection produced no content and gave no reason. Checked and NOT the "
+                        "cause: the budget was not exhausted (%s of %s output tokens used)."
+                        % (spent, cap or "no declared cap"))
     note = []
     record_refusal(refusal_check(text, marker), warn, note)
     # Tokens are SUMMED across tool rounds, not taken from the last response. Each round re-sends
@@ -4313,11 +4417,11 @@ def main():
     # Choices come from the registry, so deleting a tier there really deletes it. Igor removed
     # `quick` and `standard` on 2026-08-08; with the old literal list this flag would have gone
     # on accepting both and silently falling through to per-branch defaults.
-    ap.add_argument("--tier", default="strategic", choices=sorted(load_tiers()),
-                    help="depth/time profile. `strategic` is the default and is exactly what ran "
-                         "before tiers were reduced to two; `deep` buys more time, twice the "
-                         "pages each channel may open and twice the reasoning ceiling where the "
-                         "vendor has one. The resolved value per channel is printed in the plan.")
+    ap.add_argument("--tier", default=_default_tier(), choices=_tier_choices(),
+                    help="depth per channel. Since 2026-08-15 there is exactly ONE tier and it is "
+                         "every channel's own ceiling - `strategic` and `deep` still parse, as "
+                         "aliases of it, so old commands keep working. The resolved depth per "
+                         "channel is printed in the plan.")
     # 🔴 A SECOND AXIS, NOT A SECOND TIER. `--tier` is how deep each reviewer goes; `--panel` is
     # which reviewers are in the room. Igor, 2026-08-15: «разделим оркестр[ацию] на дешевую и
     # стандартную». They compose freely - `--panel cheap --tier deep` is few voices thinking
@@ -4507,6 +4611,26 @@ def main():
     # Appended only when the brief does not already contain the marker, so an author who did
     # write the instruction gets no duplicate, and `--marker ""` still disables the check.
     if a.marker and a.marker not in brief:
+        # 🔴 A BRIEF THAT ALREADY ENDS WITH A *DIFFERENT* MARKER IS THE CASE THIS TEST MISSES,
+        # and it costs a whole round's verdict. Measured 2026-08-15 while re-testing two channels
+        # on a REUSED brief from the other project: its last line was `КОНЕЦ-ОТВЕТА-R34` while
+        # the command line said `--marker R43-DONE`. Both instructions then sat in the payload,
+        # the in-brief one last and in the reader's own language, and the channels SPLIT - one
+        # obeyed the appended line and passed, the other obeyed the brief's own and was graded
+        # «END MARKER NOT ON LAST LINE - output is partial, do not parse it» on top of a complete
+        # 47 KB review. The condition above asks «is MY marker here?» when the question that
+        # matters is «is SOMEONE ELSE'S here?». Reusing a brief is normal practice, so this is not
+        # exotic. It cannot be auto-resolved - only the human knows which marker is current - so
+        # it warns loudly at preflight, before anything is spent, and names both.
+        tail = [ln.strip() for ln in brief.strip().splitlines() if ln.strip()]
+        last = tail[-1] if tail else ""
+        if (last and len(last) <= 60 and " " not in last
+                and last.upper() == last and any(ch.isalpha() for ch in last)):
+            log("🔴 [preflight] the brief ALREADY ENDS with %r, and --marker says %r. Both will "
+                "reach the model and it will pick one; channels have been measured to split. "
+                "Every channel that obeys the brief will be graded «output is partial» over a "
+                "complete review. Pass --marker %s, or edit the brief's last line."
+                % (last, a.marker, last))
         brief += ("\n\n---\nWhen the ENTIRE review is finished, end your reply with this exact "
                   "line and nothing after it:\n%s\n" % a.marker)
     # The default used to be a single sentence, and it reached only the HTTPS channel. Depth,

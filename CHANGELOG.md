@@ -1,5 +1,80 @@
 # Changelog
 
+## 1.22.0 — 2026-08-15
+
+**Depth stops being a choice: every channel runs at the maximum its own vendor accepts, in every
+mode, and only the number of reviewers differs. Two channels were found below their ceiling, one
+had been silently truncating itself for a whole round, and the most expensive channel in the
+registry turned out to be startable by two vendor words nobody thought of as naming it.**
+
+### Depth is maximal everywhere, and it is asserted rather than claimed
+
+- 🔴🔴 **One tier.** `strategic` and `deep` are now aliases of `max` and still parse, so no
+  stored command breaks; the plan prints which word it honoured. `quick` is still refused by
+  name. The pair that survived from four differed, at the end, in a timeout and two multipliers —
+  depth was already identical on Spark (`xhigh`; `max` returns 400, re-probed with an invented
+  value as the negative control), on the Gemini CLI, on the direct Gemini API, and on the xAI
+  model that refuses the field at every value and placement. **A knob whose range shrinks to a
+  point every time the underlying values improve is not a knob.**
+- **Each channel declares its own ceiling** — `supported_efforts` (highest first) for the
+  OpenRouter models, `thinking_levels` for the direct Gemini ones — and the self-test asserts the
+  configured value is the top of that list. A vendor adding a rung is now a red test rather than
+  a silent shortfall.
+- 🔴 **Two channels were below their ceiling.** One ran `high` where the catalogue offers
+  `xhigh`. The other sent an explicit reasoning-token budget to a model that does not support
+  token-budget reasoning at all, so the gateway converted it to roughly *medium* — on a model
+  whose own default is *max*. That setting had been added to stop a real failure and it worked;
+  what had changed underneath was a later measurement showing the effort ratio is a **ceiling,
+  not a reservation**, which makes a generous `max_tokens` sufficient on its own.
+- **`max_tokens` follows one rule now:** `min(the vendor's declared max_completion_tokens,
+  131072)`. Raised on eight channels.
+- 🔴 **A panel may never change depth** — asserted by resolving every panel and comparing every
+  surviving channel's depth fields against the unfiltered plan.
+
+### The empty answer that was really a truncation
+
+- 🔴🔴 **`OUTPUT BUDGET EXHAUSTED BY REASONING`**, a new and specific diagnosis. On these
+  protocols `max_tokens` bounds reasoning *and* answer together, so a hard brief can end with the
+  trace having consumed the whole allowance and no answer written. Measured: 766 seconds, 60,002
+  reasoning tokens against a 60,000 cap, zero bytes — reported at the time as *"the provider sent
+  no error event and gave no reason"*, **while the reason sat three fields away in the same
+  record**, and with stock advice ("lower the tier") that changed nothing on that channel. An
+  equivalent diagnosis had existed on a sibling transport since 1.9: it was written for the
+  channel that failed rather than for the class, so the identical failure met the generic
+  sentence again nine days later.
+- The detector reads the **last round's** usage, never the sum: output tokens accumulate across
+  tool rounds and legitimately exceed a per-call ceiling, and a gate that fires on healthy runs
+  teaches you to ignore the whole category.
+
+### A group word no longer starts a channel that ships off
+
+- 🔴🔴 **`explicit_only`.** A channel may declare that it runs only when something names *it*.
+  `enabled: false` was not a lock: `--only` overrides it by design — that is the documented
+  opt-in path — and `--only <group>` reached the most expensive channel in the registry through
+  **two** different vendor words. The plan then described it as "named explicitly", which was
+  false, because by that point the pipeline could no longer tell a group from a name. The gate is
+  computed from the words **before any group is expanded**, and enforced at a single choke point
+  so that adding a third selection path later cannot reopen it.
+- 🔴 **The same rule now covers every default-off channel, and it closed a money bug.** Testing
+  the phrasings a user actually types, «только грок» resolved to *two* channels — the direct
+  vendor key and its OpenRouter twin, which ships disabled precisely because the direct key
+  exists. Two bills for one voice. The registry already contained this argument, written about
+  panels and never carried across to groups.
+- Naming still works, in both flag and prose form, and that half is tested just as hard: **a lock
+  nobody can open is an outage, not a safeguard.**
+
+### Words people actually type
+
+- **«запусти все» now selects the standard panel.** It named nothing before and died with "no
+  channel matched" — the most natural way to ask for everything was the one sentence the router
+  could not read. Safe where `full` was not: it cannot be mistaken for a depth word, and there is
+  no depth axis left to confuse it with.
+- **«включая» / «including» are instruction words now.** The sentence that authorises the opt-in
+  channel by name was itself a hard route error until this release.
+- A bare name with no instruction word still refuses rather than guessing between "only that one"
+  and "that one as well" — two very different bills — but the refusal now lists all four modes
+  instead of three.
+
 ## 1.21.1 — 2026-08-15
 
 **The last three reviewers of the twelve landed after 1.21.0 was tagged, and two of them found

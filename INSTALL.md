@@ -216,7 +216,7 @@ tier has, and it may add whole new ones.** Repoint a model, add a vendor, define
       "enabled": true
     }
   },
-  "tiers": { "strategic": { "gemini_thinking_level": "low" } }
+  "tiers": { "max": { "gemini_thinking_level": "low" } }
 }
 ```
 
