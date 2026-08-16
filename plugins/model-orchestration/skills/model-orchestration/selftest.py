@@ -145,7 +145,24 @@ def suite_routing():
     # because this suite reads the raw JSON on purpose rather than through the loader it tests.
     with open(HERE / "channels.json", encoding="utf-8") as fh:
         _CHANS = {k: v for k, v in json.load(fh)["channels"].items() if not k.startswith("_")}
-    ALL = {k for k, v in _CHANS.items() if v.get("enabled", True)}
+    # 🔴 `enabled` IS NOT ENOUGH - THE DEFAULT PANEL IS PART OF "WHAT A NO-FLAG RUN LAUNCHES",
+    # and this set was `enabled` alone until 2026-08-16, when `default_panel` moved from
+    # "standard" to "cheap" and twelve cases went red against correct code. They were not testing
+    # the router; they were testing that nobody had changed a setting a human is expected to
+    # change - this suite's own recurring defect. Derived from `default_panel` now, so the same
+    # flip in either direction is a no-op here.
+    _RAW = json.load(open(HERE / "channels.json", encoding="utf-8"))
+    _DEFAULT_INCLUDES = set(_RAW["panels"][_RAW["default_panel"]]["includes"])
+    ENABLED_ANY_PANEL = {k for k, v in _CHANS.items() if v.get("enabled", True)}
+    ALL = {k for k, v in _CHANS.items()
+           if v.get("enabled", True) and v.get("panel") in _DEFAULT_INCLUDES}
+
+    def panel_set(name):
+        """Enabled channels a NAMED panel admits - for cases whose route names one in prose."""
+        inc = set(_RAW["panels"][name]["includes"])
+        return {k for k, v in _CHANS.items()
+                if v.get("enabled", True) and v.get("panel") in inc}
+
     EXISTS = set(_CHANS)
     check(len(ALL) >= 3, "the registry declares at least the three documented channels",
           f"registry={sorted(ALL)}")
@@ -253,7 +270,14 @@ def suite_routing():
         """Which channels does a human word expand to, AND actually run? From the registry."""
         for g, v in _groups_raw.items():
             if word == g or word in (v.get("aliases") or []):
-                return GROUPS[g] & ALL
+                # 🔴 INTERSECTED WITH `ENABLED_ANY_PANEL`, NOT WITH `ALL`. `ALL` is the DEFAULT
+                # PANEL's enabled set, and naming a group is an explicit selection that overrides
+                # the panel - `--only spark` runs both Sparks even though spark11 is standard-only
+                # and the default panel is cheap. Using ALL here made this expect one Spark and
+                # get two, i.e. it called correct behaviour a failure. The exclusion cases are
+                # unaffected either way: `without()` subtracts from ALL, and subtracting a name
+                # that was never in ALL is a no-op.
+                return GROUPS[g] & ENABLED_ANY_PANEL
         raise AssertionError("no group answers to %r - this test names a word the registry lost"
                              % word)
 
@@ -282,7 +306,13 @@ def suite_routing():
     # OpenRouter for a voice this machine already buys directly, and waking one in the kit means
     # calling a vendor whose key the user does not have. Naming the channel is tested separately
     # and must still work - a lock nobody can open is an outage, not a safeguard.
-    _off = sorted(EXISTS - ALL)
+    # 🔴 «DEFAULT-OFF» MEANS `enabled: false`, NOT «outside the default panel». Written as
+    # `EXISTS - ALL` until 2026-08-16, when ALL became panel-aware and this started claiming that
+    # `--only spark` "resurrected" spark11 - a channel that is enabled, costs the same either
+    # way, and is simply not on the cheap panel. The invariant being protected is about the
+    # `enabled` flag package.py flips per `distribution`; panel membership is a different axis
+    # and an explicit `--only` is supposed to cross it.
+    _off = sorted(EXISTS - ENABLED_ANY_PANEL)
     for _g in sorted(_groups_raw):
         _resurrected = sorted(group_members_all(_g) & set(_off))
         if _resurrected:
@@ -322,7 +352,14 @@ def suite_routing():
          "route: только терра-про (RU alias of an OFF-by-default channel)"),
         # ADD mode: default set PLUS the named channel. Igor's rule is that «используй все
         # модели» must NOT pull in the rationed channel while «и ещё 5.6 Terra Pro» must.
-        (["--route", "используй все модели и ещё 5.6 Terra Pro"], ALL | {"orgpt56terrapro"},
+        # 🔴 «все модели» NAMES THE STANDARD PANEL IN PROSE - it is not a synonym for "the
+        # default". The suite already asserts that two lines below («запусти все» does NOT wake
+        # the opt-in channel because «все» is the standard panel), so writing ALL here was two
+        # tests disagreeing about one word; it only looked right while `standard` happened to be
+        # the default. Derived per case now: this one resolves the standard panel, the next one
+        # carries no panel word and gets the default.
+        (["--route", "используй все модели и ещё 5.6 Terra Pro"],
+         panel_set("standard") | {"orgpt56terrapro"},
          "route: ADD keeps the default set and adds the opt-in one"),
         (["--route", "добавь терра-про"], ALL | {"orgpt56terrapro"},
          "route: добавь <opt-in channel>"),
@@ -584,7 +621,13 @@ def suite_dispatch():
         "o.main()\n"
         "D = list(L)\n"
         f"reg = routing.load_registry(os.path.join(r'{HERE}', 'channels.json'))\n"
-        "en = sorted(c for c, ch in reg['channels'].items() if ch.get('enabled', True))\n"
+        # 'enabled' here means "would a no-flag run launch it", which is enabled AND in the
+        # default panel - `o.main()` above is a no-flag run. Panel-filtered since 2026-08-16;
+        # without it, flipping default_panel makes this compare 17 against 13 and call correct
+        # code broken.
+        "_inc = set(reg['panels'][reg['default_panel']]['includes'])\n"
+        "en = sorted(c for c, ch in reg['channels'].items()\n"
+        "            if ch.get('enabled', True) and ch.get('panel') in _inc)\n"
         "print('RESULT=' + json.dumps({'enabled': en, 'launched': S, 'deep': D}))\n"
     )
     pf = Path(tempfile.gettempdir()) / "orch_selftest_dispatch.py"
@@ -621,10 +664,16 @@ def suite_dispatch():
         # membership against the enabled set, twenty lines up, and it is worth noticing that BOTH
         # were written by assuming "every channel in the registry runs here" - an assumption no
         # line of code stated and that stopped being true in one edit.
-        webbed = [c for c, ch in json.loads(
-            Path(HERE, "channels.json").read_text(encoding="utf-8"))["channels"].items()
-            if not c.startswith("_") and ch.get("enabled", True)
-            and (ch.get("web") or {}).get("enabled")]
+        # ...and the same argument applies one step further: a channel outside the DEFAULT PANEL
+        # never launches on a no-flag run either, so it cannot have delivered its web setting to
+        # a call. Added 2026-08-16 when default_panel moved to cheap and kimik3/qwen38max - both
+        # standard-only - went red for not appearing in a run they were never part of.
+        _reg_raw = json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))
+        _inc = set(_reg_raw["panels"][_reg_raw["default_panel"]]["includes"])
+        webbed = [c for c, ch in _reg_raw["channels"].items()
+                  if not c.startswith("_") and ch.get("enabled", True)
+                  and ch.get("panel") in _inc
+                  and (ch.get("web") or {}).get("enabled")]
         for c in webbed:
             check(any(r["name"] == c and r["web"] for r in launched),
                   "the registry's web setting reached the %s call" % c)
@@ -2577,8 +2626,17 @@ def suite_panels():
           "`role` is printed - it was a registry field nothing read until round 42")
     reg3 = _r.load_registry()
     dflt = _r.format_plan(_r.resolve(reg3), reg3)
-    check("--panel cheap would DROP" in dflt,
-          "the DEFAULT plan offers the cheaper panel and names what it costs")
+    # 🔴 THE ASSERTION IS «THE DEFAULT PLAN NAMES THE OTHER PANEL», NOT «IT SAYS THE WORD DROP».
+    # Pinned to "--panel cheap would DROP" until 2026-08-16, which tested that the default was
+    # `standard` rather than that the printer is symmetric - so flipping the default turned a
+    # correct plan red. Which direction the sentence runs is derived from `default_panel`: on a
+    # standard default the cheap panel DROPS channels, on a cheap default the standard one ADDS
+    # them, and the same `gain`/`lose` computation prints both.
+    _other = next(p for p in reg3["panels"] if p != reg3["default_panel"])
+    check(("--panel %s would ALSO run" % _other) in dflt
+          or ("--panel %s would DROP" % _other) in dflt,
+          "the DEFAULT plan names the other panel and what changing to it would do",
+          "default_panel=%r other=%r" % (reg3["default_panel"], _other))
     # The concentration warning is derived from the resolved set, so it has to move when the
     # set does. Two arms, because a line that is always printed is not evidence of anything.
     reg4 = _r.load_registry()

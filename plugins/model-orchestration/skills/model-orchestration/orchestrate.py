@@ -434,15 +434,35 @@ def transport_damage(text):
     Deliberately a NOTE and never a warning. `ok` is `not warn` everywhere in this file, so a
     warning would throw away a 26 KB usable review over 35 characters, and an emoticon `:)`
     would fail a perfectly good one. Same judgement the citation check already makes: worth
-    saying, not worth discarding. Measured false-positive rate on the 14 other channels of that
-    same real run: **zero** - every one of them balanced exactly.
+    saying, not worth discarding.
+
+    🔴🔴 CODE SPANS AND FENCES ARE EXCLUDED, AND THE REASON IS A FALSE POSITIVE THIS CHECK'S OWN
+    VALIDATION COULD NOT HAVE FOUND. R44 measured a false-positive rate of ZERO and the number was
+    honest, but it was measured on the 14 answers of one asylum round - none of which had any
+    reason to WRITE a broken bracket. The first review that did tripped it immediately: on
+    2026-08-16 the grokbuild channel returned 31 KB analysing this very corruption, quoted the
+    damaged citation `208(a)2)(D)` eleven times, and was flagged with 7 orphan closers. Every one
+    was inside backticks.
+
+    So the detector could not tell «this answer is damaged» from «this answer is ABOUT damage» -
+    and any review of the bug that produced it is guaranteed to trip it. A transport that drops a
+    byte does not care whether the byte was inside a code fence, but an author quoting broken text
+    always puts it in one, so stripping code regions removes almost all of the false positives and
+    almost none of the true ones. Validated both ways rather than asserted: the real corrupt MiMo
+    answer must still be flagged, and this review must come out clean. grokbuild found this on its
+    first working run and proposed the sharper instrument (citation grammar, not raw balance);
+    that is recorded in the round notes as the next step, not silently taken here.
     """
     if not text:
         return []
+    # Fenced blocks first, then inline spans - the other order lets a stray backtick inside a
+    # fence eat the rest of the document.
+    stripped = re.sub(r"```.*?```", " ", text, flags=re.S)
+    stripped = re.sub(r"`[^`\n]*`", " ", stripped)
     out = []
     for opener, closer, label in (("(", ")", "round brackets"),):
         depth, orphan_close = 0, 0
-        for c in text:
+        for c in stripped:
             if c == opener:
                 depth += 1
             elif c == closer:
@@ -1388,7 +1408,7 @@ def _binary_version(binary):
         return None
 
 
-def pii_gate(parts, strict_pii=False):
+def pii_gate(parts, strict_pii=False, warn_pii=False):
     """
     parts: list of (label, text). Returns an exit code to propagate, or 0 to continue.
 
@@ -1397,10 +1417,25 @@ def pii_gate(parts, strict_pii=False):
 
     Two severities, and they are deliberately not symmetric. SECRETS are a hard refusal with no
     override at any setting - a key sent to three vendors cannot be recalled and its blast radius
-    is everything that key opens. PERSONAL IDENTIFIERS warn loudly and send, unless --strict-pii
-    restores the block. The argument used to be spelled `allow_pii` and defaulted to blocking;
-    it is inverted here rather than renamed in place so that a stale caller passing the old
-    positional value fails visibly instead of silently flipping the policy.
+    is everything that key opens. PERSONAL IDENTIFIERS are OFF by default as of 2026-08-16.
+
+    🔴 THE IDENTIFIER HALF IS OFF, THE SECRET HALF IS NOT, AND THAT IS THE WHOLE DESIGN. Igor,
+    2026-08-16: «давай наверное полностью отключим, чтобы он нам не мешал», which continues his
+    2026-08-03 scope ruling that only keys, passwords and .env are critical and «остальное не
+    критично». Three settings now: off (default), --warn-pii (the itemised list this used to
+    print on every run), --strict-pii (refuse). Nothing about secrets changed at any of them.
+
+    WHAT «OFF» DOES NOT MEAN: it does not mean the scan is skipped. The scan is local regex over
+    a string that is already in memory, it costs nothing measurable, and it runs in the SAME pass
+    that finds secrets - so switching it off would not buy speed, it would only buy silence. What
+    is switched off is the WALL OF TEXT: one summary line instead of an itemised list. That line
+    is not negotiable and has no flag, because this project's own rule is that a payload leaving
+    for three vendors may be permitted silently by policy but never INVISIBLY by accident, and a
+    gate whose output is indistinguishable from a gate that crashed is worse than no gate.
+
+    The `strict_pii` argument used to be spelled `allow_pii` and defaulted to blocking; it is
+    inverted rather than renamed in place so that a stale caller passing the old positional value
+    fails visibly instead of silently flipping the policy.
     """
     secrets, pii = [], []
     for label, text in parts:
@@ -1428,11 +1463,27 @@ def pii_gate(parts, strict_pii=False):
             "    transcript, which is the same mistake one step earlier.\n"
             "    Drop --strict-pii to send anyway.")
         return 3
+    if pii and not warn_pii:
+        # 🔴 OFF BY DEFAULT SINCE 2026-08-16. One line, not a list. Igor asked for the identifier
+        # gate to be gone entirely; what survives is a single sentence with a count, because the
+        # alternative is a payload leaving for N vendors with nothing on screen at all, and this
+        # project cannot tell that state apart from a gate that silently crashed. The kinds are
+        # named, the values and line numbers are not - the console is read by the orchestrating
+        # model and printing a value here is the same leak one step earlier.
+        log("  PII gate: OFF - %d personal identifier(s) (%s) are in the payload and are being "
+            "sent as-is to every enabled channel. --warn-pii lists them, --strict-pii refuses. "
+            "Secrets are refused regardless and that has no flag."
+            # scan_payload's format is "KIND at LABEL line N (M chars)" - split on " at ", not on
+            # ":", which is not in the string at all and would have printed the whole hit
+            # including the line number. Caught by re-reading scan_payload rather than by the
+            # output looking wrong, which it would not have.
+            % (len(pii), ", ".join(sorted({h.split(" at ")[0] for h in pii}))))
+        return 0
     if pii:
         # 🔴 WARN, DO NOT BLOCK - changed 2026-08-07 on Igor's explicit instruction: «если данные
         # и утекут, это не критично, поэтому правила ослабляй, кроме паролей и api ключей».
         # Secrets above are untouched and still have no override, because that is the exception
-        # he named.
+        # he named. Since 2026-08-16 this branch needs --warn-pii; it is no longer the default.
         #
         # There is a second reason, independent of the instruction, and it is the stronger one.
         # A gate that blocks on identifiers has a high false-positive rate on real legal and
@@ -2098,13 +2149,14 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     # Position matters: R40 measured the same instruction obeyed 2/2 from the BRIEF and 0/1 from
     # a persona slot, so the preset leads the file rather than going to --system-prompt-override
     # (which would also replace the agent's own tool instructions wholesale).
-    # 🔴 THE PREAMBLE IS NOT DECORATION - WITHOUT IT THIS CHANNEL DOES NOT COMPLETE. Every other
-    # channel here is a chat model that answers a brief. This one is a coding AGENT whose default
-    # assumption is that it has been pointed at a repository, so it plans to explore, reaches for
-    # tools the harness does not grant, and the turn ends `stopReason: cancelled` after two turns
-    # with a sentence of narration. Measured three times on 2026-08-16 - unrestricted, with a
-    # narrow tool allowlist, and with the vendor's full read-only set - and the tool list was
-    # never the cause. Saying plainly that there is no codebase is what stops it looking.
+    # The preamble orients a coding AGENT that would otherwise assume it has been pointed at a
+    # repository and spend its first turns looking for one.
+    # 🔴 SUPERSEDED 2026-08-16 (R45): the previous version of this comment claimed «WITHOUT IT THIS
+    # CHANNEL DOES NOT COMPLETE», and that was a guess dressed as a measurement. The channel did
+    # not complete because two tool calls were being DENIED (see the cmd block below); the
+    # preamble never had anything to do with it. Kept because orienting the agent is still worth
+    # a paragraph and costs nothing - but it is a nicety now, not the fix, and nobody should read
+    # this and conclude the wording is load-bearing.
     NO_REPO = (
         "OPERATING CONTEXT — read this first.\n"
         "You are NOT pointed at a repository and there is no codebase to explore. Your working "
@@ -2127,25 +2179,60 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     # every other channel has, and no file, shell or edit tools at all. That is also a safety
     # boundary, not only a quality one - the whole input is an untrusted brief, and this binary
     # ships with a terminal tool. Same reasoning as HERMES_TOOLSETS one screen up.
+    # 🔴🔴 WHY THIS RUNS AT ALL, ROOT-CAUSED 2026-08-16 (R45) FROM THE EVENT STREAM RATHER THAN
+    # FROM A FIFTH THEORY. R44 shipped this channel disabled after four arms all died
+    # `stopReason: cancelled`, and three separate explanations were offered and are all WRONG:
+    # the tool list (R44), plan mode (`--no-plan` changes nothing), and the coding persona
+    # (`--system-prompt-override` changes nothing). `--output-format streaming-messages-json`
+    # settles it in one run - the turn ends on a tool_result carrying
+    #     is_error=True  "User cancelled the execution for tool `web_fetch`"
+    # and ONE DENIED TOOL DISCARDS THE WHOLE TURN, exactly as the agy channel already documents.
+    #
+    # TWO separate denials had to be cleared, and each was invisible in `--output-format json`:
+    #
+    # 1. `web_fetch` on a host outside x.ai. Isolated with the same mode, the same tool and only
+    #    the host varying: dontAsk + docs.z.ai -> cancelled, dontAsk + docs.x.ai -> end_turn.
+    #    That is also why a short probe "worked" in R44 and a review never did - a review reads
+    #    other vendors' documentation by definition.
+    #    🔴 THE FIX SPELLS THE TOOL DIFFERENTLY FROM `--tools`, AND THE WRONG SPELLING FAILS
+    #    SILENTLY: `--allow WebFetch` grants it, `--allow web_fetch` is accepted and does
+    #    NOTHING (still cancelled). `--tools` wants the snake_case name, `--allow` wants the
+    #    PascalCase one. Neither the help text nor an error says so.
+    # 2. `use_tool` - the MCP gateway. After 17 successful fetches the model reached for
+    #    `search_tool`/`use_tool` and the denial killed the turn.
+    #    🔴 `--tools` DID NOT BOUND THESE. The allowlist named three tools and the model still
+    #    had the gateway, because these are not built-ins. `--disallowed-tools` removes them.
+    #
+    # `--permission-mode auto` also completes and is NOT used: this machine's config loads MCP
+    # servers in headless mode WITH their credentials (a metered scraper, a git host with a
+    # write-capable token, three browsers), and the entire input to this channel is an untrusted
+    # brief. dontAsk + one named grant keeps everything else denied; auto does not.
     cmd = [binary, "--prompt-file", pf, "--cwd", neutral_cwd(), "--no-memory", "--no-subagents",
-           # 🔴 THE VENDOR'S OWN READ-ONLY SET, MINUS NOTHING IT NEEDS TO THINK - and a narrower
-           # list than this DOES NOT WORK. Measured twice on 2026-08-16. First attempt had no
-           # restriction at all: the agent went off to work on the repository and returned 520
-           # bytes of narration («The harness lives under the model-orchestration skill. Next
-           # I'll open the registry…») with no review and no marker. Second attempt allowed only
-           # `web_search,web_fetch`: the run came back `stopReason: cancelled` after 2 turns and
-           # 127 bytes, because the model reached for `todo_write` - its planning tool, which the
-           # vendor documents as read-only and never-prompting - and ONE DENIED TOOL CANCELS THE
-           # WHOLE TURN. Exactly the failure mode the agy channel already documents, on a
-           # different binary.
-           # What is granted is the documented read-only list (read_file, list_dir, grep,
-           # web_search, todo_write) plus web_fetch. What is NOT granted is the shell, any edit
-           # or write tool, and subagents. That boundary is the point: the entire input is an
-           # untrusted brief and this binary ships a terminal tool. The read tools are harmless
-           # here only because --cwd is a neutral empty directory - remove that and this list
-           # becomes a file-exfiltration surface.
-           "--tools", "read_file,list_dir,grep,web_search,web_fetch,todo_write",
-           "--verbatim", "--output-format", "json", "--permission-mode", "dontAsk"]
+           # 🔴 WEB ONLY. `todo_write` stays because the model uses it to plan and a denial of it
+           # would cancel the turn; everything else it needs is search and fetch, which is the
+           # same surface every other channel in this registry has.
+           #
+           # 🔴🔴 read_file / list_dir / grep WERE GRANTED UNTIL 2026-08-16 AND THE STATED REASON
+           # WAS FALSE. R44's comment here said they were "harmless here only because --cwd is a
+           # neutral empty directory". Measured today: with exactly that neutral cwd, the model
+           # called read_file and was served a file out of `~/.grok/skills/` - nowhere near the
+           # cwd. **--cwd bounds where the agent STARTS, not what read_file can OPEN.** Since the
+           # entire input to this channel is an untrusted brief, that was a file-read primitive
+           # aimed at this machine, and one of the files reachable that way is a config holding
+           # live third-party credentials. Removed, and the run that proved the fix works had them
+           # removed - so nothing is being traded for the safety.
+           "--tools", "web_search,web_fetch,todo_write",
+           # 🔴🔴 THE MCP GATEWAY IS NOT A BUILT-IN AND `--tools` DOES NOT BOUND IT. Read off the
+           # event stream: after 17 successful fetches the model called `search_tool` and then
+           # `use_tool`, which the allowlist above never mentioned and never removed. Denying it
+           # cancels the turn; granting it would hand an untrusted brief every MCP server this
+           # machine has configured. Removing it is the only option that is both safe and
+           # completable.
+           "--disallowed-tools", "search_tool,use_tool",
+           # PascalCase HERE and snake_case in --tools, for the same tool. Not a typo - measured:
+           # `--allow web_fetch` is accepted and grants nothing, `--allow WebFetch` grants it.
+           "--verbatim", "--output-format", "json", "--permission-mode", "dontAsk",
+           "--allow", "WebFetch"]
     if model:
         cmd += ["-m", model]
     if effort:
@@ -4759,10 +4846,14 @@ def main():
     ap.add_argument("--dry-run", action="store_true",
                     help="print the resolved plan and exit without spending anything")
     ap.add_argument("--strict-pii", action="store_true",
-                    help="refuse to send when the payload contains personal identifiers. Off by "
-                         "default since 2026-08-07: identifiers now produce a loud itemised "
-                         "warning and are sent. SECRETS are refused always and have no override "
-                         "at any setting")
+                    help="refuse to send when the payload contains personal identifiers. OFF by "
+                         "default, and since 2026-08-16 the itemised warning is off too - a run "
+                         "prints one summary line and sends. SECRETS are refused always and have "
+                         "no override at any setting")
+    ap.add_argument("--warn-pii", action="store_true",
+                    help="restore the per-identifier warning list (kind and line, never the "
+                         "value). Between this and --strict-pii the gate has three settings: "
+                         "off (default), warn, refuse")
     # Kept so that every existing script and habit keeps working. It is now a no-op, and says so
     # once rather than failing: a flag that vanishes turns a working command into an argparse
     # error at the worst moment, and this one appears in briefs, notes and other chats' history.
@@ -4953,8 +5044,9 @@ def main():
     # hand-written --system file is just as capable of carrying a name or a key as the brief.
     if a.allow_pii:
         log("  note: --allow-pii is now a no-op - personal identifiers are sent by default and "
-            "warned about. Use --strict-pii to refuse instead.")
-    gate = pii_gate([("brief", brief), ("system", system)], strict_pii=a.strict_pii)
+            "the gate no longer even lists them. Use --warn-pii or --strict-pii to turn it back on.")
+    gate = pii_gate([("brief", brief), ("system", system)], strict_pii=a.strict_pii,
+                    warn_pii=a.warn_pii)
     if gate:
         return gate
 

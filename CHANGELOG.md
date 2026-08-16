@@ -1,5 +1,89 @@
 # Changelog
 
+## 1.24.0 — 2026-08-16
+
+**A channel that "would not finish a long review" was being denied a tool, and three rounds of
+explanation never looked at the event stream. Grok Build shipped disabled in 1.23.0 with a note
+listing four experiments and concluding "the flags were never the cause". The flags were exactly
+the cause. One run with `--output-format streaming-messages-json` produced the answer that four
+arms of guessing had not.**
+
+### The root cause, and the two theories that were wrong before it
+
+- 🔴🔴 **`stopReason: cancelled` meant a DENIED TOOL, not a model that would not sit still.** The
+  turn ends on a `tool_result` carrying `is_error: true` and the literal text
+  *"User cancelled the execution for tool `web_fetch`"*. One denied tool discards the entire turn
+  — the same failure the agy channel has documented since 2026-07-31, on a different binary and a
+  different vendor. `--output-format json` shows only the final stopReason, which is why three
+  rounds of theories all sounded plausible and none was checked.
+- **Two refuted theories, recorded because they cost a round each.** The agent is literally named
+  `grok-build-plan`, so plan mode was the obvious suspect: `--no-plan` changed nothing. The system
+  prompt says "an interactive CLI tool that helps users with software engineering tasks" and
+  "communicate concisely", so the persona was the next suspect: `--system-prompt-override` with a
+  reviewer persona changed nothing (3 turns, still cancelled).
+- **Denial 1 — the HOST, isolated with one variable.** Same mode, same tool, same prompt shape:
+  `dontAsk` + a non-x.ai host → cancelled; `dontAsk` + `docs.x.ai` → `end_turn`. That is why a
+  short smoke test passed in 1.23.0 while every review failed — the smoke test only ever fetched
+  the vendor's own documentation, and reviewing means reading somebody else's.
+- 🔴 **The grant is spelled differently from the allowlist, and the wrong spelling is silent.**
+  `--allow WebFetch` grants it; `--allow web_fetch` is accepted and grants nothing; `--tools`
+  requires the snake_case form. Same tool, two conventions, no error either way.
+- 🔴🔴 **Denial 2 — `--tools` does not bound the MCP gateway.** After seventeen successful fetches
+  the model called `search_tool` and then `use_tool`. The allowlist named three tools and the
+  model still had two more, because those are not built-ins. They are now REMOVED with
+  `--disallowed-tools` rather than granted: `--permission-mode auto` also completes, and is not
+  used, because the CLI loads the user's MCP servers in headless mode with their credentials and
+  the entire input to this channel is an untrusted brief.
+- **Result:** the same 13.6 KB brief that produced 158 bytes now returns **31 178 bytes**,
+  `end_turn`, marker on the last line, zero denied tools, 26 fetches, 14 turns, 433 s.
+
+### A security claim from 1.23.0 that was false
+
+- 🔴🔴 **`--cwd` bounds where the agent STARTS, not what `read_file` can OPEN.** 1.23.0 granted
+  `read_file`/`list_dir`/`grep` with the comment that they were "harmless here only because
+  `--cwd` is a neutral empty directory". Measured with exactly that cwd in force, `read_file`
+  served a file out of `~/.grok/skills/`. Removed; the successful run above had them removed, so
+  no capability was traded for the fix.
+
+### A false positive our own zero-false-positive check could not have found
+
+- 🔴 **`transport_damage()` could not tell a damaged answer from an answer ABOUT damage.** 1.23.0
+  measured its false-positive rate as zero across 14 real answers — honestly, but none of those
+  answers had any reason to write a broken bracket. The first review that did — Grok Build's first
+  working output, reviewing the corruption bug itself — tripped it with 7 orphan closers, every
+  one a backticked quotation of a damaged statutory citation. Fenced blocks and inline code spans
+  are now stripped before counting. Validated both directions: the genuinely corrupt answer still
+  reports exactly 35 missing, the review about corruption comes out clean, and the real 14-answer
+  round still flags exactly 1.
+
+### Settings
+
+- **Page-fetch budget 8 → 11 per channel.** The note arguing for 8 was corrected rather than
+  deleted: the runaway is bounded by BYTES, not CALLS — `FETCH_RUN_BUDGET` (1 000 000 cumulative
+  per channel per review) and `FETCH_MAX_BYTES` (400 KB per page) already cap the worst case at
+  about two and a half maximum-size pages regardless of the call count.
+- **Default panel `standard` → `cheap`.** Offered and declined twice before; taken now. The plan
+  printer is symmetric, so every cheap run prints `--panel standard would ALSO run: codex,
+  kimik3, qwen38max, spark11` before anything is spent.
+- **Personal-identifier gate default warn → off**, with `--warn-pii` to restore the itemised list
+  and `--strict-pii` to refuse. Secrets are unchanged: a hard refusal, no override at any setting,
+  verified by a negative control that still exits 3 with the identifier gate off. "Off" prints one
+  summary line rather than nothing — a gate whose output is indistinguishable from a crashed gate
+  is worse than no gate.
+- **`goog36flash` / `goog37flash` `max_tokens` 60000 → 65536**, the vendor's declared
+  `outputTokenLimit`. 🔴 The negative control fired on the way: `/v1beta/interactions` accepts
+  `max_output_tokens: 99000000` with HTTP 200, so acceptance proves nothing about this endpoint.
+  The field was confirmed live by the meter instead — output tracked the cap across two
+  order-of-magnitude-apart values on both models.
+
+### Tests
+
+- **528/528.** Twelve checks went red on the panel change, every one against correct code: they
+  derived the expected set from `enabled` alone rather than from `default_panel`. Two further
+  distinctions are now explicit — `--only <group>` crosses panel boundaries because naming is
+  explicit selection, and "default-off" in the non-resurrection invariant means `enabled: false`,
+  not "outside the default panel".
+
 ## 1.23.0 — 2026-08-16
 
 **A vendor was caught silently deleting characters from its own answers — 35 of them from one

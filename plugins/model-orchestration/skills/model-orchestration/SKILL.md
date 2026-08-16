@@ -44,10 +44,13 @@ changes a decision is in this block.
   ending in the end marker and was reported OK. Gate on content, never on status.
 - 🔴 **A vendor can deliver the answer with characters MISSING and every other check still passes.**
   35 `(` absent from a 26 KB review: `INA § 208(a)(2)(D)` arrived as `208(a)2)(D)`, marker present,
-  `ok` true. One vendor's *streamed* transport during its own citation post-processing; that channel
-  is unstreamed now. Every channel is bracket-checked, as a `note` not a warning (a warning would
-  bin the other 26 KB). On `TEXT INTEGRITY:`, copy no quotation or section number from that answer
-  without opening the source.
+  `ok` true. One vendor's *streamed* transport during its citation post-processing; that channel is
+  unstreamed now. Every channel is bracket-checked, as a `note` not a warning. On
+  `TEXT INTEGRITY:`, copy no quotation or section number from that answer without opening the
+  source. Code spans are excluded: a review *about* damage quotes it.
+- 🔴 **A flag can be accepted and grant nothing, and one tool can have two spellings.** Grok Build:
+  `--allow web_fetch` inert, `--allow WebFetch` works, `--tools` wants the first. Assert the
+  effect, never the exit code.
 - **A refusal on a legal/immigration brief is a FRAMING bug, not a subject ban.** Pass
   `--system legal-research` and write the brief as source-verification for attorney review, not as
   filing strategy: codex then answers 6/6. Recipe: **`references/legal-briefs.md`**, read it FIRST.
@@ -121,7 +124,7 @@ which. A channel that is off is one `enabled: true` away, not a missing feature.
 | `--brief` | file with the question. Required unless you pass `--ask`. Its last line should instruct the model to end with your marker |
 | `--ask` | **one-shot question instead of a round.** `--ask "text"` or `--ask @file`. Defaults to `spark12cont` (cheapest); `--ask-channel <name>` picks another. Prints the ANSWER to stdout, skips the citation audit. ~20 s |
 | `--tier` | **one tier, `max`, and it is the default.** `strategic`/`deep` are aliases kept so old commands run. Depth is never a choice — see §2 |
-| `--panel` | `standard` (default) · `cheap`. WHO is in the room; never changes depth. See §2 |
+| `--panel` | `cheap` (default) · `standard`. WHO is in the room; never changes depth. See §2 |
 | `--marker` | literal string the reply must end with. If it is absent the output is incomplete |
 | `--out` | output directory. Default `./reviews` |
 | `--system` | preset name or path (§0.2). The harness **appends the no-non-existence rule** to whatever you pass — end the file with a newline or that sentence collides with your last word |
@@ -129,7 +132,7 @@ which. A channel that is off is one `enabled: true` away, not a missing feature.
 | `--skip` | the inverse of `--only` |
 | `--set` | pin a model without editing anything: `--set codex=gpt-5.4` |
 | `--route` | **paste what the operator typed, verbatim** — see §0.1 |
-| `--dry-run` | full preflight — plan, brief, preset, key, binaries, agy permissions, PII gate — then exit, spending nothing |
+| `--dry-run` | full preflight — plan, brief, preset, keys, binaries, gates — then exit, spending nothing |
 | `--strict-pii` | refuse to send when the payload holds personal identifiers. **Off by default since 2026-08-07** (the operator: «правила ослабляй, кроме паролей и api ключей») — identifiers now produce a loud itemised warning and go. `--allow-pii` still parses and is a no-op. **Secrets can never be sent, at any setting** |
 
 ### 0.1 Choosing channels and models without editing code
@@ -193,7 +196,7 @@ stable and worth knowing:
 | Codex CLI | resolved via `CODEX_BIN` → PATH → known install dirs |
 | Antigravity CLI | `agy`, **not on PATH** on Windows; resolved via `AGY_BIN` → PATH → `%LOCALAPPDATA%\agy\bin\agy.exe` |
 | agy models | one model per channel, base slug plus `--effort`. **Not** `gemini-3.1-pro-high` — a suffixed slug plus a disagreeing `--effort` is exit 1 in 3 s (`references/channels.md` §6.3). 🔴 This row said "two channels" while there were three: ask `routing.py`, never this table |
-| Grok Build CLI | `grok`, **not on PATH**; `GROK_BIN` → PATH → `%USERPROFILE%\.grok\bin`. Subscription session, no API key. **Ships OFF**: it will not finish a long review (`stopReason: cancelled`). Reads `CLAUDE.md` from its cwd upward → neutral cwd. Details in `channels.json` |
+| Grok Build CLI | `grok`, **not on PATH**; `GROK_BIN` → PATH → `%USERPROFILE%\.grok\bin`. Subscription session, no key. Reads `CLAUDE.md` from its cwd upward → neutral cwd. 🔴 **One denied tool discards the whole turn**, and `--tools` does not bound the MCP gateway. Flags in `channels.json` |
 | harness | `orchestrate.py`, standard library only, no `pip install`, Python 3.8+ |
 
 **Secrets.** Never `Read`, `cat`, `echo` or `Write-Output` the key. The script reads it from the
@@ -210,19 +213,19 @@ at the ceiling its own vendor accepts, in every mode: **only the number of model
 
 | `--panel` | who runs |
 |---|---|
-| **`standard`** (default) | every enabled channel — what ran before panels existed. Route words: *«запусти все»*, *«стандартная панель»* |
-| **`cheap`** | the free, subscription and low-rate channels — everything **except** spark11, codex, kimik3, qwen38max and terra-pro. Route words: *«запусти дешевые»*, *«дешевая панель, без grok»*. Ask the plan for the list; it prints both sets by name |
+| **`cheap`** (default since 2026-08-16) | free, subscription and low-rate channels — all **except** spark11, codex, kimik3, qwen38max, terra-pro. *«запусти дешевые»* |
+| **`standard`** | every enabled channel. *«запусти все»*, *«стандартная панель»* |
 
 🔴 **Neither a panel nor a GROUP enables anything.** `--only openrouter`, *«только грок»* run only
 the members already on. **Naming a channel is the one way to start one that ships off** —
-`--only terra`, *«включая Terra pro»*. 🔴 **What `cheap` costs is vendor diversity, not depth**:
-it drops OpenAI, Moonshot, Alibaba and Meta-Standard, and over half its seats are Google. The
-plan prints the vendor tally and warns at half the room — six Geminis agreeing is one opinion
-repeated, not corroboration.
+`--only terra`. 🔴 **What `cheap` costs is vendor diversity, not depth**: it drops OpenAI,
+Moonshot, Alibaba and Meta-Standard, and nearly half its seats are Google. The plan prints the
+vendor tally, warns at half the room, and names what `standard` would add — six Geminis agreeing
+is one opinion repeated, not corroboration.
 
 **`--tier` parses and chooses nothing.** One tier, `max`; `strategic`/`deep` are aliases so old
 commands work, and the plan says which word it honoured. `quick` is still an argparse error.
-Resolved depth is printed per channel — that is the only place to read it.
+Resolved depth is printed per channel.
 
 **The floor is waived when your brief caps the length.** "Under 250 words" makes a short reply
 correct — the floor only means "under-allocated" when the brief did not ask for brevity.
