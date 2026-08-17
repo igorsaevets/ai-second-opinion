@@ -15,9 +15,11 @@ a labelled `token=` / `password=` / `api_key=` assignment, or a bearer token is 
 There is deliberately no flag to force it. If it is a false positive — a placeholder, a documented
 example — rename the variable or redact the value in the document.
 
-**Personal identifiers — blocked by default.** National ID numbers, case and receipt numbers,
-SSNs, email addresses, phone numbers, labelled dates of birth and passport numbers. Pass
-`--strict-pii` to refuse instead of warning, deliberately.
+**Personal identifiers — detected, listed by kind and line, and sent by default.** National ID
+numbers, case and receipt numbers, SSNs, email addresses, phone numbers, labelled dates of
+birth and passport numbers are found and reported before send but the payload IS sent unless
+you pass `--strict-pii`, which refuses the round instead. The default is warn-and-send; the
+opt-in is refuse. Credentials, above, are always refused; PII is not.
 
 The recommended handling is to tokenize in the **sent copy only** — never edit your source of
 record — and tell the model the placeholders are expected. A reviewer never needs real identifiers

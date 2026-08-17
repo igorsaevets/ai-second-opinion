@@ -3110,6 +3110,30 @@ def suite_r47_causes():
               "walked every lock rung on purpose - absence is the only lock that survives naming)")
 
 
+def suite_dedup_scripts():
+    """
+    18. Two byte-identical copies of `check_json_dup_keys.py` ship: one at repo root
+    (used by this repo's own `.pre-commit-config.yaml`) and one inside the plugin's
+    `plugins/model-orchestration/tools/` (shipped to end users, referenced by the
+    wrapper `check_json_dup_keys_hook.py`). A fix to one that skips the other is the
+    exact drift pattern the audit found (T61). No suite would catch it because both
+    copies pass `suite_dev_tooling` independently.
+
+    Runs only from the repo layout; a user's kit / plugin install has one copy.
+    """
+    root = HERE.parent.parent.parent.parent  # skill -> plugin -> plugins -> repo-root
+    a = root / "tools" / "check_json_dup_keys.py"
+    b = root / "plugins" / "model-orchestration" / "tools" / "check_json_dup_keys.py"
+    if not (a.is_file() and b.is_file()):
+        return  # not the repo layout — nothing to compare
+    import hashlib
+    ha = hashlib.sha256(a.read_bytes()).hexdigest()
+    hb = hashlib.sha256(b.read_bytes()).hexdigest()
+    check(ha == hb,
+          "check_json_dup_keys.py: repo-root and plugin copies are byte-identical",
+          "root=%s plugin=%s" % (ha[:12], hb[:12]))
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -3140,7 +3164,7 @@ def main():
                   suite_settings_and_upgrade, suite_echocheck, suite_dev_tooling,
                   suite_agy_plan_class, suite_spend_guard, suite_panels,
                   suite_max_depth_and_explicit_only, suite_refs_and_meters,
-                  suite_r47_causes):
+                  suite_r47_causes, suite_dedup_scripts):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
