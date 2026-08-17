@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.26.0 — 2026-08-17
+
+**Reviewers may now volunteer what nobody asked, and a rotated key can no longer hide behind a
+stale shell.**
+
+- **New: the UNASKED section, appended to every channel's system layer on every round** (not on
+  `--ask`, which is a lookup). Reviewers are asked to end with anything important the brief did
+  not ask about — a wrong assumption, a risk, a better alternative — items they would defend,
+  with an explicit "nothing beyond the questions" allowed so the section cannot manufacture
+  content. This was a brief-writing habit before; the R46 panel's hand-written version of the
+  same question returned four findings that shipped the same round, which is the argument for
+  making it structural.
+- 🔴 **A key rotated with `setx` was masked by the stale process environment.** `_env_key`
+  prefers the process copy (an inline override must keep working), so every already-running
+  session kept sending the dead key and the failure wore the vendor's clothes — HTTP 429 on a
+  key replaced minutes earlier. The helper now prints one warning per variable per run when
+  the process copy and `HKCU\Environment` disagree, naming the fix (restart the shell). The
+  two remaining inline registry readers (Spark's, Gemini's — the channel that hit this) were
+  replaced with `_env_key`, so the warning covers every key.
+- 4 new self-test checks (562 source / 526 kit).
+
 ## 1.25.0 — 2026-08-16
 
 **Documents by reference for the command-line reviewers, and the round now surfaces the two

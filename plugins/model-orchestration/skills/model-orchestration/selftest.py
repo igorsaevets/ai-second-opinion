@@ -2976,6 +2976,23 @@ def suite_refs_and_meters():
           "can be «do not think» (grok-4.20: 0 tokens + wrong arithmetic, measured R46)",
           repr(naked))
 
+    # ---- R47: the discretionary section, and the rotated-key divergence warning ----------------
+    check("titled UNASKED" in src
+          and '"UNASKED: nothing beyond the questions."' in src,
+          "every round appends the UNASKED section to the system layer - «иная информация на "
+          "твое усмотрение» is structural, not a brief-writing habit (R46's hand-written "
+          "version returned four findings that shipped)")
+    check("if not ask_mode:" in src.split("titled UNASKED")[0][-1500:],
+          "and --ask (a lookup, not a review) does not get the UNASKED section")
+    check("_ENV_KEY_DIVERGENCE_WARNED" in src,
+          "_env_key warns once per variable when the process env and HKCU disagree - a key "
+          "rotated with setx is otherwise masked by the stale process copy (measured R47: a "
+          "fresh GEMINI_API_KEY produced 429s that read as a quota wall)")
+    check('winreg.QueryValueEx(reg, "MODEL_API_KEY")' not in src
+          and 'winreg.QueryValueEx(reg, "GEMINI_API_KEY")' not in src,
+          "no inline winreg key-readers remain beside _env_key - two readers of one variable "
+          "is the two-homes rot, key-shaped")
+
     # ---- report.py renders a depth for every kind's spelling of the knob -----------------------
     import report as _rep
     fake = {"plan": {"g": {"model": "m", "thinking_level": "high", "kind": "gemini"},

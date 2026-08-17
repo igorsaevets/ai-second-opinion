@@ -287,14 +287,10 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, na
     `name` exists because two channels now share this function (spark 1.1 and spark 1.2 run in
     parallel) and a log line reading `[http]` twice describes neither of them.
     """
-    key = os.environ.get("MODEL_API_KEY")
-    if not key and os.name == "nt":
-        try:                                  # PowerShell setx writes here; the process env may lag
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg:
-                key = winreg.QueryValueEx(reg, "MODEL_API_KEY")[0]
-        except OSError:
-            pass
+    # _env_key, not an inline winreg copy: the inline form predated the helper, and R47 taught
+    # the helper a divergence warning the copies would silently lack (a rotated key masked by a
+    # stale process env) - two readers of one variable is the two-homes rot, key-shaped.
+    key = _env_key("MODEL_API_KEY")
     if not key:
         return {"channel": "http", "ok": False, "error": "MODEL_API_KEY not set"}
 
@@ -1380,14 +1376,7 @@ def log_citation_audit(audit):
 
 def environment_report(want=()):
     """Facts about this machine that determine whether a run can work. No secret values."""
-    key = os.environ.get("MODEL_API_KEY") or ""
-    if not key and os.name == "nt":
-        try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg:
-                key = winreg.QueryValueEx(reg, "MODEL_API_KEY")[0]
-        except OSError:
-            key = ""
+    key = _env_key("MODEL_API_KEY") or ""
     env = {
         "python": sys.version.split()[0],
         "platform": platform.platform(),
@@ -2888,14 +2877,9 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
     never "not at all". Concluding absence from one rejected placement is how a real capability
     stays switched off for a year.
     """
-    key = os.environ.get("GEMINI_API_KEY")
-    if not key and os.name == "nt":
-        try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg:
-                key = winreg.QueryValueEx(reg, "GEMINI_API_KEY")[0]
-        except OSError:
-            pass
+    # _env_key, not an inline winreg copy - see its R47 docstring: THIS channel is where a
+    # rotated key masked by a stale process env produced an HTTP 429 that read as a quota wall.
+    key = _env_key("GEMINI_API_KEY")
     if not key:
         return {"channel": name, "ok": False,
                 "error": "GEMINI_API_KEY is not set - this channel needs it. Set it (see "
@@ -4166,16 +4150,38 @@ def _legacy_slot(cname):
             "timeout": None, "web": None, "toolsets": None}
 
 
+_ENV_KEY_DIVERGENCE_WARNED = set()
+
+
 def _env_key(varname):
-    """Process env first, then HKCU\\Environment, because `setx` writes only the latter."""
+    """Process env first, then HKCU\\Environment, because `setx` writes only the latter.
+
+    🔴 AND WHEN THE TWO DISAGREE, SAY SO (R47). Igor rotated GEMINI_API_KEY with setx; every
+    already-running session kept the DEAD key in its inherited process env, this function
+    preferred it, and the failure wore the vendor's clothes - HTTP 429 on a key that had just
+    been replaced, indistinguishable from a real quota wall. The process copy still WINS,
+    because an inline `$env:X=...; python ...` override is legitimate and must keep working -
+    a stale inherited copy and a deliberate override are mechanically indistinguishable. What
+    changes is that the divergence is PRINTED, once per variable per run: the one line that
+    turns half an hour of quota theories into "restart the shell".
+    """
     v = os.environ.get(varname)
-    if not v and os.name == "nt":
+    if os.name == "nt":
+        reg_v = None
         try:
             import winreg
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg:
-                v = winreg.QueryValueEx(reg, varname)[0]
+                reg_v = winreg.QueryValueEx(reg, varname)[0]
         except OSError:
             pass
+        if not v:
+            v = reg_v
+        elif reg_v and reg_v != v and varname not in _ENV_KEY_DIVERGENCE_WARNED:
+            _ENV_KEY_DIVERGENCE_WARNED.add(varname)
+            log("  ⚠ %s in this PROCESS differs from the one saved with setx "
+                "(HKCU\\Environment). The process copy is being USED. If you just rotated "
+                "this key, this session is still holding the old one - restart the shell, "
+                "or clear the process copy so the new value is read." % varname)
     return v
 
 
@@ -5363,6 +5369,21 @@ def main():
     system += ('\n\nIf your search finds nothing, write exactly "my search found no confirmation" '
                "and do NOT conclude the thing does not exist. A non-existence claim is permitted "
                "only with positive evidence of absence, with that source's URL.")
+    # «Иная информация на твое усмотрение» (Igor, R47) - structural, not a brief-writing habit,
+    # because rules fire by topic and habits decay: R46's hand-written version of this question
+    # returned four findings that shipped the same round, and SKILL.md has said for weeks that
+    # the highest-value finding is never an answer to an asked question. Appended to the SYSTEM
+    # layer so it reaches every channel on every round without anyone remembering it. Bounded on
+    # purpose - items the reviewer would DEFEND - and an explicit "nothing" is legal, so the
+    # section cannot manufacture content to fill itself. Skipped for --ask: a lookup is not a
+    # review, and padding a one-line answer with an essay section would make the cheap path
+    # expensive to read.
+    if not ask_mode:
+        system += ("\n\nAfter the brief's own questions are answered, add one final section "
+                   "titled UNASKED: anything important the brief did not ask about - a wrong "
+                   "assumption, a risk you noticed, a better alternative, a thing worth "
+                   "checking next. Only items you would defend as significant. If there is "
+                   'nothing, write exactly "UNASKED: nothing beyond the questions."')
 
     # Last point at which anything can still be stopped for free. Both files are scanned: a
     # hand-written --system file is just as capable of carrying a name or a key as the brief.
