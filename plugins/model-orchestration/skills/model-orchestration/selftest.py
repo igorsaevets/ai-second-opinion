@@ -204,6 +204,17 @@ def suite_routing():
     # default should fail here, in both the working copy and a shipped kit.
     OPT_IN = {"orgpt56terrapro": "rationed: ~$1.80/review, strategic questions only"}
     for c, why in sorted(OPT_IN.items()):
+        if kit_tree:
+            # 🔴 R47, Igor: «Terra Pro модель в репозитории вообще давай отключим (или удалим),
+            # а то сотрудники все равно ее запускают. Только у меня локально ее оставь.» The
+            # three lock rungs - enabled:false, explicit_only, requires_ack - were each walked
+            # BY a determined user, because every rung leaves the channel present and nameable.
+            # The only lock that survives naming is absence: package.py now deletes the entry
+            # from the published registry (PUBLISH_EXCLUDE_CHANNELS), so in a shipped tree the
+            # correct state is NOT THERE, and finding it is a build regression.
+            check(c not in _CHANS,
+                  "%s is ABSENT from the shipped registry (author-local channel, R47)" % c)
+            continue
         if c not in _CHANS:
             check(False, "opt-in channel %s still exists" % c)
             continue
@@ -341,29 +352,7 @@ def suite_routing():
          "--skip codex + agy group"),
         (["--route", "только spark11"], {"spark11"}, "route: только spark11"),
         (["--route", "не используй codex"], without("codex"), "route: RU negation"),
-        # 🔴 OPT-IN CHANNELS, round 38. Naming a default-OFF channel in prose must SELECT it -
-        # until 2026-08-14 the route's only-branch could only turn things off, so "только 5.6
-        # terra" removed the other twelve and left the named one disabled: "running 0 channel(s):
-        # NONE". The --only FLAG was always right, so the two selection paths disagreed and the
-        # prose one silently did nothing. Derived from the registry, not hard-coded to a count.
-        (["--route", "только 5.6 terra"], {"orgpt56terrapro"},
-         "route: только 5.6 terra (names an OFF-by-default channel)"),
-        (["--route", "только терра-про"], {"orgpt56terrapro"},
-         "route: только терра-про (RU alias of an OFF-by-default channel)"),
-        # ADD mode: default set PLUS the named channel. Igor's rule is that «используй все
-        # модели» must NOT pull in the rationed channel while «и ещё 5.6 Terra Pro» must.
-        # 🔴 «все модели» NAMES THE STANDARD PANEL IN PROSE - it is not a synonym for "the
-        # default". The suite already asserts that two lines below («запусти все» does NOT wake
-        # the opt-in channel because «все» is the standard panel), so writing ALL here was two
-        # tests disagreeing about one word; it only looked right while `standard` happened to be
-        # the default. Derived per case now: this one resolves the standard panel, the next one
-        # carries no panel word and gets the default.
-        (["--route", "используй все модели и ещё 5.6 Terra Pro"],
-         panel_set("standard") | {"orgpt56terrapro"},
-         "route: ADD keeps the default set and adds the opt-in one"),
-        (["--route", "добавь терра-про"], ALL | {"orgpt56terrapro"},
-         "route: добавь <opt-in channel>"),
-        # The negative half of the same rule: no additive marker => the default set, unchanged.
+        # The negative half of the ADD rule: no additive marker => the default set, unchanged.
         (["--route", "не используй gemini"], without(*group_of("gemini")),
          "route: a plain negation still leaves the opt-in channel OFF"),
         (["--route", "кроме gemini"], without(*group_of("gemini")), "route: кроме gemini (GROUP)"),
@@ -372,6 +361,30 @@ def suite_routing():
         (["--route", "only codex"], {"codex"}, "route: EN only"),
         ([], ALL, "no flags: every enabled channel runs"),
     ]
+    if "orgpt56terrapro" in EXISTS:
+        # 🔴 OPT-IN CHANNELS, round 38. Naming a default-OFF channel in prose must SELECT it -
+        # until 2026-08-14 the route's only-branch could only turn things off, so "только 5.6
+        # terra" removed the other twelve and left the named one disabled: "running 0 channel(s):
+        # NONE". The --only FLAG was always right, so the two selection paths disagreed and the
+        # prose one silently did nothing. Derived from the registry, not hard-coded to a count.
+        # 🔴 R47: conditional on the channel EXISTING, because the shipped kit registry now
+        # DELETES it (PUBLISH_EXCLUDE_CHANNELS in package.py). The absent-tree assertions live
+        # in suite_explicit_only, which proves the words go dark rather than quietly empty.
+        cases += [
+            (["--route", "только 5.6 terra"], {"orgpt56terrapro"},
+             "route: только 5.6 terra (names an OFF-by-default channel)"),
+            (["--route", "только терра-про"], {"orgpt56terrapro"},
+             "route: только терра-про (RU alias of an OFF-by-default channel)"),
+            # ADD mode: default set PLUS the named channel. Igor's rule is that «используй все
+            # модели» must NOT pull in the rationed channel while «и ещё 5.6 Terra Pro» must.
+            # 🔴 «все модели» NAMES THE STANDARD PANEL IN PROSE - it is not a synonym for "the
+            # default"; derived per case (standard panel here, the bare default below).
+            (["--route", "используй все модели и ещё 5.6 Terra Pro"],
+             panel_set("standard") | {"orgpt56terrapro"},
+             "route: ADD keeps the default set and adds the opt-in one"),
+            (["--route", "добавь терра-про"], ALL | {"orgpt56terrapro"},
+             "route: добавь <opt-in channel>"),
+        ]
     for args, expect, label in cases:
         p = run_cli(args + ["--dry-run"], timeout=90)
         ran = {ln.strip().split("]", 1)[1].strip().split()[0]
@@ -2300,10 +2313,10 @@ def suite_spend_guard():
             ("transport: ConnectionResetError(10054, 'Удаленный хост принудительно разорвал "
              "существующее подключение', None, 10054, None)",
              "the SAME failure with a Russian OS message"),
-            ("EMPTY OUTPUT from stream - status=completed, output items=['reasoning', "
-             "'web_search_call'], reasoning_tokens=10276 of 10279 output tokens. A high reasoning "
-             "share with no message item means the turn ended inside the agentic loop",
-             "reasoned past its budget and never answered")):
+            ("VENDOR ENDED THE TURN MID-LOOP - status=completed, incomplete_reason=None, "
+             "output items=['reasoning', 'web_search_call'], reasoning_tokens=6712 of 6715 "
+             "output tokens, with 95% of the max_output_tokens=131072 budget UNSPENT.",
+             "vendor mid-loop death (R47 wording - the AOS round-40 grok420 instance)")):
         c3, f3 = o.diagnose(text)
         check(c3 is not None and f3 is not None, "diagnosed: %s" % label,
               (c3 or "NO MATCH")[:60])
@@ -2314,8 +2327,18 @@ def suite_spend_guard():
     reg = _json.load(open(os.path.join(HERE, "channels.json"), encoding="utf-8"))
     guarded = {c: ch for c, ch in reg["channels"].items()
                if not c.startswith("_") and (ch.get("spend_guard") or {}).get("requires_ack")}
-    check(guarded, "at least one channel declares spend_guard.requires_ack",
-          ", ".join(guarded) or "none")
+    # 🔴 R47: the ONLY requires_ack channel is deleted from the shipped registry, so in a kit
+    # tree this sentinel would demand a channel that is absent by design. There the honest
+    # assertion is that the MECHANISM still ships (the code path exists for a hand-added
+    # channel), which the source-string check below covers; the working copy keeps the strong
+    # form so the policy cannot be silently dropped where it is meant to live.
+    if os.path.isfile(os.path.join(HERE, "VERSION")):
+        check("requires_ack" in open(os.path.join(HERE, "orchestrate.py"),
+                                     encoding="utf-8").read(),
+              "the ack-gate mechanism still ships even though no shipped channel uses it")
+    else:
+        check(guarded, "at least one channel declares spend_guard.requires_ack",
+              ", ".join(guarded) or "none")
     for cname, ch in guarded.items():
         check(ch.get("enabled") is False,
               "%s: requires_ack implies default-off (an ack gate on an on-by-default channel "
@@ -2430,8 +2453,13 @@ def suite_max_depth_and_explicit_only():
 
     # --- (b) explicit_only: every group word, every panel, the default -----------------------
     expl = [c for c, ch in reg["channels"].items() if ch.get("explicit_only")]
-    check(bool(expl), "at least one channel is declared explicit_only",
-          "otherwise every check below passes vacuously")
+    # 🔴 R47: the only explicit_only channel is deleted from the shipped registry (see the
+    # requires_ack sentinel above - same reasoning). In a kit tree the checks below run
+    # vacuously over an empty set, which is CORRECT there: the property they guard has no
+    # carrier. The working copy keeps the strong sentinel.
+    if not os.path.isfile(os.path.join(HERE, "VERSION")):
+        check(bool(expl), "at least one channel is declared explicit_only",
+              "otherwise every check below passes vacuously")
 
     def enabled(**kw):
         """The channels a selection starts. A RouteError counts as «started nothing».
@@ -2470,27 +2498,41 @@ def suite_max_depth_and_explicit_only():
         for word in [c] + list(reg["channels"][c].get("aliases") or []):
             check(c in enabled(only=[word]),
                   "--only %r DOES start it - naming is the way in" % word)
-    # 🔴 IGOR'S OWN SENTENCE, VERBATIM. It was a hard ROUTE ERROR until R43 because «включая» was
-    # not an instruction word - so the one phrasing named in the instruction that authorises this
-    # channel was the one phrasing that could not authorise it.
-    check(set(expl) <= enabled(route="Запусти все, включая Terra pro"),
-          "«Запусти все, включая Terra pro» starts it (Igor's own authorising sentence)")
-    check(not (set(expl) & enabled(route="запусти все")),
-          "«запусти все» does NOT start it - «все» is the standard panel, not everything")
-    # 🔴🔴 THE INVERSE SENTENCE, ONE WORD APART, AND IT USED TO DO THE OPPOSITE OF WHAT IT SAYS.
-    # Found by a reviewer in the round that introduced «включая»: the ADD word matched INSIDE
-    # «не включая», so the user's «не» became decoration and the round ran the most expensive
-    # channel in the registry. Every selection marker is now checked for a preceding negation.
-    # The negated forms are asserted for EVERY mode word, not just the one that was broken.
-    for neg in ("Запусти все, не включая Terra pro", "запусти все, кроме terra",
-                "запусти все без terra", "не используй terra",
-                "запусти все, не включая terra", "все, но не terra"):
-        check(not (set(expl) & enabled(route=neg)),
-              "a NEGATED mention does not start it: %r" % neg)
-    # And naming by MODEL id must reach the channel through the FLAG path too, not only prose.
-    for word in ("terra pro", "5.6 terra", "openai/gpt-5.6-terra-pro"):
-        check(set(expl) & enabled(only=[word]),
-              "--only %r resolves through a MODEL alias to the channel" % word)
+    # 🔴 R47: everything below names the Terra channel's own words, so it runs only where the
+    # registry still carries the channel. The shipped kit registry DELETES it outright
+    # (PUBLISH_EXCLUDE_CHANNELS in package.py) - Igor: «сотрудники все равно ее запускают», and
+    # the three lock rungs were each walked on purpose, so the only surviving lock is absence.
+    if "orgpt56terrapro" in reg["channels"]:
+        # 🔴 IGOR'S OWN SENTENCE, VERBATIM. It was a hard ROUTE ERROR until R43 because «включая»
+        # was not an instruction word - so the one phrasing named in the instruction that
+        # authorises this channel was the one phrasing that could not authorise it.
+        check(set(expl) <= enabled(route="Запусти все, включая Terra pro"),
+              "«Запусти все, включая Terra pro» starts it (Igor's own authorising sentence)")
+        check(not (set(expl) & enabled(route="запусти все")),
+              "«запусти все» does NOT start it - «все» is the standard panel, not everything")
+        # 🔴🔴 THE INVERSE SENTENCE, ONE WORD APART, AND IT USED TO DO THE OPPOSITE OF WHAT IT
+        # SAYS. Found by a reviewer in the round that introduced «включая»: the ADD word matched
+        # INSIDE «не включая», so the user's «не» became decoration and the round ran the most
+        # expensive channel in the registry. Every selection marker is now checked for a
+        # preceding negation. The negated forms are asserted for EVERY mode word.
+        for neg in ("Запусти все, не включая Terra pro", "запусти все, кроме terra",
+                    "запусти все без terra", "не используй terra",
+                    "запусти все, не включая terra", "все, но не terra"):
+            check(not (set(expl) & enabled(route=neg)),
+                  "a NEGATED mention does not start it: %r" % neg)
+        # And naming by MODEL id must reach the channel through the FLAG path too, not only prose.
+        for word in ("terra pro", "5.6 terra", "openai/gpt-5.6-terra-pro"):
+            check(set(expl) & enabled(only=[word]),
+                  "--only %r resolves through a MODEL alias to the channel" % word)
+    else:
+        # The absent tree: the words that used to authorise the channel must go DARK - a hard
+        # error a user can read, never an empty success that quietly ran nothing.
+        for args in (["--only", "terra pro"], ["--only", "orgpt56terrapro"],
+                     ["--route", "только терра-про"]):
+            p = run_cli(args + ["--dry-run"])
+            check(p.returncode != 0,
+                  "%r errors in a registry without the channel (absence is the lock)"
+                  % " ".join(args))
 
 
 def suite_panels():
@@ -3007,6 +3049,67 @@ def suite_refs_and_meters():
           "report.py shows a reasoning budget as the depth for budget-form channels (was '-')")
 
 
+def suite_r47_causes():
+    section("R47. The cause the vendor states, not the one the canned text assumes")
+    sys.path.insert(0, str(HERE))
+    import orchestrate as o
+    src = (HERE / "orchestrate.py").read_text(encoding="utf-8")
+
+    # ---- finish_reason is read off the stream and recorded -------------------------------------
+    check('ch.get("finish_reason")' in src and 'ch.get("native_finish_reason")' in src,
+          "both spellings of the provider's stop reason are captured (OpenRouter normalises; "
+          "the vendor's own spelling rides in native_finish_reason)")
+    oai_tail = src.split("def call_oai_reviewer")[1].split("\nXAI_RESPONSES_URL")[0]
+    check('"finish_reason": last_finish.get("finish")' in oai_tail,
+          "the channel record carries finish_reason - it was discarded on every chunk before, "
+          "so a provider-cut answer (nemotron, AOS R40: 32 KB ending mid-heading, no marker) "
+          "was indistinguishable from a model that chose to stop")
+    check("PROVIDER LENGTH CEILING CUT THE ANSWER" in oai_tail,
+          "finish_reason=length beside a missing marker names the cutter, not just the symptom")
+
+    # ---- the two xai empty-output shapes meet different causes ---------------------------------
+    xai_src = src.split("def call_xai_responses")[1].split("\nAGY_AGENT")[0]
+    check("VENDOR ENDED THE TURN MID-LOOP" in xai_src
+          and "OUTPUT BUDGET EXHAUSTED - status=" in xai_src,
+          "the empty xai answer splits on budget share: exhausted vs vendor mid-loop death "
+          "(AOS R40: 95% of the budget UNSPENT while the canned cause said it was gone)")
+    check('"response_id": resp_obj.get("id")' in xai_src,
+          "the vendor's response id is recorded for post-mortem retrieval")
+
+    # ---- diagnose() has a cause for each new warning - EXECUTED, not read ----------------------
+    for w, frag in (
+            ("VENDOR ENDED THE TURN MID-LOOP - status=completed, x", "server-side"),
+            ("PROVIDER LENGTH CEILING CUT THE ANSWER - finish_reason=length: x", "provider's"),
+            ("OUTPUT BUDGET EXHAUSTED - status=completed, output items=['reasoning']",
+             "CUT OFF")):
+        cause, fix = o.diagnose(w)
+        check(bool(cause) and bool(fix) and frag.lower() in ((cause or "") + (fix or "")).lower(),
+              "diagnose() maps %r... to its own cause" % w[:40])
+    check("reasoned until its output budget was gone" not in src,
+          "the wrong one-size cause (budget-was-gone printed over a 95%-unspent budget) is gone")
+
+    # ---- doctor: keys derived from the registry, resolver shared with the harness --------------
+    dsrc = (HERE / "doctor.py").read_text(encoding="utf-8")
+    check('os.environ.get("MODEL_API_KEY")' not in dsrc,
+          "doctor no longer keeps a third private copy of the process-env/HKCU key resolver")
+    check("check_key(r, mod)" in dsrc and "_env_key" in dsrc,
+          "doctor's key check goes through the harness's _env_key, divergence warning included")
+    check("kind_var" in dsrc and "key_env" in dsrc,
+          "doctor derives WHICH keys matter from the registry and the provider table - it used "
+          "to report the Spark key and stay silent about the only key a kit user has")
+
+    # ---- Terra: held back from the published registry ------------------------------------------
+    # package.py is the BUILDER and does not ship; in the kit tree the equivalent assertion is
+    # the registry-absence check in suite_routing's kit_tree branch. (This suite raised
+    # FileNotFoundError on the first kit run - the world-awareness rule, applied to its author.)
+    pkg = HERE / "package.py"
+    if pkg.is_file():
+        psrc = pkg.read_text(encoding="utf-8")
+        check('PUBLISH_EXCLUDE_CHANNELS = ["orgpt56terrapro"]' in psrc,
+              "package.py deletes the rationed channel from the shipped registry (R47: employees "
+              "walked every lock rung on purpose - absence is the only lock that survives naming)")
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -3036,7 +3139,8 @@ def main():
                   suite_citations, suite_dispatch, suite_tiers_and_grounding,
                   suite_settings_and_upgrade, suite_echocheck, suite_dev_tooling,
                   suite_agy_plan_class, suite_spend_guard, suite_panels,
-                  suite_max_depth_and_explicit_only, suite_refs_and_meters):
+                  suite_max_depth_and_explicit_only, suite_refs_and_meters,
+                  suite_r47_causes):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

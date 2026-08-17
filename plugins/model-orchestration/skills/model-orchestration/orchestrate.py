@@ -1004,6 +1004,16 @@ KNOWN_FAILURES = [
      "max_completion_tokens (the warning prints both numbers). If it is already at the ceiling, "
      "the brief is too hard for that channel and the only remedy is to split it. This is NOT a "
      "timeout and NOT a tier problem."),
+    # R47, from the AOS round-40 nemotron review that ended mid-heading with only the generic
+    # marker warning: the provider's own stop reason was on the final chunk and unread.
+    ("PROVIDER LENGTH CEILING CUT THE ANSWER|finish_reason=length",
+     "The provider's own per-response completion cap is smaller than the max_tokens this "
+     "channel asked for, so generation stopped mid-sentence at THEIR ceiling. Free-tier "
+     "endpoints carry the smallest caps; the end marker is the first casualty because it is "
+     "the last thing the model would have written.",
+     "Raising max_tokens in channels.json cannot help - the binding ceiling is the provider's. "
+     "Shorten the brief, ask for a tighter answer, or move the channel to a paid endpoint of "
+     "the same model, which usually carries the larger cap."),
     ("PROVIDER ERROR MID-STREAM|Upstream error|Internal server error",
      "The vendor's own upstream failed while streaming - their infrastructure, not the brief "
      "and not this harness.",
@@ -1076,15 +1086,20 @@ KNOWN_FAILURES = [
      "drop it for this round. Nothing was billed for a request that returned no tokens, so a "
      "single re-run is safe here - unlike a rate limit or a spend stop, which must not be "
      "auto-retried."),
-    # The vendor answered, spent its whole output budget on reasoning, and never emitted a message
-    # item. Distinct from an empty stream with no error: here the meter proves the model worked.
-    ("A high reasoning share with no message item|reasoning_tokens=\\d+ of \\d+ output tokens",
-     "The model reasoned until its output budget was gone and never started the answer, so the "
-     "turn ended inside its own agentic loop. The tokens were spent and billed; there is simply "
-     "no text.",
-     "Shorten the brief or split it into fewer questions, or raise that channel's max_tokens in "
-     "channels.json - on this protocol the budget covers REASONING AND ANSWER TOGETHER, so a "
-     "ceiling that looks generous can still leave nothing for the review."),
+    # 🔴 R47: this entry used to cover BOTH empty-output shapes with the budget-exhausted cause,
+    # and the AOS round-40 failure proved it wrong out loud: 6 715 of 131 072 output tokens used -
+    # 95% of the budget UNSPENT - and the printed cause said "the output budget was gone". The
+    # warning text now splits on the budget share, so each shape meets its own cause here.
+    ("VENDOR ENDED THE TURN MID-LOOP",
+     "The vendor's server-side agentic loop terminated after a tool call without producing a "
+     "message item - status says completed, the budget is largely unspent, and the reasoning "
+     "and searches were billed. This is a vendor-side stochastic termination, the 4th measured "
+     "instance of one class across three vendors (kimik3 2026-08-03, grok420 R29+R40, "
+     "orgemini37flash R38). No request parameter controls it.",
+     "Re-run just that channel with --only <channel> - never automatically, the failed call was "
+     "billed. If it repeats on large briefs, run the same model through a transport where the "
+     "HARNESS drives the tool loop client-side (for grok-4.20 that is orgrok420 via OpenRouter): "
+     "the mid-loop termination lives in the vendor's server-side runtime, not in the model."),
     ("CITATIONS: only 0 of",
      "The model cited sources and opened none of them - memory dressed as research.",
      "The harness already re-ran this channel once with a source-discipline escalation. Treat "
@@ -3173,6 +3188,11 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                                     data=json.dumps(payload).encode("utf-8"), headers=headers)
         parts, rchars, use, calls = [], 0, {}, {}
         served = set()
+        # 🔴 R47: `finish_reason` was on every final chunk and discarded, so a provider that CUT
+        # the answer (finish_reason=length - the AOS round-40 nemotron review ends mid-heading)
+        # was indistinguishable from a model that chose to stop. OpenRouter adds
+        # `native_finish_reason`, the vendor's own spelling before normalisation; both kept.
+        finish = {}
         if not streaming:
             # One response object instead of a frame sequence. Same five return values, so every
             # caller below is untouched - the tool loop, the spend guard and the telemetry cannot
@@ -3187,6 +3207,10 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             use = ev.get("usage") or {}
             for ch in ev.get("choices") or []:
                 msg = ch.get("message") or {}
+                if ch.get("finish_reason"):
+                    finish["finish"] = ch["finish_reason"]
+                if ch.get("native_finish_reason"):
+                    finish["native"] = ch["native_finish_reason"]
                 if msg.get("content"):
                     parts.append(msg["content"])
                 for rk in ("reasoning", "reasoning_content"):
@@ -3207,7 +3231,7 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             return ("".join(parts), rchars, use,
                     [{"id": v["id"], "name": v["name"], "args": "".join(v["args"])}
                      for _, v in sorted(calls.items())],
-                    sorted(served))
+                    sorted(served), finish)
         with urllib.request.urlopen(rq, timeout=timeout) as resp:
             for raw in resp:
                 line = raw.decode("utf-8", "replace").strip()
@@ -3247,6 +3271,10 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                 for ch in ev.get("choices") or []:
                     if ch.get("error"):
                         stream_error.append(ch["error"])
+                    if ch.get("finish_reason"):
+                        finish["finish"] = ch["finish_reason"]
+                    if ch.get("native_finish_reason"):
+                        finish["native"] = ch["native_finish_reason"]
                     delta = ch.get("delta") or {}
                     if delta.get("content"):
                         parts.append(delta["content"])
@@ -3278,7 +3306,7 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         return ("".join(parts), rchars,  use,
                 [{"id": v["id"], "name": v["name"], "args": "".join(v["args"])}
                  for _, v in sorted(calls.items())],
-                sorted(served))
+                sorted(served), finish)
 
     vendor_cites, stream_error = [], []
     text_parts, reasoning_chars, usage = [], 0, {}
@@ -3311,6 +3339,13 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # survived because the round was framed as "fix the money field" instead of "find every
     # field read from `usage` after a loop that overwrites `usage`".
     usd_tot, usd_seen, rounds_done, cached_tot = 0.0, False, 0, 0
+    # 🔴 R47: THE SAME DEFECT THIS BLOCK IS NAMED FOR, ONE FIELD FURTHER ALONG. `usd`, then
+    # `cached_in_tokens`, and now `reasoning_tokens`: the record read it from `usage` - the LAST
+    # round's object - while `reasoning_chars` right beside it summed every round. The AOS
+    # round-40 nemotron review printed reasoning_tokens=26 next to reasoning_chars=4948, and the
+    # 26 was read as "the knob is inert" until a 3-arm probe showed the knob moving (181 vs ~102)
+    # and the 26 being the final tool round's thinking only. Summed like in_tot/out_tot now.
+    reas_tot = 0
     # The most expensive single round SO FAR, used as the estimate of what the next one will cost.
     # Measured, not derived from a price table - same rule as the ceiling itself.
     usd_max_round = 0.0
@@ -3344,16 +3379,23 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                 "fetches": fetches if fetch_on else None,
                 "seconds": round(time.time() - start, 1)}
 
+    last_finish = {}
     try:
         for _round in range(max_rounds + 1):
-            chunk, rch, use, calls, served = _stream_once(body)
+            chunk, rch, use, calls, served, _fin = _stream_once(body)
             rounds_done += 1
+            # The FINAL round's finish_reason is the one that ended the answer; a tool round's
+            # `tool_calls` value is overwritten by whatever the last generation reports.
+            if _fin:
+                last_finish = _fin
             served_models.update(served)
             reasoning_chars += rch
             in_tot += (use or {}).get("prompt_tokens") or 0
             out_tot += (use or {}).get("completion_tokens") or 0
             cached_tot += (((use or {}).get("prompt_tokens_details") or {})
                            .get("cached_tokens") or 0)
+            reas_tot += (((use or {}).get("completion_tokens_details") or {})
+                         .get("reasoning_tokens") or 0)
             _c = (use or {}).get("cost")
             if _c is not None:
                 try:
@@ -3617,6 +3659,25 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                     % (usd_ceiling, rounds_done))
     if marker and not text.strip().endswith(marker):
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
+        # 🔴 R47: the marker warning stood ALONE on the AOS round-40 nemotron review - 32 KB of
+        # text ending mid-heading - because the finish_reason that would have named the cutter
+        # was never read off the stream. When the provider itself says why generation stopped,
+        # that reason now stands beside the symptom.
+        _fr = last_finish.get("finish")
+        if _fr == "length":
+            warn.append(
+                "PROVIDER LENGTH CEILING CUT THE ANSWER - finish_reason=length: the provider "
+                "stopped the final generation at %s output tokens although this channel asked "
+                "for max_tokens=%s. The binding ceiling is the PROVIDER's, so raising ours "
+                "cannot help; a :free variant usually carries a smaller cap than the paid "
+                "endpoint of the same model."
+                % ((usage or {}).get("completion_tokens"), max_tokens))
+        elif _fr and _fr not in ("stop", "tool_calls"):
+            warn.append(
+                "PROVIDER ENDED THE ANSWER EARLY - finish_reason=%r%s. The text stops where "
+                "the provider stopped it, not where the model finished."
+                % (_fr, (" (native: %r)" % last_finish["native"])
+                   if last_finish.get("native") else ""))
     if not text.strip():
         # 🔴🔴 THE HARNESS HELD THE REASON AND PRINTED «no reason». R42's mimo25pro round returned
         # zero bytes after 766 seconds and this branch said «the connection produced no content and
@@ -3702,6 +3763,13 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             # purpose - collapsing them into one is how the substitution stayed invisible.
             "model_served": served or None,
             "provider": provider,
+            # Why the FINAL generation stopped, in the provider's own words. "stop" is a model
+            # that finished; "length" is a provider that cut it; anything else is the provider
+            # ending the turn for its own reason. R47 - was discarded on every chunk before.
+            "finish_reason": last_finish.get("finish"),
+            "native_finish_reason": (last_finish.get("native")
+                                     if last_finish.get("native") != last_finish.get("finish")
+                                     else None),
             "in_tokens": in_tot or usage.get("prompt_tokens"),
             "out_tokens": out_tot or usage.get("completion_tokens"),
             # 🔴 THE PRICE WAS ON THE WIRE ALL ALONG AND WE THREW IT AWAY. `usage.include: true`
@@ -3729,8 +3797,10 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             # under `completion_tokens_details`; `output_tokens_details` is the Responses API and
             # is correct for xAI two hundred lines below. One project, two shapes, one habit of
             # copying the key that worked last time.
-            "reasoning_tokens": (usage.get("completion_tokens_details") or {})
-                                .get("reasoning_tokens"),
+            # 🔴 R47: SUMMED across tool rounds (see reas_tot above) - the last-round read stood
+            # here through TWO fixes of the identical defect on neighbouring fields.
+            "reasoning_tokens": reas_tot or (usage.get("completion_tokens_details") or {})
+                                            .get("reasoning_tokens"),
             "reasoning_meter": meter_source(usage, "completion_tokens_details",
                                             "reasoning_tokens"),
             "reasoning_chars": reasoning_chars or None,
@@ -3804,12 +3874,13 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
                          "INSTALL.md), or run with --skip %s." % name}
     model = model or _registry_default(name, "model", "grok-4.20-0309-reasoning")
     tools = list(tools or ["web_search"])
+    sent_budget = max_tokens or 60000
     body = {"model": model,
             # The system layer rides in front of the brief, exactly as it does for codex and agy.
             # A brief framed one way is refused and framed another way is answered, so the framing
             # has to reach every channel that can refuse.
             "input": [{"role": "user", "content": _with_system(brief, system)}],
-            "max_output_tokens": max_tokens or 60000,
+            "max_output_tokens": sent_budget,
             "tools": [{"type": t} for t in tools],
             "stream": True}
     headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
@@ -3892,16 +3963,46 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
         # the vendor DID report - the terminal status, the incomplete reason, the shape of the
         # output array - now travels with the failure, because a paid failure you cannot
         # diagnose is one you will pay for again.
+        #
+        # 🔴 R47: ONE WARNING TEXT COVERED TWO OPPOSITE FAILURES, AND THE CANNED CAUSE LIED ABOUT
+        # ONE OF THEM. The AOS round-40 instance spent 6 715 of a 131 072 budget - 95% UNSPENT -
+        # and the diagnosis still blamed an exhausted budget, in those words. The two
+        # shapes need different fixes: an exhausted budget wants a bigger max_tokens or a smaller
+        # brief; a mid-loop termination with the budget untouched is the vendor's server-side
+        # agentic runtime ending the turn without a message item - the 4th measured instance of
+        # that class across three vendors (kimik3 2026-08-03, grok420 R29+R40, orgemini37flash
+        # R38), and no request parameter controls it. Split on the budget share so each failure
+        # meets its own cause.
         kinds = sorted({(it.get("type") or "?") for it in (resp_obj.get("output") or [])})
-        warn.append(
-            "EMPTY OUTPUT from stream - status=%s, incomplete_reason=%s, output items=%s, "
-            "reasoning_tokens=%s of %s output tokens. A high reasoning share with no message "
-            "item means the turn ended inside the agentic loop: re-run, or shorten the brief."
-            % (resp_obj.get("status"),
-               (resp_obj.get("incomplete_details") or {}).get("reason"),
-               kinds or "none captured",
-               (usage.get("output_tokens_details") or {}).get("reasoning_tokens"),
-               usage.get("output_tokens")))
+        out_used = usage.get("output_tokens") or 0
+        reas_used = (usage.get("output_tokens_details") or {}).get("reasoning_tokens")
+        if out_used >= int(sent_budget * 0.9):
+            # R47 panel (ordeepseekv4pro): a loop death can COINCIDE with a nearly-spent budget,
+            # and labelling that shape purely "exhausted" points the reader at max_tokens when
+            # the loop was the killer. When the captured items show the turn still inside a tool
+            # call, say both.
+            _in_loop = any(str(k).endswith("search_call") for k in kinds)
+            warn.append(
+                "OUTPUT BUDGET EXHAUSTED - status=%s, output items=%s, reasoning_tokens=%s of "
+                "%s output tokens against max_output_tokens=%s. The reasoning spent the whole "
+                "budget and the answer never started.%s"
+                % (resp_obj.get("status"), kinds or "none captured",
+                   reas_used, out_used, sent_budget,
+                   (" NOTE: the last captured items include a tool call, so the turn was still "
+                    "inside the agentic loop when the budget went - raising max_tokens may only "
+                    "buy a longer loop." if _in_loop else "")))
+        else:
+            warn.append(
+                "VENDOR ENDED THE TURN MID-LOOP - status=%s, incomplete_reason=%s, output "
+                "items=%s, reasoning_tokens=%s of %s output tokens, with %d%% of the "
+                "max_output_tokens=%s budget UNSPENT. The budget is NOT the cause: the vendor's "
+                "server-side agentic loop terminated after a tool call without ever producing a "
+                "message item, and billed for the reasoning and searches it did make."
+                % (resp_obj.get("status"),
+                   (resp_obj.get("incomplete_details") or {}).get("reason"),
+                   kinds or "none captured", reas_used, out_used,
+                   round(100 * (1 - out_used / sent_budget)) if sent_budget else 0,
+                   sent_budget))
     record_refusal(refusal_check(text, marker), warn, note)
     if resp_obj.get("status") == "incomplete":
         note.append("xAI reported status=incomplete (%s)"
@@ -3933,6 +4034,11 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
             # question asked of any xai failure, and reconstructing it after the fact is
             # impossible because the stream is gone.
             "response_status": resp_obj.get("status"),
+            # The vendor's handle for this turn. R47: the round-40 post-mortem had to argue
+            # parser-vs-vendor from the captured stream alone; with the id, the stored response
+            # can be re-read at the vendor after the fact. Recorded, not acted on - whether
+            # retrieval works on xAI's side is not asserted here because it was not probed.
+            "response_id": resp_obj.get("id"),
             "output_item_types": sorted({(it.get("type") or "?")
                                          for it in (resp_obj.get("output") or [])}) or None,
             # 🔴 NOT `num_sources_used`. That counter belongs to the DEPRECATED live-search path

@@ -194,24 +194,78 @@ def check_registry_pristine(r):
            "%s --migrate" % os.path.join(HERE, "upgrade.py"))
 
 
-def check_key(r):
-    key = os.environ.get("MODEL_API_KEY")
-    where = "process env"
-    if not key and os.name == "nt":
-        try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg:
-                key = winreg.QueryValueEx(reg, "MODEL_API_KEY")[0]
-                where = "HKCU\\Environment"
-        except OSError:
-            pass
-    if key:
-        # Length only. The value must never reach a console, a log, or a model's context.
-        r.ok("spark key", "MODEL_API_KEY present in %s, length %d" % (where, len(key)))
-    else:
-        r.warn("spark key", "MODEL_API_KEY not set",
-               "the Spark/HTTPS channel cannot run. Set it, or always pass --skip spark. "
-               "This key is per-person and metered - do not borrow somebody else's.")
+def check_key(r, mod=None):
+    """
+    🔴 R47, two defects in one function. (a) This was the THIRD inline copy of "process env,
+    then HKCU" - and the only one that never learned R46.1's lesson: a key rotated with `setx`
+    is masked by the stale process copy, and the divergence must be SAID. The resolver is now
+    the harness's own `_env_key`, which prints that warning; the inline read survives only as
+    the fallback for an install where orchestrate.py itself will not import, because doctor
+    must still answer there. (b) It checked the SPARK key and nothing else, while the kit's
+    whole install story is one OPENROUTER key - so the one command a kit user runs to ask
+    "why do my channels fail" was structurally silent about the only key they have. The
+    variables that matter are now derived from the registry's own enabled channels, from the
+    same sources channel_preflight reads (kind, and the provider table's key_env).
+    """
+    def _inline(varname):
+        v = os.environ.get(varname)
+        if not v and os.name == "nt":
+            try:
+                import winreg
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg:
+                    v = winreg.QueryValueEx(reg, varname)[0]
+            except OSError:
+                pass
+        return v
+    envk = getattr(mod, "_env_key", None) or _inline
+
+    kind_var = {"http": "MODEL_API_KEY", "xai": "XAI_API_KEY", "gemini": "GEMINI_API_KEY"}
+    prov_tab = getattr(mod, "OAI_PROVIDERS", None) or {}
+    wanted = {}   # env var -> sorted channel names that need it
+    try:
+        with open(os.path.join(HERE, "channels.json"), encoding="utf-8") as fh:
+            chans = json.load(fh)["channels"]
+    except Exception:                                       # noqa: BLE001
+        chans = {}                                          # check_registry already complained
+    for n, c in chans.items():
+        if n.startswith("_") or not isinstance(c, dict) or not c.get("enabled", True):
+            continue
+        var = kind_var.get(c.get("kind"))
+        if c.get("kind") in ("openrouter", "oai"):
+            var = ((prov_tab.get(c.get("provider") or "openrouter") or {}).get("key_env")
+                   or "OPENROUTER_API_KEY")
+        if var:
+            wanted.setdefault(var, []).append(n)
+    # R47 panel (spark12cont + orglm52, convergent): a kind this derivation does not know gets
+    # NO key line and doctor stays green - silence that reads as "checked and fine". Name it.
+    cli_kinds = set(getattr(mod, "CLI_RESOLVERS", {}) or {"codex": 1, "agy": 1,
+                                                          "hermes": 1, "grokcli": 1})
+    unknown = sorted({c.get("kind") for n, c in chans.items()
+                      if not n.startswith("_") and isinstance(c, dict)
+                      and c.get("enabled", True)
+                      and c.get("kind") not in kind_var
+                      and c.get("kind") not in ("openrouter", "oai")
+                      and c.get("kind") not in cli_kinds} - {None})
+    if unknown:
+        r.warn("key coverage", "kind(s) %s carry no key mapping known to doctor"
+               % ", ".join(repr(k) for k in unknown),
+               "those channels' credentials were NOT checked here - a green doctor says "
+               "nothing about them. The run-time preflight is the authority.")
+    if not wanted:
+        wanted = {"MODEL_API_KEY": ["spark"]}
+    for var in sorted(wanted):
+        names = ", ".join(sorted(wanted[var])[:4])
+        if len(wanted[var]) > 4:
+            names += " +%d more" % (len(wanted[var]) - 4)
+        key = envk(var)
+        if key:
+            # Length only. The value must never reach a console, a log, or a model's context.
+            r.ok("key %s" % var, "present, length %d (used by %s)" % (len(key), names))
+        else:
+            r.warn("key %s" % var, "not set - %s cannot run" % names,
+                   "set it (`setx %s \"<your key>\"` on Windows, then restart the shell), or "
+                   "always exclude those channels with --skip. Keys are per-person and "
+                   "metered - do not borrow somebody else's." % var)
 
 
 def check_cli(r, mod, name, resolver, version_args):
@@ -392,7 +446,7 @@ def check_skill_size(r):
         r.ok("skill size", "; ".join(bits))
 
 
-def check_effort_ladders_live(r):
+def check_effort_ladders_live(r, mod=None):
     """Compare each channel's declared `supported_efforts` against the VENDOR's live catalogue.
 
     🔴🔴 THIS EXISTS BECAUSE THE SELF-TEST'S LADDER CHECK IS A TAUTOLOGY, and reviewers of round
@@ -407,7 +461,8 @@ def check_effort_ladders_live(r):
     must not need a network or a key to answer the other twenty questions.
     """
     import urllib.request
-    key = os.environ.get("OPENROUTER_API_KEY")
+    # Same resolver as the harness (R47): process env, then HKCU, with the divergence warning.
+    key = (getattr(mod, "_env_key", None) or os.environ.get)("OPENROUTER_API_KEY")
     try:
         with open(os.path.join(HERE, "channels.json"), encoding="utf-8") as fh:
             chans = json.load(fh)["channels"]
@@ -465,9 +520,6 @@ def main():
     check_registry(r)
     check_registry_pristine(r)
     check_skill_size(r)
-    check_key(r)
-    if a.online:
-        check_effort_ladders_live(r)
 
     mod = None
     if have:
@@ -475,6 +527,12 @@ def main():
             mod = _load_orchestrate()
         except Exception as e:
             r.fail("harness import", repr(e), "orchestrate.py could not be imported")
+    # After the import attempt on purpose (R47): with the module in hand the key check uses the
+    # harness's own _env_key - the one that warns when a setx-rotated key is masked by a stale
+    # process copy - instead of a third private copy of that logic.
+    check_key(r, mod)
+    if a.online:
+        check_effort_ladders_live(r, mod)
     if mod:
         # 🔴 DERIVED FROM CLI_RESOLVERS, NOT TWO LITERALS. Until 2026-08-16 this checked exactly
         # `codex` and `agy`, so `doctor` was silent about hermes (added 08-01) and grokcli (added

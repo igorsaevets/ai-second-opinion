@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.27.0 — 2026-08-17
+
+**The failure the vendor states, not the one the canned text assumes — and the shipped registry
+no longer carries the author-only rationed channel.**
+
+- 🔴 **`finish_reason` is now read off the stream and recorded on every OpenAI-protocol
+  channel.** It was on the final chunk of every round and discarded, so a provider that CUT an
+  answer (a 32 KB review ending mid-heading with no end marker) was indistinguishable from a
+  model that chose to stop. `finish_reason=length` beside a missing marker now names the cutter
+  outright: the binding ceiling is the provider's, and raising `max_tokens` on our side cannot
+  help. OpenRouter's `native_finish_reason` (the vendor's own spelling) rides beside it.
+- 🔴 **The empty xAI answer now splits into its two real causes.** One warning text used to
+  cover both shapes with a budget-exhausted diagnosis; a measured instance spent 5% of its
+  budget and the printed cause still blamed the budget. "OUTPUT BUDGET EXHAUSTED" (tokens
+  actually gone) and "VENDOR ENDED THE TURN MID-LOOP" (the server-side agentic runtime ended
+  the turn with no message item, budget largely unspent — the 4th measured instance of that
+  class across three vendors) are now distinct warnings with distinct fixes, and the vendor's
+  `response_id` is recorded for post-mortem retrieval.
+- 🔴 **`reasoning_tokens` was read from the LAST tool round while `reasoning_chars` beside it
+  summed every round** — the same two-counters defect this project fixed twice on neighbouring
+  fields (`usd`, then `cached_in_tokens`). A free-tier review printed reasoning_tokens=26 next
+  to 4 948 chars of visible reasoning, and the 26 nearly bought an "inert knob" conclusion; a
+  3-arm probe showed the knob moving (181 vs ~102 tokens). Summed now.
+- **The rationed strategy channel is deleted from the shipped registry**
+  (`PUBLISH_EXCLUDE_CHANNELS`). Its three lock rungs — off by default, named-by-name only,
+  explicit spend acknowledgement — were each walked deliberately, and the only lock that
+  survives a determined user is absence. Groups are pruned in the same build step; naming it
+  now returns the registry's own unknown-channel error. (Honest limit: the model remains in
+  the public catalogue and can be re-added by hand; this removes the default availability,
+  not the knowledge.)
+- **`doctor` now checks every key the registry's enabled channels need, not just the first
+  channel's** — derived from the registry and the provider table, resolved through the same
+  `_env_key` the harness uses, so the rotated-key divergence warning appears there too. It
+  used to report the Spark key and stay silent about the one key a kit install actually has.
+- The OpenRouter Grok twin is enabled on the author's machine too (both transports of one
+  model): the direct xAI channel's mid-loop deaths all happened inside the vendor's
+  server-side loop, and on this transport the harness drives the tool loop client-side.
+- Self-test suites are world-aware: a shipped tree asserts the rationed channel's absence,
+  the working copy asserts its locks.
+
 ## 1.26.0 — 2026-08-17
 
 **Reviewers may now volunteer what nobody asked, and a rotated key can no longer hide behind a

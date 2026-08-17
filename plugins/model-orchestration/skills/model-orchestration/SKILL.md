@@ -210,12 +210,12 @@ at the ceiling its own vendor accepts, in every mode: **only the number of model
 
 | `--panel` | who runs |
 |---|---|
-| **`cheap`** (default since 2026-08-16) | free, subscription and low-rate channels — all **except** spark11, codex, kimik3, qwen38max, terra-pro. *«запусти дешевые»* |
+| **`cheap`** (default since 2026-08-16) | free, subscription and low-rate channels — all **except** spark11, codex, kimik3, qwen38max and the rationed opt-in channel where the registry has one. *«запусти дешевые»* |
 | **`standard`** | every enabled channel. *«запусти все»*, *«стандартная панель»* |
 
 🔴 **Neither a panel nor a GROUP enables anything.** `--only openrouter`, *«только грок»* run only
 the members already on. **Naming a channel is the one way to start one that ships off** —
-`--only terra`. 🔴 **What `cheap` costs is vendor diversity, not depth**: it drops OpenAI,
+`--only goog36flash`. 🔴 **What `cheap` costs is vendor diversity, not depth**: it drops OpenAI,
 Moonshot, Alibaba and Meta-Standard, and nearly half its seats are Google. The plan prints the
 vendor tally, warns at half the room, and names what `standard` would add — six Geminis agreeing
 is one opinion repeated, not corroboration.
