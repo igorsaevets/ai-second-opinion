@@ -2872,6 +2872,124 @@ def suite_panels():
           "exit=%d" % r.returncode)
 
 
+def suite_refs_and_meters():
+    section("R46. Attachments by reference, and the meters that answer Igor's questions")
+    sys.path.insert(0, str(HERE))
+    import orchestrate as o
+    src = (HERE / "orchestrate.py").read_text(encoding="utf-8")
+
+    # ---- refs mode: who reads from disk --------------------------------------------------------
+    check(set(o.REFS_KINDS) <= set(o.KNOWN_KINDS), "REFS_KINDS is a subset of KNOWN_KINDS",
+          repr(o.REFS_KINDS))
+    check("hermes" not in o.REFS_KINDS,
+          "hermes is NOT a refs kind - its toolset grant is `web` only, so a path would name a "
+          "capability it does not have")
+    check(not {"http", "openrouter", "oai", "xai", "gemini"} & set(o.REFS_KINDS),
+          "no API kind is a refs kind - a remote endpoint cannot read this disk")
+
+    atts = [(r"C:\x\doc.md", "SECRET-FREE CONTENT")]
+    refs = o._attach_refs(atts, [r"C:\x\sub"])
+    inline = o._attach_inline(atts, [r"C:\x\sub"])
+    check(r"C:\x\doc.md" in refs and "SECRET-FREE CONTENT" not in refs,
+          "_attach_refs sends the PATH and never the file text")
+    check("READ ONLY" in refs and "no write tools" in refs,
+          "_attach_refs carries the read-only contract in the brief (R40: the brief is the "
+          "strong position, the persona the weak one)")
+    check("SECRET-FREE CONTENT" in inline and "NOT" in inline and "folder" in inline.lower(),
+          "_attach_inline carries the file text and names the folders as ABSENT rather than "
+          "letting an API reviewer imagine reading them")
+
+    # grok build: refs grants read_file+list_dir and nothing else; no write tool in any mode
+    check('"web_search,web_fetch,todo_write,read_file,list_dir" if file_refs' in src,
+          "grok build gains read_file/list_dir ONLY in refs mode")
+    grok_src = src.split("def call_grokcli")[1].split("def neutral_cwd")[0]
+    for bad in ("edit_file", "write_file", "create_file", "run_command"):
+        check(bad not in grok_src,
+              "no write/shell tool is ever granted to grok build (%s absent)" % bad)
+    agy_src = src.split("def _agy_once")[1].split("\ndef ")[0]
+    check('"--add-dir", d' in agy_src,
+          "agy gains --add-dir per attachment folder in refs mode")
+
+    # end to end, free: --dry-run with an attachment
+    with tempfile.TemporaryDirectory() as td:
+        doc = Path(td) / "doc.md"
+        doc.write_text("attached document body", encoding="utf-8")
+        r = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
+                     "--attach", str(doc)])
+        blob = blob_of(r)
+        check(r.returncode == 0 and "attachments: 1 file(s)" in blob,
+              "--attach shows up in the plan on --dry-run", "exit=%d" % r.returncode)
+        check("refs mode TRUSTS the attached material" in blob,
+              "the plan prints the refs-mode trust caveat before anything is spent")
+        # the gate covers the attachment: a planted key inside it must refuse the round (exit 3)
+        leak = Path(td) / "leak.md"
+        leak.write_text("api_key = sk-FAKE" + "A" * 32, encoding="utf-8")
+        r2 = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
+                      "--attach", str(leak)])
+        check(r2.returncode == 3 and "SECRETS IN THE PAYLOAD" in blob_of(r2),
+              "a secret inside an ATTACHED file refuses the round with no override",
+              "exit=%d" % r2.returncode)
+        # a folder with a binary: skipped LOUDLY, round not blocked
+        sub = Path(td) / "sub"
+        sub.mkdir()
+        (sub / "blob.bin").write_bytes(b"\x00\x01\x02" * 100)
+        r3 = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
+                      "--attach-dir", str(sub)])
+        check(r3.returncode == 0 and "NOT SCANNED for secrets" in blob_of(r3),
+              "a binary in --attach-dir is skipped BY NAME, never silently",
+              "exit=%d" % r3.returncode)
+        r4 = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
+                      "--attach", str(Path(td) / "nope.md")])
+        check(r4.returncode == 2 and "file not found" in blob_of(r4),
+              "--attach with a missing file refuses before anything runs",
+              "exit=%d" % r4.returncode)
+
+    # ---- meters --------------------------------------------------------------------------------
+    check("fetches if fetch_on else None" in src
+          and '"fetches": fetches or None' not in src,
+          "fetches distinguishes 0 (tool offered, unused) from None (not offered) - R45's "
+          "diagnostics could not answer «может не настроен поиск?» because it did not")
+    check("ZERO WEB GROUNDING IN THE TEXT" in src,
+          "an OAI channel that cites nothing despite web access says so in its notes")
+    check("openrouter_key_meter" in src and "GET /credits" in src,
+          "the OpenRouter key ledger cross-meter is wired into the round and diagnostics")
+    env = o.environment_report()
+    missing = [k for k in o.CLI_RESOLVERS if k + "_installed" not in env]
+    check(not missing,
+          "environment_report derives its CLI list from CLI_RESOLVERS (R45.1's class fix, "
+          "applied to the member it missed)", repr(missing))
+
+    # ---- the depth-default class is LOCKED, not patched per instance ---------------------------
+    # grokbuild and qwen38max converged on the same R46 panel finding: measuring grok-4.20's
+    # default_enabled:false and fixing that one channel leaves the CLASS open - the next model
+    # whose vendor defaults reasoning OFF ships "fast, confident, wrong" until someone asks why
+    # it answered in 0.6 s. Every enabled OpenRouter channel must therefore DECLARE its depth;
+    # silence in the registry would mean the vendor decides. (kind `oai`/mimo is exempt: its
+    # provider table hardcodes thinking:enabled unconditionally.)
+    regj = json.loads((HERE / "channels.json").read_text(encoding="utf-8"))
+    naked = [c for c, ch in regj["channels"].items()
+             if not str(c).startswith("_") and isinstance(ch, dict)
+             and ch.get("kind") == "openrouter" and ch.get("enabled")
+             and not ch.get("reasoning")]
+    check(not naked,
+          "every ENABLED openrouter channel declares a `reasoning` block - a vendor default "
+          "can be «do not think» (grok-4.20: 0 tokens + wrong arithmetic, measured R46)",
+          repr(naked))
+
+    # ---- report.py renders a depth for every kind's spelling of the knob -----------------------
+    import report as _rep
+    fake = {"plan": {"g": {"model": "m", "thinking_level": "high", "kind": "gemini"},
+                     "b": {"model": "m2", "kind": "openrouter",
+                           "reasoning": {"max_tokens": 48000}}},
+            "channels": {"g": {"ok": True}, "b": {"ok": True}},
+            "invocation": {"tier": "max"}}
+    rows = {r["name"]: r for r in _rep._rows(fake)}
+    check(rows["g"]["effort"] == "high",
+          "report.py shows thinking_level as the depth for gemini channels (was '-')")
+    check(rows["b"]["effort"] == "budget:48000",
+          "report.py shows a reasoning budget as the depth for budget-form channels (was '-')")
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -2901,7 +3019,7 @@ def main():
                   suite_citations, suite_dispatch, suite_tiers_and_grounding,
                   suite_settings_and_upgrade, suite_echocheck, suite_dev_tooling,
                   suite_agy_plan_class, suite_spend_guard, suite_panels,
-                  suite_max_depth_and_explicit_only):
+                  suite_max_depth_and_explicit_only, suite_refs_and_meters):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

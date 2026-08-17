@@ -67,7 +67,16 @@ def _rows(d):
             "label": p.get("model_label") or _UNKNOWN,
             "overridden": bool(p.get("model_overridden")),
             "default": p.get("model_default"),
-            "effort": r.get("effort") or p.get("effort") or _UNKNOWN,
+            # 🔴 THE DEPTH KNOB HAS THREE SPELLINGS ACROSS KINDS and this column read only one,
+            # so every gemini channel showed `-` (its knob is thinking_level) and every
+            # budget-form OpenRouter channel showed `-` (its knob is reasoning.max_tokens).
+            # A `-` in the depth column of the one table Igor reads is exactly how «ты точно
+            # ему мозги выкрутил?» became unanswerable from the artifact (R46).
+            "effort": (r.get("effort") or p.get("effort") or p.get("thinking_level")
+                       or (("budget:%s" % p["reasoning"]["max_tokens"])
+                           if isinstance(p.get("reasoning"), dict)
+                           and p["reasoning"].get("max_tokens") else None)
+                       or _UNKNOWN),
             "seconds": r.get("seconds"),
             "bytes": r.get("bytes"),
             # `in_tokens_total` when the channel computed one, else the raw field. The two are
@@ -340,7 +349,11 @@ def render(d):
     # ---- environment, last: needed for a bug report, noise for a reader. ----
     L.append("## Environment")
     L.append("")
-    for k in ("python", "platform", "codex_version", "agy_version", "spark_endpoint", "cwd"):
+    # `*_version` keys are DERIVED, not listed: the literal list here named codex and agy and
+    # went silently blind to grokcli and hermes when environment_report grew them - the same
+    # frozen-list rot as the R45.1 missing-binary advice, one artifact over.
+    ver_keys = sorted(k for k in env if k.endswith("_version"))
+    for k in ["python", "platform"] + ver_keys + ["spark_endpoint", "cwd"]:
         if env.get(k):
             L.append("- `%s`: %s" % (k, env[k]))
     L.append("")

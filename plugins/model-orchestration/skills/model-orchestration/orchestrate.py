@@ -1402,7 +1402,12 @@ def environment_report(want=()):
     # Keyed on the BINARY each entry actually probes, not on a channel that once used it:
     # `kimi_installed` reported the presence of the Hermes CLI, which the kimi channel stopped
     # using on 2026-08-03 - a true value about the wrong thing, which is worse than a missing one.
-    for name, resolver in (("codex", codex_bin), ("agy", agy_bin), ("hermes", hermes_bin)):
+    # 🔴 DERIVED FROM CLI_RESOLVERS SINCE 2026-08-16 (R46). This loop was a literal three-tuple
+    # and was BLIND TO grokcli - found one round after R45.1 converted doctor.py and the
+    # preflight to the shared registry for exactly this defect. The class fix missed one member
+    # of the class: diagnostics.json's `environment` block, the artifact a user pastes into a
+    # support chat, said nothing about the grok binary while the channel it runs was failing.
+    for name, resolver in sorted(CLI_RESOLVERS.items()):
         try:
             b = resolver()
             found = bool(os.path.isfile(b) or shutil.which(b))
@@ -1421,6 +1426,38 @@ def _binary_version(binary):
         p = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=20)
         return (p.stdout or p.stderr or "").strip().splitlines()[0][:80] or None
     except Exception:
+        return None
+
+
+def openrouter_credits():
+    """The KEY-level spend meter: GET /api/v1/credits -> {total_credits, total_usage}, in USD.
+
+    Igor, R46: «у нас есть MCP openrouter, может через него можно брать цену запросов?» The MCP
+    server's get-credits/get-generation read the same account API this function reads - an MCP is
+    a tool for an interactive chat, and this harness is a standalone script, so it asks the REST
+    endpoint directly. What it buys is a CROSS-METER: the per-call `usage.cost` figures this
+    harness sums are the vendor's per-response accounting, while `total_usage` is the account's
+    own ledger. R41 measured what happens when only one meter exists and it is the wrong one
+    ($12.08 printed as $0) - two meters that must agree is the fix that survives the next
+    field rename. Known honest gap: the delta covers the whole key for the whole window, so
+    anything ELSE this key did concurrently lands in it; the report says so instead of
+    pretending the numbers are the same instrument.
+
+    Free (no tokens), never raises, never prints the key.
+    """
+    key = _env_key("OPENROUTER_API_KEY")
+    if not key:
+        return None
+    try:
+        rq = urllib.request.Request("https://openrouter.ai/api/v1/credits",
+                                    headers={"Authorization": "Bearer " + key})
+        with urllib.request.urlopen(rq, timeout=20) as r:
+            d = (json.loads(r.read().decode("utf-8")) or {}).get("data") or {}
+        if d.get("total_usage") is None:
+            return None
+        return {"total_credits": d.get("total_credits"),
+                "total_usage": d.get("total_usage")}
+    except Exception:                                     # noqa: BLE001
         return None
 
 
@@ -2123,7 +2160,7 @@ def grok_bin():
 
 
 def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
-                 timeout=None, system=None, name="grokbuild"):
+                 timeout=None, system=None, name="grokbuild", file_refs=False):
     """Grok Build - xAI's own CLI, on the SUBSCRIPTION, not the metered api.x.ai key.
 
     A different thing from the `grok420` channel despite the shared vendor: that one is
@@ -2173,15 +2210,30 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     # preamble never had anything to do with it. Kept because orienting the agent is still worth
     # a paragraph and costs nothing - but it is a nicety now, not the fix, and nobody should read
     # this and conclude the wording is load-bearing.
-    NO_REPO = (
-        "OPERATING CONTEXT — read this first.\n"
-        "You are NOT pointed at a repository and there is no codebase to explore. Your working "
-        "directory is deliberately empty. Do not plan to open, list, grep or read project files, "
-        "and do not spawn subagents to look for them; those tools will refuse and the run will be "
-        "discarded mid-answer. Everything you are being asked about is in the text below, and the "
-        "only outside resource you have is web search and page fetching, which you should use "
-        "freely for vendor documentation. Write the finished review in a single reply.\n\n"
-        "---\n\n")
+    # Two preambles, chosen by whether the brief references documents on disk. The default one
+    # tells the agent it has NO file tools - which becomes a lie the moment refs mode grants
+    # read_file/list_dir, and an agent told its tools will refuse does not use the tools it was
+    # given. The refs variant grants reads and re-states the no-write contract.
+    if file_refs:
+        NO_REPO = (
+            "OPERATING CONTEXT — read this first.\n"
+            "You are NOT pointed at a repository; your working directory is deliberately empty. "
+            "The material under review includes documents at ABSOLUTE paths listed in the brief "
+            "below - read those with your file tools (read_file, list_dir), and only material "
+            "relevant to the review. READ ONLY: you have no write, edit or shell tools in this "
+            "run, and you must not modify, create or delete anything anywhere. Web search and "
+            "page fetching are available for vendor documentation. Write the finished review in "
+            "a single reply.\n\n---\n\n")
+    else:
+        NO_REPO = (
+            "OPERATING CONTEXT — read this first.\n"
+            "You are NOT pointed at a repository and there is no codebase to explore. Your "
+            "working directory is deliberately empty. Do not plan to open, list, grep or read "
+            "project files, and do not spawn subagents to look for them; those tools will refuse "
+            "and the run will be discarded mid-answer. Everything you are being asked about is "
+            "in the text below, and the only outside resource you have is web search and page "
+            "fetching, which you should use freely for vendor documentation. Write the finished "
+            "review in a single reply.\n\n---\n\n")
     text_in = NO_REPO + ((system.strip() + "\n\n---\n\n") if system else "") + brief
     pf = os.path.join(workdir, "PROMPT.md")
     with open(pf, "w", encoding="utf-8") as f:
@@ -2237,7 +2289,15 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
            # aimed at this machine, and one of the files reachable that way is a config holding
            # live third-party credentials. Removed, and the run that proved the fix works had them
            # removed - so nothing is being traded for the safety.
-           "--tools", "web_search,web_fetch,todo_write",
+           # 🔴 REFS MODE ADDS read_file/list_dir AND NOTHING ELSE (R46, --attach). The R45
+           # measurement stands: read_file is NOT bounded by --cwd (it served ~/.grok/skills/
+           # with the neutral cwd in force), so granting it hands the model this machine's
+           # readable files - which is exactly what «пусть сам изучит документы и папки» asks
+           # for, and exactly why the plan prints that refs mode TRUSTS the attached material.
+           # No write/edit/shell tool is granted in either mode; grep stays out (read+list
+           # suffice, and every extra tool is another denial surface).
+           "--tools", ("web_search,web_fetch,todo_write,read_file,list_dir" if file_refs
+                       else "web_search,web_fetch,todo_write"),
            # 🔴🔴 THE MCP GATEWAY IS NOT A BUILT-IN AND `--tools` DOES NOT BOUND IT. Read off the
            # event stream: after 17 successful fetches the model called `search_tool` and then
            # `use_tool`, which the allowlist above never mentioned and never removed. Denying it
@@ -2254,8 +2314,10 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     if effort:
         cmd += ["--reasoning-effort", effort]
     log("  [%s] Grok Build CLI on the subscription (no API key); depth --reasoning-effort=%s, "
-        "brief via --prompt-file (%d chars), neutral cwd, memory off"
-        % (name, effort or "vendor default", len(text_in)))
+        "brief via --prompt-file (%d chars), neutral cwd, memory off%s"
+        % (name, effort or "vendor default", len(text_in),
+           ", file refs: READ tools granted (read_file, list_dir), no write tools"
+           if file_refs else ""))
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
@@ -3295,7 +3357,7 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         return {"in_tokens": in_tot or None, "out_tokens": out_tot or None,
                 "usd": round(usd_tot, 6) if usd_seen else None,
                 "usd_rounds": rounds_done if usd_seen else None,
-                "fetches": fetches or None,
+                "fetches": fetches if fetch_on else None,
                 "seconds": round(time.time() - start, 1)}
 
     try:
@@ -3632,6 +3694,24 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # manufacture grounding out of the vendor's own assertion, which is the mistake this project
     # already caught once when it called a printed-URL count "grounding".
     wsu = (usage or {}).get("web_search_usage") or {}
+    # 🔴 R46 (2026-08-16), from Igor reading the R45 table: «Не прислал ссылки, возможно у них
+    # проблемы с интернетом, может не настроен поиск у них?» Neither. ordeepseekv4pro and
+    # ornemotron3ultra had search AND a fetch tool; the Exa plugin even attached 5 result
+    # annotations each. The models simply wrote reviews containing ZERO URLs and never called
+    # fetch_url - and the only trace was `fetches: null` plus an annotation count nobody
+    # surfaced, so a reader's first theory was a broken internet. The fact was collected in
+    # three fields and connected in none. A NOTE, not a warning: an ungrounded design review is
+    # often a legitimate answer, and the reader - not the exit code - decides what it is worth.
+    if text.strip() and not opened and not n_cited and not wsu.get("tool_usage") \
+            and (fetch_on or (web or {}).get("enabled")):
+        vc = len(set(vendor_cites))
+        note.append(
+            "ZERO WEB GROUNDING IN THE TEXT: web access was available and the answer cites no "
+            "URLs and fetched no pages%s. This is not a connectivity failure - it is the model "
+            "answering from the brief and its training data. Fine for a pure design review; "
+            "treat every dated or vendor-specific claim in it as unverified."
+            % ((" (the search plugin did attach %d result annotation(s), which the model saw as "
+                "excerpts and cited none of)" % vc) if vc else ""))
     return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
             "bytes": len(text.encode("utf-8")), "exit": 0, "model": model,
             # What we ASKED for is `model`; what the provider SAYS it ran is this. Two fields on
@@ -3676,7 +3756,12 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             "provider_error": stream_error[0] if stream_error else None,
             # Real grounding evidence for a channel that had none: WE ran these fetches, so this
             # is a list rather than an inference. Codex cannot produce this at all.
-            "fetches": fetches or None,
+            # 🔴 0 when the tool was OFFERED and never called, None when it was not offered.
+            # `fetches or None` collapsed those two facts into one null, and R46 measured the
+            # cost: the R45 diagnostics could not say whether ordeepseekv4pro even HAD its fetch
+            # tool, which is the first question Igor's «может не настроен поиск?» asks. Same
+            # class as R44's two-counters-over-one-event, in the quiet direction.
+            "fetches": fetches if fetch_on else None,
             # D6: `opened_urls` here really was ours, but it shared a name with the vendor-side
             # count on xai and gemini. Same vocabulary now, so the two can never be added up.
             **_grounding(fetched=opened),
@@ -4046,6 +4131,14 @@ CLI_RESOLVERS = {
 KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "hermes",
                "grokcli")
 
+# The kinds that run ON THIS MACHINE and can therefore read an attached document from disk
+# instead of receiving it inline (--attach / --attach-dir). Igor, R46: «CLI агентам не отправлять
+# файлы, а отправлять ссылки на документы и папки, чтобы они могли сами изучить дополнительное».
+# `hermes` is deliberately absent: its toolset grant is `web` only, so handing it a path would
+# name a capability it does not have - the model would report OUR gap as its own failure.
+# API kinds are structurally absent: a remote endpoint cannot open this disk.
+REFS_KINDS = ("codex", "agy", "grokcli")
+
 # The degraded path only. When channels.json cannot be loaded there is no `kind` field to read,
 # so these are the names the harness has used, mapped to what they were. Both the historical
 # spellings and the current registry names are here: this table is consulted exactly when the
@@ -4054,11 +4147,16 @@ _LEGACY_KINDS = {"http": "http", "spark": "http", "spark11": "http", "spark12": 
                  "spark12cont": "http",
                  "codex": "codex",
                  "agy": "agy", "gemini": "agy", "agy31pro": "agy", "agy36flash": "agy",
+                 "agy37flash": "agy",
                  "kimi": "openrouter", "qwen": "openrouter",
                  "kimik3": "openrouter", "qwen38max": "openrouter",
-                 "orgemini36flash": "openrouter", "ormimo25pro": "openrouter",
+                 "orgemini36flash": "openrouter", "orgemini37flash": "openrouter",
+                 "ormimo25pro": "openrouter",
                  "orgrok420": "openrouter", "ornemotron3ultra": "openrouter",
-                 "goog36flash": "gemini", "mimo25pro": "oai", "grok420": "xai",
+                 "ordeepseekv4pro": "openrouter", "orglm52": "openrouter",
+                 "orgpt56terrapro": "openrouter",
+                 "goog36flash": "gemini", "goog37flash": "gemini",
+                 "mimo25pro": "oai", "grok420": "xai", "grokbuild": "grokcli",
                  "hermes": "hermes"}
 
 
@@ -4511,7 +4609,7 @@ def _agy_plan_shape(text):
 
 
 def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout="25m",
-             system=None):
+             system=None, add_dirs=None):
     """
     Run the channel, and re-run it ONCE if it planned instead of working, or if it cited
     sources without opening any.
@@ -4537,7 +4635,8 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
     it about sources - and both failures are reported. Two ungrounded runs is a much stronger
     signal about the brief than one.
     """
-    first = _agy_once(brief, marker, workdir, outfile, model, effort, timeout, system)
+    first = _agy_once(brief, marker, workdir, outfile, model, effort, timeout, system,
+                      add_dirs=add_dirs)
 
     if first.get("plan_shape"):
         log("  [agy] the answer is an implementation PLAN, not the review. Re-running once "
@@ -4545,7 +4644,7 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
         retry_out = os.path.splitext(outfile)[0] + ".retry" + (os.path.splitext(outfile)[1] or ".md")
         second = _agy_once(brief + AGY_PLAN_ESCALATION, marker,
                            os.path.join(workdir, "plan-retry"), retry_out,
-                           model, effort, timeout, system)
+                           model, effort, timeout, system, add_dirs=add_dirs)
         if second.get("text") and not second.get("plan_shape") \
                 and (not marker or marker in second["text"]):
             # Deliberately NOT chained into the zero-grounding re-run below: the cost bound is
@@ -4574,7 +4673,7 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
     retry_out = os.path.splitext(outfile)[0] + ".retry" + (os.path.splitext(outfile)[1] or ".md")
     second = _agy_once(brief + AGY_ESCALATION, marker,
                        os.path.join(workdir, "retry"), retry_out,
-                       model, effort, timeout, system)
+                       model, effort, timeout, system, add_dirs=add_dirs)
 
     if second.get("n_grounded"):
         second.setdefault("notes", []).append(
@@ -4595,7 +4694,7 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
 
 
 def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeout="25m",
-              system=None):
+              system=None, add_dirs=None):
     """
     Two ways in, and they fail differently. Inline -p avoids the file-reading tool (and its
     permission error) but is capped by the Windows argv limit. --add-dir has no size cap but needs
@@ -4677,6 +4776,12 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
             "--mode", "default", "--sandbox",
             "--output-format", "stream-json",   # the ONLY way this channel reports tool use
             "--print-timeout", timeout]         # default truncates at 5m
+    # Refs mode (--attach): grant the CLI access to each attachment's folder. --add-dir is the
+    # documented workspace grant; without it a read of an out-of-workspace path can be denied,
+    # and on this channel ONE denial discards the whole run. Reads only - the run keeps
+    # --sandbox and the permission allowlist, so no write surface is opened by this.
+    for d in (add_dirs or []):
+        cmd += ["--add-dir", d]
     try:
         # cwd must be the workspace or the workspace-scoped agent is never discovered.
         p, secs = _run(cmd, timeout=3600, cwd=workdir, stdout_path=ndjson)
@@ -4753,7 +4858,11 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
         (warn if n_cited and not grounded else note).append(msg)
     return {"channel": "agy", "ok": not warn, "text": text, "seconds": round(secs, 1),
             "bytes": len(text.encode("utf-8")), "exit": p.returncode, "warnings": warn,
-            "notes": note, "tool_calls": sum(ev["tools"].values()), "searches": searches,
+            # model/effort recorded since R46: the R45 diagnostics carried neither for the three
+            # agy channels, so the per-channel record could not answer «на чём это отработало»
+            # without the plan beside it - the codex 2026-08-02 lesson, on a sibling kind.
+            "notes": note, "model": mdl, "effort": effort,
+            "tool_calls": sum(ev["tools"].values()), "searches": searches,
             "denied": sum(ev["denied"].values()),
             # Split from `denied` on 2026-08-07. A failed fetch and a refused permission need
             # different fixes and used to share one counter under the scarier name.
@@ -4801,6 +4910,112 @@ def _free_extras(primary):
             if c != primary and ch.get("enabled", True) and ch.get("cost") == "free"]
 
 
+# Extensions treated as scannable text inside --attach-dir. Anything else is sniffed for a NUL
+# byte and skipped as binary - LOUDLY, because a folder file the secrets scan silently skipped
+# is a folder file that reaches a CLI reviewer unscanned.
+_ATT_TEXT_EXT = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml", ".ini", ".csv",
+                 ".html", ".htm", ".xml", ".js", ".ts", ".css", ".rst", ".tex", ".log", ".cfg"}
+
+
+def _scan_dir_texts(dirs, max_bytes=2_000_000, max_files=200):
+    """(label, text) parts for the secrets/PII scan over attached folders, plus what was SKIPPED.
+
+    The caps exist because a folder is unbounded and the scan runs before every round; every
+    skip is returned by name so the caller can print it - a bounded scan that reads as a
+    complete one is the truncated-check lie the citation audit already refuses to tell.
+    """
+    parts, skipped = [], []
+    seen = 0
+    for d in dirs or []:
+        for root, _dn, files in os.walk(d):
+            for fn in sorted(files):
+                p = os.path.join(root, fn)
+                if seen >= max_files:
+                    skipped.append("%s (file cap %d reached)" % (p, max_files))
+                    continue
+                try:
+                    size = os.path.getsize(p)
+                except OSError:
+                    skipped.append("%s (unreadable)" % p)
+                    continue
+                if size > max_bytes:
+                    skipped.append("%s (%d KB over the %d KB scan cap)"
+                                   % (p, size // 1000, max_bytes // 1000))
+                    continue
+                try:
+                    with open(p, "rb") as fh:
+                        raw = fh.read(max_bytes + 1)
+                except OSError:
+                    skipped.append("%s (unreadable)" % p)
+                    continue
+                # 🔴 A UTF-16 BOM NAMES A FILE AS TEXT BEFORE THE NUL SNIFF CALLS IT BINARY.
+                # agy36flash, reviewing this feature on the day it shipped: UTF-16 encodes ASCII
+                # as byte pairs CONTAINING NUL, and Windows tools (PowerShell redirects, some
+                # editors) emit UTF-16LE routinely - so the sniff alone would skip real text
+                # files, and a secret inside one would be unscanned while a CLI reviewer in
+                # refs mode can still read it. Decoding by BOM also fixes the quieter half: a
+                # UTF-16 file with a whitelisted extension used to be read as UTF-8, whose
+                # NUL-interleaved characters can never match a secret pattern - a scan that ran
+                # and could not find anything.
+                if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+                    parts.append(("attach-dir:" + p, raw.decode("utf-16", "replace")))
+                    seen += 1
+                elif (os.path.splitext(fn)[1].lower() in _ATT_TEXT_EXT
+                        or b"\x00" not in raw[:4096]):
+                    parts.append(("attach-dir:" + p, raw.decode("utf-8", "replace")))
+                    seen += 1
+                else:
+                    skipped.append("%s (binary)" % p)
+    return parts, skipped
+
+
+def _attach_inline(atts, att_dirs):
+    """The attachment section API channels receive: full file text, folders named as absent."""
+    out = []
+    for i, (p, text) in enumerate(atts, 1):
+        out.append("\n\n---\n\nATTACHMENT %d: %s\n\n%s" % (i, os.path.basename(p), text))
+    if att_dirs:
+        # Named as absent rather than silently dropped: a reviewer told about a folder it cannot
+        # see would otherwise "read" it from imagination, which is the exact fabrication class
+        # the panel exists to catch.
+        out.append("\n\n---\n\nNOTE: %d supporting folder(s) accompany this brief but are NOT "
+                   "included here - only reviewers running on the host machine can read folders. "
+                   "Do not claim to have read them." % len(att_dirs))
+    return "".join(out)
+
+
+def _attach_refs(atts, att_dirs):
+    """The attachment section CLI channels receive: absolute paths plus the read-only contract.
+
+    The rules ride in the BRIEF, not only in a persona slot, because placement is load-bearing
+    and was measured (R40): the same ban obeyed 2/2 from the brief and 0/1 from the persona.
+    The no-write backstop differs per channel and is stated precisely because codex's R46
+    review caught the loose version overclaiming: codex runs in a read-only SANDBOX (writes
+    impossible); grok build has no write tool GRANTED (absent, not gated); agy's session still
+    advertises write/exec tools behind `request-review` - in headless mode an attempt is
+    auto-denied and the denial DISCARDS THE RUN, so its guarantee is enforcement by death of
+    the turn, not absence of the capability. This text is the instruction layer on top.
+    """
+    lines = ["\n\n---\n\nDOCUMENTS ON DISK - READ THEM YOURSELF\n",
+             "You are running on the machine that holds the material under review. Open these "
+             "ABSOLUTE paths with your file-reading tools; they are part of the brief. You may "
+             "also read neighbouring material in the same folders when the review needs it.\n"]
+    for i, (p, text) in enumerate(atts, 1):
+        lines.append("- FILE %d: %s  (%d bytes)" % (i, p, len(text.encode("utf-8"))))
+    for d in att_dirs:
+        lines.append("- FOLDER: %s  (supporting material - list it, read what the review needs)"
+                     % d)
+    lines.append(
+        "\nSTRICT RULES for these locations, non-negotiable:\n"
+        "- READ ONLY. Do not modify, create, delete, move or rename ANYTHING there or anywhere "
+        "else in that project. You have no write tools in this run; do not try to obtain any.\n"
+        "- Do not run shell commands on these paths; use your file-reading tools only.\n"
+        "- Your deliverable is the review TEXT in your reply - the harness saves it to its own "
+        "output folder. You write no files anywhere.\n"
+        "- If a path does not open, say so plainly and review what you could read.")
+    return "\n".join(lines)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Run one brief past several reviewer models at once.")
     ap.add_argument("--brief", help="path to the brief sent to every channel (or use --ask)")
@@ -4828,6 +5043,23 @@ def main():
                          "are contributor tiers: their vendors may train on what you send. Pass "
                          "--only spark11 for anything you would not publish")
     ap.add_argument("--system", help="path to the system prompt for the HTTPS channel")
+    # 🔴 TWO DELIVERY MODES FOR ONE DOCUMENT, split by what a channel can physically reach.
+    # Igor, R46: «CLI агентам (Codex CLI, Agy CLI, Grok Build) не отправлять файлы, а отправлять
+    # ссылки на документы и папки, что бы если надо, они могли сами изучить так же дополнительное.
+    # Но обязательно прописать им, что бы ничего не изменяли и не удаляли.» A remote API cannot
+    # read this disk, so the same --attach inlines for API channels and references for CLI ones;
+    # the read-only contract is prose in the brief PLUS a mechanical no-write fence per channel.
+    ap.add_argument("--attach", action="extend", nargs="*", default=[], metavar="FILE",
+                    help="a document reviewed alongside the brief. CLI channels (codex, agy, "
+                         "grok build) get the ABSOLUTE PATH and read it themselves, read-only, "
+                         "so they can also consult surrounding material; API channels get it "
+                         "INLINED as an ATTACHMENT block. The secrets scan covers the content "
+                         "either way. Repeatable")
+    ap.add_argument("--attach-dir", action="extend", nargs="*", default=[], metavar="DIR",
+                    help="a folder of supporting material, BY REFERENCE, for CLI channels only "
+                         "- API channels are told it exists and that they cannot read it. "
+                         "Read-only; text files inside are secrets-scanned (skips are printed "
+                         "by name). Repeatable")
     # 🔴 SELECTING A CHANNEL AND AUTHORISING ITS BILL ARE TWO DIFFERENT ACTS, and until 2026-08-14
     # they were one. `--only <name>` both chose a default-OFF channel and paid for it, which reads
     # as deliberate when a human types one name and means nothing at all when an agent session
@@ -5034,6 +5266,38 @@ def main():
     with open(a.brief, encoding="utf-8") as f:
         brief = f.read()
 
+    # ---- attachments: one document, two delivery modes -------------------------------------
+    atts, att_dirs = [], []
+    for pth in (a.attach or []):
+        p_abs = os.path.abspath(os.path.expanduser(pth))
+        if not os.path.isfile(p_abs):
+            log("--attach %s: file not found" % pth)
+            return 2
+        try:
+            with open(p_abs, encoding="utf-8", errors="replace") as fh:
+                atts.append((p_abs, fh.read()))
+        except OSError as exc:
+            log("--attach %s: cannot read (%s)" % (pth, exc))
+            return 2
+    for pth in (a.attach_dir or []):
+        p_abs = os.path.abspath(os.path.expanduser(pth))
+        if not os.path.isdir(p_abs):
+            log("--attach-dir %s: not a directory" % pth)
+            return 2
+        att_dirs.append(p_abs)
+    if atts or att_dirs:
+        log("attachments: %d file(s), %d chars total%s"
+            % (len(atts), sum(len(t) for _p, t in atts),
+               ("; %d folder(s), by reference" % len(att_dirs)) if att_dirs else ""))
+        log("  API channels receive the file(s) INLINE%s. CLI channels (codex, agy, grok build) "
+            "receive ABSOLUTE PATHS and read from this disk themselves - read-only, no write or "
+            "shell tools, and they may consult surrounding material."
+            % ("; folders reach CLI channels only" if att_dirs else ""))
+        log("  🔴 refs mode TRUSTS the attached material: a hostile document can steer a CLI "
+            "reviewer's read tools (grok build's read_file is not bounded by its cwd - "
+            "measured). Attach material you authored or trust; send foreign documents inline "
+            "in the brief instead.")
+
     # Every channel is VERIFIED against the end marker, but until 2026-07-31 nothing ever asked
     # the model to emit one: the brief's author was silently expected to know. A brief written by
     # anyone who had not read the docs therefore came back PROBLEM on all three channels with a
@@ -5065,6 +5329,21 @@ def main():
                 % (last, a.marker, last))
         brief += ("\n\n---\nWhen the ENTIRE review is finished, end your reply with this exact "
                   "line and nothing after it:\n%s\n" % a.marker)
+    # Two payload variants from here on. `brief` (inline attachments) stays the canonical one -
+    # it is what the gate scans, what the size line reports, and what every API channel gets;
+    # `brief_refs` differs ONLY in the attachment section and goes to REFS_KINDS channels.
+    # The marker instruction lands at the very end of BOTH, after a split-and-splice: models
+    # obey the LAST instruction, and an attachment block after the marker line would bury it.
+    if atts or att_dirs:
+        _mk = ""
+        if a.marker:
+            _pos = brief.rfind("\n\n---\nWhen the ENTIRE review is finished")
+            if _pos != -1:
+                brief, _mk = brief[:_pos], brief[_pos:]
+        brief_refs = brief + _attach_refs(atts, att_dirs) + _mk
+        brief = brief + _attach_inline(atts, att_dirs) + _mk
+    else:
+        brief_refs = brief
     # The default used to be a single sentence, and it reached only the HTTPS channel. Depth,
     # source discipline and output language were therefore left to whatever each model defaults
     # to - which for a terminal-tuned CLI is "short, fast, few tool calls". base-depth.md is the
@@ -5090,8 +5369,22 @@ def main():
     if a.allow_pii:
         log("  note: --allow-pii is now a no-op - personal identifiers are sent by default and "
             "the gate no longer even lists them. Use --warn-pii or --strict-pii to turn it back on.")
-    gate = pii_gate([("brief", brief), ("system", system)], strict_pii=a.strict_pii,
-                    warn_pii=a.warn_pii)
+    # Attached FILES are already inside `brief` (inline variant), so the same scan covers them.
+    # Attached FOLDERS are scanned file by file, and every skip is printed by name - a folder
+    # file the scan silently skipped would reach a CLI reviewer unscanned, which for the
+    # secrets class is the one thing this gate exists to prevent.
+    dir_parts, dir_skipped = _scan_dir_texts(att_dirs)
+    for s in dir_skipped:
+        # 🔴 Named as REACHABLE, not merely unscanned: CLI reviewers in refs mode read the
+        # folder themselves, so a skipped file is exactly the one place a secret could ride
+        # through unseen. agy31pro named the gap the day the feature shipped. Fail-closed was
+        # considered and rejected - refusing a round over any image in a docs folder is the
+        # false-positive-in-a-gate class that teaches override-by-reflex.
+        log("  [attach-dir] NOT SCANNED for secrets: %s - CLI reviewers in refs mode can "
+            "still READ it. If it could hold a key, remove it from the folder or attach the "
+            "relevant file with --attach instead." % s)
+    gate = pii_gate([("brief", brief), ("system", system)] + dir_parts,
+                    strict_pii=a.strict_pii, warn_pii=a.warn_pii)
     if gate:
         return gate
 
@@ -5213,6 +5506,14 @@ def main():
 
     os.makedirs(a.out, exist_ok=True)
 
+    # Key-level spend meter, read before and after the round. Only when an OpenRouter-billed
+    # channel is actually in the plan: on any other round the two extra requests would measure
+    # nothing this run did.
+    uses_or_key = any((((plan or {}).get(c) or {}).get("kind") == "openrouter")
+                      or (((plan or {}).get(c) or {}).get("provider") == "openrouter")
+                      for c in want)
+    credits_before = openrouter_credits() if uses_or_key else None
+
     jobs, unlaunched = {}, {}
     log("brief=%d chars  tier=%s  marker=%s" % (len(brief), a.tier, a.marker))
     # Threads, not asyncio: two of the channels are blocking subprocesses, and on Windows
@@ -5231,30 +5532,39 @@ def main():
             kind = p.get("kind")
             outfile = os.path.join(a.out, cname.upper() + ".md")
             workdir = os.path.join(a.out, cname + "-ws")
+            # Which payload variant this channel gets. Identical unless --attach/--attach-dir
+            # was passed; then REFS_KINDS read the documents from disk and everyone else gets
+            # them inline. One variable per channel, chosen by capability, never by name.
+            use_refs = bool((atts or att_dirs) and kind in REFS_KINDS)
+            cbrief = brief_refs if use_refs else brief
+            att_parents = (sorted({os.path.dirname(pth) for pth, _t in atts} | set(att_dirs))
+                           if use_refs else None)
             if kind == "http":
-                jobs[cname] = ex.submit(call_http_reviewer, brief, _system_for(system, p),
+                jobs[cname] = ex.submit(call_http_reviewer, cbrief, _system_for(system, p),
                                         a.tier, a.marker,
                                         model=p.get("model"), name=cname,
                                         effort=p.get("effort"))
             elif kind == "codex":
-                jobs[cname] = ex.submit(call_codex, brief, a.marker, workdir, outfile,
+                jobs[cname] = ex.submit(call_codex, cbrief, a.marker, workdir, outfile,
                                         model=p.get("model"), effort=p.get("effort"),
                                         timeout=p.get("timeout"),
                                         system=_system_for(system, p))
             elif kind == "agy":
-                jobs[cname] = ex.submit(call_agy, brief, a.marker, workdir, outfile,
+                jobs[cname] = ex.submit(call_agy, cbrief, a.marker, workdir, outfile,
                                         model=p.get("model"),
                                         effort=p.get("effort") or "high",
                                         timeout=p.get("timeout") or "25m",
-                                        system=_system_for(system, p))
+                                        system=_system_for(system, p),
+                                        add_dirs=att_parents)
             elif kind == "grokcli":
-                jobs[cname] = ex.submit(call_grokcli, brief, a.marker, workdir, outfile,
+                jobs[cname] = ex.submit(call_grokcli, cbrief, a.marker, workdir, outfile,
                                         model=p.get("model"),
                                         effort=p.get("effort"),
                                         timeout=p.get("timeout") or "40m",
-                                        system=_system_for(system, p), name=cname)
+                                        system=_system_for(system, p), name=cname,
+                                        file_refs=use_refs)
             elif kind == "hermes":
-                jobs[cname] = ex.submit(call_hermes, brief, a.marker, outfile,
+                jobs[cname] = ex.submit(call_hermes, cbrief, a.marker, outfile,
                                         model=p.get("model"), toolsets=p.get("toolsets"),
                                         system=_system_for(system, p))
             elif kind in ("openrouter", "oai"):
@@ -5262,7 +5572,7 @@ def main():
                 # names the channels that go through OpenRouter and because existing installs
                 # carry it; `oai` names a direct OpenAI-protocol vendor. The vendor itself is
                 # `provider`, and an unknown one is refused inside the call rather than defaulted.
-                jobs[cname] = ex.submit(call_oai_reviewer, brief, a.marker, outfile,
+                jobs[cname] = ex.submit(call_oai_reviewer, cbrief, a.marker, outfile,
                                         model=p.get("model"), system=_system_for(system, p),
                                         web=p.get("web"), name=cname,
                                         reasoning=p.get("reasoning"),
@@ -5280,13 +5590,13 @@ def main():
                 # and the line written to be honest about a missing lever was itself wrong about
                 # the one lever that remained. A note that describes a mechanism has to be
                 # checked against the mechanism.
-                jobs[cname] = ex.submit(call_xai_responses, brief, a.marker, outfile,
+                jobs[cname] = ex.submit(call_xai_responses, cbrief, a.marker, outfile,
                                         model=p.get("model"), system=_system_for(system, p),
                                         name=cname, tools=p.get("tools"),
                                         timeout=_seconds(p.get("timeout"), 2400),
                                         max_tokens=p.get("max_tokens"))
             elif kind == "gemini":
-                jobs[cname] = ex.submit(call_gemini_direct, brief, a.marker, outfile,
+                jobs[cname] = ex.submit(call_gemini_direct, cbrief, a.marker, outfile,
                                         model=p.get("model"), system=_system_for(system, p),
                                         name=cname, thinking_level=p.get("thinking_level"),
                                         tools=p.get("tools"), max_tokens=p.get("max_tokens"))
@@ -5336,6 +5646,26 @@ def main():
         _dmg = transport_damage(r.get("text"))
         for _d in _dmg:
             r.setdefault("notes", []).append(_d)
+        # 🔴 THE ANSWER IS AN EGRESS TOO (kimik3, R46 panel): the harness scans what it SENDS
+        # and scrubs diagnostics/console, but the review text itself is written to disk RAW -
+        # deliberately, a reviewer's words are never altered - so a reviewer that read a
+        # credential through its refs-mode tools could carry it into the artifact unremarked.
+        # A NOTE, never a rewrite. Code spans are stripped first, same recipe and same reason
+        # as transport_damage: measured on 15 real reviews, the raw scan fired twice, both on
+        # reviews QUOTING a secret pattern in backticks while discussing this very gate; the
+        # stripped scan fired zero times on the same corpus.
+        if r.get("text"):
+            _t2 = re.sub(r"```.*?```", " ", r["text"], flags=re.S)
+            _t2 = re.sub(r"`[^`\n]*`", " ", _t2)
+            _leak, _pii2 = scan_payload(_t2, name)
+            if _leak:
+                r.setdefault("notes", []).append(
+                    "SECRET-SHAPED CONTENT IN THE ANSWER (%s). The reviewer may have read a "
+                    "credential through its own tools and written it into the review; the "
+                    "saved .md holds it RAW (a reviewer's words are never altered here), while "
+                    "diagnostics and this console are scrubbed. If it is real: ROTATE it - "
+                    "deleting the file does not un-send the review."
+                    % ", ".join(sorted({h.split(" at ")[0] for h in _leak})))
         if r.get("text"):
             with open(os.path.join(a.out, name.upper() + ".md"), "w", encoding="utf-8") as f:
                 # 🔴🔴 THE DAMAGE HAS TO BE UNMISSABLE IN THE ARTIFACT, NOT ONLY IN THE LOG.
@@ -5419,11 +5749,19 @@ def main():
                     % r["usd_reported_unverified"])
         if kind in ("openrouter", "oai") and r.get("out_tokens") is not None:
             # The direct channel finally has real usage numbers; Hermes reported none.
-            log("    tokens in=%s (cached %s) out=%s | reasoning=%s tok / %s chars | web=%s | "
-                "fetched_by_us=%s | grounding=%s%s"
+            # 🔴 depth= prints the RESOLVED knob (effort or budget) since R46 - Igor's «ты точно
+            # ему на максимум мозги выкрутил?» could not be answered from this line before,
+            # because the one kind with the most depth variants printed none of them.
+            _rz = slot.get("reasoning") if isinstance(slot.get("reasoning"), dict) else {}
+            _depth = (_rz.get("effort") or
+                      ("budget:%s" % _rz["max_tokens"] if _rz.get("max_tokens") else None) or
+                      "vendor default")
+            log("    tokens in=%s (cached %s) out=%s | reasoning=%s tok / %s chars | depth=%s | "
+                "web=%s | fetched_by_us=%s | grounding=%s%s"
                 % (r.get("in_tokens"), r.get("cached_in_tokens"), r.get("out_tokens"),
                    r.get("reasoning_tokens"),
-                   r.get("reasoning_chars"), (slot.get("web") or {}).get("enabled", False),
+                   r.get("reasoning_chars"), _depth,
+                   (slot.get("web") or {}).get("enabled", False),
                    r.get("fetched_by_us") or 0, r.get("grounding_basis"),
                    # 🔴 THE ROUND COUNT RIDES WITH THE PRICE. spark11, reviewing this diff:
                    # `usd_rounds` was measured and never printed, so a reader could not tell
@@ -5513,12 +5851,15 @@ def main():
             # BECAUSE the branch is an `if kind ==` chain: adding a kind to the dispatcher is
             # loud, forgetting it in the reporter is silent. Dispatch fails; reporting goes quiet.
             log("    tokens in=%s (cached %s) out=%s | thought=%s | tool-content=%s | "
-                "searches=%s | pages opened BY GOOGLE=%s | grounding=%s"
+                "thinking_level=%s | searches=%s | pages opened BY GOOGLE=%s | grounding=%s"
                 % (r.get("in_tokens"), r.get("cached_in_tokens"), r.get("out_tokens"),
-                   r.get("reasoning_tokens"), r.get("tool_tokens"), r.get("searches"),
-                   r.get("vendor_opened"), r.get("grounding_basis")))
-            log("    thinking_level is the tier's lever here (medium on strategic, high on deep) "
-                "- the claim that this API has no depth knob was wrong; see channels.json")
+                   r.get("reasoning_tokens"), r.get("tool_tokens"),
+                   slot.get("thinking_level") or "unset (vendor default: medium)",
+                   r.get("searches"), r.get("vendor_opened"), r.get("grounding_basis")))
+            # 🔴 The static line that stood here said «medium on strategic, high on deep» - two
+            # tiers that stopped existing in R43. A telemetry line asserting a retired mechanism
+            # is the compaction-resurfaces-stale-prose failure, printed fresh on every run. The
+            # resolved value now rides in the line above instead.
             if r.get("cited_domains") or r.get("n_annotations"):
                 # `n_cited` is DISTINCT sources and `n_annotations` is spans; printing both is the
                 # only way a reader can tell that "14 citations" and "5 sources" describe one call.
@@ -5589,6 +5930,34 @@ def main():
                 "(codex, agy) never will; the rest bill per token at a rate this harness does "
                 "not hold. This total is a floor, not the bill." % ", ".join(unpriced))
 
+    # The account's own ledger against the sum of per-response cost fields - two meters over one
+    # spend, on the transport with the only measured runaway. Search fees ($0.005/query) do not
+    # always ride in `usage.cost`, so a delta ABOVE the summed figure is usually them; a delta
+    # far above is another process on the same key.
+    or_meter = None
+    credits_after = openrouter_credits() if uses_or_key and credits_before else None
+    if credits_before and credits_after:
+        delta = round(credits_after["total_usage"] - credits_before["total_usage"], 6)
+        summed = round(sum(r["usd"] for c, r in results.items()
+                           if r.get("usd") is not None
+                           and r.get("provider") == "openrouter"), 6)
+        remaining = None
+        if credits_after.get("total_credits") is not None:
+            remaining = round(credits_after["total_credits"]
+                              - credits_after["total_usage"], 4)
+        or_meter = {"usage_before": credits_before["total_usage"],
+                    "usage_after": credits_after["total_usage"],
+                    "delta_usd": delta, "summed_from_responses_usd": summed,
+                    "credits_remaining_usd": remaining}
+        log("OpenRouter KEY ledger (GET /credits): this round moved it $%.4f; per-response "
+            "cost fields sum to $%.4f%s.%s"
+            % (delta, summed,
+               ("" if remaining is None else " | credits remaining on the key: $%.2f"
+                % remaining),
+               (" The gap is normally search fees, which bill outside `usage.cost` - or "
+                "another process on the same key during the round."
+                if abs(delta - summed) > 0.0005 else " The two meters agree.")))
+
     # ---- citation audit ---------------------------------------------------------------------
     # Runs on every review, because the alternative - a separate command afterwards - is a check
     # that gets skipped exactly when the run was rushed. See citation_audit() for why existence
@@ -5653,6 +6022,7 @@ def main():
         "environment": environment_report(want),
         "plan": plan,
         "preflight": preflight,
+        "openrouter_key_meter": or_meter,
         "problems": problems,
         "citations":
             {"how_to_read_this":

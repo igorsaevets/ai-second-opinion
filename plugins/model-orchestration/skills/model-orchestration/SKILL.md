@@ -76,8 +76,7 @@ changes a decision is in this block.
 ## 0.3 Reference files — read on demand
 
 `SKILL.md` stays under the 5,000-token budget an auto-compaction re-attaches, so it is never
-truncated. The detail lives beside it, read on demand — which costs nothing until it is needed,
-and a file read after a compaction comes back complete instead of clipped.
+truncated. Detail lives beside it in `references/`, read on demand.
 
 | file | read it when |
 |---|---|
@@ -128,12 +127,13 @@ which. A channel that is off is one `enabled: true` away, not a missing feature.
 | `--marker` | literal string the reply must end with. If it is absent the output is incomplete |
 | `--out` | output directory. Default `./reviews` |
 | `--system` | preset name or path (§0.2). The harness **appends the no-non-existence rule** to whatever you pass — end the file with a newline or that sentence collides with your last word |
+| `--attach` / `--attach-dir` | document / folder beside the brief. CLI channels (codex, agy, grok build) get the **absolute path** and read it from disk — read-only, no write tools, surrounding material allowed; API channels get files **inline**, folders named as unreadable. Secrets-scanned either way. 🔴 Refs trust the attachment: only material you authored |
 | `--only` | restrict channels. Channel names, aliases and **group** words all work; `python routing.py` prints every accepted spelling. Groups are the useful form — a vendor family (`gemini`, `grok`, `mimo`, `spark`) or a billing path (`agy`, `openrouter`, `direct`). Omit to run every enabled one. 🔴 One channel per `--only` argument: `--only a b c`, never `--only "a b c"` |
 | `--skip` | the inverse of `--only` |
 | `--set` | pin a model without editing anything: `--set codex=gpt-5.4` |
 | `--route` | **paste what the operator typed, verbatim** — see §0.1 |
 | `--dry-run` | full preflight — plan, brief, preset, keys, binaries, gates — then exit, spending nothing |
-| `--strict-pii` | refuse to send when the payload holds personal identifiers. **Off by default since 2026-08-07** (the operator: «правила ослабляй, кроме паролей и api ключей») — identifiers now produce a loud itemised warning and go. `--allow-pii` still parses and is a no-op. **Secrets can never be sent, at any setting** |
+| `--strict-pii` | the identifier gate is **OFF by default since R45** (one summary line, then send): `--warn-pii` restores the itemised list, `--strict-pii` refuses. `--allow-pii` parses and is a no-op. **Secrets can never be sent, at any setting** |
 
 ### 0.1 Choosing channels and models without editing code
 
@@ -152,11 +152,9 @@ panel would add or drop, then one `[RUN ]`/`[skip]` line per channel with its mo
 role, data policy, web access, spend ceiling and tier effect, then the running set and its
 **vendor tally**. Read it; it is the one screen that exists to be read before money moves.
 
-Rules that matter: an unparseable route is a **hard stop**, never a guess — a router that
-silently picks an expensive model defeats its own purpose. A refused model with no stated
-replacement falls back to the next model in registry order and says so on a `NOTE:` line. To add
-a model or a channel, edit `channels.json`; nothing in `orchestrate.py` needs to change.
-Check it costs nothing: `--dry-run`.
+Rules that matter: an unparseable route is a **hard stop**, never a guess. A refused model with
+no stated replacement falls back to the next in registry order, on a `NOTE:` line. Adding a
+model or channel is a `channels.json` edit only. Checking costs nothing: `--dry-run`.
 
 ### 0.2 System presets — one line each, detail in `references/systems.md`
 
@@ -169,9 +167,8 @@ presets force English output.
 official one"; `legal-research` deliberately omits that clause, because in a regulated domain it
 reads as *suggest a way around the rule* — which is what gets a brief refused. Do not merge them.
 
-**Timing**: most channels land in 1–4 min; **Codex is the long pole at 8–35 min** and sets the
-round's wall-clock — which is also why `--panel cheap` finishes far sooner. Run a full round in
-the background; sanity check first with `--ask`, ~20 s.
+**Timing**: most channels 1–4 min; **Codex 8–35 min** sets the wall-clock (`--panel cheap` is
+far faster). Run rounds in the background; sanity-check with `--ask` (~20 s).
 
 ---
 
@@ -195,7 +192,7 @@ stable and worth knowing:
 | HTTPS endpoint / model | `https://api.meta.ai/v1`; the model comes from `channels.json` and the **registry wins over `MODEL_NAME`** — one process-wide variable cannot address one of two channels on one endpoint. Docs: `dev.meta.ai/docs` (public; the login wall is the console, not the docs) |
 | Codex CLI | resolved via `CODEX_BIN` → PATH → known install dirs |
 | Antigravity CLI | `agy`, **not on PATH** on Windows; resolved via `AGY_BIN` → PATH → `%LOCALAPPDATA%\agy\bin\agy.exe` |
-| agy models | one model per channel, base slug plus `--effort`. **Not** `gemini-3.1-pro-high` — a suffixed slug plus a disagreeing `--effort` is exit 1 in 3 s (`references/channels.md` §6.3). 🔴 This row said "two channels" while there were three: ask `routing.py`, never this table |
+| agy models | one model per channel, base slug plus `--effort`. **Not** `gemini-3.1-pro-high` — a suffixed slug plus a disagreeing `--effort` is exit 1 in 3 s (`references/channels.md` §6.3). Channel count: ask `routing.py`, never this table |
 | Grok Build CLI | `grok`, **not on PATH**; `GROK_BIN` → PATH → `%USERPROFILE%\.grok\bin`. Subscription session, no key. Reads `CLAUDE.md` from its cwd upward → neutral cwd. 🔴 **One denied tool discards the whole turn**, and `--tools` does not bound the MCP gateway. Flags in `channels.json` |
 | harness | `orchestrate.py`, standard library only, no `pip install`, Python 3.8+ |
 
@@ -258,8 +255,7 @@ A call that ran is not a review that happened. The harness prints all of this; r
 
 **Soft signals — the answer exists, judge it yourself:**
 4. **Tool-invocation count is 0.** `tools:` is *permission*, not instruction. A model handed web
-   search may never call it and then answer dated questions from training data. The harness reads
-   `usage.server_tool_use.web_search_requests` and falls back to counting `server_tool_use` blocks.
+   search may never call it and then answer dated questions from training data.
    **Zero means every dated fact in that answer is unverified.**
 5. Output tokens below the floor, *with an uncapped brief* → the model under-allocated. There is
    no deeper setting to raise it to; split the question into more sub-questions instead.
@@ -287,15 +283,16 @@ anything from source. Three that decide what you do next:
 ## 10. Report back — always
 
 
-Per channel: model, tier, elapsed seconds, input/output tokens, **tool-invocation count**, stop
-reason, marker present, output size. Then separately: what was **accepted**, what was **rejected
-with proof**, and where the channels **disagreed with each other**.
+🔴 **Name every channel WITH its model and depth** — `codex (gpt-5.4 @ xhigh)`,
+`grokbuild (grok-4.6 @ xhigh)`, never a bare channel name (the operator, R46: «не просто Codex, а
+Codex5.4Xhigh»). Per channel: seconds, in/out tokens, **tool/fetch count**, **grounding**
+(pages we fetched / vendor-stated / none) and **citations in the text** — a web-capable channel
+that cited nothing is a fact to state, not a column to leave blank; it means the review is
+training-data-plus-brief, which R45's table hid. Then separately: **accepted**, **rejected with
+proof**, and where the channels **disagreed with each other**.
 
-The disagreement is the product. One reviewer is not a second opinion.
-
-Four rounds, four different winners — `agy`, Codex, Spark, then qwen38max, which refuted a claim
-the two expensive channels accepted. **Which channel wins is not predictable from cost, or from
-the last round**: that is the whole argument for running all of them.
+The disagreement is the product. One reviewer is not a second opinion. **Which channel wins is
+not predictable from cost, or from the last round** — four rounds gave four different winners.
 
 One shape recurs: the highest-value finding was **not an answer to a question that was asked**. It
 arrived under "what are we missing". Always include that question.
@@ -304,8 +301,7 @@ arrived under "what are we missing". Always include that question.
 
 ## 11. Relationship to the other skill
 
-`second-opinion-consult` holds the **policy** — all three channels always, the cost ladder for
-lookups, the sub-agent rules (never Fable 5, default `sonnet`, always pass `model`). **This skill
-holds the mechanics, and it is the only home for them**: the copy that used to live over there
-went stale in four places without looking stale. Read policy there, run calls from here. This file
-alone is enough to run a round.
+`second-opinion-consult` holds the **policy** — all channels always, the cost ladder for
+lookups. **This skill holds the mechanics, and it is the only home for them**: the copy that used
+to live over there went stale in four places without looking stale. Read policy there, run calls
+from here. This file alone is enough to run a round.

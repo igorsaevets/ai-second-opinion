@@ -1,5 +1,51 @@
 # Changelog
 
+## 1.25.0 — 2026-08-16
+
+**Documents by reference for the command-line reviewers, and the round now surfaces the two
+facts its own table used to bury: a reviewer that grounded nothing, and what the round really
+cost the OpenRouter key.**
+
+- **New: `--attach FILE` and `--attach-dir DIR`.** One document, two delivery modes decided by
+  what a channel can physically reach: CLI channels (codex, agy, grok build) receive the
+  **absolute path** and read it from disk themselves — so they can also consult surrounding
+  material — while API channels receive files **inlined** and are told folders exist and are
+  unreadable, rather than being left to imagine reading them. The read-only contract rides in
+  the brief (the measured strong position) AND is mechanical per channel: codex runs in its
+  read-only sandbox, agy behind its permission allowlist, grok build with read tools granted
+  only in refs mode and no write tool in any mode. Attached files are secrets-scanned exactly
+  like the brief — a planted key in an attachment refuses the round with no override — and
+  folder scans print every skipped file by name. Verified by execution on all three CLI
+  channels: each opened the attached file, quoted its contents verbatim, and read the
+  supporting folder. 🔴 The plan prints the trade every run: refs mode TRUSTS the attachment,
+  because a hostile document can steer a reviewer's read tools.
+- 🔴 **A channel with working web access that cites nothing now says so.** A real round produced
+  three reviews containing literally zero URLs — with search configured, result annotations
+  attached, and a fetch tool offered — and the only trace was a `fetches: null` nobody could
+  interpret. The first human theory was a broken internet. It was not: the models answered
+  from the brief plus training data. Now: `fetches` distinguishes 0 (tool offered, unused) from
+  null (not offered); a `ZERO WEB GROUNDING IN THE TEXT` note names the fact and what it means;
+  and the run-summary depth field (`depth=`, `thinking_level=`) prints on the kinds that lacked
+  it.
+- **New: the OpenRouter KEY ledger as a cross-meter.** When any OpenRouter-billed channel runs,
+  the harness reads `GET /api/v1/credits` before and after and prints the account's own delta
+  beside the sum of per-response `usage.cost` fields, plus remaining credits. Two meters over
+  one spend, because this project has already measured what one wrong meter does ($12.08
+  printed as $0). Search fees bill outside `usage.cost`, so a small gap is normal and the line
+  says so.
+- **Measured on the live endpoint: `x-ai/grok-4.20` via OpenRouter does not reason AT ALL unless
+  asked** — 0 reasoning tokens, sub-second answers, and wrong arithmetic on the control probe —
+  and this kit's `orgrok420` reasoning budget is the switch that turns it on (973–1419 tokens,
+  correct answers). All enabled forms land in one band: the model has one depth, so nothing
+  deeper is being missed. Same shape confirmed on `ormimo25pro` (0 vs 1638). Both channel notes
+  now carry the measurement instead of an inference.
+- `environment_report` derives its CLI list from `CLI_RESOLVERS` — it was a frozen three-name
+  tuple, blind to the grok binary one release after 1.24.1 fixed exactly this class in doctor
+  and the preflight. `report.py` derives its Environment version rows the same way, and its
+  depth column now renders `thinking_level` and budget-form knobs instead of `-`.
+- 23 new self-test checks (refs mode end to end including the attachment secrets gate, the
+  meters, the report columns).
+
 ## 1.24.1 — 2026-08-16
 
 **1.24.0 turned the Grok Build channel on and shipped it broken for everyone except the author.
