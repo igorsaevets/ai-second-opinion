@@ -698,18 +698,24 @@ def suite_dispatch():
         # rot this repository has recorded seven times for other fields. Derived from the registry
         # rather than named: any launched channel whose registry entry carries `provider_route`
         # must have received it in its call kwargs.
-        pinned = [c for c, ch in json.loads(
-            Path(HERE, "channels.json").read_text(encoding="utf-8"))["channels"].items()
-            if not c.startswith("_") and ch.get("enabled", True)
-            and ch.get("provider_route")]
+        # 🔴 AND THE SAME DEFAULT-PANEL FILTER AS `webbed` ABOVE - MISSING HERE UNTIL 2026-08-19.
+        # That filter was added to `webbed` in R44 with three paragraphs explaining why a channel
+        # outside the default panel cannot have delivered anything to a call, and this list
+        # twenty lines below it was left alone. It went red the first time a pinned channel moved
+        # out of the cheap panel (ordeepseekv4pro, R48) - red against working code, for exactly
+        # the reason the comment above already gives. Third instance of class-fix-misses-a-member
+        # found in this round, and the first one inside the test file: tests are code and rot the
+        # same way. The registry is also read once now instead of three times in ten lines.
+        pinned = [c for c, ch in _reg_raw["channels"].items()
+                  if not c.startswith("_") and ch.get("enabled", True)
+                  and ch.get("panel") in _inc
+                  and ch.get("provider_route")]
         for c in pinned:
             row = next((r for r in launched if r["name"] == c), None)
             check(bool(row and row.get("provider_route")),
                   "provider_route from the registry REACHED the %s call" % c,
-                  "registry=%s got=%s" % (
-                      json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))
-                      ["channels"][c].get("provider_route"),
-                      row and row.get("provider_route")))
+                  "registry=%s got=%s" % (_reg_raw["channels"][c].get("provider_route"),
+                                          row and row.get("provider_route")))
         # 🔴 THE TIER MUST REACH THE CALL, NOT ONLY THE PRINTOUT. Compared arg-for-arg between a
         # strategic and a deep dispatch of the same registry: a knob that resolves and prints but
         # never reaches the function is the defect class this repository has now recorded seven
@@ -2609,15 +2615,46 @@ def suite_panels():
         "grokbuild":  "subscription CLI, free at the margin exactly like the agy seats",
         "orglm52":    "$0.308/M in, cheaper than ordeepseekv4pro which he did name as cheap",
     }
+    # 🔴🔴 AN ADDITION HAD A NAMED HOME AND A REMOVAL HAD NONE, WHICH IS ITSELF THE DEFECT.
+    #
+    # `ADDED_TO_CHEAP_SINCE` exists because equating "the dictated set" with "the current set"
+    # went red on every legitimate addition and «trains the next person to edit the expected
+    # value until it matches» - the comment above says so in those words. The mirror case had no
+    # such home: the only way to record a legitimate REMOVAL was to quietly delete a name from
+    # DICTATED_CHEAP, i.e. to do exactly the thing the anchor exists to make impossible. Found
+    # 2026-08-19 the first time Igor asked for a removal; the test was right to fire and the file
+    # had nowhere to put the answer. A removal now costs the same one deliberate line an addition
+    # does, and the anchor still fails hard on any name that leaves without one.
+    REMOVED_FROM_CHEAP_SINCE = {
+        "ordeepseekv4pro":
+            "R48, 2026-08-19, Igor by name: «перенеси его в дорогую панель». It was the most "
+            "expensive member of the cheap panel by a wide margin - $0.7732 of the $3.97 R43 "
+            "round, $0.3653 in R42 - and the panel keeps two other `role: code` voices "
+            "(grokbuild, orglm52), so nothing is orphaned. Still reachable: standard INCLUDES "
+            "cheap, so `--panel standard` runs it.",
+    }
     actual_cheap = {c for c, v in CH.items() if v.get("panel") == "cheap"}
-    check(not (DICTATED_CHEAP - actual_cheap),
-          "every channel Igor named as cheap is STILL cheap",
-          "dropped=%s" % sorted(DICTATED_CHEAP - actual_cheap))
-    check(actual_cheap == DICTATED_CHEAP | set(ADDED_TO_CHEAP_SINCE),
-          "the cheap panel is what Igor dictated plus the additions recorded here",
+    check(not (DICTATED_CHEAP - actual_cheap - set(REMOVED_FROM_CHEAP_SINCE)),
+          "every channel Igor named as cheap is STILL cheap, or its removal is recorded here",
+          "dropped without a record=%s"
+          % sorted(DICTATED_CHEAP - actual_cheap - set(REMOVED_FROM_CHEAP_SINCE)))
+    check(actual_cheap == (DICTATED_CHEAP | set(ADDED_TO_CHEAP_SINCE))
+          - set(REMOVED_FROM_CHEAP_SINCE),
+          "the cheap panel is what Igor dictated, plus the additions and minus the removals "
+          "recorded here",
           "unrecorded=%s" % sorted(actual_cheap - DICTATED_CHEAP - set(ADDED_TO_CHEAP_SINCE)))
     check(all(ADDED_TO_CHEAP_SINCE.values()),
           "every later addition to the cheap panel states why it is cheap")
+    check(all(REMOVED_FROM_CHEAP_SINCE.values()),
+          "every removal from the cheap panel states who decided it and why")
+    # A name cannot be in both books, and a removed channel must still exist somewhere in the
+    # registry - "removed from cheap" is a move, not a deletion, and spelling the two the same
+    # way is how a channel disappears while a test stays green.
+    check(not (set(REMOVED_FROM_CHEAP_SINCE) & set(ADDED_TO_CHEAP_SINCE)),
+          "no channel is recorded as both added to and removed from the cheap panel")
+    check(all(c in CH for c in REMOVED_FROM_CHEAP_SINCE),
+          "a channel removed from the cheap panel still exists in the registry",
+          "vanished=%s" % sorted(c for c in REMOVED_FROM_CHEAP_SINCE if c not in CH))
     standard_only = {c for c in CH} - actual_cheap
     check({c for c, v in CH.items() if v.get("panel") == "standard"} == standard_only,
           "everything outside the cheap panel is standard-only", ", ".join(sorted(standard_only)))
@@ -3112,26 +3149,132 @@ def suite_r47_causes():
 
 def suite_dedup_scripts():
     """
-    18. Two byte-identical copies of `check_json_dup_keys.py` ship: one at repo root
-    (used by this repo's own `.pre-commit-config.yaml`) and one inside the plugin's
-    `plugins/model-orchestration/tools/` (shipped to end users, referenced by the
-    wrapper `check_json_dup_keys_hook.py`). A fix to one that skips the other is the
-    exact drift pattern the audit found (T61). No suite would catch it because both
-    copies pass `suite_dev_tooling` independently.
+    Two byte-identical copies of `check_json_dup_keys.py` ship: one at the repo root (used by
+    the published repo's own `.pre-commit-config.yaml`) and one inside the plugin's `tools/`
+    (shipped to end users, referenced by the wrapper `check_json_dup_keys_hook.py`). A fix to
+    one that skips the other is a drift pattern no other suite catches, because both copies
+    pass `suite_dev_tooling` independently.
 
-    Runs only from the repo layout; a user's kit / plugin install has one copy.
+    🔴 AUTHORED BY IGOR, IN THE GENERATED TREE, AND PORTED HERE 2026-08-19 (R48). This is the
+    second round running in which a hand edit landed in `model-orchestration-kit` - which
+    `package.py` regenerates from this directory, so the next clean build would have deleted it
+    silently. The check itself is good and is kept verbatim in substance; only its home moved.
+    Same lesson as R47.1's SUPPORT.md/CODE_OF_CONDUCT adoption: **a generated tree accepts an
+    edit and forgets it, and nothing warns you at the moment you make it.**
+
+    Runs only from the repo layout; a user's kit or plugin install has one copy.
     """
-    root = HERE.parent.parent.parent.parent  # skill -> plugin -> plugins -> repo-root
+    section("Shipped-script duplication (Igor, T61 audit — ported from the generated tree)")
+    root = HERE.parent.parent.parent.parent  # skill -> plugin -> plugins -> repo root
     a = root / "tools" / "check_json_dup_keys.py"
     b = root / "plugins" / "model-orchestration" / "tools" / "check_json_dup_keys.py"
     if not (a.is_file() and b.is_file()):
-        return  # not the repo layout — nothing to compare
+        return                       # not the repo layout - nothing to compare
     import hashlib
     ha = hashlib.sha256(a.read_bytes()).hexdigest()
     hb = hashlib.sha256(b.read_bytes()).hexdigest()
     check(ha == hb,
           "check_json_dup_keys.py: repo-root and plugin copies are byte-identical",
           "root=%s plugin=%s" % (ha[:12], hb[:12]))
+
+
+def suite_r48_visibility():
+    """R48. What the run PRODUCED, told truthfully - the round Igor read a table and it lied."""
+    section("R48. The artifact measures itself, and a heading may not outrun its rows")
+    sys.path.insert(0, str(HERE))
+    import orchestrate as o
+    src = (HERE / "orchestrate.py").read_text(encoding="utf-8")
+    rep = (HERE / "report.py").read_text(encoding="utf-8")
+
+    # ---- the codex-in-the-report defect --------------------------------------------------------
+    check("ran_rows = [r for r in rows if r[\"ran\"]]" in rep
+          and "for r in ran_rows:" in rep,
+          "the model table iterates only channels that RAN - it used to walk the whole registry, "
+          "so a cheap-panel run printed «Which model actually answered | codex | GPT-5.4»")
+    check("NOT RUN in this round" in rep,
+          "channels that did not run are named once, in a line whose words say they did not run")
+    check("for r in rows:" not in rep.split("## Which model actually answered")[1]
+          .split("## Citations")[0],
+          "neither of the two telemetry tables walks the full registry any more")
+
+    # ---- bytes: the artifact measures itself ---------------------------------------------------
+    check('r["answer_bytes"] = os.path.getsize(_answer_path)' in src,
+          "the answer's size is read off the FILE, at the single write site - it used to be set "
+          "independently in eight dispatchers and call_http_reviewer (spark) never set it, so "
+          "spark12cont showed `-` in six consecutive panels while returning 45 KB reviews")
+    http_fn = src.split("def call_http_reviewer")[1].split("\ndef transport_damage")[0]
+    check('"bytes"' not in http_fn,
+          "call_http_reviewer still does not set `bytes` itself - the fix is the central one, "
+          "not a ninth copy of the same promise")
+    check('r["answer_file"] = os.path.basename(_answer_path)' in src
+          and "answer=%s" in src,
+          "the run log names the answer FILE for every channel, so a reading list can be built "
+          "from the log instead of from memory (R46 lost 317 KB to a hand-built list)")
+
+    # ---- the manifest is a listdir, not a projection of the records ----------------------------
+    check(hasattr(o, "write_handoff"), "write_handoff exists")
+    hand = src.split("def write_handoff")[1].split("\n# How many cited URLs")[0]
+    check("os.listdir(outdir)" in hand,
+          "the manifest is built from a DIRECTORY LISTING - a manifest derived from `results` "
+          "would reproduce exactly the blind spot it exists to catch")
+    check("orphans" in hand and "ran_without_file" in hand,
+          "the manifest names files no record claims, and channels that ran and wrote nothing")
+    check("est_tokens" in hand and "CHARS_PER_TOKEN" in hand,
+          "the manifest prices the READ, which is the number the defer-or-not decision turns on")
+
+    # ---- the record is not hostage to what runs after the round --------------------------------
+    check(src.index("diag = write_diagnostics(a.out, _diag_payload(None))")
+          < src.index("audit = citation_audit(results"),
+          "diagnostics are written BEFORE the citation audit: the AOS R45 panel spent $3.97, "
+          "wrote 17 answers, and died in the gap - leaving no diagnostics.json and no REPORT.md")
+    check("except BaseException as exc:" in src.split("audit = citation_audit(results")[1][:1200],
+          "the audit is guarded even though its docstring promises it never raises - prose does "
+          "not enforce anything")
+
+    # ---- the two-counters family, fourth member ------------------------------------------------
+    m = o.meter_source({"completion_tokens_details": {"reasoning_tokens": 40}},
+                       "completion_tokens_details", "reasoning_tokens", summed=562)
+    check(m.get("value") == 562 and m.get("last_round_value") == 40 and m.get("rounds_summed"),
+          "reasoning_meter reports the SUMMED value beside the last-round one - R47 summed "
+          "reasoning_tokens and left this meter, one line below it, reading the last round "
+          "(measured disagreement up to 4.4x across nine channels)",
+          repr(m)[:160])
+    m2 = o.meter_source({"output_tokens_details": {"reasoning_tokens": 4901}},
+                        "output_tokens_details", "reasoning_tokens")
+    check(m2.get("value") == 4901 and "rounds_summed" not in m2,
+          "the single-response xAI shape is unchanged - a class fix applied where the class does "
+          "not hold is its own defect")
+
+    # ---- diagnoses that read the fields the harness captured -----------------------------------
+    oai = src.split("def call_oai_reviewer")[1].split("\nXAI_RESPONSES_URL")[0]
+    check("NO ANSWER TURN - finish_reason=tool_calls" in oai,
+          "an empty answer whose finish_reason is tool_calls is named, not reported as «gave no "
+          "reason» - the R43 nemotron record carried that field while the warning denied it")
+    check("gave no reason" not in oai or "finish_reason was absent from every chunk" in oai,
+          "«gave no reason» is now claimed only when the reason field really was absent")
+    check("TOOL-CALL MARKUP IN PLACE OF AN ANSWER" in oai,
+          "raw <tool_call> syntax saved as a review is named - R45's orglm52 got a SHORT ANSWER "
+          "note and a transport-corruption note, and neither described what happened")
+    check("SUBSTANTIAL TEXT, MARKER MISPLACED" in src
+          and "unverified_but_substantial" in src and "unverified_but_substantial" in rep,
+          "a complete review that misplaced its end marker is distinguished from an empty one - "
+          "«do not parse it» was printed over a 46 473 B answer with 11 citations")
+
+    # ---- the money line states an observation, not an invariant --------------------------------
+    check("They MATCH THIS ROUND" in src and "The two meters agree." not in src,
+          "the ledger says the meters matched THIS round rather than that they agree - they "
+          "disagreed in three of the four measured rounds, once by $1.18")
+
+    # ---- doctor re-reads prices, because a pinned order is a snapshot --------------------------
+    doc = (HERE / "doctor.py").read_text(encoding="utf-8")
+    check("def check_provider_prices_live" in doc and "check_provider_prices_live(r, mod)" in doc,
+          "doctor --online re-reads provider prices and compares them against the pinned order")
+    reg = json.loads((HERE / "channels.json").read_text(encoding="utf-8"))
+    for name in ("ordeepseekv4pro", "orglm52"):
+        pr = (reg["channels"][name].get("provider_route") or {})
+        check("baidu" not in [p.lower() for p in pr.get("only", [])],
+              "%s no longer routes to the undiscounted provider the pin had put first" % name,
+              repr(pr))
 
 
 def main():
@@ -3164,7 +3307,7 @@ def main():
                   suite_settings_and_upgrade, suite_echocheck, suite_dev_tooling,
                   suite_agy_plan_class, suite_spend_guard, suite_panels,
                   suite_max_depth_and_explicit_only, suite_refs_and_meters,
-                  suite_r47_causes, suite_dedup_scripts):
+                  suite_r47_causes, suite_dedup_scripts, suite_r48_visibility):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

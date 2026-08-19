@@ -63,6 +63,10 @@ def _rows(d):
             "name": name,
             "ok": r.get("ok"),
             "ran": name in chans,
+            # The whole channel record, so a new field added in orchestrate.py is readable here
+            # without a matching edit in this dict. Every previous new field needed one, and the
+            # ones that got forgotten are why this file has a comment on almost every column.
+            "raw": r,
             "model": p.get("model") or r.get("model") or _UNKNOWN,
             "label": p.get("model_label") or _UNKNOWN,
             "overridden": bool(p.get("model_overridden")),
@@ -206,17 +210,46 @@ def render(d):
     L.append("")
 
     # ---- model identity. The thing a name can lie about. ----
+    #
+    # 🔴🔴 A TABLE HEADED WITH A FACTUAL CLAIM MAY ONLY CONTAIN ROWS FOR WHICH THE CLAIM IS TRUE.
+    # Until 2026-08-19 this table iterated the WHOLE REGISTRY, so a run of the cheap panel printed
+    #
+    #     ## Which model actually answered
+    #     | `codex` | GPT-5.4 `gpt-5.4` | xhigh | - |
+    #
+    # for a channel that was never launched. The operator read exactly that in another project and
+    # asked «сказал использовать дешевую панель, а он почему-то использовал codex» - and he was
+    # reading correctly; the report was lying. The "not run" verdict existed, three screens further
+    # down in a DIFFERENT table, which is not a correction, it is a footnote to a false headline.
+    #
+    # This is the project's own recorded class - a name standing in for the thing it describes -
+    # landing in the one artifact whose job is to say what happened. The fix is not a footnote:
+    # the table now contains only channels that ran, and the ones that did not are listed after
+    # it, in one line, with the word NOT in it. Two facts, two shapes, neither borrowing the
+    # other's heading.
+    ran_rows = [r for r in rows if r["ran"]]
+    idle_rows = [r for r in rows if not r["ran"]]
     L.append("## Which model actually answered")
+    L.append("")
+    L.append("Only channels that ran. %d of %d registry channels were launched in this run."
+             % (len(ran_rows), len(rows)))
     L.append("")
     L.append("| channel | model | effort | data policy |")
     L.append("|---|---|---|---|")
-    for r in rows:
+    for r in ran_rows:
         flag = " 🔴 **OVERRIDDEN** (registry default: `%s`)" % r["default"] if r["overridden"] else ""
         L.append("| `%s` | %s `%s`%s | %s | %s |"
                  % (r["name"], r["label"], r["model"], flag, r["effort"],
                     (r["data_policy"] or "-")[:110]))
     L.append("")
-    if any(r["overridden"] for r in rows):
+    if idle_rows:
+        L.append("**NOT RUN in this round — no request was sent and no model answered:** %s. "
+                 "They are registry entries the run did not select (panel profile, `--only`, "
+                 "`--skip`, a missing key or a disabled channel); the reason per channel is in "
+                 "the run log's plan block."
+                 % ", ".join("`%s`" % r["name"] for r in idle_rows))
+        L.append("")
+    if any(r["overridden"] for r in ran_rows):
         L.append("🔴 **A model was overridden.** One channel = one model is the rule; a channel "
                  "running something other than its registry default means someone passed `--set`. "
                  "That is visible here and nowhere else in the outputs.")
@@ -228,11 +261,17 @@ def render(d):
     L.append("| channel · model | verdict | s | billed in | cached in | out tok | reasoning "
              "| tools | searches | bytes |")
     L.append("|---|---|---|---|---|---|---|---|---|---|")
-    for r in rows:
-        if not r["ran"]:
-            verdict = "not run"
-        elif r["ok"]:
+    # Same rule as the table above: a row of dashes under "what each channel actually did" is not
+    # data, it is a channel that was never asked. They are named once, above, and not repeated as
+    # eleven empty rows a reader has to scan past to find the three that matter.
+    for r in ran_rows:
+        # Three verdicts, not two. "FAILED" over a 46 KB review that merely misplaced its end
+        # marker told the reader to throw the review away; the harness records the difference
+        # (`unverified_but_substantial`) and this column is where a human meets it.
+        if r["ok"]:
             verdict = "OK"
+        elif (r.get("raw") or {}).get("unverified_but_substantial"):
+            verdict = "⚠ UNVERIFIED — text present, read it"
         else:
             verdict = "🔴 FAILED"
         # 🔴 THE MODEL TRAVELS WITH THE CHANNEL NAME IN EVERY TABLE. Igor, 2026-08-07: «пусть ИИ

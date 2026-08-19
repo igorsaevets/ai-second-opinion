@@ -505,6 +505,113 @@ def check_effort_ladders_live(r, mod=None):
         r.ok("effort ladders", "%d channel(s) match the vendor catalogue exactly" % len(want))
 
 
+def check_provider_prices_live(r, mod=None):
+    """Compare every pinned `provider_route.order` against the providers' LIVE prices.
+
+    🔴🔴 A REGISTRY ENTRY THAT HARD-CODES A PRICE ORDERING IS A DOCUMENT ASSERTING A MUTABLE
+    VALUE, AND IT ROTS EXACTLY LIKE PROSE - silently, while reading as a measured decision.
+
+    Measured 2026-08-19 (R48) on `ordeepseekv4pro`. Its pin was chosen on 2026-08-15 from live
+    catalogue rates - streamlake $0.348/M, baidu $0.4056/M, novita $1.168/M - and three long
+    registry notes defend the choice in detail. Four days later baidu was $1.69/M, i.e. 4.2x the
+    recorded figure and now the DEAREST of the three, with `discount: 0` while the other two were
+    discounted 60.1% and 10%. Our `order` still sent every request to it FIRST, and
+    `allow_fallbacks: false` guaranteed nothing cheaper could rescue the call. Every note was
+    still true about the day it was written and every one of them was misleading about today.
+
+    The notes cannot fix this - that is the point. Only a check that RE-READS the vendor can, so
+    this is the check. Same reason `check_effort_ladders_live` exists: the self-test compares
+    channels.json against itself and can never notice the world moving.
+
+    Off unless `--online`. Needs no key: the endpoints route is public.
+    """
+    import urllib.request
+    try:
+        with open(os.path.join(HERE, "channels.json"), encoding="utf-8") as fh:
+            chans = json.load(fh)["channels"]
+    except Exception as e:                                  # noqa: BLE001
+        r.warn("provider prices", "registry unreadable (%r)" % e, "fix channels.json first")
+        return
+    pinned = {n: c for n, c in chans.items()
+              if c.get("enabled") and (c.get("provider_route") or {}).get("order")}
+    if not pinned:
+        r.ok("provider prices", "no channel pins a provider order - nothing to compare")
+        return
+
+    def _num(s):
+        """Price -> dollars per MILLION tokens, whatever shape the field arrives in.
+
+        🔴 TWO SHAPES, ONE FIELD, AND ONLY ONE OF THEM IS DOCUMENTED. OpenRouter's MCP server
+        returns `pricing.prompt` pre-formatted as `"$1.69/M tokens"`; the REST endpoint this
+        function calls returns the raw per-TOKEN float `1.69e-06` under the same key. Caught
+        2026-08-19 while reading the first warning this check produced - the comparison was
+        right (one unit throughout) but the message would have printed "$0.0000/M", which is a
+        number a reader would have had to disbelieve before they could act on it. Normalise on
+        the way in rather than at each print site.
+        """
+        m = re.search(r"([0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)", str(s or ""))
+        if not m:
+            return None
+        v = float(m.group(1))
+        # A per-million price is never this small and a per-token price never this large, so the
+        # threshold cannot straddle a real value.
+        return v * 1e6 if v < 0.001 else v
+
+    drift, checked = [], 0
+    for name, c in sorted(pinned.items()):
+        model = c.get("model") or ""
+        if "/" not in model:
+            continue
+        url = "https://openrouter.ai/api/v1/models/%s/endpoints" % model
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "model-orchestration/doctor"})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                eps = (json.loads(resp.read().decode("utf-8")).get("data") or {}).get("endpoints")
+        except Exception as e:                              # noqa: BLE001
+            r.warn("provider prices", "%s: endpoints not reachable (%r)" % (name, e),
+                   "harmless offline; re-run with a network")
+            continue
+        checked += 1
+        # Provider slugs in `only`/`order` are lowercase tags; the endpoint list reports a
+        # display name and a `tag` like "streamlake/fp8". Match on either, lowercased.
+        live = {}
+        for ep in (eps or []):
+            for keyname in ((ep.get("tag") or "").split("/")[0],
+                            (ep.get("provider_name") or "")):
+                if keyname:
+                    live.setdefault(keyname.strip().lower(), ep)
+        order = [str(p).lower() for p in c["provider_route"]["order"]]
+        priced = [(p, _num((live[p].get("pricing") or {}).get("prompt")),
+                   (live[p].get("pricing") or {}).get("discount"))
+                  for p in order if p in live]
+        missing = [p for p in order if p not in live]
+        if missing:
+            drift.append("%s: pinned provider(s) %s no longer serve this model"
+                         % (name, ", ".join(missing)))
+        usable = [(p, v, d) for p, v, d in priced if v is not None]
+        if len(usable) >= 2:
+            first = usable[0]
+            cheapest = min(usable, key=lambda t: t[1])
+            if cheapest[0] != first[0]:
+                drift.append("%s: `order` sends requests to %s first at $%.4f/M while %s serves "
+                             "the same model at $%.4f/M"
+                             % (name, first[0], first[1], cheapest[0], cheapest[1]))
+            undiscounted = [p for p, _v, d in usable if not d]
+            if undiscounted and len(undiscounted) < len(usable):
+                drift.append("%s: pinned provider(s) %s carry no discount while %d sibling(s) in "
+                             "the same pin do"
+                             % (name, ", ".join(undiscounted), len(usable) - len(undiscounted)))
+    if drift:
+        r.warn("provider prices", "; ".join(drift),
+               "re-read the endpoints and reorder `provider_route.order` cheapest-first in "
+               "channels.json. A pin is a snapshot of a price list, not a property of the model - "
+               "the notes beside it will keep reading as current long after they are not.")
+    elif checked:
+        r.ok("provider prices",
+             "%d pinned channel(s): each `order` starts with the cheapest reachable provider"
+             % checked)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Check that a review round can actually run here.")
     ap.add_argument("--json", action="store_true")
@@ -533,6 +640,10 @@ def main():
     check_key(r, mod)
     if a.online:
         check_effort_ladders_live(r, mod)
+        # Both live checks answer the same shape of question - "has the vendor moved under a
+        # value we froze into the registry?" - so they run together under one flag. Added R48
+        # after a pinned provider order silently became the most expensive route available.
+        check_provider_prices_live(r, mod)
     if mod:
         # 🔴 DERIVED FROM CLI_RESOLVERS, NOT TWO LITERALS. Until 2026-08-16 this checked exactly
         # `codex` and `agy`, so `doctor` was silent about hermes (added 08-01) and grokcli (added

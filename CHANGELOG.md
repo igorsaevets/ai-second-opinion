@@ -1,5 +1,92 @@
 # Changelog
 
+## 1.28.0 — 2026-08-19
+
+**The round about being readable. Every fix here started as a user reading an artifact this
+harness wrote and drawing a conclusion the data did not support.**
+
+- 🔴🔴 **`REPORT.md`'s model table listed channels that never ran.** The section headed
+  *"Which model actually answered"* iterated the whole registry, so a cheap-panel run printed a
+  row `| codex | GPT-5.4 | xhigh |` for a channel that was never launched — and the operator
+  read it and asked why codex had been used. The "not run" verdict existed three screens below,
+  in a different table, which is a footnote to a false headline rather than a correction. Both
+  telemetry tables now contain only channels that ran; the rest are named once, in a sentence
+  containing the words **NOT RUN in this round — no request was sent and no model answered**.
+  *A table headed with a factual claim may only contain rows for which the claim is true.*
+
+- 🔴🔴 **A channel that produced a 45 KB review reported no size, in six consecutive panels.**
+  `bytes` was set independently inside eight dispatcher functions and the ninth — the Spark
+  transport — never set it, so every report showed `| spark12cont | OK | 228 | … | - |` beside a
+  full review and the run log printed no size line for it at all. The operator concluded the
+  channel was broken. It was not. The count now comes from **the write itself**: after the answer
+  file is written, the record gains `answer_file` and `answer_bytes` (`os.path.getsize`), which
+  no future channel can forget. `bytes` is kept as the model's payload length, and the two are
+  documented as different quantities — on Windows the file is larger by exactly its newline
+  count. *A fact that N code paths each promise to record is a fact that will be missing from one.*
+
+- 🔴🔴 **`HANDOFF.md`: what the round produced, and what reading it costs.** Built from
+  `os.listdir(outdir)` — never from the run's own records, because a manifest derived from the
+  records inherits whatever the records already got wrong. Lists every answer file with its size,
+  an estimated token cost to read it, and whether it ends with the end marker; then the total;
+  then files on disk that no channel record claims; then channels that ran and wrote nothing; then
+  a ready-to-paste prompt for a fresh context. Written for a measured failure: one round left
+  317 KB across three reviews — including its largest and most expensive — unopened, and reported
+  a channel count that was wrong in both directions. The harness states the price and **does not
+  decide**: it cannot see how full the caller's context is, and guessing would be asserting a fact
+  it has no instrument for.
+
+- 🔴🔴 **`diagnostics.json` and `REPORT.md` are written BEFORE the citation audit, then again
+  with it.** A panel that spent $3.97 and wrote 17 answers left no machine-readable record at
+  all: the process ended in the gap between the last cost line and the first line of the audit,
+  after everything the record needed had already been computed. The only thing that failed was
+  the writing, and it failed because the write came last. The audit is additionally wrapped in
+  `except BaseException` — its docstring promised it never raises, and prose does not enforce
+  anything. *A record only written when nothing goes wrong is a record of rounds that did not
+  need one.*
+
+- 🔴 **`reasoning_meter` was the fourth field in the two-counters family, and it was fixed one
+  line below the third.** `usage` is the last tool round's object; the record's
+  `reasoning_tokens` became a sum in 1.27.0 and this meter kept reading the last round — nine
+  channels measured, disagreeing by up to 4.4× (23 793 vs 5 399). Worse than its predecessors
+  because this field's declared job is to *prove* a depth knob moved, so it quietly grades a
+  working knob as inert. Now reports the summed value with the last round's beside it, under
+  names that say which is which. The single-response xAI call site deliberately does not sum,
+  with a comment saying why: *a class fix applied where the class does not hold is its own defect.*
+
+- 🔴 **Three diagnoses now read fields the harness had already captured.** An empty answer with
+  `finish_reason=tool_calls` is named as **NO ANSWER TURN** — the model ended its turn asking for
+  another tool call after the loop stopped granting them — instead of "the connection produced no
+  content and gave no reason", which was printed over a record that carried the reason. An answer
+  whose text begins with raw `<tool_call>` markup is named as such, instead of drawing a
+  "short answer" note and a transport-corruption note that both described something else. And a
+  channel graded FAILED *solely* because its end marker is not the last line, over ≥2 000 bytes
+  with no other complaint, now reads **⚠ UNVERIFIED — text present, read it**; the `ok` gate is
+  unchanged, but "do not parse it" had been printed over a 46 KB review with 11 live citations.
+
+- 🔴 **`doctor.py --online` re-reads provider prices.** Two channels pinned a provider route with
+  `allow_fallbacks: false` and a hard-coded order chosen four days earlier from live rates. The
+  provider ordered *first* had gone from $0.41/M to $1.69/M — 4.2× — and was the only one of
+  three carrying no discount while its siblings carried 60.1% and 10%. Both pins now list only
+  discounted providers, cheapest first. The new check found the second channel by itself, within
+  a minute of existing. *A registry entry that hard-codes a price ordering is a document
+  asserting a mutable value, and it rots exactly like prose — silently, while reading as a
+  measured decision.*
+
+- **The OpenRouter ledger line no longer states an invariant it does not have.** It used to
+  declare flatly that the two money meters agree whenever they happened to match; across four
+  measured rounds they disagreed in three, once by $1.18. It now says they matched *this round*
+  and names the largest measured gap.
+
+- **`ordeepseekv4pro` moved from the cheap panel to standard** (it remains reachable, since
+  standard includes cheap). It was the cheap panel's single most expensive member — $0.77 of one
+  $3.97 round — and a "cheap panel" whose dearest member costs more than the next three together
+  is a label that does not describe the thing. Two `role: code` voices remain in cheap.
+
+- **The self-test gained a removals register.** Additions to the cheap panel had a named home
+  where each must state why; removals had none, so the only way to record one was to delete a
+  name from the anchor set — the exact edit the anchor exists to forbid. 599 checks, including a
+  22-check suite locking everything above.
+
 ## 1.27.0 — 2026-08-17
 
 **The failure the vendor states, not the one the canned text assumes — and the shipped registry

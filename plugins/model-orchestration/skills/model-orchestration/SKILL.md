@@ -1,14 +1,14 @@
 ---
 name: model-orchestration
 description: >
-  Run a question past every external reviewer voice at once — Muse Spark, the Codex CLI, Gemini
-  (both through the Antigravity subscription and through the OpenRouter API), Kimi and Qwen — in
-  parallel, at maximum depth, with verification that each one actually did the work. `--ask` is
-  the cheap one-shot form. Use this EVERY TIME the user asks for a
-  "second opinion", «второе мнение», a review or verification of a document, plan or analysis by
-  an external model, or names Spark / Codex / Gemini / Antigravity / Kimi / Qwen. Run doctor.py once per machine to check prerequisites;
-  §0 is then a single command. Also contains the exact wire parameters, the CLI flag traps,
-  the streaming and retry rules, and the checks that catch a model which silently did nothing.
+  Run a question past every external reviewer voice at once — Muse Spark, Codex, Gemini (via the
+  Antigravity subscription and via OpenRouter), Grok, DeepSeek, GLM, Kimi, Qwen — in parallel, at
+  maximum depth, with verification that each one actually did the work. `--ask` is the cheap
+  one-shot form. Use this EVERY TIME the user asks for a "second opinion", «второе мнение», a
+  review or verification of a document, plan or analysis by an external model, or names any of
+  those channels. Everything is already installed here; §0 is a single command. Also holds the
+  wire parameters, the CLI flag traps, the streaming and retry rules, and the checks that catch a
+  model which silently did nothing.
 user_invocable: true
 ---
 
@@ -80,16 +80,16 @@ truncated. Detail lives beside it in `references/`, read on demand.
 
 | file | read it when |
 |---|---|
-| `references/legal-briefs.md` | **before** writing any legal / immigration / regulatory brief. A refusal there is a framing bug, and rewriting after the fact costs a whole expensive round |
-| `references/channels.md` | wire parameters and CLI traps per channel; a channel misbehaves, returns empty, or you are changing flags |
+| `references/legal-briefs.md` | **before** any legal / immigration / regulatory brief. A refusal there is a framing bug, and rewriting after one costs a whole expensive round |
+| `references/channels.md` | wire parameters and CLI traps per channel; a channel misbehaves or you are changing flags |
 | `references/briefs.md` | building any brief: what goes in it, and the live-web-search demand |
-| `references/verification.md` | judging whether a review actually happened; reviewer signatures; citation spot-checks |
+| `references/verification.md` | judging whether a review actually happened; signatures; citation spot-checks |
+| `references/reading-the-answers.md` | **a round landed** — the manifest, the read cost, when to defer to a fresh context |
 | `references/when-it-breaks.md` | **anything failed** — symptom → cause → fix, and the status fields that lie |
-| `references/systems.md` | the `--system` presets in full: what each one says, and why the legal one omits a clause |
-| `KIT-README.md` + `package.py` | giving this to somebody else's machine. `package.py --out <dir>` regenerates the distributable (plugin + installers) from this directory, so there is never a second copy to drift |
+| `references/systems.md` | the `--system` presets in full, and why the legal one omits a clause |
+| `KIT-README.md` + `package.py` | giving this to another machine. `package.py --out <dir>` regenerates the distributable from here, so no second copy can drift |
 
-Paths are relative to this skill's own directory,
-`<SKILL_DIR>\`.
+Paths are relative to this skill's own directory.
 
 
 ## 0. Just run it
@@ -216,13 +216,12 @@ at the ceiling its own vendor accepts, in every mode: **only the number of model
 🔴 **Neither a panel nor a GROUP enables anything.** `--only openrouter`, *«только грок»* run only
 the members already on. **Naming a channel is the one way to start one that ships off** —
 `--only goog36flash`. 🔴 **What `cheap` costs is vendor diversity, not depth**: it drops OpenAI,
-Moonshot, Alibaba and Meta-Standard, and nearly half its seats are Google. The plan prints the
-vendor tally, warns at half the room, and names what `standard` would add — six Geminis agreeing
-is one opinion repeated, not corroboration.
+Moonshot, Alibaba, DeepSeek and Meta-Standard, and nearly half its seats are Google. The plan
+prints the vendor tally and names what `standard` adds — six Geminis agreeing is one opinion
+repeated, not corroboration.
 
 **`--tier` parses and chooses nothing.** One tier, `max`; `strategic`/`deep` are aliases so old
-commands work, and the plan says which word it honoured. `quick` is still an argparse error.
-Resolved depth is printed per channel.
+commands work. `quick` is still an argparse error. Resolved depth is printed per channel.
 
 **The floor is waived when your brief caps the length.** "Under 250 words" makes a short reply
 correct — the floor only means "under-allocated" when the brief did not ask for brevity.
@@ -243,25 +242,24 @@ refuses. Rules and errors: `references/when-it-breaks.md`. Updating: `python upg
 ## 3. Verify the answer is real — the whole point
 
 
-A call that ran is not a review that happened. The harness prints all of this; read it.
+A call that ran is not a review that happened. The harness prints all of this.
 
 **Hard failures — the answer is unusable, never report it as a review:**
 1. `stop_reason` is anything other than `end_turn` → truncated, the tail of the analysis is gone.
 2. The marker is not present → output is incomplete.
-3. Empty body despite HTTP 200. 🔴 **Read the warning before diagnosing it.** If it says
-   `OUTPUT BUDGET EXHAUSTED BY REASONING`, the reasoning trace filled `max_tokens` and the answer
-   never started — raise that channel's `max_tokens`, or split the brief. Measured: mimo25pro,
-   766 s, 60 002 reasoning tokens against a 60 000 cap, zero bytes.
+3. Empty body despite HTTP 200. 🔴 **Read the warning before diagnosing it** — it now names which
+   of three things happened: the reasoning filled `max_tokens` (raise it or split the brief), the
+   vendor ended its loop mid-turn, or the model spent its last turn calling tools.
 
 **Soft signals — the answer exists, judge it yourself:**
 4. **Tool-invocation count is 0.** `tools:` is *permission*, not instruction. A model handed web
    search may never call it and then answer dated questions from training data.
    **Zero means every dated fact in that answer is unverified.**
 5. Output tokens below the floor, *with an uncapped brief* → the model under-allocated. There is
-   no deeper setting to raise it to; split the question into more sub-questions instead.
+   no deeper setting; split the question into more sub-questions instead.
 
 Never let a soft signal mark a run failed. A check that cries wolf on a good answer trains you to
-ignore the alarm that matters — made twice in this harness, and fixed twice.
+ignore the alarm that matters — made twice here, fixed twice.
 
 ---
 
@@ -275,21 +273,20 @@ anything from source. Three that decide what you do next:
   marker and the counters.
 - **`FILTERED` on the Spark probe**: neutralise the phrasing **in the sent copy only**, never on
   disk, and strip appendices. Do not retry unchanged.
-- **A channel is off and nothing explains why**: your own settings file, whose path and every
-  changed field the plan prints at the top.
+- **A channel is off and nothing explains why**: your own settings file, whose path and changed
+  fields the plan prints at the top.
 
 ---
 
 ## 10. Report back — always
 
 
-🔴 **Name every channel WITH its model and depth** — `codex (gpt-5.4 @ xhigh)`,
-`grokbuild (grok-4.6 @ xhigh)`, never a bare channel name (the operator, R46: «не просто Codex, а
-Codex5.4Xhigh»). Per channel: seconds, in/out tokens, **tool/fetch count**, **grounding**
-(pages we fetched / vendor-stated / none) and **citations in the text** — a web-capable channel
-that cited nothing is a fact to state, not a column to leave blank; it means the review is
-training-data-plus-brief, which R45's table hid. Then separately: **accepted**, **rejected with
-proof**, and where the channels **disagreed with each other**.
+🔴 **Name every channel WITH its model and depth** — `codex (gpt-5.4 @ xhigh)`, never a bare
+channel name (the operator, R46: «не просто Codex, а Codex5.4Xhigh»). Per channel: seconds, in/out tokens,
+**tool/fetch count**, **grounding** (pages we fetched / vendor-stated / none) and **citations in
+the text** — a web-capable channel that cited nothing is a fact to state, not a column to leave
+blank; it means the review is training-data-plus-brief, which R45's table hid. Then separately:
+**accepted**, **rejected with proof**, and where the channels **disagreed with each other**.
 
 The disagreement is the product. One reviewer is not a second opinion. **Which channel wins is
 not predictable from cost, or from the last round** — four rounds gave four different winners.
@@ -297,11 +294,16 @@ not predictable from cost, or from the last round** — four rounds gave four di
 One shape recurs: the highest-value finding was **not an answer to a question that was asked**. It
 arrived under "what are we missing". Always include that question.
 
+🔴 **`HANDOFF.md` is the reading list — a `listdir`, never built by hand — and it prices the read
+in tokens. Over ~40K tokens with a session already large: do NOT read them this turn.** Report the
+telemetry, hand the operator its resume prompt, let a fresh context read after `/compact`. R46 paid for
+the alternative: 317 KB unopened, a count reported wrong.
+Detail: `references/reading-the-answers.md`.
+
 ---
 
 ## 11. Relationship to the other skill
 
-`second-opinion-consult` holds the **policy** — all channels always, the cost ladder for
-lookups. **This skill holds the mechanics, and it is the only home for them**: the copy that used
-to live over there went stale in four places without looking stale. Read policy there, run calls
-from here. This file alone is enough to run a round.
+`second-opinion-consult` holds the **policy**; **this skill is the only home for the mechanics** —
+the copy that used to live there went stale in four places without looking stale. This file alone
+is enough to run a round.

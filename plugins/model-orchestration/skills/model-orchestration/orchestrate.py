@@ -1165,6 +1165,149 @@ def write_diagnostics(outdir, payload):
     return path
 
 
+# Crude chars-per-token for mixed English/Russian prose. Deliberately crude and labelled as an
+# estimate everywhere it is printed: the number exists to answer "does this fit in what is left of
+# my context", where being 20% out changes nothing, and pulling in a real tokenizer would add a
+# dependency to a harness whose whole selling point is that it has none.
+CHARS_PER_TOKEN = 4
+
+
+def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=None):
+    """
+    Write HANDOFF.md: what is on disk, what it costs to read, and the prompt that resumes it.
+
+    🔴 THE MANIFEST IS A `listdir`, NOT A PROJECTION OF `results`.
+
+    Round 46 lost the three largest reviews of a $3.97 panel - 317 KB - because the session
+    assembled its reading list by hand from the run log, and the log had no line for the two
+    Spark answers (their `bytes` field was never set; see the write site). The round reported
+    "18 launches, 17 answers" and both figures were wrong. A manifest built from `results` would
+    have inherited that error exactly, because `results` is the belief that was already wrong.
+    Reading the directory is the only version of this function that can report a file nobody
+    remembered - and the one that catches a file some other process wrote into the same folder.
+
+    🔴 IT IS ALSO THE ANSWER TO "SHOULD I READ THIS NOW?"
+
+    Igor, 2026-08-19: «пока ИИ запускает оркестрацию, у него уже окно часто заполнено на 350K+.
+    А чтобы читать и анализировать ответ, лучше чтобы окно было почти пустое.» He is describing
+    a real and measured failure: the session that ORDERS a panel has spent its context getting to
+    the point of ordering one, and the panel then returns more text than the session has room to
+    think about. Round 46 is what that looks like from the outside - not a refusal, just three
+    files quietly never opened.
+
+    This function does NOT decide. It cannot: nothing here can see how full the caller's context
+    is, and a harness that guessed would be asserting a fact it has no instrument for - the class
+    this project keeps paying for. It states the price in tokens and writes the resume prompt, so
+    deferring costs one paste instead of an hour of reconstruction. Whether to defer belongs to
+    the caller, and the rule for it lives in SKILL.md where a human can argue with it.
+
+    Never raises: a handoff writer that can break the round it is describing is worse than none.
+    """
+    try:
+        os.makedirs(outdir, exist_ok=True)
+        skip = {"REPORT.md", "HANDOFF.md", "BRIEF.md", "PROMPT.md", "agent.md"}
+        files = []
+        for fn in sorted(os.listdir(outdir)):
+            if not fn.endswith(".md") or fn in skip:
+                continue
+            p = os.path.join(outdir, fn)
+            if not os.path.isfile(p):
+                continue
+            size = os.path.getsize(p)
+            try:
+                with open(p, encoding="utf-8", errors="replace") as f:
+                    body = f.read()
+            except OSError:
+                body = ""
+            tail = [ln for ln in body.splitlines() if ln.strip()]
+            files.append({
+                "file": fn,
+                "bytes": size,
+                "est_tokens": size // CHARS_PER_TOKEN,
+                # The marker check is repeated here ON THE FILE rather than trusted from the
+                # record, for the same reason the listing is: this is the artifact a reader will
+                # actually open, and the record describes what the harness believed it wrote.
+                "ends_with_marker": bool(marker) and bool(tail) and tail[-1].strip() == marker,
+                "harness_banner": body.startswith("> 🔴 **HARNESS WARNING"),
+            })
+        total = sum(f["bytes"] for f in files)
+        est = total // CHARS_PER_TOKEN
+
+        # Channels that ran and left NO file. Named, because "absent from the manifest" is the
+        # one thing a manifest cannot say about itself.
+        claimed = {(r.get("answer_file") or "").lower() for r in results.values()}
+        on_disk = {f["file"].lower() for f in files}
+        orphans = sorted(on_disk - claimed - {""})
+        missing = sorted(n for n, r in results.items()
+                         if not r.get("answer_file") and r.get("seconds") is not None)
+
+        L = ["# Handoff — what this round produced, and what reading it costs", "",
+             "Written by the harness from a directory listing of `%s`, not from its own records: "
+             "round 46 lost 317 KB of reviews to a hand-built file list and this file exists so "
+             "that cannot recur. Every size below was read off the filesystem after the run."
+             % os.path.abspath(outdir), "",
+             "| answer file | bytes | ~tokens to read | ends with the end marker |",
+             "|---|---:|---:|---|"]
+        for f in files:
+            L.append("| `%s` | %s | ~%s | %s |"
+                     % (f["file"], f"{f['bytes']:,}".replace(",", " "),
+                        f"{f['est_tokens']:,}".replace(",", " "),
+                        "yes" if f["ends_with_marker"] else
+                        ("no — INCOMPLETE, do not parse as a finished review" if marker else "-")))
+        L += ["",
+              "**%d answer file(s), %s bytes, ~%s tokens to read all of them** (estimate at %d "
+              "chars/token, mixed English/Russian prose)."
+              % (len(files), f"{total:,}".replace(",", " "),
+                 f"{est:,}".replace(",", " "), CHARS_PER_TOKEN), ""]
+        if orphans:
+            L += ["🔴 **On disk but claimed by no channel record:** %s. Something wrote into this "
+                  "folder that this run did not produce, or a record lost its file name."
+                  % ", ".join("`%s`" % o for o in orphans), ""]
+        if missing:
+            L += ["🔴 **Ran but left no answer file:** %s. Those channels cost time and possibly "
+                  "money and produced nothing to read; their cause is in `diagnostics.json` → "
+                  "`problems`." % ", ".join("`%s`" % m for m in missing), ""]
+
+        L += ["## Reading this in a fresh context",
+              "",
+              "If the session that ordered this round is already large, reading %s tokens of "
+              "reviews into it is how a panel gets paid for and then not read. The harness does "
+              "not know how full that context is and does not guess. If it is tight: run "
+              "`/compact`, then send the block below — it is self-contained."
+              % f"~{est:,}".replace(",", " "),
+              "",
+              "```",
+              "Прочитай ответы панели в %s" % os.path.abspath(outdir),
+              "Начни с HANDOFF.md (манифест с диска) и REPORT.md (телеметрия: кто отвечал, "
+              "чем, сколько ссылок живых).",
+              "Потом прочитай КАЖДЫЙ файл из манифеста — их %d, ~%s токенов. Не собирай список "
+              "руками: он в HANDOFF.md." % (len(files), f"{est:,}".replace(",", " ")),
+              "По каждой находке: принял / отклонил с доказательством / в бэклог. "
+              "Совпадения между каналами считай отдельно от одиночных мнений.",
+              ("Маркер конца ответа: %s. Файл без него на последней строке — неполный."
+               % marker) if marker else "",
+              ("Бриф, который им отправляли: %s" % os.path.abspath(brief)) if brief else "",
+              "```",
+              ""]
+        with open(os.path.join(outdir, "HANDOFF.md"), "w", encoding="utf-8") as f:
+            f.write("\n".join(x for x in L if x is not None) + "\n")
+
+        log("Handoff: %d answer file(s) on disk, %s bytes, ~%s tokens to read all of them."
+            % (len(files), f"{total:,}".replace(",", " "), f"{est:,}".replace(",", " ")))
+        if missing:
+            log("  ran but wrote NO answer file: %s" % ", ".join(missing))
+        if orphans:
+            log("  on disk but claimed by no record: %s" % ", ".join(orphans))
+        log("  The manifest and a ready-to-paste resume prompt are in %s"
+            % os.path.join(os.path.abspath(outdir), "HANDOFF.md"))
+        return {"files": files, "total_bytes": total, "est_tokens": est,
+                "orphans": orphans, "ran_without_file": missing}
+    except Exception as exc:                                       # noqa: BLE001
+        log("  note: the handoff manifest could not be written (%r). The answers are unaffected; "
+            "list %s by hand." % (exc, outdir))
+        return None
+
+
 # How many cited URLs to probe per channel. A review normally cites 10-35; a runaway answer can
 # cite hundreds, and probing those serially would make the check the slowest part of the run. When
 # the cap bites it is REPORTED, never silent - a truncated check that reads as a complete one is
@@ -1563,9 +1706,29 @@ def pii_gate(parts, strict_pii=False, warn_pii=False):
     return 0
 
 
-def meter_source(usage, *path):
+def meter_source(usage, *path, summed=None):
     """
     Name the key a number came from, and say plainly when it was absent.
+
+    🔴🔴 R48: `summed` EXISTS BECAUSE THIS FUNCTION WAS THE FOURTH MEMBER OF THE TWO-COUNTERS
+    FAMILY, AND IT WAS FIXED IN R47 - one line above it.
+
+    `usage` here is the LAST tool round's usage object. The record's own `reasoning_tokens` has
+    been summed across every round since R47; this meter kept reading the last one, so the two
+    numbers sat in the same dict, under names that promise the same fact, disagreeing by up to
+    4.4x. Measured on the AOS panels of 2026-08-17/18, nine channels: ordeepseekv4pro 23 793 vs
+    5 399, orglm52 39 811 vs 19 270, ornemotron3ultra 562 vs 40, mimo25pro 2 076 vs 304.
+
+    That is worse than the earlier three (`usd`, `cached_in_tokens`, `reasoning_tokens`), because
+    this field is the one whose DECLARED JOB is to prove a depth knob moved - `echocheck.py` was
+    written against it. A verification instrument that under-reports by 4x does not fail loudly;
+    it quietly grades a working knob as inert. R47 nearly bought exactly that conclusion about
+    nemotron off a `26` that was a last-round read.
+
+    The path and the presence flag still come from the real usage object, because that is this
+    function's other job and the one it does correctly: naming which key resolved. Only `value`
+    changes meaning, and when the two differ, BOTH are reported under names that say which is
+    which. Two facts, two names - the same rule that fixed `bytes` vs `answer_bytes`.
 
     🔴 CODEX, REVIEWING ROUND 31: once the transport, the prompt and the usage schema all vary by
     channel, "these two models disagreed" is uninterpretable without a record of *which usage
@@ -1579,10 +1742,28 @@ def meter_source(usage, *path):
     for key in path:
         seen.append(key)
         if not isinstance(node, dict) or key not in node:
-            return {"path": ".".join(path), "present": False,
-                    "missing_at": ".".join(seen)}
+            out = {"path": ".".join(path), "present": False, "missing_at": ".".join(seen)}
+            # A summed total with no key to read it from is a real state: a vendor that reports
+            # the field on early rounds and drops it on the last one. Say so rather than
+            # reporting absence over a number we hold.
+            if summed:
+                out["value"] = summed
+                out["rounds_summed"] = True
+                out["note"] = ("the key was absent from the LAST round's usage object; this "
+                               "value is the sum of the rounds that did report it")
+            return out
         node = node[key]
-    return {"path": ".".join(path), "present": node is not None, "value": node}
+    out = {"path": ".".join(path), "present": node is not None, "value": node}
+    if summed is not None:
+        out["value"] = summed
+        out["rounds_summed"] = True
+        out["last_round_value"] = node
+        if node is not None and summed != node:
+            out["note"] = ("`value` is the SUM across tool rounds and matches the record's "
+                           "reasoning_tokens; `last_round_value` is what this key held on the "
+                           "final round alone. They differ whenever the channel ran more than "
+                           "one round.")
+    return out
 
 
 def _resolve_system(name):
@@ -3721,11 +3902,62 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                 "is already there, the brief is too hard for this channel and splitting it is the "
                 "only remedy. Lowering the tier does NOT help - depth is at each vendor's ceiling "
                 "by design since 2026-08-15." % (reas, cap, spent, name))
+        elif last_finish.get("finish") == "tool_calls":
+            # 🔴🔴 «GAVE NO REASON» OVER A RESPONSE THAT GAVE A REASON, IN A FIELD WE NOW CAPTURE.
+            #
+            # R43 AOS panel, ornemotron3ultra: bytes 0, 12 billed rounds, 1 146 168 input tokens,
+            # `finish_reason: "tool_calls"` sitting in the same record - and the warning said the
+            # connection "gave no reason", then reassured the reader with "Checked and NOT the
+            # cause: the budget was not exhausted (71 of 65536)". A reader who trusts "checked and
+            # not the cause" stops investigating, so the sentence did not merely fail to help, it
+            # actively closed the enquiry. (R47 taught the harness to CAPTURE finish_reason; this
+            # is the second half - the diagnosis has to READ what the capture put there. Capturing
+            # a field and not consulting it is the same shape as recording `vendor_opened` and
+            # printing a dash.)
+            #
+            # What the state actually means: the model ended its turn asking for another tool
+            # call, and the loop had stopped granting them - normally because the fetch budget was
+            # reached and the harness said "answer as it stands". The model answered that request
+            # with more tool calls instead of prose. Nothing was truncated and nothing errored;
+            # the conversation simply never produced an answer turn.
+            warn.append(
+                "NO ANSWER TURN - finish_reason=tool_calls after %d round(s): the model ended its "
+                "last turn asking for ANOTHER tool call rather than writing prose, and the loop "
+                "had already stopped granting them (fetch budget %s). This is not truncation and "
+                "not a provider error - the budget was NOT exhausted (%s of %s output tokens on "
+                "the final round). Fixes, in order: raise channels.json -> %s.fetch_tool.max_calls "
+                "so the model reaches its answer inside the budget; or narrow the brief so it "
+                "needs fewer pages. Raising max_tokens does nothing here."
+                % (rounds_done, max_rounds, spent, cap or "no declared cap", name))
         else:
             warn.append("EMPTY OUTPUT from stream, and the provider sent no error event - the "
-                        "connection produced no content and gave no reason. Checked and NOT the "
+                        "connection produced no content%s. Checked and NOT the "
                         "cause: the budget was not exhausted (%s of %s output tokens used)."
-                        % (spent, cap or "no declared cap"))
+                        % ((" and gave no reason - finish_reason was absent from every chunk"
+                            if not last_finish.get("finish")
+                            else " (finish_reason=%r, which names no known cause for an empty "
+                                 "answer - report it)" % last_finish.get("finish")),
+                           spent, cap or "no declared cap"))
+    # 🔴 THE MODEL WROTE ITS TOOL CALLS AS TEXT, AND TWO INSTRUMENTS BOTH MISDESCRIBED IT.
+    #
+    # R45 AOS panel, orglm52: the saved answer is 1 166 B whose entire body after the harness
+    # banner is `<tool_call>web_search(query="...</arg_value></tool_call>` twice over - unparsed
+    # function-call syntax with mismatched tags, not prose. The round fired TWO notes about it and
+    # neither named it: "SHORT ANSWER (313 chars)" treated it as a terse review, and the text-
+    # integrity check attributed the unbalanced parentheses to «the vendor's transport dropped
+    # characters in flight» - the R44 corruption story, applied to characters the model itself
+    # wrote. Two detectors, two confident wrong causes, one unread artifact.
+    #
+    # Same root as the tool_calls branch above and it deserves the same words: the model was still
+    # trying to call tools after the loop stopped granting them. Checked on the answer text
+    # because on this path the markup arrives as CONTENT, so no finish_reason can reveal it.
+    if text.strip() and re.search(r"</?(tool_call|function_call|invoke)\b", text[:4000]):
+        warn.append(
+            "TOOL-CALL MARKUP IN PLACE OF AN ANSWER - the text begins with raw `<tool_call>` "
+            "syntax rather than prose, which means the model was still trying to call tools when "
+            "the loop asked it to answer. Read the file before counting this channel: any "
+            "bracket-balance or short-answer note on it describes the MARKUP, not damage in "
+            "transit and not a terse review.")
     note = []
     record_refusal(refusal_check(text, marker), warn, note)
     # Tokens are SUMMED across tool rounds, not taken from the last response. Each round re-sends
@@ -3801,8 +4033,11 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             # here through TWO fixes of the identical defect on neighbouring fields.
             "reasoning_tokens": reas_tot or (usage.get("completion_tokens_details") or {})
                                             .get("reasoning_tokens"),
+            # `summed=` keeps this meter and the field above reading the same event. Without it
+            # they were two counters over one quantity, disagreeing by up to 4.4x - see
+            # meter_source's docstring for the nine measured pairs.
             "reasoning_meter": meter_source(usage, "completion_tokens_details",
-                                            "reasoning_tokens"),
+                                            "reasoning_tokens", summed=reas_tot or None),
             "reasoning_chars": reasoning_chars or None,
             "vendor_searches": wsu.get("tool_usage"),
             "vendor_pages": wsu.get("page_usage"),
@@ -4015,6 +4250,11 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
             "bytes": len(text.encode("utf-8")), "exit": 0, "model": model,
             # Correct HERE - this is the Responses API. The identical-looking key is wrong two
             # hundred lines up, on /chat/completions, and was wrong there for months.
+            # No `summed=` here, and that is correct rather than an omission: xAI /v1/responses
+            # runs its agentic loop SERVER-side and returns one response with one usage object,
+            # so there are no rounds on this side to sum. Stated because the sibling call site
+            # needed the opposite fix, and a class fix applied where the class does not hold is
+            # its own defect.
             "reasoning_meter": meter_source(usage, "output_tokens_details", "reasoning_tokens"),
             "in_tokens": usage.get("input_tokens"),
             "cached_in_tokens": (usage.get("input_tokens_details") or {}).get("cached_tokens"),
@@ -5794,7 +6034,8 @@ def main():
                     "deleting the file does not un-send the review."
                     % ", ".join(sorted({h.split(" at ")[0] for h in _leak})))
         if r.get("text"):
-            with open(os.path.join(a.out, name.upper() + ".md"), "w", encoding="utf-8") as f:
+            _answer_path = os.path.join(a.out, name.upper() + ".md")
+            with open(_answer_path, "w", encoding="utf-8") as f:
                 # 🔴🔴 THE DAMAGE HAS TO BE UNMISSABLE IN THE ARTIFACT, NOT ONLY IN THE LOG.
                 # Seven of the thirteen reviewers of this change, independently, said a `note`
                 # is too weak for a corrupted statutory citation - and they were right about the
@@ -5814,6 +6055,71 @@ def main():
                               "received. Do not lift a quotation, a section number or a figure "
                               "out of it without opening the source.\n\n---\n\n")
                 f.write(r["text"])
+            # 🔴🔴 THE ARTIFACT MEASURES ITSELF. THIS IS WHY `spark12cont` LOOKED DEAD FOR WEEKS.
+            #
+            # `bytes` was set independently inside EIGHT dispatchers - call_codex, call_grokcli,
+            # call_hermes, call_gemini_direct, call_oai_reviewer, call_xai_responses, _agy_once -
+            # and `call_http_reviewer`, the Spark channel, never set it. Not a typo with a small
+            # blast radius: `report.py` renders a missing number as `-`, so every REPORT.md ever
+            # produced showed
+            #     | `spark12cont` · Muse Spark 1.2 Contributor | OK | 228 | ... | - |
+            # beside a 45 KB review, and the run log's summary block printed no `bytes=` line for
+            # it while printing one for all fifteen others. Measured across six consecutive panels
+            # (2026-08-17..18, four projects): spark12cont ok=True in 6 of 6, bytes=None in 6 of 6.
+            # Igor read that and said «spark12cont не сработал» - the channel was fine; the only
+            # column that says "an answer exists" was blank on the one channel that never filled
+            # it. The R45 round then LOST both Spark answers (107 KB) from the hand-built file list
+            # a session assembled off that same log, because nothing in it said they existed.
+            #
+            # A per-dispatcher field is a promise eight functions have to keep; adding a ninth
+            # channel silently re-opens the hole. So the count now comes from the WRITE - the one
+            # place that exists exactly once and cannot be reached without an answer on disk.
+            #
+            # TWO NUMBERS, TWO NAMES, deliberately. `bytes` is the model's payload
+            # (len(text.encode("utf-8"))); `answer_bytes` is the file, which on Windows is LARGER
+            # because text-mode writing turns every \n into \r\n - measured 2026-08-19 across the
+            # R45 panel: 147 B over payload on a 9 998 B answer, 2 065 B on a 199 738 B one, i.e.
+            # exactly the newline count. That is not drift and not damage, but a reader comparing
+            # `bytes` against `ls` sees a mismatch, so the two facts get two names and the reason
+            # is stated in the report rather than rediscovered.
+            try:
+                r["answer_file"] = os.path.basename(_answer_path)
+                r["answer_bytes"] = os.path.getsize(_answer_path)
+                if not r.get("bytes"):
+                    r["bytes"] = len(r["text"].encode("utf-8"))
+            except OSError:
+                pass          # a stat failure must never cost the round its answer
+
+        # 🔴🔴 «DO NOT PARSE IT» PRINTED OVER 46 KB OF FINISHED REVIEW.
+        #
+        # `ok` is computed from the end marker's position, so a channel that wrote a complete
+        # review and then added one stray line is graded identically to a channel that returned
+        # nothing. Measured: R42 AOS panel, ornemotron3ultra - ok=false, sole warning "END MARKER
+        # NOT ON LAST LINE - output is partial, do not parse it", file 46 473 B, n_cited 11,
+        # finish_reason "stop". R40, same channel: ok=false over 32 958 B. A reader following the
+        # instruction discards a finished review to punish a formatting slip.
+        #
+        # The gate is NOT relaxed - `ok` still means "verified end to end", and loosening it would
+        # make the marker decorative, which is the whole reason it exists. What changes is that
+        # the record now carries the OTHER fact too, so the reader can tell the two apart. Done
+        # here rather than in the five dispatchers that raise the marker warning: one place that
+        # every channel passes through, keyed on the artifact rather than on the transport.
+        _marker_only = (not r.get("ok")
+                        and (r.get("answer_bytes") or 0) >= 2000
+                        and any("END MARKER" in w for w in (r.get("warnings") or []))
+                        and not any(("EMPTY OUTPUT" in w or "NO ANSWER TURN" in w
+                                     or "PROVIDER ERROR" in w or "BUDGET EXHAUSTED" in w)
+                                    for w in (r.get("warnings") or [])))
+        if _marker_only:
+            r["unverified_but_substantial"] = True
+            r.setdefault("notes", []).append(
+                "SUBSTANTIAL TEXT, MARKER MISPLACED - %s bytes were written and no warning here "
+                "names an empty, truncated or errored response. The channel is graded FAILED "
+                "because the end marker is not the last line, which is the only mechanical proof "
+                "that a review finished; it is NOT evidence that the content is unusable. Open "
+                "the file and check where it stops before discarding it - a complete review "
+                "followed by one stray line looks identical to a truncation from here."
+                % r.get("answer_bytes"))
         status = "OK" if r.get("ok") else "PROBLEM"
         slot = (plan or {}).get(name) or {}
         kind = slot.get("kind") or _LEGACY_KINDS.get(name)
@@ -6003,8 +6309,18 @@ def main():
                                 if r.get("titles_missing") else "",
                                 "%d title(s) were not domain-shaped" % r["titles_not_domain"]
                                 if r.get("titles_not_domain") else ""]))))
-        if r.get("bytes"):
-            log("    bytes=%s exit=%s" % (r["bytes"], r.get("exit")))
+        # 🔴 THE LOG IS A MANIFEST OR IT IS NOTHING. A session that has to answer "which answers
+        # exist" reads this block, and until 2026-08-19 the line was conditional on a field one
+        # channel never set, so two Spark answers totalling 107 KB appeared nowhere in 303 lines
+        # of log. The file NAME is printed too, unconditionally, because "17 files on disk" and
+        # "16 byte-counts in the log" is the discrepancy that cost round 46 its three biggest
+        # reviews - the reader built the list by hand from this block and the block was short.
+        if r.get("answer_file"):
+            log("    answer=%s  %s bytes on disk (payload %s) exit=%s"
+                % (r["answer_file"], r.get("answer_bytes"), r.get("bytes"), r.get("exit")))
+        elif r.get("bytes"):
+            log("    bytes=%s exit=%s (no answer file was written)"
+                % (r["bytes"], r.get("exit")))
         for w in r.get("warnings", []):
             log("    FAIL: " + w)
         for n in r.get("notes", []):
@@ -6014,6 +6330,28 @@ def main():
     log("=" * 78)
     log("%d/%d channels returned a verified review. Outputs in %s"
         % (ok_count, len(results), os.path.abspath(a.out)))
+
+    # ---- the manifest, and the cost of reading it ------------------------------------------
+    # 🔴🔴 ASK THE DIRECTORY, NEVER THE RECORDS. Round 46 handed three reviews - GROKBUILD
+    # 199 738 B, SPARK12CONT 66 955 B, SPARK11 40 782 B, 317 KB in total - to nobody, because
+    # the session built the reading list BY HAND from the run log, and the log was short by
+    # exactly the channels whose `bytes` field was never set. The round then reported "18
+    # launches, 17 answers"; both numbers were wrong. The most expensive output of the round
+    # was invisible to the only reader it had.
+    #
+    # A manifest computed from `results` would have reproduced the same blind spot, because
+    # `results` is what was already believed. This one is a `listdir`: it reports what is ON
+    # DISK, including a file no record claims, and it is written whether or not anything later
+    # in this function succeeds.
+    #
+    # It also prints the READ COST, because that is the number the decision actually turns on.
+    # Igor, 2026-08-19: «пока ИИ запускает оркестрацию, у него уже окно часто заполнено на
+    # 350K+, а чтобы читать и анализировать ответ, лучше чтобы окно было почти пустое». The
+    # harness cannot see the caller's context, so it does not decide - it states the price and
+    # hands over a ready-to-send resume prompt. ~4 chars/token is the crude English/Russian
+    # mixed-prose ratio; it is labelled an estimate because it is one.
+    handoff = write_handoff(a.out, results, marker=a.marker, brief=a.brief,
+                            panel=getattr(a, "panel", None), started=started)
 
     # 🔴 WHAT DID THIS ROUND COST? Until 2026-08-08 the honest answer was "nobody knows", and the
     # reason was not that the vendors hide it - OpenRouter returns `usage.cost` on a request this
@@ -6081,21 +6419,24 @@ def main():
             % (delta, summed,
                ("" if remaining is None else " | credits remaining on the key: $%.2f"
                 % remaining),
+               # 🔴 A MATCH IS AN OBSERVATION, NOT AN INVARIANT. The else-branch used to state
+               # the agreement flatly, in the present tense, with no round attached - which
+               # reads as a property of the instrument. It is
+               # not: measured across four rounds, the two meters disagreed in THREE of them
+               # (R40 gap $0.509, R41 $1.183 with the ledger moving 2.65x what the responses
+               # reported, R42 $0.099) and matched in one. A reader who saw the confident
+               # wording in R45 had no way to know the round before it had a dollar unaccounted
+               # for. Say what happened this time and what it does not prove.
                (" The gap is normally search fees, which bill outside `usage.cost` - or "
                 "another process on the same key during the round."
-                if abs(delta - summed) > 0.0005 else " The two meters agree.")))
+                if abs(delta - summed) > 0.0005 else
+                " They MATCH THIS ROUND, which is not guaranteed - a gap here is normal and "
+                "usually search fees; measured gaps in earlier rounds ran to $1.18.")))
 
-    # ---- citation audit ---------------------------------------------------------------------
-    # Runs on every review, because the alternative - a separate command afterwards - is a check
-    # that gets skipped exactly when the run was rushed. See citation_audit() for why existence
-    # rather than grounding, and why it never touches the exit code.
-    audit = citation_audit(results, enabled=not a.no_citecheck,
-                           resolve_links=a.resolve_grounding_links)
-    log_citation_audit(audit)
-
-    # ---- diagnostics ------------------------------------------------------------------------
-    # Written on every run, success included: the most common support question is "it worked
-    # yesterday", and answering it needs the working run's file to diff against.
+    # ---- problems -----------------------------------------------------------------------------
+    # Computed BEFORE the citation audit, because nothing in it needs the audit and everything in
+    # it is needed if the audit dies. See the diagnostics block below for why that is not
+    # hypothetical.
     problems = []
     for name, r in results.items():
         for text in ([r.get("error")] if r.get("error") else []) + list(r.get("warnings", [])):
@@ -6120,7 +6461,8 @@ def main():
             deduped.append(p)
     problems = deduped
 
-    diag = write_diagnostics(a.out, {
+    def _diag_payload(audit):
+        return {
         "schema": "model-orchestration/diagnostics/1",
         "how_to_read_this":
             "A machine-readable account of one review run. It is scrubbed of secrets and "
@@ -6151,6 +6493,7 @@ def main():
         "preflight": preflight,
         "openrouter_key_meter": or_meter,
         "problems": problems,
+        "handoff": handoff,
         "citations":
             {"how_to_read_this":
                 "Per channel: how many URLs the review cited and what happened when each was "
@@ -6162,7 +6505,60 @@ def main():
              "results": audit},
         "channels": {n: {k: v for k, v in r.items() if k != "text"} for n, r in results.items()},
         "console": _LOG["lines"],
-    }) if not a.no_log else None
+        }
+
+    # ---- diagnostics, written TWICE, and the second one is the optional half -------------------
+    #
+    # 🔴🔴 THE RECORD OF A ROUND MUST NOT BE HOSTAGE TO ANYTHING THAT RUNS AFTER THE ROUND.
+    #
+    # Measured on the AOS round-45 panel, 2026-08-18: 18 channels launched, 17 answers written to
+    # disk, $3.9753 spent - and `reviews-global/` contains NO `diagnostics.json` and NO
+    # `REPORT.md`. `run.log` is appended and flushed inside `log()` on every call, so its clean
+    # stop one line after the OpenRouter ledger is not a truncated write; the process ended in the
+    # gap between that line and the first `log()` of the citation audit. Everything the record
+    # needed had already been computed. The only thing that failed was the writing, and it failed
+    # because the write came last.
+    #
+    # The cause of that particular death is NOT established - the candidate that fit best was
+    # refuted by its own control: a child python with a piped stdout gets cp1251 on this machine
+    # and dies on a non-encodable character, but the surviving R45 log contains SEVENTEEN lines
+    # with `⚠` in them, so stdout was not cp1251 in that run. Recorded as unknown rather than
+    # guessed at.
+    #
+    # Which is exactly the point. A record that is only written when nothing goes wrong is a
+    # record of rounds that did not need one. So: write the complete payload BEFORE the citation
+    # audit - it needs nothing from the audit - and write it again afterwards with the audit
+    # folded in. The second write is an enrichment. If anything between them dies, the round
+    # still has its diagnostics, its REPORT.md and its manifest, missing only the URL probe.
+    diag = write_diagnostics(a.out, _diag_payload(None)) if not a.no_log else None
+
+    # ---- citation audit -----------------------------------------------------------------------
+    # Runs on every review, because the alternative - a separate command afterwards - is a check
+    # that gets skipped exactly when the run was rushed. See citation_audit() for why existence
+    # rather than grounding, and why it never touches the exit code.
+    #
+    # Guarded even though citation_audit() says "Never raises": that promise is prose, and prose
+    # does not enforce anything. `BaseException` rather than `Exception` on purpose - a
+    # MemoryError or a Ctrl-C here must still leave the enriched record's predecessor in place,
+    # and the interrupt is re-raised immediately after it is recorded.
+    audit = None
+    try:
+        audit = citation_audit(results, enabled=not a.no_citecheck,
+                               resolve_links=a.resolve_grounding_links)
+        log_citation_audit(audit)
+    except BaseException as exc:                                   # noqa: BLE001
+        audit = {"skipped": "the citation audit died: %s. The reviews and the rest of this "
+                            "record are unaffected - only the URL existence probe is missing."
+                            % type(exc).__name__}
+        log("  note: the citation audit died (%s). Everything else in this round is recorded; "
+            "run `citecheck.py` against the answers by hand if the URLs matter."
+            % type(exc).__name__)
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            if not a.no_log:
+                write_diagnostics(a.out, _diag_payload(audit))
+            raise
+    if not a.no_log:
+        diag = write_diagnostics(a.out, _diag_payload(audit)) or diag
 
     if problems:
         log("\n%d problem(s) recorded. Plain-language cause and fix for each:" % len(problems))
