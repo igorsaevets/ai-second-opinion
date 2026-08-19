@@ -1,5 +1,55 @@
 # Changelog
 
+## 1.29.0 — 2026-08-19
+
+**The round about a record that survives being interrupted.** 1.28.0 made the run's record
+crash-proof by writing it twice; nine of the twelve reviewers of that change independently pointed
+out that it had, in the same stroke, made a crash *invisible*. This release closes that, and the
+things found while closing it.
+
+- 🔴🔴 **A crash during the citation audit used to leave no `diagnostics.json` at all — a loud,
+  unambiguous signal. Since 1.28.0 it left a complete-LOOKING record missing only the audit, and
+  nothing said so.** The payload now carries `record_status.complete`, false on the early write,
+  and `REPORT.md` renders a banner at the very top when it is false. "The audit found no
+  citations" and "the audit never ran" must not render the same way.
+- 🔴🔴 **The two writes were not atomic.** `open(path, "w")` truncates before it writes, so an
+  interruption during the *second* pass could destroy the good record left by the first — a new
+  way to lose the very thing the double write exists to protect. `diagnostics.json`, `REPORT.md`
+  and `HANDOFF.md` now go through one `_atomic_write`: sibling temp file, `fsync`, `os.replace`.
+- 🔴 **`HANDOFF.md` overstated its own guarantee.** It said it was built "from `os.listdir`,
+  never from the run's own records" — in a sentence that also promised to list "files on disk that
+  no channel record claims", which needs those records. Four reviewers refuted it from its own
+  second half. The code always did the join; the prose now says so: the filesystem is
+  authoritative for what exists, the records for what was attempted, and the disagreements
+  between them are the manifest's most useful output.
+- 🔴 **`write_handoff` was being passed `panel=` and `started=` and read neither.** `started` now
+  separates files older than the run — a previous panel left in a reused `--out` folder — onto
+  their own line, excluded from the read-cost total instead of billed to this round. `panel` now
+  appears in the resume prompt, so a fresh context can tell an excluded voice from a failed one.
+- **Answer files pin `newline="\n"`.** The same review is now the same bytes on every platform;
+  Windows text mode used to expand every `\n`, which is why `bytes` and `answer_bytes` had to be
+  documented as "expected to differ". They now agree, so a future divergence is evidence of a
+  short write rather than a footnote.
+- **The read-cost estimate keeps `bytes // 4` and now ships its measured error band.** Three
+  reviewers called the divisor a 2–3× underestimate on Cyrillic and two demanded `bytes // 2`.
+  Tokenising 17 real files with `tiktoken o200k_base` put the true ratio at **3.48–4.64 B/token**,
+  with the two most Cyrillic-dense files at 4.11 and 4.25 — indistinguishable from English prose.
+  Taking that advice would have doubled the estimate and deferred panels that fit.
+- **The removals register could record a demotion but not a retirement.** It required that a
+  channel removed from the cheap panel still exist in the registry, so the first genuinely
+  deprecated vendor model would have failed the suite forever. A reason beginning `RETIRED` now
+  relaxes that requirement, and a mirror check asserts a retired name really is gone.
+- 🔴 **The Antigravity channel had been sending an argument value the CLI never accepted.** `agy`'s
+  `--mode` enum is `accept-edits|plan`; we passed `default`, so every call printed
+  `warning: unrecognized --mode value "default"` to stderr and exited 0. In this release's own
+  review round that warning *was* one channel's entire 74-byte answer file. `--mode` is no longer
+  passed at all, which is what "default" was trying to say. The self-test line that had locked the
+  bad value for three releases is replaced: **a test that pins a vendor's argument value cannot
+  tell "we chose this" from "the vendor rejects this".**
+- Self-test: **617 checks**, including a new suite locking the above and one class-level check —
+  `answer_bytes` is assigned in exactly one place in the file, so no dispatcher can forget a field
+  it is not permitted to set.
+
 ## 1.28.0 — 2026-08-19
 
 **The round about being readable. Every fix here started as a user reading an artifact this

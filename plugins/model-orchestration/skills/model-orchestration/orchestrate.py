@@ -1130,6 +1130,30 @@ def diagnose(text):
     return None, None
 
 
+def _atomic_write(path, text):
+    """
+    Write `text` to `path` so that a reader never sees a half-written file.
+
+    🔴 `open(path, "w")` TRUNCATES BEFORE IT WRITES. Between that truncation and the last byte
+    the file on disk is short, and for JSON "short" means unparseable. That window used to be
+    harmless because the file was written exactly once, at the very end; since the record is now
+    written TWICE (see the diagnostics call sites) the window opens over a file that already had
+    good content in it. Nine of the twelve reviewers of that change raised this independently,
+    and they were right: the previous design could lose a round's record by crashing, and the new
+    one could additionally lose it by being interrupted while improving it.
+
+    Write to a sibling temp file, then `os.replace`, which is atomic on NTFS and on POSIX for
+    same-directory renames. A reader either gets the old complete file or the new complete file.
+    Same directory on purpose: `os.replace` across volumes is not atomic and can raise.
+    """
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())     # rename is atomic; the CONTENT still has to be on the platter
+    os.replace(tmp, path)
+
+
 def write_diagnostics(outdir, payload):
     """
     Write a scrubbed, machine-readable account of the run to <outdir>/diagnostics.json.
@@ -1142,8 +1166,7 @@ def write_diagnostics(outdir, payload):
         os.makedirs(outdir, exist_ok=True)
         payload = scrub_deep(payload)
         path = os.path.join(outdir, "diagnostics.json")
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
+        _atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False, default=str))
     except Exception:
         return None
     # REPORT.md beside it, from the SAME payload. The JSON has always been generated to a fixed
@@ -1157,34 +1180,56 @@ def write_diagnostics(outdir, payload):
         if _here not in sys.path:
             sys.path.insert(0, _here)   # this module may be imported from another cwd
         import report as _report
-        with open(os.path.join(outdir, "REPORT.md"), "w", encoding="utf-8") as f:
-            f.write(_report.render(payload))
+        _atomic_write(os.path.join(outdir, "REPORT.md"), _report.render(payload))
     except Exception as exc:
         log("  note: REPORT.md could not be rendered (%r). diagnostics.json is unaffected; "
             "run report.py against it by hand." % (exc,))
     return path
 
 
-# Crude chars-per-token for mixed English/Russian prose. Deliberately crude and labelled as an
-# estimate everywhere it is printed: the number exists to answer "does this fit in what is left of
-# my context", where being 20% out changes nothing, and pulling in a real tokenizer would add a
-# dependency to a harness whose whole selling point is that it has none.
+# Bytes per token for the read-cost estimate. The number exists to answer "does this fit in what
+# is left of my context", and pulling in a real tokenizer would add a dependency to a harness whose
+# selling point is that it has none.
+#
+# 🔴 MEASURED 2026-08-19, BECAUSE THREE R48 REVIEWERS ATTACKED THIS CONSTANT AND ALL THREE WERE
+# WRONG - IN OPPOSITE DIRECTIONS. Two called `bytes // 4` a "critical defect" that underestimates
+# Cyrillic by 2-3x and demanded `bytes // 2`; a third said Windows CRLF inflates it. Tokenised 17
+# real files with `tiktoken` `o200k_base` (the panel's own twelve reviews, plus this project's
+# Russian NOW.md, MEMORY.md and CLAUDE.md): the ratio runs 3.48-4.64 B/token END TO END, and the
+# most Cyrillic-dense files measured - NOW.md at 24.3% non-ASCII bytes, CLAUDE.md at 25.3% - came
+# in at 4.11 and 4.25, i.e. indistinguishable from the English reviews. Modern BPE vocabularies
+# carry Russian subwords; the "2 bytes per character so half the tokens" reasoning describes a
+# tokenizer nobody here uses. `bytes // 4` lands within -13%..+16% on every file measured.
+#
+# Taking that advice would have DOUBLED the estimate and told the caller to defer a panel that
+# fits. The number stays, and what changes is the label: a reader now gets the measured band
+# instead of the word "estimate", so it can be trusted to the accuracy it actually has.
 CHARS_PER_TOKEN = 4
+EST_BAND = "measured -13%..+16% against tiktoken o200k_base on 17 real files, EN and RU alike"
 
 
 def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=None):
     """
     Write HANDOFF.md: what is on disk, what it costs to read, and the prompt that resumes it.
 
-    🔴 THE MANIFEST IS A `listdir`, NOT A PROJECTION OF `results`.
+    🔴 THE LISTING IS A `listdir`; THE MANIFEST IS A JOIN. Both halves are load-bearing.
 
     Round 46 lost the three largest reviews of a $3.97 panel - 317 KB - because the session
     assembled its reading list by hand from the run log, and the log had no line for the two
     Spark answers (their `bytes` field was never set; see the write site). The round reported
-    "18 launches, 17 answers" and both figures were wrong. A manifest built from `results` would
-    have inherited that error exactly, because `results` is the belief that was already wrong.
-    Reading the directory is the only version of this function that can report a file nobody
-    remembered - and the one that catches a file some other process wrote into the same folder.
+    "18 launches, 17 answers" and both figures were wrong. A list built from `results` would have
+    inherited that error exactly, because `results` is the belief that was already wrong. So
+    WHICH FILES EXIST comes from the directory, always, and nothing may override it.
+
+    🔴 But the R48 description of this function said "never from the run's own records", and FOUR
+    of the twelve reviewers refuted it from that sentence's own second half - correctly. You
+    cannot report "files on disk that no channel record claims" without the records, and a
+    channel that ran and wrote nothing leaves NO trace in a directory listing at all: it is
+    visible only in `results`. The code always did the join; only the prose claimed otherwise,
+    and a docstring that overstates its own guarantee is the same defect as a table heading that
+    overstates its rows. Stated exactly: **the filesystem is authoritative for what exists, the
+    records are authoritative for what was attempted, and the two disagreements between them are
+    the manifest's most valuable output.**
 
     🔴 IT IS ALSO THE ANSWER TO "SHOULD I READ THIS NOW?"
 
@@ -1214,6 +1259,16 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             if not os.path.isfile(p):
                 continue
             size = os.path.getsize(p)
+            # 🔴 A DIRECTORY IS A NAMESPACE, NOT A ROUND. `--out` is routinely reused, and every
+            # answer file from the previous panel is still sitting there with a plausible name.
+            # Listing it as this round's output inflates the read cost and, far worse, invites
+            # the fresh context to adjudicate last week's reviews as if they were these. Two R48
+            # reviewers raised it independently; both proposed comparing against the run's start
+            # time, which is exactly the argument this function was ALREADY BEING PASSED and had
+            # never read - see `started` in the signature. The parameter is now consulted.
+            # Flagged rather than hidden: a file this run did not write is still a file someone
+            # may want, and silently dropping it would repeat round 46 from the other direction.
+            stale = bool(started) and os.path.getmtime(p) < started - 5
             try:
                 with open(p, encoding="utf-8", errors="replace") as f:
                     body = f.read()
@@ -1223,6 +1278,7 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             files.append({
                 "file": fn,
                 "bytes": size,
+                "stale": stale,
                 "est_tokens": size // CHARS_PER_TOKEN,
                 # The marker check is repeated here ON THE FILE rather than trusted from the
                 # record, for the same reason the listing is: this is the artifact a reader will
@@ -1230,35 +1286,49 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
                 "ends_with_marker": bool(marker) and bool(tail) and tail[-1].strip() == marker,
                 "harness_banner": body.startswith("> 🔴 **HARNESS WARNING"),
             })
-        total = sum(f["bytes"] for f in files)
+        fresh = [f for f in files if not f["stale"]]
+        stale_files = [f for f in files if f["stale"]]
+        total = sum(f["bytes"] for f in fresh)
         est = total // CHARS_PER_TOKEN
 
         # Channels that ran and left NO file. Named, because "absent from the manifest" is the
-        # one thing a manifest cannot say about itself.
+        # one thing a manifest cannot say about itself. Computed over the FRESH files only: a
+        # leftover from a previous panel is unclaimed by construction, and reporting it twice -
+        # once as stale, once as an orphan - would make the loud line the routine one.
         claimed = {(r.get("answer_file") or "").lower() for r in results.values()}
-        on_disk = {f["file"].lower() for f in files}
+        on_disk = {f["file"].lower() for f in fresh}
         orphans = sorted(on_disk - claimed - {""})
         missing = sorted(n for n, r in results.items()
                          if not r.get("answer_file") and r.get("seconds") is not None)
 
         L = ["# Handoff — what this round produced, and what reading it costs", "",
-             "Written by the harness from a directory listing of `%s`, not from its own records: "
-             "round 46 lost 317 KB of reviews to a hand-built file list and this file exists so "
-             "that cannot recur. Every size below was read off the filesystem after the run."
-             % os.path.abspath(outdir), "",
+             "**Which files exist** was read off the filesystem — a directory listing of `%s` "
+             "taken after the run, never a projection of what the harness believed it wrote. "
+             "Round 46 lost 317 KB of reviews to a hand-built list and this file exists so that "
+             "cannot recur. **What was attempted** comes from the run's own records, because a "
+             "channel that ran and wrote nothing leaves no trace in a directory. The two "
+             "disagreements between those halves are flagged below and are the most useful thing "
+             "here." % os.path.abspath(outdir), "",
              "| answer file | bytes | ~tokens to read | ends with the end marker |",
              "|---|---:|---:|---|"]
-        for f in files:
+        for f in fresh:
             L.append("| `%s` | %s | ~%s | %s |"
                      % (f["file"], f"{f['bytes']:,}".replace(",", " "),
                         f"{f['est_tokens']:,}".replace(",", " "),
                         "yes" if f["ends_with_marker"] else
                         ("no — INCOMPLETE, do not parse as a finished review" if marker else "-")))
         L += ["",
-              "**%d answer file(s), %s bytes, ~%s tokens to read all of them** (estimate at %d "
-              "chars/token, mixed English/Russian prose)."
-              % (len(files), f"{total:,}".replace(",", " "),
-                 f"{est:,}".replace(",", " "), CHARS_PER_TOKEN), ""]
+              "**%d answer file(s), %s bytes, ~%s tokens to read all of them** (%d bytes/token, "
+              "%s)."
+              % (len(fresh), f"{total:,}".replace(",", " "),
+                 f"{est:,}".replace(",", " "), CHARS_PER_TOKEN, EST_BAND), ""]
+        if stale_files:
+            L += ["⚠ **Older than this run and NOT counted above** — almost certainly a previous "
+                  "panel written into the same `--out` folder: %s. They are still on disk; if "
+                  "you want them, open them deliberately, and do not adjudicate them as this "
+                  "round's answers."
+                  % ", ".join("`%s` (%s bytes)" % (f["file"], f"{f['bytes']:,}".replace(",", " "))
+                              for f in stale_files), ""]
         if orphans:
             L += ["🔴 **On disk but claimed by no channel record:** %s. Something wrote into this "
                   "folder that this run did not produce, or a record lost its file name."
@@ -1277,11 +1347,17 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
               % f"~{est:,}".replace(",", " "),
               "",
               "```",
-              "Прочитай ответы панели в %s" % os.path.abspath(outdir),
+              # The PANEL belongs in the resume prompt, because the fresh context has no other
+              # way to know it. Round 48's own complaint was «сказал использовать дешевую панель,
+              # а он почему-то использовал codex» - a reader who cannot see which room was booked
+              # cannot tell a missing voice from an excluded one. `panel` was already being passed
+              # to this function and, like `started`, was never read.
+              ("Прочитай ответы панели `%s` в %s" % (panel, os.path.abspath(outdir))) if panel
+              else ("Прочитай ответы панели в %s" % os.path.abspath(outdir)),
               "Начни с HANDOFF.md (манифест с диска) и REPORT.md (телеметрия: кто отвечал, "
               "чем, сколько ссылок живых).",
               "Потом прочитай КАЖДЫЙ файл из манифеста — их %d, ~%s токенов. Не собирай список "
-              "руками: он в HANDOFF.md." % (len(files), f"{est:,}".replace(",", " ")),
+              "руками: он в HANDOFF.md." % (len(fresh), f"{est:,}".replace(",", " ")),
               "По каждой находке: принял / отклонил с доказательством / в бэклог. "
               "Совпадения между каналами считай отдельно от одиночных мнений.",
               ("Маркер конца ответа: %s. Файл без него на последней строке — неполный."
@@ -1289,19 +1365,23 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
               ("Бриф, который им отправляли: %s" % os.path.abspath(brief)) if brief else "",
               "```",
               ""]
-        with open(os.path.join(outdir, "HANDOFF.md"), "w", encoding="utf-8") as f:
-            f.write("\n".join(x for x in L if x is not None) + "\n")
+        _atomic_write(os.path.join(outdir, "HANDOFF.md"),
+                      "\n".join(x for x in L if x is not None) + "\n")
 
         log("Handoff: %d answer file(s) on disk, %s bytes, ~%s tokens to read all of them."
-            % (len(files), f"{total:,}".replace(",", " "), f"{est:,}".replace(",", " ")))
+            % (len(fresh), f"{total:,}".replace(",", " "), f"{est:,}".replace(",", " ")))
+        if stale_files:
+            log("  older than this run, NOT counted (previous panel in the same folder?): %s"
+                % ", ".join(f["file"] for f in stale_files))
         if missing:
             log("  ran but wrote NO answer file: %s" % ", ".join(missing))
         if orphans:
             log("  on disk but claimed by no record: %s" % ", ".join(orphans))
         log("  The manifest and a ready-to-paste resume prompt are in %s"
             % os.path.join(os.path.abspath(outdir), "HANDOFF.md"))
-        return {"files": files, "total_bytes": total, "est_tokens": est,
-                "orphans": orphans, "ran_without_file": missing}
+        return {"files": fresh, "total_bytes": total, "est_tokens": est,
+                "orphans": orphans, "ran_without_file": missing,
+                "stale_files": [f["file"] for f in stale_files]}
     except Exception as exc:                                       # noqa: BLE001
         log("  note: the handoff manifest could not be written (%r). The answers are unaffected; "
             "list %s by hand." % (exc, outdir))
@@ -5122,10 +5202,22 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
     # can still act, and this one acts on large briefs, where the agent's planner engages.
     # And --mode is still NOT what makes the run read-only: --sandbox and the permission rules
     # written by patch_agy_permissions.py carry that, exactly as before.
+    # 🔴 `--mode` IS NOT PASSED AT ALL, AND «default» WAS NEVER A VALUE. R46 measured that
+    # `--mode plan` made this channel return a plan instead of a review, and the fix was to send
+    # `--mode default` instead. Measured against agy 1.1.15 on 2026-08-19: the flag's enum is
+    # `accept-edits|plan` and nothing else, so every agy call since has printed
+    # `warning: unrecognized --mode value "default"` on stderr, exit 0. In the R49 panel that
+    # warning WAS agy37flash's entire 74-byte answer file.
+    #
+    # Omitting the flag is what "default" was trying to say: with no `--mode`, the CLI applies
+    # its own default. Behaviour is unchanged - an unrecognised value was already being ignored -
+    # and the stderr line that can masquerade as an answer is gone. The R45 rule again, on our
+    # own side this time: assert the EFFECT, never the exit code. A CLI that exits 0 while
+    # telling you the argument was rubbish is the normal case, not the exception.
     cmd += ["--model", mdl,
             "--effort", effort,
             "--agent", AGY_AGENT,
-            "--mode", "default", "--sandbox",
+            "--sandbox",
             "--output-format", "stream-json",   # the ONLY way this channel reports tool use
             "--print-timeout", timeout]         # default truncates at 5m
     # Refs mode (--attach): grant the CLI access to each attachment's folder. --add-dir is the
@@ -6035,7 +6127,16 @@ def main():
                     % ", ".join(sorted({h.split(" at ")[0] for h in _leak})))
         if r.get("text"):
             _answer_path = os.path.join(a.out, name.upper() + ".md")
-            with open(_answer_path, "w", encoding="utf-8") as f:
+            # 🔴 `newline="\n"` ADDED R49. Without it Python translates every \n to \r\n on
+            # Windows and nowhere else, so the SAME model output lands on disk as two different
+            # byte strings depending on which machine ran the panel - different sizes, different
+            # hashes, different byte offsets for anything that indexes into the file. That was
+            # the entire reason `bytes` and `answer_bytes` had to be explained to the reader as
+            # "two quantities" (measured R48: +147 B on a 9 998 B answer, +2 065 B on 199 738 B,
+            # exactly the newline count). Pinning the line ending removes the discrepancy at the
+            # source instead of documenting it forever, and it turns a mismatch between the two
+            # numbers back into what it should always have been: evidence of a short write.
+            with open(_answer_path, "w", encoding="utf-8", newline="\n") as f:
                 # 🔴🔴 THE DAMAGE HAS TO BE UNMISSABLE IN THE ARTIFACT, NOT ONLY IN THE LOG.
                 # Seven of the thirteen reviewers of this change, independently, said a `note`
                 # is too weak for a corrupted statutory citation - and they were right about the
@@ -6076,12 +6177,14 @@ def main():
             # place that exists exactly once and cannot be reached without an answer on disk.
             #
             # TWO NUMBERS, TWO NAMES, deliberately. `bytes` is the model's payload
-            # (len(text.encode("utf-8"))); `answer_bytes` is the file, which on Windows is LARGER
-            # because text-mode writing turns every \n into \r\n - measured 2026-08-19 across the
-            # R45 panel: 147 B over payload on a 9 998 B answer, 2 065 B on a 199 738 B one, i.e.
-            # exactly the newline count. That is not drift and not damage, but a reader comparing
-            # `bytes` against `ls` sees a mismatch, so the two facts get two names and the reason
-            # is stated in the report rather than rediscovered.
+            # (len(text.encode("utf-8"))); `answer_bytes` is what `stat` says about the file.
+            # 🔴 R48 they differed by construction on Windows (text-mode \n -> \r\n, measured at
+            # exactly the newline count) and the round's answer was to DOCUMENT the difference.
+            # R49 pinned `newline="\n"` at the open above instead, so on every platform the two
+            # now agree - which is the better outcome, because a documented expected mismatch
+            # cannot also serve as a detector. They stay two fields: one is what the model
+            # produced, the other is what survived to disk, and a future divergence between them
+            # is now a short write rather than a footnote.
             try:
                 r["answer_file"] = os.path.basename(_answer_path)
                 r["answer_bytes"] = os.path.getsize(_answer_path)
@@ -6474,6 +6577,33 @@ def main():
             "key or a missing CLI is a normal, non-fatal condition and only disables that one "
             "channel.",
         "generated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        # 🔴🔴 A FILE THAT EXISTS USED TO MEAN "THE ROUND FINISHED". IT NO LONGER DOES.
+        #
+        # Writing the record twice fixed the loss described below, and bought a NEW failure with
+        # the money: before, a death during the citation audit left no diagnostics.json at all,
+        # and absence is a loud, unambiguous signal. After, it leaves a complete-LOOKING record
+        # that is simply missing the audit - and nothing in it said so. Nine of the twelve R48
+        # reviewers named this independently, in the same words: the fix traded a visible failure
+        # for an invisible one. They were right, and the omission is the round's own defect class
+        # wearing the round's own fix as a disguise.
+        #
+        # So the first write SAYS it is the first write. `complete: false` is the field a machine
+        # reads; the sentence is for the human who opens the file after a crash and needs to know
+        # in one line why `citations.results` is null. Absence of the audit and "the audit found
+        # nothing" are different facts and must not render the same.
+        "record_status": {
+            "complete": audit is not None,
+            "phase": ("channels finished; the citation audit had NOT run when this was written"
+                      if audit is None else
+                      "complete - channels finished and the citation audit is folded in"),
+            "how_to_read_this":
+                "`complete: false` means this file is the crash-safe early write. Every channel "
+                "result, cost and warning in it is final; only `citations.results` is missing, "
+                "and it is null because the probe had not run, NOT because no URL was cited. If "
+                "you are reading a false here after the run should have ended, the process died "
+                "during the citation audit - the reviews on disk are unaffected and `citecheck.py` "
+                "can be run against them by hand.",
+        },
         "seconds": round(time.time() - started, 1),
         "ok_channels": ok_count,
         "total_channels": len(results),

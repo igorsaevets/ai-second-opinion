@@ -132,6 +132,30 @@ def render(d):
              "the harness during the run; nothing is recalled or estimated.")
     L.append("")
 
+    # 🔴🔴 THE EARLY WRITE ANNOUNCES ITSELF ON THE FIRST SCREEN, NOT IN A FIELD.
+    #
+    # `diagnostics.json` is written once as soon as the channels finish and again once the
+    # citation audit is folded in, so a death during the audit cannot cost the round its record.
+    # What that bought was a report which looks finished and is not. Igor reads the TOP of this
+    # file, and round 48 established that a true verdict three screens down does not reach him -
+    # so a partial record says so above everything else. "The audit found no citations" and "the
+    # audit never ran" must never render the same way; that equivalence is the whole round.
+    #
+    # Key absent = a diagnostics.json written before the field existed. Those were written once,
+    # at the very end, so they were complete by construction and silence is correct for them.
+    _rs = d.get("record_status")
+    if isinstance(_rs, dict) and _rs.get("complete") is False:
+        L.append("> 🔴 **THIS IS THE EARLY WRITE — THE CITATION AUDIT HAD NOT RUN WHEN IT WAS "
+                 "RENDERED.**")
+        L.append(">")
+        L.append("> Every channel result, cost and warning below is final. The citations section "
+                 "is not: its numbers are absent because the probe had not started, which is a "
+                 "different fact from a channel having cited nothing. If you are reading this "
+                 "after the round should have ended, the process died during the audit — the "
+                 "reviews on disk are unaffected and `citecheck.py` can be run against them by "
+                 "hand.")
+        L.append("")
+
     # ---- the settings block. Tier first, by explicit request and for a good reason. ----
     L.append("## What was asked for")
     L.append("")

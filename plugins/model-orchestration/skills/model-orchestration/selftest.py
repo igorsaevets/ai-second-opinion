@@ -2105,13 +2105,20 @@ def suite_agy_plan_class():
     check(not os.path.exists(os.path.join(t, ".agents", "hooks.json")),
           "_write_agy_agent does NOT re-add the dead workspace hooks.json")
 
-    # Placement is load-bearing (measured 2/2 in the brief vs 0/1 in the persona alone), and
-    # --mode default vs plan was the A/B that root-caused the class. Assert the SOURCE, so a
-    # refactor that drops either one goes red here instead of resurfacing in a paid round.
+    # Placement is load-bearing (measured 2/2 in the brief vs 0/1 in the persona alone). Assert
+    # the SOURCE, so a refactor that drops it goes red here instead of resurfacing in a paid round.
     src = inspect.getsource(o._agy_once)
     check("AGY_ENV_CONSTRAINT" in src,
           "the env constraint is appended to the BRIEF in _agy_once")
-    check('"--mode", "default"' in src, '--mode is "default" (the plan-mode A/B, 2026-08-14)')
+    # 🔴 SUPERSEDED R49. This line used to be `check('"--mode", "default"' in src)`, locking the
+    # R46 A/B that replaced `--mode plan`. It passed for three rounds while being WRONG: agy's
+    # enum is `accept-edits|plan`, so «default» warned on stderr and was ignored on every call.
+    # A test that pins a vendor's argument value cannot tell "we chose this" from "the vendor
+    # rejects this" — it only ever checked that we still typed the same string. Tests are code
+    # and rot the same way; the replacement asserts we set no mode at all (see suite_r49).
+    check('"--mode"' not in src,
+          "no --mode is passed to agy - the value this check used to demand was never in the "
+          "vendor's enum, and an unrecognised one lands on stderr where it can pass for an answer")
 
     # diagnose(): both marker spellings, exhaustion-only rate-limit matching, zero-grounding.
     c, _ = o.diagnose("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
@@ -2647,14 +2654,37 @@ def suite_panels():
           "every later addition to the cheap panel states why it is cheap")
     check(all(REMOVED_FROM_CHEAP_SINCE.values()),
           "every removal from the cheap panel states who decided it and why")
-    # A name cannot be in both books, and a removed channel must still exist somewhere in the
-    # registry - "removed from cheap" is a move, not a deletion, and spelling the two the same
-    # way is how a channel disappears while a test stays green.
+    # A name cannot be in both books, and a channel that was demoted out of cheap must still
+    # exist somewhere in the registry - "removed from cheap" is a move, not a deletion, and
+    # spelling the two the same way is how a channel disappears while a test stays green.
+    #
+    # 🔴 BUT AS WRITTEN THAT MADE RETIREMENT IMPOSSIBLE, which grokbuild caught reviewing R48:
+    # «`REMOVED_FROM_CHEAP_SINCE` can only mean "demoted", never "deleted". That is a
+    # zombie-registry rule.» Correct, and it is the R48 defect one level up - the removals book
+    # was added because additions had a home and removals had none, and it shipped with the same
+    # asymmetry inside it: a demotion could be recorded and a retirement could not. Vendors
+    # deprecate models; the first genuinely dead channel would have gone red forever against
+    # working code, and the only way out would have been to delete the record - the exact edit
+    # both books exist to forbid.
+    #
+    # A retirement is now sayable, and it costs the same one deliberate line: prefix the reason
+    # with RETIRED. That word is the difference between "this channel moved rooms" and "this
+    # channel no longer exists", and it has to be written by a human either way.
+    _retired = {c for c, why in REMOVED_FROM_CHEAP_SINCE.items()
+                if str(why).strip().upper().startswith("RETIRED")}
     check(not (set(REMOVED_FROM_CHEAP_SINCE) & set(ADDED_TO_CHEAP_SINCE)),
           "no channel is recorded as both added to and removed from the cheap panel")
-    check(all(c in CH for c in REMOVED_FROM_CHEAP_SINCE),
-          "a channel removed from the cheap panel still exists in the registry",
-          "vanished=%s" % sorted(c for c in REMOVED_FROM_CHEAP_SINCE if c not in CH))
+    check(all(c in CH for c in set(REMOVED_FROM_CHEAP_SINCE) - _retired),
+          "a channel DEMOTED out of the cheap panel still exists in the registry; one that is "
+          "gone for good says RETIRED in its reason",
+          "vanished without a RETIRED note=%s"
+          % sorted(c for c in set(REMOVED_FROM_CHEAP_SINCE) - _retired if c not in CH))
+    # And the mirror: RETIRED must mean retired. A name marked retired that is still in the
+    # registry is a record that has drifted from the thing it describes - the same defect,
+    # pointing the other way, and the cheaper one to leave rotting because nothing breaks.
+    check(not (_retired & set(CH)),
+          "a channel recorded as RETIRED is really gone from the registry",
+          "still present=%s" % sorted(_retired & set(CH)))
     standard_only = {c for c in CH} - actual_cheap
     check({c for c, v in CH.items() if v.get("panel") == "standard"} == standard_only,
           "everything outside the cheap panel is standard-only", ", ".join(sorted(standard_only)))
@@ -3178,6 +3208,107 @@ def suite_dedup_scripts():
           "root=%s plugin=%s" % (ha[:12], hb[:12]))
 
 
+def suite_r49_record_integrity():
+    """
+    R49. The record survives being interrupted, and says so when it is half-written.
+
+    R48 made the record crash-proof by writing it twice and, in the same stroke, made a crash
+    invisible: a death during the citation audit now leaves a complete-LOOKING diagnostics.json
+    and REPORT.md. NINE of that round's twelve reviewers raised it independently - the highest
+    convergence any finding has reached here - and every one of them named the same two missing
+    pieces: a completeness flag, and an atomic write so the second pass cannot destroy the first.
+
+    The other checks lock things this round found in its own code rather than in a reviewer's
+    imagination: two parameters that were passed to `write_handoff` and never read, and a
+    removals register that could record a demotion but not a retirement.
+    """
+    section("R49. A half-written record announces itself; a passed parameter is read")
+    sys.path.insert(0, str(HERE))
+    src = (HERE / "orchestrate.py").read_text(encoding="utf-8")
+    rep = (HERE / "report.py").read_text(encoding="utf-8")
+
+    # ---- atomic writes -------------------------------------------------------------------------
+    check("def _atomic_write(" in src and "os.replace(tmp, path)" in src,
+          "there is one atomic-write helper and it renames rather than truncates in place")
+    check("os.fsync(f.fileno())" in src,
+          "the temp file is fsynced before the rename - a rename is atomic, the CONTENT still "
+          "has to have reached the disk")
+    for artefact in ("diagnostics.json", "REPORT.md", "HANDOFF.md"):
+        check('_atomic_write(os.path.join(outdir, "%s")' % artefact in src
+              or (artefact == "diagnostics.json" and "_atomic_write(path, json.dumps" in src),
+              "%s is written atomically - a reader between the two passes gets the old complete "
+              "file or the new one, never a truncated one" % artefact)
+    check('open(os.path.join(outdir, "REPORT.md"), "w"' not in src
+          and 'open(os.path.join(outdir, "HANDOFF.md"), "w"' not in src,
+          "no in-place truncating write survives for the round's own artefacts")
+
+    # ---- the completeness flag -----------------------------------------------------------------
+    check('"record_status"' in src and '"complete": audit is not None' in src,
+          "the early write SAYS it is the early write - before R49 a crash during the citation "
+          "audit left a record that looked finished, which is worse than the missing file it "
+          "replaced")
+    check('_rs.get("complete") is False' in rep and "EARLY WRITE" in rep,
+          "REPORT.md declares a partial record at the TOP, where Igor reads - a true verdict "
+          "three screens down is what round 48 was about")
+
+    # ---- parameters that are passed must be read -----------------------------------------------
+    _handoff = src.split("def write_handoff(")[1].split("\ndef ")[0]
+    check("os.path.getmtime(p) < started" in _handoff,
+          "write_handoff READS `started` - it was in the signature and unused, so a previous "
+          "panel left in the same --out folder was billed to this round's read cost")
+    check("if panel" in _handoff and "панели `%s`" in _handoff,
+          "write_handoff READS `panel` - the fresh context cannot otherwise tell a voice that "
+          "was excluded from one that failed")
+
+    # ---- the class test, asked for by orglm52 reviewing R48 -------------------------------------
+    # «The only test that catches the CLASS is one that asserts every dispatcher writes
+    # answer_bytes.» It cannot be asserted per dispatcher without running them all; the stronger
+    # statement is that no dispatcher CAN write it, because exactly one line in the file does.
+    check(src.count('r["answer_bytes"] =') == 1,
+          "`answer_bytes` is assigned in exactly ONE place in the whole file - the class fix is "
+          "that a dispatcher cannot forget a field it is not allowed to set",
+          "assignments=%d" % src.count('r["answer_bytes"] ='))
+    check('encoding="utf-8", newline="\\n"' in src,
+          "answer files pin their line ending, so the same review is the same bytes on every "
+          "platform instead of differing by exactly its newline count on Windows")
+
+    # ---- a flag value the vendor never accepted -------------------------------------------------
+    # agy 1.1.15 `--help`: «--mode  Set the agent execution mode for this session (accept-edits,
+    # plan)». R46 replaced `--mode plan` with `--mode default` to stop this channel returning a
+    # plan; «default» is not in the enum, so every agy call since printed
+    # `warning: unrecognized --mode value "default"` and exited 0 — and in the R49 panel that
+    # warning was agy37flash's entire 74-byte answer file. Asserting ABSENCE rather than the legal
+    # values on purpose: an enum copied into a test is a vendor fact that rots, and the point is
+    # that we have no business setting this knob at all.
+    check('"--mode"' not in src,
+          "the agy call passes no --mode: «default» was never one of its values, and an "
+          "unrecognised one warns on stderr where it can be mistaken for the answer")
+
+    # ---- the token estimate, kept BECAUSE it was measured ---------------------------------------
+    check(getattr(__import__("orchestrate"), "CHARS_PER_TOKEN", None) == 4,
+          "the read-cost divisor stays 4: three R48 reviewers called it a 2-3x underestimate on "
+          "Cyrillic and a measurement over 17 real files put the true ratio at 3.48-4.64 B/token, "
+          "Russian and English alike")
+    check("EST_BAND" in src and "tiktoken" in src,
+          "the estimate ships its measured error band instead of the word «estimate»")
+
+    # ---- the manifest no longer overstates its own guarantee ------------------------------------
+    #
+    # 🔴 FIFTH INSTANCE OF «NAME THE SHAPE, NEVER SPELL IT», and this time in the check itself.
+    # Written first as `"never from the run's own records" not in _handoff`, it went red against
+    # the fixed code, because the docstring that RETRACTS the sentence has to quote it to retract
+    # it. A check that cannot tell a claim from a discussion of that claim is the same defect as
+    # the R45 bracket detector that could not tell a damaged answer from an answer about damage.
+    # The claim lives in the emitted string, so the docstring is cut off before matching.
+    _handoff_code = _handoff.split('"""')[2] if _handoff.count('"""') >= 2 else _handoff
+    check("never from the run's own records" not in _handoff_code,
+          "the manifest no longer TELLS ITS READER it ignores the records it demonstrably joins "
+          "against - four R48 reviewers refuted that sentence using its own second half")
+    check("never a projection of what the harness believed it wrote" in _handoff_code,
+          "and it still states the half that IS true: the file list is never derived from the "
+          "run's beliefs, which is the property that stopped round 46 recurring")
+
+
 def suite_r48_visibility():
     """R48. What the run PRODUCED, told truthfully - the round Igor read a table and it lied."""
     section("R48. The artifact measures itself, and a heading may not outrun its rows")
@@ -3307,7 +3438,8 @@ def main():
                   suite_settings_and_upgrade, suite_echocheck, suite_dev_tooling,
                   suite_agy_plan_class, suite_spend_guard, suite_panels,
                   suite_max_depth_and_explicit_only, suite_refs_and_meters,
-                  suite_r47_causes, suite_dedup_scripts, suite_r48_visibility):
+                  suite_r47_causes, suite_dedup_scripts, suite_r48_visibility,
+                  suite_r49_record_integrity):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

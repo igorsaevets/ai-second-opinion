@@ -43,14 +43,11 @@ changes a decision is in this block.
   answer, and `status:"ERROR"` on a complete one (`references/channels.md`). Codex returned a 162-byte **refusal**
   ending in the end marker and was reported OK. Gate on content, never on status.
 - 🔴 **A vendor can deliver the answer with characters MISSING and every other check still passes.**
-  35 `(` absent from a 26 KB review: `INA § 208(a)(2)(D)` arrived as `208(a)2)(D)`, marker present,
-  `ok` true. One vendor's *streamed* transport during its citation post-processing; that channel is
-  unstreamed now. Every channel is bracket-checked, as a `note` not a warning. On
-  `TEXT INTEGRITY:`, copy no quotation or section number from that answer without opening the
-  source. Code spans are excluded: a review *about* damage quotes it.
+  35 `(` absent from a 26 KB review — `208(a)(2)(D)` → `208(a)2)(D)`, marker present, `ok` true.
+  Every channel is bracket-checked. On `TEXT INTEGRITY:`, copy no quotation or section number out
+  of that answer without opening the source. Details: `references/when-it-breaks.md`.
 - 🔴 **A flag can be accepted and grant nothing, and one tool can have two spellings.** Grok Build:
-  `--allow web_fetch` inert, `--allow WebFetch` works, `--tools` wants the first. Assert the
-  effect, never the exit code.
+  `--allow web_fetch` inert, `--allow WebFetch` works. Assert the effect, never the exit code.
 - **A refusal on a legal/immigration brief is a FRAMING bug, not a subject ban.** Pass
   `--system legal-research` and write the brief as source-verification for attorney review, not as
   filing strategy: codex then answers 6/6. Recipe: **`references/legal-briefs.md`**, read it FIRST.
@@ -61,35 +58,30 @@ changes a decision is in this block.
   marked unverified. Never edit this into a loop.
 - **Citations are not evidence — the most reliable failure there is.** Read the `CITATIONS:` line.
   For **Codex, which reports no tool telemetry**, "was it opened" is unanswerable, so ask the only
-  remaining question: `citecheck.py --answer reviews\CODEX.md --resolve-urls`, which needs no event
-  log. `DEAD` = the page is not there; `BLOCKED`/`UNKNOWN` = the check failed and prove nothing.
-  Details and the FR-number resolver: `references/verification.md`.
-- **Every model answers in English**, enforced by the default preset: Russian costs ~2× the
-  tokens (§0.2).
+  remaining question: `citecheck.py --answer reviews\CODEX.md --resolve-urls`. `DEAD` = the page is
+  not there; `BLOCKED`/`UNKNOWN` = the check failed and prove nothing. `references/verification.md`.
+- **Every model answers in English**, enforced by the default preset: Russian costs ~2× (§0.2).
 - **Choosing models is config, not code.** `--route`, `--skip`, `--set`; free `--dry-run` (§0.1).
 - **Codex is expensive and slow (~6-25 min).** Never send it a lookup: `--ask "…"` is one command.
-- 🔴 **CONTEXT IS ALMOST FREE; SEARCHING IS NOT.** Round-26 legal brief: **2,026,852** input
-  tokens ≈ $0.20 with no long-context premium, against **128 searches** at $2.50/1,000 = **$0.32,
-  60 % of that channel's bill.** Caching is automatic, cached input **50× cheaper**. Sending more
-  material is the cheap lever; asking for more searching is the expensive one.
+- 🔴 **CONTEXT IS ALMOST FREE; SEARCHING IS NOT.** Measured: **2 026 852** input tokens ≈ $0.20 with
+  no long-context premium, against **128 searches** = **$0.32, 60% of that channel's bill.**
+  Sending more material is the cheap lever; asking for more searching is the expensive one.
 
 ## 0.3 Reference files — read on demand
 
 `SKILL.md` stays under the 5,000-token budget an auto-compaction re-attaches, so it is never
-truncated. Detail lives beside it in `references/`, read on demand.
+truncated. Detail lives beside it in `references/` (paths relative to this skill's directory).
 
 | file | read it when |
 |---|---|
-| `references/legal-briefs.md` | **before** any legal / immigration / regulatory brief. A refusal there is a framing bug, and rewriting after one costs a whole expensive round |
-| `references/channels.md` | wire parameters and CLI traps per channel; a channel misbehaves or you are changing flags |
-| `references/briefs.md` | building any brief: what goes in it, and the live-web-search demand |
-| `references/verification.md` | judging whether a review actually happened; signatures; citation spot-checks |
-| `references/reading-the-answers.md` | **a round landed** — the manifest, the read cost, when to defer to a fresh context |
-| `references/when-it-breaks.md` | **anything failed** — symptom → cause → fix, and the status fields that lie |
-| `references/systems.md` | the `--system` presets in full, and why the legal one omits a clause |
-| `KIT-README.md` + `package.py` | giving this to another machine. `package.py --out <dir>` regenerates the distributable from here, so no second copy can drift |
-
-Paths are relative to this skill's own directory.
+| `legal-briefs.md` | **before** any legal / immigration / regulatory brief — a refusal there is a framing bug, and rewriting after one costs a whole round |
+| `channels.md` | wire parameters and CLI traps per channel; a channel misbehaves, or you are changing flags |
+| `briefs.md` | building any brief: what goes in it, and the live-web-search demand |
+| `verification.md` | judging whether a review actually happened; signatures; citation spot-checks |
+| `reading-the-answers.md` | **a round landed** — the manifest, the read cost, when to defer to a fresh context |
+| `when-it-breaks.md` | **anything failed** — symptom → cause → fix, and the status fields that lie |
+| `systems.md` | the `--system` presets in full, and why the legal one omits a clause |
+| `../KIT-README.md` + `package.py` | giving this to another machine: `package.py --out <dir>` regenerates the distributable from here, so no second copy can drift |
 
 
 ## 0. Just run it
@@ -108,15 +100,13 @@ python "<SKILL_DIR>\orchestrate.py" `
 That runs **every enabled channel in parallel**, writes one `<CHANNEL>.md` per channel into
 `--out`, renders `REPORT.md`, and prints a verification block.
 
-🔴 **Do not count the channels from this file, and do not list them.** The number is whatever
-`channels.json` enables; every prose copy has been wrong within days — including the `--only` row
-below, which listed seven channels three lines under this warning. `python routing.py` prints the
-live set and spends nothing. Output filenames are the registry key, upper-cased.
+🔴 **Do not count the channels from this file, and do not list them** — every prose copy has been
+wrong within days. `python routing.py` prints the live set and spends nothing. Output filenames
+are the registry key, upper-cased.
 
-🔴 **Some channels are deliberately off HERE and on in the published kit, and vice versa**, decided
-by the registry's `distribution` field: this machine has direct vendor keys (Google, Xiaomi, xAI)
-where the kit's install story is one OpenRouter key to the same models. `--dry-run` shows which is
-which. A channel that is off is one `enabled: true` away, not a missing feature.
+🔴 **Some channels are deliberately off HERE and on in the published kit, and vice versa**, per the
+registry's `distribution` field: this machine has direct vendor keys where the kit's install story
+is one OpenRouter key to the same models. `--dry-run` shows which is which.
 
 | flag | what it does |
 |---|---|
@@ -127,8 +117,8 @@ which. A channel that is off is one `enabled: true` away, not a missing feature.
 | `--marker` | literal string the reply must end with. If it is absent the output is incomplete |
 | `--out` | output directory. Default `./reviews` |
 | `--system` | preset name or path (§0.2). The harness **appends the no-non-existence rule** to whatever you pass — end the file with a newline or that sentence collides with your last word |
-| `--attach` / `--attach-dir` | document / folder beside the brief. CLI channels (codex, agy, grok build) get the **absolute path** and read it from disk — read-only, no write tools, surrounding material allowed; API channels get files **inline**, folders named as unreadable. Secrets-scanned either way. 🔴 Refs trust the attachment: only material you authored |
-| `--only` | restrict channels. Channel names, aliases and **group** words all work; `python routing.py` prints every accepted spelling. Groups are the useful form — a vendor family (`gemini`, `grok`, `mimo`, `spark`) or a billing path (`agy`, `openrouter`, `direct`). Omit to run every enabled one. 🔴 One channel per `--only` argument: `--only a b c`, never `--only "a b c"` |
+| `--attach` / `--attach-dir` | document / folder beside the brief. CLI channels get the **absolute path** and read it from disk (read-only); API channels get files **inline**, folders named as unreadable. Secrets-scanned either way. 🔴 Refs trust the attachment: only material you authored |
+| `--only` | restrict channels. Names, aliases and **group** words all work — a vendor family (`gemini`, `grok`, `spark`) or a billing path (`agy`, `openrouter`, `direct`); `routing.py` prints every accepted spelling. 🔴 One channel per argument: `--only a b c`, never `--only "a b c"` |
 | `--skip` | the inverse of `--only` |
 | `--set` | pin a model without editing anything: `--set codex=gpt-5.4` |
 | `--route` | **paste what the operator typed, verbatim** — see §0.1 |
@@ -275,29 +265,33 @@ anything from source. Three that decide what you do next:
   disk, and strip appendices. Do not retry unchanged.
 - **A channel is off and nothing explains why**: your own settings file, whose path and changed
   fields the plan prints at the top.
+- 🔴 **The LAUNCH is refused with «Auto mode could not evaluate this action»**: the permission
+  classifier returned no verdict — not a decision about your command. **Retry the identical
+  command**, never a rewritten one. Measured, with the rule, in `~/.claude/CLAUDE.md` (there, not
+  here: every project needs it and this file is loaded in almost none of them).
 
 ---
 
 ## 10. Report back — always
 
 
-🔴 **Name every channel WITH its model and depth** — `codex (gpt-5.4 @ xhigh)`, never a bare
-channel name (the operator, R46: «не просто Codex, а Codex5.4Xhigh»). Per channel: seconds, in/out tokens,
-**tool/fetch count**, **grounding** (pages we fetched / vendor-stated / none) and **citations in
-the text** — a web-capable channel that cited nothing is a fact to state, not a column to leave
-blank; it means the review is training-data-plus-brief, which R45's table hid. Then separately:
-**accepted**, **rejected with proof**, and where the channels **disagreed with each other**.
+🔴 **Name every channel WITH its model and depth** — `codex (gpt-5.4 @ xhigh)`, never a bare name
+(the operator, R46: «не просто Codex, а Codex5.4Xhigh»). Per channel: seconds, in/out tokens, **tool/fetch
+count**, **grounding** (pages we fetched / vendor-stated / none) and **citations in the text** — a
+web-capable channel that cited nothing is a fact to state, not a blank column: the review is
+training-data-plus-brief, which R45's table hid. Then separately: **accepted**, **rejected with
+proof**, and where the channels **disagreed with each other**.
 
-The disagreement is the product. One reviewer is not a second opinion. **Which channel wins is
-not predictable from cost, or from the last round** — four rounds gave four different winners.
+The disagreement is the product; one reviewer is not a second opinion. **Which channel wins is not
+predictable from cost or from the last round** — four rounds, four winners. And convergence is not
+independence: R49 had three channels agree on a Cyrillic token ratio that one measurement refuted.
 
 One shape recurs: the highest-value finding was **not an answer to a question that was asked**. It
 arrived under "what are we missing". Always include that question.
 
 🔴 **`HANDOFF.md` is the reading list — a `listdir`, never built by hand — and it prices the read
 in tokens. Over ~40K tokens with a session already large: do NOT read them this turn.** Report the
-telemetry, hand the operator its resume prompt, let a fresh context read after `/compact`. R46 paid for
-the alternative: 317 KB unopened, a count reported wrong.
+telemetry, hand the operator its resume prompt, let a fresh context read after `/compact`.
 Detail: `references/reading-the-answers.md`.
 
 ---
