@@ -1,37 +1,77 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-patch_agy_permissions.py - make headless `agy` runs survivable, and close the Firecrawl hole.
-
-WHY THIS EXISTS (measured 2026-07-31, agy 1.1.9)
-------------------------------------------------
-In headless (`-p`) mode agy cannot show a permission prompt, so any tool left at the default
-"ask" is auto-denied - and a single auto-denial DISCARDS THE ENTIRE RUN. Observed: the model
-made 29 successful tool calls (10 web searches, 6 page fetches), then reached for
-`mcp(jina-mcp-server/read_url)`, was denied, and the CLI returned:
-
-    response = ""      status = "SUCCESS"      exit code = 0
-
-Nothing in the exit code or the status field distinguishes that from a good run. Every
-orchestration round that used the agy channel for research was exposed to this.
-
-Second, independent problem: agy has the FULL Firecrawl toolset registered
-(`~/.gemini/config/mcp_config.json`), including `firecrawl_crawl` (1 credit PER PAGE,
-unbounded), `firecrawl_agent` and `firecrawl_monitor_create` (recurring, autonomous spend).
-orchestrate.py denies exactly those tools to Codex and has never denied them to agy.
-
-WHAT IT DOES
-------------
-Adds to `~/.gemini/antigravity-cli/settings.json`:
-  * allow-rules for the read-only, free web tools a reviewer legitimately needs;
-  * deny-rules for every metered or unbounded Firecrawl tool (deny beats allow in agy's
-    precedence order: deny > ask > allow).
-Both lists are additive and idempotent - existing user rules are preserved, order is stable.
-A timestamped backup is written next to the file before the first change.
+patch_agy_permissions.py - make headless `agy` runs survivable.
 
     python patch_agy_permissions.py --dry-run     # show the diff, change nothing
     python patch_agy_permissions.py               # apply
+    python patch_agy_permissions.py --keep-shell  # apply, but leave the shell rule alone
     python patch_agy_permissions.py --revert      # restore the newest backup
+    python patch_agy_permissions.py --check       # exit 1 if the config is stale (for doctor/CI)
+
+WHY THIS EXISTS
+---------------
+In headless (`-p`) mode agy cannot show a permission prompt. A tool that is in NEITHER list is
+therefore auto-denied - and that auto-denial DISCARDS THE ENTIRE RUN:
+
+    Print mode: soft-denying tool confirmation "X" at step N     ->  response = "",
+                                                                     status = SUCCESS, exit 0
+
+Nothing in the exit code or the status field distinguishes that from a good run. Measured losses:
+29 tool calls thrown away on 2026-07-31; 56 s / 8 searches / 3 898 output tokens on 2026-08-19;
+48 s / 2 840 tokens the same day.
+
+THE ASYMMETRY EVERYTHING HERE IS BUILT ON (R56, agy 1.1.16, three arms)
+
+    allowed            the tool runs
+    explicitly DENIED  an ordinary tool error - "Permission denied for X. Matches user-configured
+                       deny rule" - AND THE MODEL CARRIES ON AND FINISHES
+    neither (UNLISTED) soft-deny, status CANCELED, the whole turn is discarded
+
+**Silence is the dangerous state, not refusal.** A deny costs nothing; an omission costs a round.
+So the goal of this file is not "grant as little as possible" - it is **leave nothing unlisted**.
+
+WHAT R57 MEASURED, AND WHY THE SHAPE CHANGED
+--------------------------------------------
+The permission language has exactly six rule kinds. They are not documented anywhere: `agy --help`
+covers flags only, and the vendor's reference page is slash-commands-only. They were read out of
+the store the product itself writes, `~/.gemini/config/config.json` ->
+`userSettings.globalPermissionGrants`:
+
+    command(...)   mcp(server/tool)   read_file(path)   write_file(path)
+    read_url(domain)                  execute_url(domain)
+
+There is NO bare-tool-name rule: `run_command` and `RunCommand` in either list match nothing
+(arms J, K, N). So the model is CAPABILITY-based, and "every tool" is a closed set of six - not a
+treadmill of names.
+
+Measured on 1.1.16, each pair one variable, logs under runs/r57/:
+
+    allow mcp(*)                        -> every server, INCLUDING ones added later   (T, ctrl U)
+    deny  mcp(srv/*) + allow mcp(srv/t) -> DENY WINS. A server is all-or-nothing.     (S)
+    allow command(echo)  on `echo X`    -> soft-denied. command() is EXACT-match, not (B)
+                                           the prefix its own help string claims.
+    allow command(<exact>)              -> runs                                       (D, F2)
+    allow command(<exact>) + --sandbox  -> soft-denied. --sandbox cancels an ALLOW.    (E)
+    deny  command(*)       + --sandbox  -> hard deny, RUN SURVIVED                     (M, H)
+    allow command(*) + deny command(*del*) -> the canary FILE WAS DELETED.             (R1)
+                                           `*` is an all-token, not a glob.
+
+That last line is the answer to "allow everything except deleting files": **it cannot be written.**
+`*` does not glob, so no deny pattern can carve deletion out of an allow-all. And there is nothing
+else to deny instead - agy has NO file-deletion tool. Its 60 tool configs contain none; the
+`DeleteFileOrDirectory` symbols in the binary belong to a gRPC WorkspaceService used by the IDE.
+**Deletion is reachable only through the shell.** So the command capability has exactly two usable
+states, and only one of them is compatible with "do not let it delete files":
+
+    allow command(*)   (needs --sandbox dropped)  unrestricted shell, deletion included
+    deny  command(*)                              no shell at all, run survives, deletion
+                                                  impossible - and the R56 fatality is gone
+
+`--dangerously-skip-permissions` is not a third option. It does auto-approve everything, and R57
+measured that MCP denies STILL WIN under it (so the reason this file used to give - "it unlocks
+firecrawl_crawl" - was wrong). But a `command(*)` deny is IGNORED under that flag, so it hands an
+unattended reviewer an unrestricted shell with no way to bound it. Worse reason, same conclusion.
 """
 
 import argparse
@@ -46,93 +86,102 @@ if hasattr(sys.stdout, "reconfigure"):
 
 SETTINGS = os.path.join(os.path.expanduser("~"), ".gemini", "antigravity-cli", "settings.json")
 
-# 🔴🔴 R56 2026-08-19 — THREE STATES, NOT TWO, AND THE HARMLESS-SOUNDING ONE IS THE FATAL ONE.
-# Measured on agy 1.1.16 by running each case (runs/r56/permprobe/results.json):
+# ---------------------------------------------------------------------------------------------
+# ALLOW - one line, because `mcp(*)` is a real rule (measured: arm T, with a valid control).
 #
-#   allowed            the tool runs.
-#   explicitly DENIED  the tool returns an ordinary error - «Permission denied for
-#                      mcp(jina-mcp-server/search_web). Matches user-configured deny rule» -
-#                      and THE MODEL CARRIES ON AND FINISHES. Arm 3 still answered.
-#   neither (UNLISTED) `Print mode: soft-denying tool confirmation "CallMcpTool" at step N`,
-#                      status CANCELED, THE WHOLE TURN IS DISCARDED.
+# This replaces a 60-entry enumeration of somebody else's tool names. That enumeration was the
+# defect, not the shortcut: the default state for anything the server gains later is the FATAL
+# one, and it cost a run twice on the same server nineteen days apart (jina read_url on 07-31,
+# jina search_web_deep on 08-19). `mcp(*)` covers tools added upstream AND servers added later -
+# and a new SERVER is the same fatal state one level up, which no per-server wildcard reaches.
 #
-# So a deny is cheap and silence is what costs a round. The old list below was an ENUMERATION of
-# tool names against somebody else's server, which means the default state for anything the
-# server gains later is the fatal one. That is not hypothetical and it is not new: the docstring
-# above records 2026-07-31 losing a run to `jina-mcp-server/read_url`, fixed by adding the name -
-# and on 2026-08-19 an agy31pro run died at 56 s, 3 898 output tokens and 8 searches thrown away,
-# on `jina-mcp-server/search_web_deep`. Same server, same shape, nineteen days apart. A list that
-# has to keep pace with an upstream server is a treadmill, and every lap costs a whole review.
-#
-# `mcp(<server>/*)` IS honoured (arm 2), and deny still beats it (arm 3). So: wildcard the servers
-# whose whole toolset is free, local and read-only, and keep an enumeration exactly where a wrong
-# guess costs money or leaks a credential.
-#
-# NOT wildcarded, deliberately:
-#   firecrawl   metered per page, no ceiling on firecrawl_crawl. A new Firecrawl tool must cost a
-#               cancelled run rather than an unbounded bill.
-#   playwright  runs against a PERSISTENT profile holding live logins, and ships
-#               browser_run_code_unsafe. A research reviewer has no business there.
+# The old entries are left in place by the merge below; they are now redundant, not wrong.
 ALLOW = [
-    "read_url(*)",
-    "mcp(jina-mcp-server/*)",   # free, read-only search/fetch; show_api_key denied below
-    "mcp(crawl4ai/*)",          # local process, no network cost beyond the fetch itself
-    "mcp(scrapling/*)",         # local process
-    "mcp(cloakbrowser/*)",      # local browser; the scripting tools are denied below
-    "mcp(firecrawl/firecrawl_scrape)",   # 1 credit, markdown only - the sanctioned last resort
-    "mcp(firecrawl/firecrawl_map)",      # 1 credit flat for any number of URLs
+    "mcp(*)",
 ]
 
-# Metered, unbounded, or recurring. Costs verified on docs.firecrawl.dev 2026-07-26 and already
-# enforced for the Codex channel in orchestrate.py; this brings agy to parity.
+# ---------------------------------------------------------------------------------------------
+# DENY - deny is where every bound now lives, and it costs nothing to be here.
+#
+# 🔴 A wildcard deny takes the WHOLE server: a more specific allow does NOT rescue one tool from
+# it (arm S). So `mcp(firecrawl/*)` below really does mean no Firecrawl at all, on purpose.
 DENY = [
-    "mcp(firecrawl/firecrawl_crawl)",            # 1 credit PER PAGE, no ceiling
-    "mcp(firecrawl/firecrawl_agent)",            # caps at 2500 credits per job
-    "mcp(firecrawl/firecrawl_extract)",
-    "mcp(firecrawl/firecrawl_parse)",
-    "mcp(firecrawl/firecrawl_search)",           # free equivalents exist
-    "mcp(firecrawl/firecrawl_interact)",         # 2 credits per browser-MINUTE
-    "mcp(firecrawl/firecrawl_interact_stop)",
-    "mcp(firecrawl/firecrawl_monitor_create)",   # recurring spend with nobody watching
-    "mcp(firecrawl/firecrawl_monitor_update)",
-    "mcp(firecrawl/firecrawl_monitor_run)",
-    "mcp(firecrawl/firecrawl_research_search_papers)",
-    "mcp(firecrawl/firecrawl_research_search_github)",
-    "mcp(firecrawl/firecrawl_research_related_papers)",
-    "mcp(firecrawl/firecrawl_research_read_paper)",
-    "mcp(firecrawl/firecrawl_research_inspect_paper)",
+    # THE SHELL. This is the fix for the class R55 and R56 both lost a round to: the model reaches
+    # for a shell (usually as a FALLBACK after another tool breaks), nothing matches, and the turn
+    # is discarded. Denying it converts that into an ordinary tool error the model recovers from -
+    # measured with AND without --sandbox (arms M, H), the run finishing both times.
+    #
+    # It is also the only way to honour "do not let it delete files", because the shell is the only
+    # route to deletion and `*` cannot be narrowed.
+    #
+    # 🔴 THE COST, STATED PLAINLY: settings.json is MACHINE-WIDE, so this also stops shell commands
+    # in the interactive agy TUI. `--keep-shell` skips this one rule; `--revert` undoes everything.
+    "command(*)",
 
-    # 🔴 R56: these become REACHABLE the moment their server is wildcarded above, so they have to
-    # be named here in the same change. Denying them is not a cost - a denied tool returns an
-    # error and the run continues (measured, see the ALLOW comment); it is the unlisted state
-    # that kills a run. So the deny list is where a wildcard's blast radius gets cut back, and
-    # every entry below is a tool a *research reviewer* has no reason to call.
+    # METERED. Firecrawl bills per page with no ceiling on firecrawl_crawl, and one runaway on a
+    # different channel cost $12 and exhausted a key that four other channels shared. With `mcp(*)`
+    # granting every server, a NEW Firecrawl tool would be auto-allowed - so the server is denied
+    # wholesale rather than by a list that has to keep pace with it. Nothing is lost that matters:
+    # jina, crawl4ai and scrapling fetch pages for free, and scrapling's stealthy_fetch and
+    # cloakbrowser cover bot-protected pages, which was Firecrawl's only unique job here.
+    "mcp(firecrawl/*)",
+
+    # LIVE LOGINS. The playwright server runs against a PERSISTENT profile
+    # (~/AppData/Local/ms-playwright/mcp-profile-main) that holds real signed-in sessions - this
+    # project has already found live Gmail session URLs in a previous run's console logs. An
+    # unattended reviewer has no business inside a logged-in browser, and it ships
+    # browser_run_code_unsafe. cloakbrowser covers browsing without the session material.
+    "mcp(playwright/*)",
+
+    # Named, because their servers stay allowed: each is a tool a research reviewer has no reason
+    # to call, and a denial is free.
     "mcp(jina-mcp-server/show_api_key)",     # prints the account's own API key into the answer
     "mcp(cloakbrowser/cloak_evaluate)",      # arbitrary JS in a real browser
-    "mcp(cloakbrowser/cloak_set_cookies)",   # session material
+    "mcp(cloakbrowser/cloak_set_cookies)",   # session material, inbound
     "mcp(cloakbrowser/cloak_get_cookies)",   # session material, outbound
     "mcp(cloakbrowser/cloak_network_intercept)",
     "mcp(cloakbrowser/cloak_network_continue)",
 ]
 
+# The shell rule is separated so --keep-shell can drop exactly it, and so the checker below can
+# report the two halves independently instead of as one opaque "stale".
+SHELL_DENY = "command(*)"
 
-def load():
-    if not os.path.exists(SETTINGS):
+
+def load(path=SETTINGS):
+    if not os.path.exists(path):
         return {}
-    with open(SETTINGS, encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def missing(cfg, keep_shell=False):
+    """What this script would add. The single source of truth for --check and for doctor.py."""
+    perms = cfg.get("permissions") or {}
+    allow = perms.get("allow") or []
+    deny = perms.get("deny") or []
+    want_deny = [d for d in DENY if not (keep_shell and d == SHELL_DENY)]
+    return ([r for r in ALLOW if r not in allow],
+            [r for r in want_deny if r not in deny])
 
 
 def newest_backup():
     d = os.path.dirname(SETTINGS)
+    if not os.path.isdir(d):
+        return None
     b = sorted(x for x in os.listdir(d) if x.startswith("settings.json.bak."))
     return os.path.join(d, b[-1]) if b else None
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--revert", action="store_true")
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
+    ap.add_argument("--dry-run", action="store_true", help="print the diff, write nothing")
+    ap.add_argument("--revert", action="store_true", help="restore the newest backup")
+    ap.add_argument("--check", action="store_true",
+                    help="exit 1 if rules are missing; prints them. Writes nothing.")
+    ap.add_argument("--keep-shell", action="store_true",
+                    help="do not add deny command(*) - keeps the interactive TUI's shell, and "
+                         "keeps the headless failure it causes")
     a = ap.parse_args()
 
     if a.revert:
@@ -144,36 +193,64 @@ def main():
         print("restored from " + b)
         return 0
 
+    # 🔴 "No settings file" and "settings file missing the rules" are DIFFERENT states, and
+    # conflating them is a false positive aimed at people who are not Igor. Most employees who
+    # pull this kit have never installed agy; without this branch `--check` tells them their
+    # config is STALE and hands them a command to fix software they do not have. A gate that
+    # cries wolf on a clean machine is how the whole class gets ignored.
+    if not os.path.exists(SETTINGS):
+        if a.check:
+            print("agy permissions: agy is not installed on this machine (no %s) - nothing to do"
+                  % SETTINGS)
+            return 0
+        print("agy is not installed here: %s does not exist.\n"
+              "Nothing was changed. Install Antigravity CLI first, then re-run this script."
+              % SETTINGS)
+        return 0
+
     cfg = load()
+    add_a, add_d = missing(cfg, a.keep_shell)
+
+    if a.check:
+        if not add_a and not add_d:
+            print("agy permissions: current")
+            return 0
+        print("agy permissions: STALE - %d allow, %d deny rule(s) missing from %s"
+              % (len(add_a), len(add_d), SETTINGS))
+        for r in add_a + add_d:
+            print("    " + r)
+        print("  fix: python %s" % os.path.abspath(__file__))
+        return 1
+
     perms = cfg.setdefault("permissions", {})
     allow = perms.setdefault("allow", [])
     deny = perms.setdefault("deny", [])
 
-    added_a = [r for r in ALLOW if r not in allow]
-    added_d = [r for r in DENY if r not in deny]
-
     print("settings: %s" % SETTINGS)
     print("  existing allow: %d rules, deny: %d rules" % (len(allow), len(deny)))
-    print("  + %d allow rules, + %d deny rules" % (len(added_a), len(added_d)))
-    for r in added_a:
+    print("  + %d allow rules, + %d deny rules" % (len(add_a), len(add_d)))
+    for r in add_a:
         print("      allow  " + r)
-    for r in added_d:
+    for r in add_d:
         print("      deny   " + r)
-    if not added_a and not added_d:
-        print("  nothing to do - already patched")
+    if SHELL_DENY in add_d:
+        print("  NOTE: `deny command(*)` also stops shell commands in the INTERACTIVE agy TUI, "
+              "because this file is machine-wide. Re-run with --keep-shell to skip that one rule, "
+              "or --revert to undo everything.")
+    if not add_a and not add_d:
+        print("  nothing to do - already current")
         return 0
     if a.dry_run:
         print("  --dry-run: nothing written")
         return 0
 
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    bak = SETTINGS + ".bak." + stamp
+    bak = SETTINGS + ".bak." + time.strftime("%Y%m%d-%H%M%S")
     if os.path.exists(SETTINGS):
         shutil.copy2(SETTINGS, bak)
         print("  backup -> " + bak)
 
-    allow.extend(added_a)
-    deny.extend(added_d)
+    allow.extend(add_a)
+    deny.extend(add_d)
     tmp = SETTINGS + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)

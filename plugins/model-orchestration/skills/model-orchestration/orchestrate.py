@@ -4644,9 +4644,24 @@ Then the literal end marker you were given. If you were given none, end with RES
 def agy_permission_preflight():
     """
     Answer "will this channel be able to finish?" in milliseconds, instead of finding out after
-    a 25-minute run comes back empty. Checks that the allow-rules patch is still in place -
-    settings.json is a user file and can be reverted, rewritten by the TUI, or lost on reinstall.
-    Returns a warning string, or None if it looks healthy.
+    a 25-minute run comes back empty. Returns a warning string, or None if it looks healthy.
+
+    🔴🔴 R57: THIS FUNCTION USED TO CARRY ITS OWN PRIVATE IDEA OF "CORRECT", AND THAT IS THE
+    DEFECT, NOT A DETAIL. It checked two things - "some mcp() allow rule exists" and
+    "firecrawl_crawl is denied" - both spelled out here, in a second place, with no link to the
+    script that writes the rules. Every rule R57 added (`mcp(*)`, `deny command(*)`,
+    `deny mcp(firecrawl/*)`, `deny mcp(playwright/*)`) would have passed BOTH of those checks on
+    a completely stale config, because a pre-R57 settings.json has mcp() allow rules and does deny
+    firecrawl_crawl by name.
+
+    That matters most for the people who are not in this session. Employees update by telling
+    their assistant to pull the repo; `upgrade.py` then runs `doctor.py`, which calls this. A
+    preflight that says "allow-rules present" on a config missing the fix does not just fail to
+    help - it actively certifies the broken state, and it does so in green.
+
+    One rule, one home: the rule set now comes from `patch_agy_permissions.py` itself. If that
+    file gains a rule, this check demands it on the next run, with no edit here. Two files on one
+    subject rot, and the read-only copy rots first because nothing corrects it by failing.
     """
     path = os.path.join(os.path.expanduser("~"), ".gemini", "antigravity-cli", "settings.json")
     try:
@@ -4654,17 +4669,46 @@ def agy_permission_preflight():
             cfg = json.load(f)
     except Exception as e:
         return "cannot read %s (%r) - cannot tell whether headless runs will survive" % (path, e)
-    allow = (cfg.get("permissions") or {}).get("allow") or []
-    if not any(str(r).startswith("mcp(") for r in allow):
-        return ("no mcp() allow-rules in %s - in headless mode the first MCP tool the model "
-                "reaches for will be auto-denied and the ENTIRE run discarded (empty answer, "
-                "status SUCCESS, exit 0). Run: python patch_agy_permissions.py" % path)
-    deny = (cfg.get("permissions") or {}).get("deny") or []
-    if not any("firecrawl_crawl" in str(r) for r in deny):
-        return ("allow-rules are present but firecrawl_crawl is NOT denied in %s - this channel "
-                "can spend Firecrawl credits per page with no ceiling. Run: python "
-                "patch_agy_permissions.py" % path)
-    return None
+
+    import importlib.util          # local: this is the only place in the file that needs it
+    here = SKILL_DIR
+    patch_py = os.path.join(here, "patch_agy_permissions.py")
+    try:
+        spec = importlib.util.spec_from_file_location("_agy_patch", patch_py)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        add_a, add_d = mod.missing(cfg)
+    except Exception:                                                         # noqa: BLE001
+        # The script is optional in a copied install. Fall back to the weakest useful question -
+        # "is ANY mcp rule present" - and say plainly that this is the degraded check, so a
+        # green line here is not mistaken for the full one.
+        allow = (cfg.get("permissions") or {}).get("allow") or []
+        if not any(str(r).startswith("mcp(") for r in allow):
+            return ("no mcp() allow-rules in %s - in headless mode the first MCP tool the model "
+                    "reaches for will be auto-denied and the ENTIRE run discarded (empty answer, "
+                    "status SUCCESS, exit 0), and patch_agy_permissions.py is missing from %s so "
+                    "the full check could not run" % (path, here))
+        return None
+
+    if not add_a and not add_d:
+        return None
+    # Name the consequence per rule kind: they fail differently and a reader needs to know which
+    # one is biting. Measured shapes, R56/R57.
+    why = []
+    if any(r.startswith("mcp(") for r in add_a):
+        why.append("an MCP tool the server has gained since the allow-list was written is "
+                   "UNLISTED, and an unlisted tool cancels the whole turn")
+    if mod.SHELL_DENY in add_d:
+        why.append("the shell is unlisted, so the first time the model reaches for a command - "
+                   "usually as a fallback after another tool breaks - the run is discarded; "
+                   "denying it explicitly costs nothing because the model recovers from a denial")
+    if any("firecrawl" in r for r in add_d):
+        why.append("Firecrawl is reachable and bills per page with no ceiling")
+    if any("playwright" in r for r in add_d):
+        why.append("the browser server driving a profile with live logins is reachable")
+    return ("agy permission rules are STALE in %s - missing %d allow, %d deny (%s). Run: python "
+            "patch_agy_permissions.py    [%s]"
+            % (path, len(add_a), len(add_d), ", ".join(add_a + add_d), "; ".join(why)))
 
 
 def _resolve_bin(env_var, exe, extra_paths):

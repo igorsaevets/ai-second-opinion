@@ -350,6 +350,10 @@ def main():
                          "new version's loader accepts is carried, and the rest are printed with "
                          "the loader's own reason")
     ap.add_argument("--no-doctor", action="store_true", help="skip the check run at the end")
+    ap.add_argument("--fix-agy", action="store_true",
+                    help="also apply the agy permission rules (patch_agy_permissions.py). Without "
+                         "this the update only PRINTS the command, because that script writes "
+                         "outside this tree and changes the interactive agy TUI as well")
     a = ap.parse_args()
 
     src, dst = os.path.abspath(a.src), os.path.abspath(a.dst)
@@ -548,6 +552,60 @@ def main():
                   "     python \"%s\" --from \"%s\" --to \"%s\" --no-doctor"
                   % (os.path.join(dst, "upgrade.py"), backup, dst))
             print("   Your settings file is not touched either way: %s" % overlay_file())
+
+    # 🔴🔴 R57: AN UPDATE THAT SHIPS A FIX BUT LEAVES IT UNAPPLIED HAS NOT FIXED ANYTHING.
+    #
+    # The agy channel's permission rules do not live in this tree. They live in the reader's own
+    # `~/.gemini/antigravity-cli/settings.json`, so copying new files here changes nothing about
+    # them - and the failure they cause is INVISIBLE: agy returns an empty answer with status
+    # SUCCESS and exit code 0 after doing minutes of real work. Two rounds were lost to it on the
+    # author's machine before it was understood, and every install that pulls this repo starts
+    # from the same untouched config.
+    #
+    # Nothing is applied automatically. `patch_agy_permissions.py` writes OUTSIDE this tree, and
+    # one of its rules also changes the interactive agy TUI; an update script must not make a
+    # machine-wide behaviour change on its own. What this does instead is make the action
+    # impossible to miss and trivially executable - which is what the reader on the other end,
+    # frequently an assistant rather than a person, actually needs in order to act.
+    #
+    # It prints ONLY when agy is installed AND rules are missing: `--check` exits 0 when there is
+    # no agy config at all, so nobody is handed a fix for software they do not have.
+    perms = os.path.join(dst, "patch_agy_permissions.py")
+    if os.path.exists(perms) and not a.dry_run:
+        try:
+            stale = subprocess.call([sys.executable, perms, "--check"],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            stale = 0
+        if stale and a.fix_agy:
+            print("\nAPPLYING THE agy PERMISSION RULES (--fix-agy)\n")
+            subprocess.call([sys.executable, perms])
+        elif stale:
+            print("\n" + "=" * 78)
+            print("REQUIRED AFTER THIS UPDATE - ONE COMMAND, AND IT IS NOT OPTIONAL")
+            print("=" * 78)
+            print('  python "%s"' % perms)
+            print()
+            print("  WHY: the Antigravity (agy) channel's permission rules live in your own")
+            print("       ~/.gemini/antigravity-cli/settings.json, which an update does not touch.")
+            print("       Without the new rules, the first tool agy reaches for that is in NEITHER")
+            print("       the allow nor the deny list cancels the ENTIRE review - and reports it as")
+            print("       an empty answer with status SUCCESS and exit code 0, so nothing looks")
+            print("       wrong. Measured losses: 56s/3,898 tokens and 48s/2,840 tokens, silent.")
+            print()
+            print("  WHAT IT CHANGES: allows every MCP tool, and explicitly DENIES the shell,")
+            print("       Firecrawl (bills per page) and the browser server that drives a profile")
+            print("       with live logins. A denied tool is harmless - the model gets an ordinary")
+            print("       error and finishes the review. Only an UNLISTED tool is fatal.")
+            print()
+            print("  ONE SIDE EFFECT, STATED PLAINLY: that file is machine-wide, so denying the")
+            print("       shell also stops shell commands in the INTERACTIVE agy TUI. If you use")
+            print("       that, run it with --keep-shell instead and accept the headless failure.")
+            print("       A timestamped backup is written first; --revert undoes everything.")
+            print()
+            print("  Skip it only if you never use the agy channel.")
+            print("  Or re-run this upgrade with --fix-agy to apply it now.")
+            print("=" * 78)
     return 0
 
 

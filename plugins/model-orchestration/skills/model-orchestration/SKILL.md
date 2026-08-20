@@ -51,8 +51,13 @@ changes a decision is in this block.
 - **A refusal on a legal/immigration brief is a FRAMING bug, not a subject ban.** Pass
   `--system legal-research` and write the brief as source-verification for attorney review, not as
   filing strategy: codex then answers 6/6. Recipe: **`references/legal-briefs.md`**, read it FIRST.
-- **agy dies silently if a tool is denied** — one auto-denied MCP call discards the whole run.
-  Fixed by `python patch_agy_permissions.py` (applied). Check it first if agy returns empty.
+- 🔴 **agy dies silently on an UNLISTED tool — a DENIED one is harmless.** A tool in neither list
+  cancels the whole turn and reports it as an empty answer with `status: SUCCESS`, exit 0; an
+  explicitly denied one is an ordinary error the model recovers from. **Silence is the dangerous
+  state, not refusal.** Fixed by `python patch_agy_permissions.py`, which allows every MCP server
+  with one `mcp(*)` and explicitly denies the shell, Firecrawl and the browser-with-live-logins.
+  Run it after any update: those rules live in `~/.gemini/`, not in this tree, so pulling a new
+  version does not apply them. Check it first if agy returns empty.
 - **agy re-runs itself once if it cites sources and opened none** — announced before it spends
   (0/3 grounded → 8/8). If the retry also grounds nothing the *first* answer is returned, both
   marked unverified. Never edit this into a loop.

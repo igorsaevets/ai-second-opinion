@@ -403,10 +403,36 @@ def check_agy_permissions(r, mod):
     if problem:
         r.warn("agy permissions", problem.split(" - ")[0][:160],
                "run: python patch_agy_permissions.py    (backs up, idempotent, --revert exists). "
-               "Until then a single auto-denied tool discards the whole run and returns an empty "
-               "answer with status SUCCESS and exit code 0.")
+               "Until then the first tool agy reaches for that is in NEITHER list discards the "
+               "whole run and returns an empty answer with status SUCCESS and exit code 0.")
+        return
+    # 🔴 R57: THE GREEN LINE HAS TO DESCRIBE WHAT WAS ACTUALLY CHECKED. It used to read
+    # "allow-rules present and firecrawl_crawl denied", which was a summary of the OLD rule set
+    # written by hand. After the preflight started deriving its rules from
+    # patch_agy_permissions.py, that sentence kept printing while describing something narrower
+    # than what had been verified - a status line that under-reports is the same defect as one
+    # that over-reports, and it is the one nobody notices, because it is green.
+    #
+    # Reporting the shell state separately is the point of the second line: `--keep-shell` is a
+    # legitimate choice for someone who uses the interactive TUI, and it leaves the headless
+    # failure in place. A reader must be able to see WHICH of the two states this machine is in
+    # without opening the settings file.
+    shell_denied = None
+    try:
+        path = os.path.join(os.path.expanduser("~"), ".gemini", "antigravity-cli", "settings.json")
+        with open(path, encoding="utf-8") as f:
+            deny = (json.load(f).get("permissions") or {}).get("deny") or []
+        shell_denied = "command(*)" in deny
+    except Exception:                                                         # noqa: BLE001
+        pass
+    if shell_denied is False:
+        r.ok("agy permissions",
+             "MCP rules current; shell NOT denied (--keep-shell) - the interactive TUI keeps its "
+             "shell, and a headless run that reaches for one still loses the whole review")
     else:
-        r.ok("agy permissions", "allow-rules present and firecrawl_crawl denied")
+        r.ok("agy permissions",
+             "current: every MCP server allowed by mcp(*), shell + firecrawl + playwright "
+             "explicitly denied (a denial is survivable; only an unlisted tool is fatal)")
 
 
 def check_pii_gate(r, mod):

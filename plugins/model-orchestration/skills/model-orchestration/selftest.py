@@ -3530,24 +3530,35 @@ def suite_r56_agy_concurrency_and_permissions():
           "the soft-deny warning says the tool was UNLISTED, not denied - they look identical "
           "in the result frame and need opposite fixes, and calling the wrong one sent two AOS "
           "rounds to a patch script that could not apply")
-    perms = open(os.path.join(HERE, "patch_agy_permissions.py"), encoding="utf-8").read()
-    for srv in ("jina-mcp-server", "crawl4ai", "scrapling", "cloakbrowser"):
-        check("mcp(%s/*)" % srv in perms,
-              "the %s MCP server is allowed by WILDCARD, so a tool it gains later cannot cancel "
-              "a round - enumerating someone else's tool names is a treadmill that has now cost "
-              "two rounds nineteen days apart" % srv)
-    # ...and the two servers that must NEVER be wildcarded, for reasons that cost money or leak.
+    # 🔴 R57 REWROTE THESE THREE CHECKS, AND THE REASON IS THE POINT. They used to read the
+    # patch file as TEXT and assert that `mcp(firecrawl/*)` was ABSENT from it. R57 denies
+    # Firecrawl wholesale - which is strictly stronger than not wildcarding it - and the string
+    # `mcp(firecrawl/*)` therefore now appears in the file, in the DENY list. The old assertion
+    # would have gone RED on more correct code, purely because it keyed on a spelling instead of
+    # on the decision. That is this project's own recurring shape (R45: a test that hard-codes the
+    # value a human is meant to change tests the human), and the fix is to ask the MODULE what it
+    # decided rather than to grep its source.
+    import importlib.util as _ilu
+    _spec = _ilu.spec_from_file_location("_perms", os.path.join(HERE, "patch_agy_permissions.py"))
+    _perms = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_perms)
+    allow, deny = set(_perms.ALLOW), set(_perms.DENY)
+
+    check("mcp(*)" in allow,
+          "every MCP server is allowed by ONE wildcard - a per-server wildcard covers a tool the "
+          "server gains, but not a SERVER added later, which is the same fatal unlisted state one "
+          "level up. Measured R57 arm T with a valid control")
+    # The rule that decides reachability is not "is it wildcarded" but "what does the engine
+    # decide". Deny beats allow in every combination measured, wildcard or specific (R56 arm 3,
+    # R57 arm S), so a server named in DENY is unreachable no matter what ALLOW says.
     for srv, why in (("firecrawl", "bills per page with no ceiling on firecrawl_crawl"),
                      ("playwright", "drives a persistent profile holding live logins")):
-        check("mcp(%s/*)" % srv not in perms,
-              "the %s server is NOT wildcarded - %s, so an unknown new tool there must cost a "
-              "cancelled run rather than a bill or a session" % (srv, why))
-    # `.split("DENY = [")`, not `.split("DENY")`: the bare word appears in this file's own prose
-    # several times, so the loose split took a section that ends before the list and the check
-    # went red on correct code. A separator that also matches the discussion of the thing is the
-    # R51 shape - keying on a spelling instead of on the structure.
-    check("mcp(jina-mcp-server/show_api_key)" in perms.split("DENY = [")[-1],
-          "wildcarding a server pulled its credential-revealing tool into reach, and the SAME "
+        check("mcp(%s/*)" % srv in deny,
+              "the %s server is DENIED wholesale - %s. Under `mcp(*)` a new tool there would "
+              "otherwise be auto-allowed, and a wildcard deny cannot be rescued by a more "
+              "specific allow (arm S), so this really is all-or-nothing" % (srv, why))
+    check("mcp(jina-mcp-server/show_api_key)" in deny,
+          "wildcarding every server pulled the credential-revealing tool into reach, and the SAME "
           "change denies it - a widened allow and its matching deny belong in one commit")
 
     # 3 - the per-channel log, which is what made 1 and 2 diagnosable at all
@@ -3559,6 +3570,86 @@ def suite_r56_agy_concurrency_and_permissions():
           "the log reader excludes the lines present in EVERY log - «not logged into "
           "Antigravity» appears 20-52 times in all 89 logs on this machine, successes included, "
           "and reading it as the cause is a root cause with a perfect citation and no control")
+
+
+def suite_r57_agy_capability_model():
+    """R57. agy's permission language is CAPABILITY-based, and two of its rules cannot be written.
+
+    Everything below was measured against agy 1.1.16 with a valid control on every arm; the raw
+    logs are under `runs/r57/`. The grammar itself is undocumented - `agy --help` covers flags,
+    and the vendor's reference page is slash-commands only - so it was read out of the store the
+    product writes for itself, `~/.gemini/config/config.json`:
+
+        command(...)  mcp(server/tool)  read_file(path)  write_file(path)
+        read_url(domain)  execute_url(domain)
+
+    Six kinds, no bare-tool-name form (`run_command` and `RunCommand` match nothing in either
+    list). The 49 tools all map onto those six, so "every tool" is a closed set.
+
+    THE TWO THINGS THAT CANNOT BE WRITTEN, and both shape what this file may promise:
+
+      * "allow everything except deleting files". `*` is an ALL-TOKEN, not a glob: with
+        `allow command(*)` + `deny command(*del*)` the canary file WAS DELETED and no deny fired.
+        And there is nothing else to deny instead - agy has no file-deletion tool at all; the
+        `DeleteFileOrDirectory` symbols in its binary belong to an IDE-facing gRPC service. So the
+        shell is the only route to deletion, and denying it is the only way to close that route.
+
+      * "allow the shell safely". `command()` is EXACT-match despite its own help string saying
+        "matches commands by prefix", so an allow-list would have to predict the exact command
+        line the model composes. `--sandbox` cancels an ALLOW anyway.
+
+    What DOES work, and is therefore what the patch ships: deny beats allow in every combination
+    tried, a deny is survivable (the model gets an ordinary error and finishes), and `mcp(*)`
+    covers every server including ones added later.
+    """
+    section("R57. agy capability model: what can and cannot be expressed")
+    import importlib.util as _ilu
+    spec = _ilu.spec_from_file_location("_perms57",
+                                        os.path.join(HERE, "patch_agy_permissions.py"))
+    perms = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(perms)
+
+    check(perms.SHELL_DENY in perms.DENY,
+          "the shell is EXPLICITLY DENIED, not left unlisted. Unlisted is the fatal state - the "
+          "turn is discarded and reported as an empty answer with status SUCCESS and exit 0 - "
+          "while a denial is an ordinary tool error the model recovers from. This is also the "
+          "only way to stop file deletion, because the shell is the only route to it")
+    check(not any(r.startswith("command(") for r in perms.ALLOW),
+          "no command() ALLOW rule is shipped: matching is exact, so an allow-list would have to "
+          "predict the model's exact command line, and --sandbox cancels such an allow anyway")
+
+    # The two checks below are about a promise this file must NOT make. A reader who sees a
+    # deletion-shaped deny rule will reasonably conclude deletion is blocked by it; the canary
+    # says otherwise, so the rule must not exist to be misread.
+    glob_shaped = [r for r in perms.DENY if "*" in r and r != "command(*)" and "/" not in r]
+    check(not glob_shaped,
+          "no deny rule pretends to pattern-match part of a command line - `*` does not glob "
+          "(measured: the canary file was deleted under `deny command(*del*)`), so such a rule "
+          "would be decoration that reads as protection",
+          "found=%r" % (glob_shaped,))
+
+    # missing() is the single source of truth shared with doctor.py and the run-time preflight.
+    # If it stops reporting a stale config, every downstream warning goes quiet at once - the
+    # failure mode this project keeps meeting: dispatch fails loudly, reporting fails silently.
+    empty_missing = perms.missing({})
+    check(empty_missing[0] == perms.ALLOW and empty_missing[1] == perms.DENY,
+          "missing() on an empty config asks for the FULL rule set - doctor.py and the run-time "
+          "preflight both derive their idea of 'current' from this one function, so a config "
+          "that predates the fix cannot be certified green by either of them")
+    current = {"permissions": {"allow": list(perms.ALLOW), "deny": list(perms.DENY)}}
+    check(perms.missing(current) == ([], []),
+          "missing() on a fully-patched config asks for nothing - otherwise doctor.py would nag "
+          "for ever and the warning would be trained away")
+    check(perms.missing(current, keep_shell=True) == ([], []),
+          "--keep-shell is a real variant, not a flag that changes nothing: it drops exactly the "
+          "shell rule and demands the rest")
+    kept = perms.missing({"permissions": {"allow": list(perms.ALLOW),
+                                          "deny": [d for d in perms.DENY
+                                                   if d != perms.SHELL_DENY]}},
+                         keep_shell=True)
+    check(kept == ([], []),
+          "with --keep-shell, a config that has everything EXCEPT the shell deny is current - so "
+          "someone who needs the interactive TUI's shell is not nagged for ever either")
 
 
 def suite_r55_child_env_and_first_error():
@@ -3825,7 +3916,8 @@ def main():
                   suite_max_depth_and_explicit_only, suite_refs_and_meters,
                   suite_r47_causes, suite_dedup_scripts, suite_r48_visibility,
                   suite_r49_record_integrity, suite_r55_child_env_and_first_error,
-                  suite_r56_agy_concurrency_and_permissions):
+                  suite_r56_agy_concurrency_and_permissions,
+                  suite_r57_agy_capability_model):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

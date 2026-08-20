@@ -1,5 +1,81 @@
 # Changelog
 
+## 1.33.0 — 2026-08-20
+
+**🔴 IF YOU USE THE `agy` CHANNEL, RUN ONE COMMAND AFTER UPDATING:**
+
+```
+python patch_agy_permissions.py
+```
+
+The rules it writes live in **your own** `~/.gemini/antigravity-cli/settings.json`, not in this
+tree, so pulling a new version does not apply them. `upgrade.py` now detects a stale config and
+prints this in a block you cannot miss; `--fix-agy` applies it for you. On a machine with no agy
+installed nothing is printed and nothing is checked.
+
+### The permission language, measured — because none of it is documented
+
+`agy --help` covers flags; the vendor's reference page is slash-commands only. So the grammar was
+read out of the store the product writes for itself (`~/.gemini/config/config.json`) and then
+tested arm by arm against agy 1.1.16, each pair changing one variable.
+
+There are **six rule kinds and no others** — `command()`, `mcp(server/tool)`, `read_file(path)`,
+`write_file(path)`, `read_url(domain)`, `execute_url(domain)`. There is **no bare-tool-name rule**:
+`run_command` and `RunCommand` match nothing in either list. The model is *capability*-based, so
+"every tool" is a closed set of six rather than a race against someone else's tool names.
+
+| what was tried | what happened |
+|---|---|
+| `allow mcp(*)` | ✅ every server, **including servers added later** |
+| `deny mcp(srv/*)` + `allow mcp(srv/tool)` | **deny wins** — a server is all-or-nothing |
+| `allow command(echo)` on `echo X` | ❌ soft-denied — `command()` is **exact-match**, not the prefix its own help string claims |
+| `allow command(<exact line>)` | ✅ runs |
+| …the same, plus `--sandbox` | ❌ soft-denied — **`--sandbox` cancels an allow** |
+| `deny command(*)` (± `--sandbox`) | ✅ hard deny, **and the run finishes** |
+
+### 🔴🔴 "Allow everything except deleting files" cannot be written
+
+`*` is an all-token, not a glob. With `allow command(*)` + `deny command(*del*)` a canary file
+**was deleted** and no deny fired; the control (no deny rule) deleted its canary too, so the test
+was sound. And there is nothing else to deny instead — **agy has no file-deletion tool at all**:
+none of its 60 tool configs deletes anything, and the `DeleteFileOrDirectory` symbols in the
+binary belong to an IDE-facing gRPC service. Deletion is reachable **only through the shell**.
+
+So the command capability has exactly two usable states, and only one of them closes that route:
+
+* `allow command(*)` (and drop `--sandbox`) — an unrestricted shell, deletion included;
+* **`deny command(*)`** — no shell, deletion impossible, and the run survives the refusal.
+
+This release ships the second. **One side effect, stated plainly:** `settings.json` is
+machine-wide, so this also stops shell commands in the **interactive agy TUI**. `--keep-shell`
+skips exactly that rule and keeps the headless failure; `--revert` undoes everything; a timestamped
+backup is written before any change.
+
+### What else changed
+
+* `patch_agy_permissions.py` replaces a 60-entry enumeration of another vendor's tool names with
+  `allow mcp(*)` plus a short, reasoned deny list. Firecrawl (bills per page, no ceiling) and
+  Playwright (drives a profile holding live logins) are denied **wholesale**, because under
+  `mcp(*)` a tool added upstream would otherwise be auto-allowed. Free local fetchers cover both.
+* New `--check` (exit 1 if stale, writes nothing) and `--keep-shell`. `--check` exits **0** when
+  agy is not installed — a gate that cries wolf on a clean machine is how the class gets ignored.
+* **`doctor.py` and the run-time preflight now derive the rule set from `patch_agy_permissions.py`
+  itself.** They each used to carry a private copy of "correct" — *"some `mcp()` allow rule exists
+  and `firecrawl_crawl` is denied"* — which a completely stale config satisfies. Both would have
+  certified this release's own missing rules as green.
+* `doctor.py`'s green line now says which of the two shell states the machine is in, instead of
+  describing a rule set that is no longer shipped.
+
+### Corrections to earlier releases
+
+* **`--dangerously-skip-permissions` does not unlock Firecrawl.** Since 2026-07-31 our own docs
+  gave that as the reason never to use it. Measured now: an `mcp()` deny **still wins** under that
+  flag. A `command()` deny does **not**, which hands an unattended reviewer an unrestricted shell —
+  so the ban stands, for a different and better reason.
+* **R39's "allow-listing the shell headlessly is structurally impossible" was right, its reasoning
+  was not.** `command(*)` *does* match — it was tested only in the ALLOW position under `--sandbox`,
+  the one condition where an allow is cancelled regardless.
+
 ## 1.32.0 — 2026-08-19
 
 **Three ways the Antigravity channel loses a whole run, and none of them is the model's fault.**
