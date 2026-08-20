@@ -878,6 +878,18 @@ def main():
         print("NOT READY. Fix the [FAIL] lines above first.")
     print('  python "%s" --brief BRIEF.md --marker DONE-01 --out reviews --dry-run'
           % os.path.join(HERE, "orchestrate.py"))
+    # R58: an update check runs from HERE because doctor is the one command every install
+    # method tells the user to run (INSTALL.md §After installing). The plugin path COULD have
+    # done it via a SessionStart hook, but anthropics/claude-code#16538 discards the hook's
+    # additionalContext for plugin-defined hooks — verified in the R58 panel — so doctor is the
+    # reliable delivery channel until that bug is fixed. Anything the check emits is a normal
+    # print to stdout; a network failure is silent by design (see update_check.py's docstring).
+    try:
+        uc = os.path.join(HERE, "update_check.py")
+        if os.path.isfile(uc):
+            subprocess.call([sys.executable, uc, "--check"])
+    except OSError:
+        pass
     # Exit code semantics, corrected 2026-07-31. This used to be min(worst, 1), which printed
     # "READY" and then exited 1 - a status line contradicting its own exit code, which is the
     # thing this project keeps saying is worse than no status line at all. It also made a partial

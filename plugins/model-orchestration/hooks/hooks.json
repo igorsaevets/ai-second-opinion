@@ -1,5 +1,6 @@
 {
   "_doc": "R33-class duplicate-key guard for this plugin, shipped as a plugin hook (round-35 panel's preferred placement over machine-wide). Fires on Edit|Write|MultiEdit of .json files, warns Claude via exit 2 + stderr on duplicate keys. Fail-open on every internal error path. See tools/check_json_dup_keys_hook.py for the wrapper and CHANGELOG 1.12.0 for the panel that chose this over ~/.claude/settings.json.",
+  "_doc_sessionstart_r58": "R58 local-only update-delta notifier. Fires ONCE after Claude Code's marketplace auto-updates the plugin, comparing the new VERSION file to the stamp — no network call, so INSTALL.md's 'nothing phones home' promise holds on the plugin path. Note: anthropics/claude-code#16538 documents that plugin SessionStart hooks do NOT reliably surface hookSpecificOutput.additionalContext to Claude, so the same JSON also carries systemMessage; users who want a proactive network check can add the equivalent hook to their own ~/.claude/settings.json with `python update_check.py --install-hook`, which is the workaround the issue itself documents. Full network check lives in doctor.py, not here.",
   "hooks": {
     "PostToolUse": [
       {
@@ -12,6 +13,22 @@
               "${CLAUDE_PLUGIN_ROOT}/tools/check_json_dup_keys_hook.py"
             ],
             "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/skills/model-orchestration/update_check.py",
+              "--hook"
+            ],
+            "timeout": 5
           }
         ]
       }

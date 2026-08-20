@@ -3670,6 +3670,137 @@ def suite_r57_agy_capability_model():
           "someone who needs the interactive TUI's shell is not nagged for ever either")
 
 
+def suite_r58_update_check():
+    """R58. Update check: local-only for the plugin hook, full for doctor.
+
+    Two-sided per property (R57 rule): every safety-shaped assertion has both a positive form
+    (X happens when it should) AND a negative form (X does NOT happen when it should not). A
+    one-sided check can only fail towards too little safety, which is exactly why the R57
+    over-reach shipped.
+    """
+    section("R58. update_check: local-only hook, full doctor path, no phones-home surprises")
+    import importlib.util as _ilu
+    spec = _ilu.spec_from_file_location("_uc58", os.path.join(HERE, "update_check.py"))
+    uc = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(uc)
+
+    # Semver comparison — the trap the panel flagged, and the reason string compare is wrong.
+    check(uc.is_newer("1.10.0", "1.9.0"),
+          "1.10.0 > 1.9.0 as version tuple (string compare would say the opposite)")
+    check(not uc.is_newer("1.9.0", "1.10.0"),
+          "1.9.0 is NOT newer than 1.10.0 — the reverse direction is also right")
+    check(not uc.is_newer("1.33.1", "1.33.1"),
+          "equal is NOT newer — otherwise every session fires the notice")
+    check(not uc.is_newer(None, "1.33.1"),
+          "None on either side is NOT newer — silent, never crash the hook")
+
+    # The User-Agent must NOT carry the installed version. Panel: with a small user base,
+    # version + IP + time is a fingerprint. The two-sided form: it must be exactly this
+    # string, and it must never grow to include a digit.
+    check(uc._user_agent() == "ai-second-opinion-update-check",
+          "User-Agent is exactly the versionless string — the panel's privacy floor")
+    import re
+    check(not re.search(r"\d", uc._user_agent()),
+          "no digit in the UA at all — a future edit that pastes VERSION in would be caught here")
+
+    # The stamp path is per-user (expanduser) and outside any tree an upgrade could replace.
+    check(uc.STAMP_PATH.startswith(os.path.expanduser("~")),
+          "stamp path is under the user's home directory")
+    check("skills" not in uc.STAMP_PATH,
+          "stamp is NOT inside the skill folder — an upgrade must not lose the snooze")
+
+    # Backoff on network failure: with 1 failure the fresh window shrinks from 168h to 1h so
+    # the next session actually retries. Two-sided: 0 failures still uses the full window.
+    long_stamp = {"consecutive_failures": 0,
+                  "last_check_utc":
+                      (uc._now_utc() - __import__("datetime").timedelta(hours=2)).strftime(
+                          "%Y-%m-%dT%H:%M:%SZ")}
+    check(uc.stamp_is_fresh(long_stamp),
+          "2h old with 0 failures: fresh (168h window is intact)")
+    short_stamp = dict(long_stamp, consecutive_failures=1)
+    check(not uc.stamp_is_fresh(short_stamp),
+          "2h old with 1 failure: STALE (backoff shortened the window to 1h)")
+
+    # Clock skew — a `last_check_utc` in the future must be treated as stale, not as fresh.
+    # Panel: SPARK12CONT called this out for VM resume / dual-boot.
+    future_stamp = {"last_check_utc":
+                    (uc._now_utc() + __import__("datetime").timedelta(hours=48)).strftime(
+                        "%Y-%m-%dT%H:%M:%SZ")}
+    check(not uc.stamp_is_fresh(future_stamp),
+          "clock in the past: a future last_check is treated as stale (do not sleep for a week)")
+
+    # The disable env vars — one positive and one negative per gate.
+    for var in ("MODEL_ORCH_UPDATE_CHECK", "NO_UPDATE_NOTIFIER", "CI"):
+        os.environ.pop(var, None)
+    check(not uc.is_check_disabled(),
+          "no env vars set: check is enabled (the default is ON, which is why the LOCAL-only "
+          "hook design matters — the network path is opt-in via --install-hook only for "
+          "Method-2/3 users)")
+    os.environ["MODEL_ORCH_UPDATE_CHECK"] = "0"
+    check(uc.is_check_disabled(), "our own env=0 disables")
+    os.environ["MODEL_ORCH_UPDATE_CHECK"] = ""
+    os.environ["NO_UPDATE_NOTIFIER"] = "1"
+    check(uc.is_check_disabled(), "NO_UPDATE_NOTIFIER=1 disables (ecosystem convention)")
+    os.environ["NO_UPDATE_NOTIFIER"] = ""
+    os.environ["CI"] = "true"
+    check(uc.is_check_disabled(), "CI=true disables (every CI system sets it)")
+    os.environ["CI"] = "false"
+    check(not uc.is_check_disabled(),
+          "CI=false does NOT disable — the two-sided form of the CI check")
+    os.environ.pop("CI", None)
+
+    # The tags URL, not /releases/latest — measured live 2026-08-20, this repo's Releases
+    # stopped at v1.27.0 while tags climbed to v1.33.1. The panel would have caught it too
+    # (GROKBUILD). Two-sided: the correct endpoint IS used, and the broken one is NOT.
+    check("/tags" in uc.GITHUB_TAGS_URL, "the checker uses /tags, which is authoritative")
+    check("releases/latest" not in uc.GITHUB_TAGS_URL,
+          "the checker does NOT use /releases/latest, which returned v1.27.0 on 2026-08-20 "
+          "while the highest tag was v1.33.1")
+
+    # pick_latest_tag picks by tuple, not by list order. The API returns them in some order
+    # (usually reverse chronological, but that is not documented). The picker must not trust
+    # it, so a shuffled list still returns the max.
+    shuffled = [{"name": "v1.32.0"}, {"name": "v1.9.0"}, {"name": "v1.33.1"},
+                {"name": "v1.33.0"}, {"name": "not-a-tag"}]
+    check(uc.pick_latest_tag(shuffled) == "v1.33.1",
+          "pick_latest_tag returns the max version tuple regardless of list order — "
+          "1.33.1 > 1.32.0 > 1.9.0 in numeric tuple, would be 1.33.0 > 1.32.0 > 1.9.0 in "
+          "string order")
+
+    # The hook mode's message MUST NOT be emitted on a first-ever run — we do not know if the
+    # user has been on this version for a year or installed it yesterday, and nagging on
+    # first run is what teaches people to ignore the nag. Simulated via a temp install +
+    # empty stamp.
+    import tempfile
+    d = tempfile.mkdtemp(prefix="uc_selftest_")
+    (open(os.path.join(d, "VERSION"), "w", encoding="utf-8")
+        .write("1.33.1\n"))
+    stamp_path = os.path.join(d, ".stamp.json")
+    saved_here, saved_stamp = uc.HERE, uc.STAMP_PATH
+    try:
+        uc.HERE = d
+        uc.STAMP_PATH = stamp_path
+        action, msg = uc.do_local_delta()
+        check(action == "no-change" and msg is None,
+              "first-ever run seeds the stamp but does NOT nag — otherwise every fresh install "
+              "shows a bogus 'update' notice on session start")
+        # Second call with the same VERSION also stays silent.
+        action, msg = uc.do_local_delta()
+        check(action == "no-change" and msg is None,
+              "same version on a subsequent run is silent — the two-sided form of the above")
+        # Now bump the VERSION and expect exactly one notice.
+        with open(os.path.join(d, "VERSION"), "w", encoding="utf-8") as f:
+            f.write("1.34.0\n")
+        action, msg = uc.do_local_delta()
+        check(action == "local-update" and msg and "1.33.1" in msg and "1.34.0" in msg,
+              "a bumped VERSION file fires the notice exactly once, naming both versions")
+        action, msg = uc.do_local_delta()
+        check(action == "no-change" and msg is None,
+              "the notice fires ONCE — the second call is silent (stamp was updated)")
+    finally:
+        uc.HERE, uc.STAMP_PATH = saved_here, saved_stamp
+
+
 def suite_r55_child_env_and_first_error():
     """R55. A tool whose BINARY is missing, and an instrument that named the last frame."""
     section("R55. The child's PATH is a dependency, and the first error is the cause")
@@ -3935,7 +4066,8 @@ def main():
                   suite_r47_causes, suite_dedup_scripts, suite_r48_visibility,
                   suite_r49_record_integrity, suite_r55_child_env_and_first_error,
                   suite_r56_agy_concurrency_and_permissions,
-                  suite_r57_agy_capability_model):
+                  suite_r57_agy_capability_model,
+                  suite_r58_update_check):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
