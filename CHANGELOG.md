@@ -1,5 +1,93 @@
 # Changelog
 
+## 1.32.0 — 2026-08-19
+
+**Three ways the Antigravity channel loses a whole run, and none of them is the model's fault.**
+All three were measured this round on one brief through one code path, and the one that mattered
+most had been recorded a round earlier as «transient and unexplained».
+
+### 🔴🔴 Concurrent `agy` starts race on a shared tool cache; the loser's run is discarded
+
+Two arms, one variable:
+
+| arm | result |
+|---|---|
+| `agy31pro` **alone**, ×2 | ok — 207 s / 159 s, ~10 KB of review each |
+| `agy31pro` **beside its two siblings**, ×2 | **one channel dies at 4.1 s, 0 output tokens, empty answer** |
+
+2 of 6 concurrent launches died. The channel's own CLI log names it:
+
+```
+failed to write tool bulk_stealthy_fetch from server scrapling to tmp file:
+  ...mcp/scrapling/bulk_stealthy_fetch.json.tmp:
+  The process cannot access the file because it is being used by another process
+-> building toolbox: tool "mcp_scrapling_open_session" advertises an invalid parameter schema
+-> Print mode: run ended with error and no response
+```
+
+`agy` rewrites every MCP server's tool schemas into **one shared directory** at startup, through
+`.tmp` files. On Windows a file open for writing cannot be opened by a second process, so of N
+simultaneous starts one wins and the rest fall back to a path that needs a file nobody wrote.
+
+🔴 **The victim moves** — `agy31pro` in one repetition, `agy36flash` in the next. That is why the
+previous round called it transient: its replay ran the failing invocation **alone**, which is the
+one condition under which this cannot happen. *Replaying the invocation is not replaying the run.*
+
+Fixed by spacing agy launches (`AGY_START_SPACING`, default 8 s, `0` disables). It costs nothing
+on the wall clock — a channel runs 50–200 s and the cache write is over in the first few, so the
+slowest channel still sets the round's length. Verified: `being used by another process` appears
+**0 times** in both solo logs, **1–2 times in every** unstaggered concurrent log, and **0 times**
+in all three channels of a staggered run.
+
+### 🔴🔴 An UNLISTED tool cancels the turn. An explicitly DENIED one does not.
+
+Measured in three arms against the live CLI:
+
+| the tool is… | what happens | cost |
+|---|---|---|
+| allowed | runs | — |
+| **explicitly denied** | ordinary tool error, **the model recovers and finishes** | nothing |
+| **in neither list** | `Print mode: soft-denying tool confirmation`, status CANCELED | **the whole run** |
+
+So silence is the dangerous state, not refusal — the opposite of the intuition the allow-list was
+built on. A real round died this way on `jina-mcp-server/search_web_deep`: 56 s, 8 searches and
+3 898 output tokens discarded because the *server* had gained a tool nobody had written down. The
+same shape, on the same server, is recorded in `patch_agy_permissions.py` from nineteen days
+earlier and was fixed then by adding one name.
+
+`mcp(<server>/*)` **is** honoured, and **deny still beats it** (measured — the CLI names the rule
+it matched). So the free, local, read-only servers are now allowed by wildcard, and the tools a
+wildcard pulls into reach are denied in the same change. `firecrawl` and `playwright` are
+deliberately **not** wildcarded: one bills per page with no ceiling, the other drives a persistent
+profile holding live logins.
+
+🔴 Still open, and now diagnosable in one line instead of one round: the shell tool `RunCommand`
+is *unlisted*, so a model that reaches for it loses the run — measured again this round at 48 s
+and 2 840 tokens. Denying it in the shared settings would break interactive `agy` for its owner,
+so the fix belongs in the project-scoped permission layer the CLI logs as
+`ApplyProjectPermissionGrants`, which has not been probed yet.
+
+### Per-channel CLI logs — the instrument that made both findings readable
+
+`agy`'s default log path is `cli-<YYYYMMDD>_<HHMMSS>.log`, timestamped **to the second**, so a
+panel's simultaneous children computed one path and shared it — and the failing channel's record
+was the one overwritten. Each channel now gets its own via `--log-file`.
+
+🔴 **The log reader excludes the lines that are in every log.** Reading the failing panel's log
+for the first time, `You are not logged into Antigravity` repeated twelve times inside one second
+looked exactly like the answer. It is in **89 of 89** logs on this machine, successes included, as
+is `Agent "deep-researcher" not found`. Either would have made a confident root cause with a
+perfect citation. Only a log that did *not* fail can tell them apart.
+
+### The panel ledger is an event log now, not two sets
+
+Fourth instance of one shape in one function, and three reviewers found the hole in 1.31.1
+independently: `ADD → REMOVE → ADD` was unsayable, so re-admitting a channel forced deleting
+history — 1.31.1's defect with the arrow reversed. Worse, its no-churn property was enforced **by
+prose**: a human had to type a magic phrase into a removal reason. `PANEL_EVENTS` is an ordered,
+append-only list and the two sets are folded out of it, so churn is a structural contradiction
+(two ADDs with nothing between) rather than a sentence somebody must remember to write.
+
 ## 1.31.1 — 2026-08-19
 
 **The review panel said the 1.31.0 ledger change was a rationalisation, and it was right.**

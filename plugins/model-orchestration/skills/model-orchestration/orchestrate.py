@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 import re
@@ -5318,6 +5319,112 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
     return first
 
 
+# Lines that appear in EVERY agy CLI log, successful runs included, and therefore diagnose
+# nothing. Measured R56 over all 89 logs on this machine (2026-08-10..19):
+#
+#   "not logged into Antigravity"  20-52 occurrences in 89 of 89 logs, including every run that
+#                                  answered normally. It is the cold token cache at boot; the
+#                                  refresh that follows is what matters and it is logged
+#                                  separately as "Auth succeeded".
+#   "Migration ["                   startup bookkeeping, every run.
+#
+# 🔴 THIS LIST IS THE WHOLE POINT OF THE FUNCTION, AND IT COST A WRONG ROOT CAUSE TO WRITE.
+# Reading the failing panel's log for the first time, "You are not logged into Antigravity"
+# repeated twelve times inside one second looked exactly like the answer - an auth race between
+# three processes starting together. It is not: the control refutes it, because the identical
+# line is in the logs of runs that worked. A signature that is present in the failure and ALSO
+# present in every success has zero diagnostic value, and the only thing that separates the two
+# readings is having looked at a log that did NOT fail.
+_AGY_LOG_NOISE = ("not logged into Antigravity", "Migration [")
+
+
+def _agy_log_evidence(path, limit=6):
+    """The error-level lines from agy's own CLI log, minus the lines every log has.
+
+    Only consulted when a run produced no text at all: at that point the stream has nothing,
+    stderr has nothing, and this file is the only remaining witness. Scrubbed before it is
+    returned - a vendor log is not a place secrets are guaranteed to be absent, and this string
+    ends up in diagnostics.json, which exists to be pasted into a chat.
+    """
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            raw = f.read()
+    except OSError:
+        return []
+    out, seen = [], set()
+    # Level letter + date is glog's own format (`E0819 22:36:05.725823`). W and E only: the
+    # I-lines are progress, and there are thousands of them.
+    for m in re.finditer(r"[WE]\d{4} \d\d:\d\d:\d\d\.\d+\s+\d+\s+(\S+)\] (.+)", raw):
+        msg = m.group(2).strip()
+        if any(n in msg for n in _AGY_LOG_NOISE):
+            continue
+        key = (m.group(1), msg[:120])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append("%s] %s" % (m.group(1), msg[:200]))
+        if len(out) >= limit:
+            break
+    return [scrub(x) for x in out]
+
+
+# 🔴🔴 R56 — CONCURRENT agy PROCESSES RACE ON A SHARED TOOL-SCHEMA CACHE, AND THE LOSER'S RUN IS
+# DISCARDED AT ~4 SECONDS WITH ZERO TOKENS.
+#
+# Measured, two arms, one variable, on the same brief through the same code path:
+#
+#   agy31pro ALONE          x2   ok, 207 s / 159 s, ~10 KB of review each
+#   agy31pro + 2 SIBLINGS   x2   one channel dies at 4.1 s, 0 output tokens, empty answer
+#
+# The per-channel CLI log (which exists only because of --log-file above) names it:
+#
+#   failed to write tool bulk_stealthy_fetch from server scrapling to tmp file:
+#   open ~/.gemini/antigravity-cli/mcp/scrapling/bulk_stealthy_fetch.json.tmp:
+#   The process cannot access the file because it is being used by another process
+#   -> building toolbox: tool "mcp_scrapling_open_session" advertises an invalid parameter
+#      schema: ... tool-parameters.json: The system cannot find the file specified
+#   -> Print mode: run ended with error and no response
+#
+# agy caches every MCP server's tool schemas under ONE shared directory and rewrites it at
+# startup through .tmp files. On Windows a file open for writing cannot be opened by a second
+# process, so of N simultaneous starts one wins and the others fall back to "eagerly loading all
+# tools", which needs a file that was never written. The toolbox then fails to build and the
+# agent terminates before its first token.
+#
+# 🔴 THE CONTROL IS WHAT MAKES THIS A FINDING: `being used by another process` appears 0 times in
+# both solo logs and 1-2 times in every concurrent one. Two other signatures in the same log
+# looked just as damning and are in the SUCCESSFUL logs too - «You are not logged into
+# Antigravity» (20-52x in all 89 logs on this machine) and «Agent "deep-researcher" not found».
+# Either would have made a confident, wrong root cause.
+#
+# 🔴 AND THE VICTIM IS ARBITRARY: in the second concurrent repetition the channel that died was
+# agy36flash, not agy31pro. That is why R55 recorded this as «transient and unexplained» - it
+# moves between rounds, and R55's replay ran the exact panel invocation ALONE, which is the one
+# condition under which it cannot happen. Replaying the INVOCATION is not replaying the RUN.
+#
+# The fix is to stop the starts overlapping, not to serialise the runs: a channel takes 50-200 s
+# and the cache write is over in the first few, so spacing the launches costs nothing on the
+# wall clock (the slowest channel still sets the round's length) and removes the race entirely.
+# Structurally cleaner would be a private state directory per child - the log shows agy resolving
+# a `GeminiDir` - but that directory also holds the subscription's OAuth credentials, so pointing
+# a child elsewhere is a separate, carefully-probed change, not a same-round fix.
+_AGY_START_LOCK = threading.Lock()
+_AGY_LAST_START = [0.0]
+
+
+def _agy_stagger():
+    """Hold the next agy launch until the previous one is past its cache-writing window."""
+    gap = float(os.environ.get("AGY_START_SPACING", "8"))
+    if gap <= 0:
+        return 0.0
+    with _AGY_START_LOCK:
+        wait = max(0.0, _AGY_LAST_START[0] + gap - time.time())
+        if wait:
+            time.sleep(wait)
+        _AGY_LAST_START[0] = time.time()
+    return wait
+
+
 def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeout="25m",
               system=None, add_dirs=None):
     """
@@ -5407,11 +5514,29 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
     # and the stderr line that can masquerade as an answer is gone. The R45 rule again, on our
     # own side this time: assert the EFFECT, never the exit code. A CLI that exits 0 while
     # telling you the argument was rubbish is the normal case, not the exception.
+    # 🔴🔴 R56: --log-file, AND THE REASON IS THAT THE DEFAULT PATH IS A WALL CLOCK.
+    # agy names its own log `~/.gemini/antigravity-cli/log/cli-<YYYYMMDD>_<HHMMSS>.log`, to the
+    # SECOND. A panel starts every agy child in the same second, so three processes computed one
+    # path and shared it. Measured on the r55 panel: three agy children launched at 22:36:05 and
+    # left ONE 31 KB log carrying two `Auth succeeded` lines, one `Starting language server`
+    # line, and bytes interleaved mid-token (`...pid 4486ER` + `ERROR:`). agy31pro's own
+    # conversation id appears in it ZERO times - the one channel that FAILED is the one whose
+    # record was overwritten, which is the worst possible way to lose a log.
+    #
+    # This is instrumentation, not a fix: it does not change what agy does, it changes whether
+    # the next failure can be read. R45's rule - when a run dies for an unknown reason the next
+    # move is an INSTRUMENT, not a hypothesis - applied to the channel that taught it to us.
+    #
+    # Verified by execution before being wired in (a knob you only SENT is not a knob): with
+    # `--log-file <path>` the file appears at that path at 30 100 bytes and the default log
+    # directory's file count is UNCHANGED (124 -> 124), so the log is diverted, not copied.
+    agy_log = os.path.splitext(outfile)[0] + ".agy-cli.log"
     cmd += ["--model", mdl,
             "--effort", effort,
             "--agent", AGY_AGENT,
             "--sandbox",
             "--output-format", "stream-json",   # the ONLY way this channel reports tool use
+            "--log-file", agy_log,              # see above: the default path collides per second
             "--print-timeout", timeout]         # default truncates at 5m
     # Refs mode (--attach): grant the CLI access to each attachment's folder. --add-dir is the
     # documented workspace grant; without it a read of an out-of-workspace path can be denied,
@@ -5419,6 +5544,11 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
     # --sandbox and the permission allowlist, so no write surface is opened by this.
     for d in (add_dirs or []):
         cmd += ["--add-dir", d]
+    waited = _agy_stagger()   # see _AGY_START_LOCK: concurrent starts corrupt a shared tool cache
+    if waited > 0.5:
+        log("  [agy] held %.0fs so this launch does not overlap another agy start - "
+            "simultaneous starts race on the shared MCP tool-schema cache and the loser's run "
+            "is discarded at ~4s with no output" % waited)
     try:
         # cwd must be the workspace or the workspace-scoped agent is never discovered.
         # env: see posix_tools_dir() - without it this channel's grep_search tool cannot
@@ -5457,6 +5587,35 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
                     "POSIX_TOOLS_DIR is wrong. The model's fallback for a broken search tool "
                     "is a shell command, and that IS denied and fatal."
                     % (missing_bin[0][0], len(missing_bin), missing_bin[0][1]))
+    # 🔴🔴 R56: AN UNLISTED TOOL IS FATAL; AN EXPLICITLY DENIED ONE IS NOT. Measured on 1.1.16
+    # by running all three cases (runs/r56/permprobe): a tool in the DENY list comes back as an
+    # ordinary tool error - «Permission denied for mcp(...). Matches user-configured deny rule» -
+    # and the model recovers and finishes. A tool in NEITHER list produces
+    # `Print mode: soft-denying tool confirmation "CallMcpTool" at step N`, status CANCELED, and
+    # every token of work is thrown away. So the dangerous state is silence, not refusal, and
+    # the two must not share a warning: one is a policy working as intended, the other is a lost
+    # round. This block reports the second, and it is the ONLY place that can - the soft-deny is
+    # absent from stream-json and from stderr, and lives solely in the CLI log that --log-file
+    # now gives this channel.
+    soft = []
+    try:
+        with open(agy_log, encoding="utf-8", errors="replace") as f:
+            soft = re.findall(r'soft-denying tool confirmation "([^"]+)" at step (\d+)', f.read())
+    except OSError:
+        pass
+    if soft:
+        warn.append(
+            "AN UNLISTED TOOL CANCELLED THE RUN (not a denial - a MISSING RULE). The CLI "
+            "soft-denied %r at step %s because it is in neither the allow nor the deny list, "
+            "and in print mode that discards the whole turn: %s output tokens over %s tool "
+            "calls in %.0fs were thrown away. An explicitly DENIED tool would have returned an "
+            "error and the model would have carried on. Fix: add a rule for it - "
+            "`python patch_agy_permissions.py` wildcards the free read-only MCP servers "
+            "(`mcp(<server>/*)`) so a tool the server gains later cannot do this again. The "
+            "tool's own name is not in the stream; find it in the conversation store, or "
+            "wildcard the server and stop maintaining a list of somebody else's tool names."
+            % (soft[0][0], soft[0][1], ev.get("out_tokens") or 0,
+               sum(ev["tools"].values()), secs))
     denial = [e for e in ev["errors"] if "denied permission" in e]
     if denial or ("permission that headless mode cannot prompt for" in (p.stderr or "")):
         first = ""
@@ -5505,6 +5664,23 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
                    % (len(ev["error_seq"]), ev["error_seq"][0][1], ev["error_seq"][0][0]))
             if len(ev["error_seq"]) > 1 and ev["error_seq"][-1][1] != ev["error_seq"][0][1]:
                 why += " Last was %r from %r." % (ev["error_seq"][-1][1], ev["error_seq"][-1][0])
+        # 🔴 R56: THIS USED TO SIT INSIDE `if result_error`, WHICH IS THE ONE BRANCH THAT ALREADY
+        # HAD AN EXPLANATION. The case with nothing to say is `status: CANCELED` - no
+        # result_error, no tool error, empty text - and that is exactly the soft-deny above. So
+        # the last witness was consulted only when it was not needed. Same shape as R50's «a
+        # guard that runs on one branch of six»: count the paths that reach the reporting line,
+        # not the paths that set it up. Consulted whenever the answer is empty, whatever the
+        # stream said about why.
+        if not text.strip() and not soft:
+            ev_lines = _agy_log_evidence(agy_log)
+            if ev_lines:
+                why += (" From this channel's own CLI log (%s), error-level lines that are NOT "
+                        "present in a normal run: %s"
+                        % (os.path.basename(agy_log), " | ".join(ev_lines)))
+            else:
+                why += (" Its CLI log (%s) holds no error-level line beyond the ones every run "
+                        "logs, so the CLI itself recorded no cause."
+                        % os.path.basename(agy_log))
         warn.append("END MARKER ABSENT - output is incomplete, do not parse it as a review." + why)
     note = []
     record_refusal(refusal_check(text, marker, min_chars=500), warn, note)

@@ -2620,57 +2620,97 @@ def suite_panels():
     # it matches. Splitting them keeps the alarm on the half that matters: a name leaving
     # DICTATED_CHEAP is still a hard failure, while an addition costs one deliberate line here
     # that has to say WHY the channel is cheap.
-    ADDED_TO_CHEAP_SINCE = {
-        # R44, 2026-08-16. Both belong by the criterion the panel names - cost - and both were
-        # added at Igor's request in the same message that asked for the models.
-        # NOTE grokbuild carries `enabled: false`: panel membership and enablement are different
-        # questions, and it is filed here as cheap so that turning it on later needs no second
-        # decision about which room it belongs in.
-        "grokbuild":  "subscription CLI, free at the margin exactly like the agy seats",
-        "orglm52":    "$0.308/M in, cheaper than ordeepseekv4pro which he did name as cheap",
-        # R54, 2026-08-19, Igor: «Добавь так же временно Luna Pro для теста, посмотрим как быстро
-        # будет отвечать, не будет ли тормозить других в cheap panel». He put it in the cheap panel
-        # himself, and the price agrees: $0.20/M in and $1.20/M out, read live, which is a TENTH of
-        # its Sol Pro sibling and cheaper per token than any other metered member of this panel.
-        # 🔴 TEMPORARY BY HIS OWN WORD, and nothing here expires it - the channel's `_temporary`
-        # key says what ends the trial. If this line is still present long after the latency
-        # question has an answer, that is the trial having quietly become permanent.
-        # 🟢 IT DID NOT. The trial ended in R55 with a NO and the channel moved to `standard`;
-        # this line STAYS, paired with the matching entry in REMOVED_FROM_CHEAP_SINCE below.
-        # Deleting it would have been the tidier-looking edit and the wrong one: this table is a
-        # ledger, and erasing the addition would erase the fact that the trial ever happened -
-        # the same shape of quiet deletion that REMOVED_FROM_CHEAP_SINCE was created to stop.
-        "orgpt56lunapro": "$0.20/M in - a tenth of Sol Pro; added as a TEMPORARY latency test",
-    }
-    # 🔴🔴 AN ADDITION HAD A NAMED HOME AND A REMOVAL HAD NONE, WHICH IS ITSELF THE DEFECT.
+    # 🔴🔴🔴 R56 — FOURTH INSTANCE OF ONE CLASS IN ONE FUNCTION, AND THE PANEL NAMED THE CURE.
     #
-    # `ADDED_TO_CHEAP_SINCE` exists because equating "the dictated set" with "the current set"
-    # went red on every legitimate addition and «trains the next person to edit the expected
-    # value until it matches» - the comment above says so in those words. The mirror case had no
-    # such home: the only way to record a legitimate REMOVAL was to quietly delete a name from
-    # DICTATED_CHEAP, i.e. to do exactly the thing the anchor exists to make impossible. Found
-    # 2026-08-19 the first time Igor asked for a removal; the test was right to fire and the file
-    # had nowhere to put the answer. A removal now costs the same one deliberate line an addition
-    # does, and the anchor still fails hard on any name that leaves without one.
-    REMOVED_FROM_CHEAP_SINCE = {
-        "ordeepseekv4pro":
-            "R48, 2026-08-19, Igor by name: «перенеси его в дорогую панель». It was the most "
-            "expensive member of the cheap panel by a wide margin - $0.7732 of the $3.97 R43 "
-            "round, $0.3653 in R42 - and the panel keeps two other `role: code` voices "
-            "(grokbuild, orglm52), so nothing is orphaned. Still reachable: standard INCLUDES "
-            "cheap, so `--panel standard` runs it.",
-        # The words ADDED_TO_CHEAP_SINCE below are load-bearing, not decoration: the pairing check
-        # looks for them, so a removal that cancels an addition has to SAY it cancels one.
-        "orgpt56lunapro":
-            "Cancels this channel's entry in ADDED_TO_CHEAP_SINCE (R54). "
-            "R55, 2026-08-19, Igor by name: «Luna pro перенеси из cheap panel в standart». It "
-            "entered the cheap panel in R54 as a TIMED TRIAL and the trial returned a NO: 604 s "
-            "and $0.8629 in its first real round - the last channel to return, and the highest "
-            "single-channel spend of the fourteen, on the cheapest metered rate card in the "
-            "registry. That pair is the finding: a RATE IS NOT A BILL, so `cost` and `panel` are "
-            "allowed to disagree and here they did. The entry in ADDED_TO_CHEAP_SINCE is kept "
-            "deliberately - an addition and its removal are two events, not one correction.",
-    }
+    # The history, because the pattern is the point and each step looked like a fix:
+    #   1. `actual_cheap == DICTATED_CHEAP` went red on every legitimate ADDITION.
+    #      Fix: a second table, ADDED_TO_CHEAP_SINCE.
+    #   2. A legitimate REMOVAL had nowhere to go, so the only green edit was to delete a name
+    #      from the anchor. Fix: a third table, REMOVED_FROM_CHEAP_SINCE.
+    #   3. R55: a channel added as a trial and removed when the trial answered no landed in BOTH
+    #      tables and tripped a disjointness assertion. I deleted the assertion. The r55 review
+    #      panel was asked whether that was a rationalisation and NINE OF ELEVEN said yes -
+    #      grokbuild: «the replacement is ALSO a normalisation rule in a safety-check's
+    #      clothing». Fix: assert the end state AND require the removal reason to name the
+    #      addition it cancels.
+    #   4. That fix has its own hole, and THREE channels found it independently (grokbuild,
+    #      agy37flash, goog37flash): ADD -> REMOVE -> ADD. A re-admitted channel is in both books
+    #      AND in the panel, so `not (_both & actual_cheap)` goes red, and the only green edit is
+    #      to delete a ledger line. That is step 2's defect with the arrow reversed.
+    #      🔴 Worse, the R55 fix was PROSE-ENFORCED: it required a human to type the words
+    #      "ADDED_TO_CHEAP_SINCE" into a removal reason. This project's own hard rule is that
+    #      prose enforces nothing.
+    #
+    # Two sets cannot express a sequence, and four rounds of predicates over two sets is four
+    # rounds of rearranging the furniture. So: ONE ORDERED, APPEND-ONLY EVENT LOG, and the sets
+    # are DERIVED by folding it. Add, remove, and re-add are all sayable; nothing has to be
+    # deleted to go green; and «no silent churn» stops being a sentence somebody must remember to
+    # write and becomes a structural property - two consecutive events of the same kind for one
+    # channel is a contradiction the fold can see.
+    #
+    # Append at the bottom. Never edit or delete a line above: this is the record of what was
+    # decided and why, and every defect in the list above came from a table that made deleting
+    # history the tidiest-looking edit.
+    PANEL_EVENTS = [
+        # (when, ADD|REMOVE, channel, why - who decided and on what evidence)
+        ("R44 2026-08-16", "ADD", "grokbuild",
+         "Igor, in the same message that asked for the model: subscription CLI, free at the "
+         "margin exactly like the agy seats. NOTE it carries `enabled: false` - panel membership "
+         "and enablement are different questions, and filing it as cheap means turning it on "
+         "later needs no second decision about which room it belongs in."),
+        ("R44 2026-08-16", "ADD", "orglm52",
+         "Igor, same message: $0.308/M in, cheaper than ordeepseekv4pro which he did name as "
+         "cheap."),
+        ("R48 2026-08-19", "REMOVE", "ordeepseekv4pro",
+         "Igor by name: «перенеси его в дорогую панель». It was the most expensive member of the "
+         "cheap panel by a wide margin - $0.7732 of the $3.97 R43 round, $0.3653 in R42 - and "
+         "the panel keeps two other `role: code` voices (grokbuild, orglm52), so nothing is "
+         "orphaned. Still reachable: standard INCLUDES cheap, so `--panel standard` runs it."),
+        ("R54 2026-08-19", "ADD", "orgpt56lunapro",
+         "Igor: «Добавь так же временно Luna Pro для теста, посмотрим как быстро будет отвечать, "
+         "не будет ли тормозить других в cheap panel». He put it in the cheap panel himself and "
+         "the price agreed: $0.20/M in, $1.20/M out, read live - a TENTH of its Sol Pro sibling. "
+         "TEMPORARY by his own word; the channel's `_temporary` key says what ends the trial."),
+        ("R55 2026-08-19", "REMOVE", "orgpt56lunapro",
+         "Igor by name: «Luna pro перенеси из cheap panel в standart». The R54 trial returned a "
+         "NO: 604 s and $0.8629 in its first real round - the last channel to return and the "
+         "highest single-channel spend of fourteen, on the CHEAPEST metered rate card in the "
+         "registry. That pair is the finding: A RATE IS NOT A BILL, so `cost` and `panel` are "
+         "allowed to disagree, and here they did."),
+    ]
+    # The fold. Last event per channel wins; order is the file's order, which is why the list is
+    # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
+    # the checks below and the round notes both refer to them - but they are now COMPUTED, so
+    # they cannot drift from the record they summarise.
+    _net = {}
+    for _when, _act, _ch, _why in PANEL_EVENTS:
+        _net[_ch] = _act
+    ADDED_TO_CHEAP_SINCE = {c: w for _t, a, c, w in PANEL_EVENTS
+                            if a == "ADD" and _net[c] == "ADD"}
+    REMOVED_FROM_CHEAP_SINCE = {c: w for _t, a, c, w in PANEL_EVENTS
+                                if a == "REMOVE" and _net[c] == "REMOVE"}
+
+    check(all(a in ("ADD", "REMOVE") for _t, a, _c, _w in PANEL_EVENTS),
+          "every panel event is an ADD or a REMOVE",
+          "bad=%s" % sorted({a for _t, a, _c, _w in PANEL_EVENTS} - {"ADD", "REMOVE"}))
+    check(all(w and t for t, _a, _c, w in PANEL_EVENTS),
+          "every panel event states when it happened and who decided it, and why")
+    # 🔴 THIS IS THE NO-SILENT-CHURN PROPERTY, AND IT IS NOW STRUCTURAL RATHER THAN A SENTENCE.
+    # spark12cont named the property and mimo25pro named the scenario: a channel entering the
+    # ledger twice through churn - two additions with no removal between them - rather than
+    # through one deliberate trial. Under two sets that was invisible. Under a sequence it is a
+    # contradiction: you cannot add what is already in, or remove what is already out.
+    _seq_bad = []
+    _state = {}
+    for _t, a, c, _w in PANEL_EVENTS:
+        if _state.get(c) == a:
+            _seq_bad.append("%s %s %s (already %sED)" % (_t, a, c, a))
+        _state[c] = a
+    check(not _seq_bad,
+          "no channel is ADDed twice running or REMOVEd twice running - a repeat with nothing "
+          "in between is churn or a copy-paste, not a decision, and a sequence can see it where "
+          "two sets could not",
+          "; ".join(_seq_bad))
     # ---- R54: a declared fallback chain that can never fire ------------------------------------
     # 🔴 MEASURED, NOT READ: with `provider.allow_fallbacks: false`, a chain declared here does not
     # survive an upstream failure. Three arms holding the provider pin constant, the primary
@@ -2767,27 +2807,19 @@ def suite_panels():
     # because the end state looks identical. spark12cont named the property in one phrase: the
     # books encode an audit trail, and what disjointness bought was NO SILENT CHURN.
     #
-    # So both halves are now asserted, and neither substitutes for the other:
-    #   (a) the end state - a name in both books really is out of the panel;
-    #   (b) the trail - a pairing must be DELIBERATE, which means the removal entry has to name
-    #       the addition it cancels. Churn cannot write that sentence by accident.
-    # That keeps R55's fix (an added-then-removed channel is recordable at all) without keeping
-    # R55's hole. Deleting a safety check because the reason it fired is inconvenient is exactly
-    # what a panel is for.
-    _both = set(REMOVED_FROM_CHEAP_SINCE) & set(ADDED_TO_CHEAP_SINCE)
-    check(not (_both & actual_cheap),
-          "a channel recorded as both added to and removed from the cheap panel is really out "
-          "of it now - both entries stay, because an addition and its later removal are two "
-          "events and deleting the first one erases why it was ever tried",
-          "recorded as removed but still in cheap=%s" % sorted(_both & actual_cheap))
-    _unacknowledged = sorted(
-        c for c in _both
-        if "ADDED_TO_CHEAP_SINCE" not in str(REMOVED_FROM_CHEAP_SINCE.get(c, "")))
-    check(not _unacknowledged,
-          "a channel in BOTH ledgers has a removal reason that explicitly names the addition it "
-          "cancels - a deliberate trial can say that sentence and accidental churn cannot, which "
-          "is the no-silent-churn property the old disjointness rule was really buying",
-          "in both books without acknowledging the addition=%s" % _unacknowledged)
+    # 🔴 SUPERSEDED IN R56, BY THE SAME PANEL, ONE LEVEL DEEPER. The two checks that stood here
+    # asserted (a) the end state and (b) that a removal reason contains the literal string
+    # "ADDED_TO_CHEAP_SINCE". (b) was the no-silent-churn property enforced BY PROSE - a human
+    # had to remember to type a magic phrase - and this project's own hard rule is that prose
+    # enforces nothing. Both are now structural consequences of PANEL_EVENTS being a sequence
+    # instead of two sets: churn is a repeated action with nothing between it, caught at the fold
+    # above, and the end state is the fold itself, checked by the set-equality assertion higher
+    # up. The re-admission hole (ADD -> REMOVE -> ADD, which check (a) made unsayable and which
+    # grokbuild, agy37flash and goog37flash each found independently) is gone by construction.
+    #
+    # What survives here is the half that is genuinely about the REGISTRY rather than the ledger:
+    # a channel written out of the cheap panel must still exist somewhere, unless its reason says
+    # it is dead.
     check(all(c in CH for c in set(REMOVED_FROM_CHEAP_SINCE) - _retired),
           "a channel DEMOTED out of the cheap panel still exists in the registry; one that is "
           "gone for good says RETIRED in its reason",
@@ -3443,6 +3475,92 @@ def suite_r49_record_integrity():
           "run's beliefs, which is the property that stopped round 46 recurring")
 
 
+def suite_r56_agy_concurrency_and_permissions():
+    """R56. Three ways this channel loses a whole run, and none of them is the model's fault.
+
+    All three were measured this round, on the same brief through the same code path:
+
+      1  CONCURRENT STARTS RACE ON A SHARED TOOL CACHE. Solo 2/2 ok; beside its two siblings,
+         one channel dies at ~4 s with 0 output tokens. 2 of 6 concurrent launches, and the
+         victim MOVES (agy31pro once, agy36flash once) - which is why R55 wrote it off as
+         transient. `being used by another process` appears 0x in both solo logs and 1-2x in
+         every concurrent one.
+      2  AN UNLISTED TOOL CANCELS THE TURN; AN EXPLICITLY DENIED ONE DOES NOT. Measured in
+         three arms: denied -> ordinary tool error, model recovers and answers; unlisted ->
+         `Print mode: soft-denying tool confirmation`, status CANCELED, everything discarded.
+      3  THE DEFAULT LOG PATH IS A WALL CLOCK, so simultaneous starts share one file and the
+         failing channel's record is the one that gets overwritten.
+
+    What is asserted here is that each fix REACHES THE CALL - the R31 rule, because a knob that
+    is only configured is not a knob.
+    """
+    print("\n" + "=" * 78)
+    print("R56. Concurrent agy starts, and the difference between denied and unlisted")
+    print("=" * 78)
+    src = open(os.path.join(HERE, "orchestrate.py"), encoding="utf-8").read()
+
+    # 1 - the stagger, and that it is applied BEFORE the launch rather than merely defined
+    check("_agy_stagger()" in src and "def _agy_stagger" in src,
+          "the agy launch is spaced by _agy_stagger() - concurrent starts corrupt a shared MCP "
+          "tool-schema cache and the loser's run is discarded before its first token")
+    i_call, i_run = src.find("waited = _agy_stagger()"), src.find("p, secs = _run(cmd, timeout=3600")
+    check(0 < i_call < i_run,
+          "the stagger is taken BEFORE the subprocess starts, not after it - the race is in the "
+          "first seconds of startup",
+          "stagger@%d launch@%d" % (i_call, i_run))
+    import orchestrate as _o
+    prev = os.environ.get("AGY_START_SPACING")
+    try:
+        os.environ["AGY_START_SPACING"] = "0"
+        _o._agy_stagger()
+        check(_o._agy_stagger() == 0.0,
+              "AGY_START_SPACING=0 disables the wait, so a single-channel run pays nothing and "
+              "the value is not frozen into the code")
+    finally:
+        if prev is None:
+            os.environ.pop("AGY_START_SPACING", None)
+        else:
+            os.environ["AGY_START_SPACING"] = prev
+
+    # 2 - the warning must distinguish the two permission states, because they need opposite fixes
+    check("soft-denying tool confirmation" in src,
+          "the harness reads the CLI log for a SOFT-DENY - that event appears in neither "
+          "stream-json nor stderr, so without this a cancelled run has no recorded cause")
+    check("not a denial - a MISSING RULE" in src,
+          "the soft-deny warning says the tool was UNLISTED, not denied - they look identical "
+          "in the result frame and need opposite fixes, and calling the wrong one sent two AOS "
+          "rounds to a patch script that could not apply")
+    perms = open(os.path.join(HERE, "patch_agy_permissions.py"), encoding="utf-8").read()
+    for srv in ("jina-mcp-server", "crawl4ai", "scrapling", "cloakbrowser"):
+        check("mcp(%s/*)" % srv in perms,
+              "the %s MCP server is allowed by WILDCARD, so a tool it gains later cannot cancel "
+              "a round - enumerating someone else's tool names is a treadmill that has now cost "
+              "two rounds nineteen days apart" % srv)
+    # ...and the two servers that must NEVER be wildcarded, for reasons that cost money or leak.
+    for srv, why in (("firecrawl", "bills per page with no ceiling on firecrawl_crawl"),
+                     ("playwright", "drives a persistent profile holding live logins")):
+        check("mcp(%s/*)" % srv not in perms,
+              "the %s server is NOT wildcarded - %s, so an unknown new tool there must cost a "
+              "cancelled run rather than a bill or a session" % (srv, why))
+    # `.split("DENY = [")`, not `.split("DENY")`: the bare word appears in this file's own prose
+    # several times, so the loose split took a section that ends before the list and the check
+    # went red on correct code. A separator that also matches the discussion of the thing is the
+    # R51 shape - keying on a spelling instead of on the structure.
+    check("mcp(jina-mcp-server/show_api_key)" in perms.split("DENY = [")[-1],
+          "wildcarding a server pulled its credential-revealing tool into reach, and the SAME "
+          "change denies it - a widened allow and its matching deny belong in one commit")
+
+    # 3 - the per-channel log, which is what made 1 and 2 diagnosable at all
+    check('"--log-file", agy_log' in src,
+          "each agy channel writes its own CLI log - the default path is timestamped to the "
+          "SECOND, so a panel's simultaneous children shared one file and the failing channel's "
+          "record was the one overwritten")
+    check("_AGY_LOG_NOISE" in src and "not logged into Antigravity" in src,
+          "the log reader excludes the lines present in EVERY log - «not logged into "
+          "Antigravity» appears 20-52 times in all 89 logs on this machine, successes included, "
+          "and reading it as the cause is a root cause with a perfect citation and no control")
+
+
 def suite_r55_child_env_and_first_error():
     """R55. A tool whose BINARY is missing, and an instrument that named the last frame."""
     section("R55. The child's PATH is a dependency, and the first error is the cause")
@@ -3706,7 +3824,8 @@ def main():
                   suite_agy_plan_class, suite_spend_guard, suite_panels,
                   suite_max_depth_and_explicit_only, suite_refs_and_meters,
                   suite_r47_causes, suite_dedup_scripts, suite_r48_visibility,
-                  suite_r49_record_integrity, suite_r55_child_env_and_first_error):
+                  suite_r49_record_integrity, suite_r55_child_env_and_first_error,
+                  suite_r56_agy_concurrency_and_permissions):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

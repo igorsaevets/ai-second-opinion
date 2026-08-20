@@ -46,23 +46,39 @@ if hasattr(sys.stdout, "reconfigure"):
 
 SETTINGS = os.path.join(os.path.expanduser("~"), ".gemini", "antigravity-cli", "settings.json")
 
-# Free and read-only. These are what a research reviewer actually needs; every one of them
-# would otherwise be auto-denied in headless mode and take the whole run down with it.
+# 🔴🔴 R56 2026-08-19 — THREE STATES, NOT TWO, AND THE HARMLESS-SOUNDING ONE IS THE FATAL ONE.
+# Measured on agy 1.1.16 by running each case (runs/r56/permprobe/results.json):
+#
+#   allowed            the tool runs.
+#   explicitly DENIED  the tool returns an ordinary error - «Permission denied for
+#                      mcp(jina-mcp-server/search_web). Matches user-configured deny rule» -
+#                      and THE MODEL CARRIES ON AND FINISHES. Arm 3 still answered.
+#   neither (UNLISTED) `Print mode: soft-denying tool confirmation "CallMcpTool" at step N`,
+#                      status CANCELED, THE WHOLE TURN IS DISCARDED.
+#
+# So a deny is cheap and silence is what costs a round. The old list below was an ENUMERATION of
+# tool names against somebody else's server, which means the default state for anything the
+# server gains later is the fatal one. That is not hypothetical and it is not new: the docstring
+# above records 2026-07-31 losing a run to `jina-mcp-server/read_url`, fixed by adding the name -
+# and on 2026-08-19 an agy31pro run died at 56 s, 3 898 output tokens and 8 searches thrown away,
+# on `jina-mcp-server/search_web_deep`. Same server, same shape, nineteen days apart. A list that
+# has to keep pace with an upstream server is a treadmill, and every lap costs a whole review.
+#
+# `mcp(<server>/*)` IS honoured (arm 2), and deny still beats it (arm 3). So: wildcard the servers
+# whose whole toolset is free, local and read-only, and keep an enumeration exactly where a wrong
+# guess costs money or leaks a credential.
+#
+# NOT wildcarded, deliberately:
+#   firecrawl   metered per page, no ceiling on firecrawl_crawl. A new Firecrawl tool must cost a
+#               cancelled run rather than an unbounded bill.
+#   playwright  runs against a PERSISTENT profile holding live logins, and ships
+#               browser_run_code_unsafe. A research reviewer has no business there.
 ALLOW = [
     "read_url(*)",
-    "mcp(jina-mcp-server/read_url)",
-    "mcp(jina-mcp-server/parallel_read_url)",
-    "mcp(jina-mcp-server/search_web)",
-    "mcp(jina-mcp-server/parallel_search_web)",
-    "mcp(jina-mcp-server/search_arxiv)",
-    "mcp(jina-mcp-server/extract_pdf)",
-    "mcp(crawl4ai/crawl_url)",
-    "mcp(crawl4ai/crawl_clean)",
-    "mcp(crawl4ai/crawl_many)",
-    "mcp(crawl4ai/extract_links)",
-    "mcp(scrapling/get)",
-    "mcp(scrapling/fetch)",
-    "mcp(scrapling/stealthy_fetch)",
+    "mcp(jina-mcp-server/*)",   # free, read-only search/fetch; show_api_key denied below
+    "mcp(crawl4ai/*)",          # local process, no network cost beyond the fetch itself
+    "mcp(scrapling/*)",         # local process
+    "mcp(cloakbrowser/*)",      # local browser; the scripting tools are denied below
     "mcp(firecrawl/firecrawl_scrape)",   # 1 credit, markdown only - the sanctioned last resort
     "mcp(firecrawl/firecrawl_map)",      # 1 credit flat for any number of URLs
 ]
@@ -85,6 +101,18 @@ DENY = [
     "mcp(firecrawl/firecrawl_research_related_papers)",
     "mcp(firecrawl/firecrawl_research_read_paper)",
     "mcp(firecrawl/firecrawl_research_inspect_paper)",
+
+    # 🔴 R56: these become REACHABLE the moment their server is wildcarded above, so they have to
+    # be named here in the same change. Denying them is not a cost - a denied tool returns an
+    # error and the run continues (measured, see the ALLOW comment); it is the unlisted state
+    # that kills a run. So the deny list is where a wildcard's blast radius gets cut back, and
+    # every entry below is a tool a *research reviewer* has no reason to call.
+    "mcp(jina-mcp-server/show_api_key)",     # prints the account's own API key into the answer
+    "mcp(cloakbrowser/cloak_evaluate)",      # arbitrary JS in a real browser
+    "mcp(cloakbrowser/cloak_set_cookies)",   # session material
+    "mcp(cloakbrowser/cloak_get_cookies)",   # session material, outbound
+    "mcp(cloakbrowser/cloak_network_intercept)",
+    "mcp(cloakbrowser/cloak_network_continue)",
 ]
 
 
