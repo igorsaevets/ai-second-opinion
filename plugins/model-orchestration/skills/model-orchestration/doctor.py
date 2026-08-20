@@ -425,14 +425,34 @@ def check_agy_permissions(r, mod):
         shell_denied = "command(*)" in deny
     except Exception:                                                         # noqa: BLE001
         pass
+    # 🔴🔴 THIS LINE IS COMPUTED, AND THE SECOND ATTEMPT IS WHY. The first version of this fix
+    # replaced one hand-written summary ("allow-rules present and firecrawl_crawl denied") with
+    # another hand-written summary ("shell + firecrawl + playwright explicitly denied"). Within
+    # the hour the deny list changed - firecrawl went back to named rules, playwright came off
+    # entirely - and the new sentence was false in exactly the way the old one had been. Writing
+    # a truer sentence does not fix a hand-written status line; only deriving it does. So the
+    # summary counts what is actually in the shipped rule set and names the servers it finds.
+    try:
+        import importlib.util as _ilu
+        _sp = _ilu.spec_from_file_location(
+            "_agy_perms_doc", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                           "patch_agy_permissions.py"))
+        _pm = _ilu.module_from_spec(_sp)
+        _sp.loader.exec_module(_pm)
+        servers = sorted({d.split("(")[1].split("/")[0] for d in _pm.DENY if d.startswith("mcp(")})
+        summary = "%d allow / %d deny rule(s); denied MCP servers: %s" % (
+            len(_pm.ALLOW), len(_pm.DENY), ", ".join(servers) or "none")
+    except Exception:                                                         # noqa: BLE001
+        summary = "rule set current (could not read the patch script to describe it)"
+
     if shell_denied is False:
         r.ok("agy permissions",
-             "MCP rules current; shell NOT denied (--keep-shell) - the interactive TUI keeps its "
-             "shell, and a headless run that reaches for one still loses the whole review")
+             "%s. Shell NOT denied (--keep-shell): the interactive TUI keeps its shell, and a "
+             "headless run that reaches for one still loses the whole review" % summary)
     else:
         r.ok("agy permissions",
-             "current: every MCP server allowed by mcp(*), shell + firecrawl + playwright "
-             "explicitly denied (a denial is survivable; only an unlisted tool is fatal)")
+             "%s, plus the shell. A denial is survivable - only an UNLISTED tool is fatal"
+             % summary)
 
 
 def check_pii_gate(r, mod):

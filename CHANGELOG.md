@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.33.1 — 2026-08-20
+
+**A safety rule that also removes a sanctioned capability is not the strict version of the policy
+— it is a different policy.** 1.33.0 denied the Firecrawl and Playwright MCP servers *wholesale*,
+reasoning that under `allow mcp(*)` a tool either server gained later would otherwise be
+auto-allowed and could bill. The reasoning was sound; the rule was still wrong, because a wildcard
+deny takes the **whole** server — a more specific allow cannot rescue one tool from it — and the
+owner's policy is *scrape and map are allowed, the rest is not*.
+
+The evidence was already in 1.33.0's own verification run and was misread as success: at step 19
+the reviewer reached for `firecrawl_scrape` and got
+`Permission denied … Matches user-configured deny rule` — a tool it was supposed to have. That
+line was reported as proof the deny mechanism worked. It was, and it was also proof the deny was
+aimed at the wrong target.
+
+* **Firecrawl is denied by name again**, not by wildcard: `crawl`, `agent`, `extract`, `parse`,
+  `search`, `interact*`, `monitor_*` and the five `research_*` tools. `scrape` (1 credit, the
+  sanctioned last resort for a bot-protected page) and `map` (1 credit flat) stay reachable.
+  The residual is stated rather than hidden: a Firecrawl tool added upstream is not on the list,
+  so `mcp(*)` will allow it — bounded by the fact that every unbounded spender it ships today is.
+* **Playwright is no longer denied at all.** Owner's call.
+* **`AGY_START_SPACING` default 8 → 11 s.** The race is measured at ~4.1 s, so this is ~2.7×,
+  and it is free in wall-clock: a channel runs 50–230 s.
+* The self-test assertion is now **two-sided** — the expensive tools must be denied *and* the
+  sanctioned ones must not be. The previous one-sided check could only fail in the direction of
+  too little safety, which is exactly why it never objected to the over-reach.
+
+If you installed 1.33.0, re-run `python patch_agy_permissions.py`. It only ever **adds** rules, so
+the two wholesale denies it wrote will still be in your `settings.json`: remove those two lines by
+hand, or `--revert` to the timestamped backup it made and then re-apply.
+
 ## 1.33.0 — 2026-08-20
 
 **🔴 IF YOU USE THE `agy` CHANNEL, RUN ONE COMMAND AFTER UPDATING:**

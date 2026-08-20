@@ -5457,8 +5457,20 @@ _AGY_LAST_START = [0.0]
 
 
 def _agy_stagger():
-    """Hold the next agy launch until the previous one is past its cache-writing window."""
-    gap = float(os.environ.get("AGY_START_SPACING", "8"))
+    """Hold the next agy launch until the previous one is past its cache-writing window.
+
+    11 s, set by Igor on 2026-08-20 (R57; the earlier "8" came from a typo in his reply that I
+    read as "keep the current value"). The failure is measured at ~4.1 s - the window in which agy
+    rewrites every MCP server's tool schemas into one shared directory - so this is ~2.7x the
+    observed race.
+
+    It costs nothing in wall-clock: a channel runs 50-230 s, so the whole stagger for a
+    three-channel panel disappears inside the slowest one. Do NOT tune it down towards 4.1 s -
+    that number is one machine under one load, not a boundary, and the symptom of getting it wrong
+    is an empty answer from a RANDOM channel with status SUCCESS and exit code 0.
+    `AGY_START_SPACING=0` disables it for a single-channel run.
+    """
+    gap = float(os.environ.get("AGY_START_SPACING", "11"))
     if gap <= 0:
         return 0.0
     with _AGY_START_LOCK:

@@ -118,20 +118,41 @@ DENY = [
     # in the interactive agy TUI. `--keep-shell` skips this one rule; `--revert` undoes everything.
     "command(*)",
 
-    # METERED. Firecrawl bills per page with no ceiling on firecrawl_crawl, and one runaway on a
-    # different channel cost $12 and exhausted a key that four other channels shared. With `mcp(*)`
-    # granting every server, a NEW Firecrawl tool would be auto-allowed - so the server is denied
-    # wholesale rather than by a list that has to keep pace with it. Nothing is lost that matters:
-    # jina, crawl4ai and scrapling fetch pages for free, and scrapling's stealthy_fetch and
-    # cloakbrowser cover bot-protected pages, which was Firecrawl's only unique job here.
-    "mcp(firecrawl/*)",
-
-    # LIVE LOGINS. The playwright server runs against a PERSISTENT profile
-    # (~/AppData/Local/ms-playwright/mcp-profile-main) that holds real signed-in sessions - this
-    # project has already found live Gmail session URLs in a previous run's console logs. An
-    # unattended reviewer has no business inside a logged-in browser, and it ships
-    # browser_run_code_unsafe. cloakbrowser covers browsing without the session material.
-    "mcp(playwright/*)",
+    # 🔴 METERED FIRECRAWL - NAMED, NOT WHOLESALE, AND THE CORRECTION IS THE POINT.
+    #
+    # R57 first shipped `mcp(firecrawl/*)`, reasoning that under `mcp(*)` a tool the server gains
+    # later would otherwise be auto-allowed and could bill. That is true, and it was still wrong,
+    # because a wildcard deny takes the WHOLE server (a more specific allow does not rescue one
+    # tool from it - measured, arm S) and the owner's policy is *scrape + map are allowed*, only
+    # the rest is not. The over-reach was visible within the hour: in the verification panel
+    # agy31pro reached for `firecrawl_scrape` and got
+    # `Permission denied ... Matches user-configured deny rule` - a tool it was supposed to have.
+    #
+    # A safety rule that also removes a sanctioned capability is not "the strict version" of the
+    # policy, it is a different policy. The list below is the policy as it actually stands:
+    # everything metered, recurring or duplicative of a free tool is denied by name; `scrape`
+    # (1 credit, the sanctioned last resort for a bot-protected page) and `map` (1 credit flat for
+    # any number of URLs) are left reachable.
+    #
+    # The residual, stated rather than hidden: a Firecrawl tool added upstream is NOT on this list,
+    # so `mcp(*)` will allow it. That is a real exposure and the price of not taking the server
+    # wholesale. It is bounded by the fact that every unbounded spender Firecrawl ships today -
+    # crawl, agent, the monitors - is named here.
+    "mcp(firecrawl/firecrawl_crawl)",            # 1 credit PER PAGE, no ceiling
+    "mcp(firecrawl/firecrawl_agent)",            # caps at 2500 credits per job
+    "mcp(firecrawl/firecrawl_extract)",
+    "mcp(firecrawl/firecrawl_parse)",
+    "mcp(firecrawl/firecrawl_search)",           # free equivalents exist
+    "mcp(firecrawl/firecrawl_interact)",         # 2 credits per browser-MINUTE
+    "mcp(firecrawl/firecrawl_interact_stop)",
+    "mcp(firecrawl/firecrawl_monitor_create)",   # recurring spend with nobody watching
+    "mcp(firecrawl/firecrawl_monitor_update)",
+    "mcp(firecrawl/firecrawl_monitor_run)",
+    "mcp(firecrawl/firecrawl_research_search_papers)",
+    "mcp(firecrawl/firecrawl_research_search_github)",
+    "mcp(firecrawl/firecrawl_research_related_papers)",
+    "mcp(firecrawl/firecrawl_research_read_paper)",
+    "mcp(firecrawl/firecrawl_research_inspect_paper)",
 
     # Named, because their servers stay allowed: each is a tool a research reviewer has no reason
     # to call, and a denial is free.

@@ -3548,15 +3548,33 @@ def suite_r56_agy_concurrency_and_permissions():
           "every MCP server is allowed by ONE wildcard - a per-server wildcard covers a tool the "
           "server gains, but not a SERVER added later, which is the same fatal unlisted state one "
           "level up. Measured R57 arm T with a valid control")
-    # The rule that decides reachability is not "is it wildcarded" but "what does the engine
-    # decide". Deny beats allow in every combination measured, wildcard or specific (R56 arm 3,
-    # R57 arm S), so a server named in DENY is unreachable no matter what ALLOW says.
-    for srv, why in (("firecrawl", "bills per page with no ceiling on firecrawl_crawl"),
-                     ("playwright", "drives a persistent profile holding live logins")):
-        check("mcp(%s/*)" % srv in deny,
-              "the %s server is DENIED wholesale - %s. Under `mcp(*)` a new tool there would "
-              "otherwise be auto-allowed, and a wildcard deny cannot be rescued by a more "
-              "specific allow (arm S), so this really is all-or-nothing" % (srv, why))
+    # 🔴🔴 THE CHECK THAT WOULD HAVE CAUGHT MY OWN OVER-REACH, AND DID NOT EXIST UNTIL IT HAD
+    # ALREADY COST SOMETHING. R57 first shipped `deny mcp(firecrawl/*)`, reasoning that under
+    # `mcp(*)` a tool the server gains later could bill. The reasoning was sound and the rule was
+    # wrong, because a wildcard deny takes the WHOLE server (arm S) and the owner's policy is
+    # *scrape and map are allowed*. Within the hour the verification panel showed agy31pro getting
+    # `Permission denied for mcp(firecrawl/firecrawl_scrape)` - a tool it was supposed to have -
+    # and the round's own author read that as the fix working.
+    #
+    # A safety rule that also removes a SANCTIONED capability is not a stricter version of the
+    # policy, it is a different policy. So the assertion is two-sided: the expensive tools must be
+    # denied AND the sanctioned ones must NOT be. A one-sided safety test can only ever fail in
+    # the direction of too little safety, which is why it never objects to over-reach.
+    for tool in ("firecrawl_crawl", "firecrawl_agent", "firecrawl_search",
+                 "firecrawl_monitor_create"):
+        check("mcp(firecrawl/%s)" % tool in deny,
+              "firecrawl/%s is denied by NAME - it is metered, recurring or duplicates a free "
+              "tool" % tool)
+    for tool in ("firecrawl_scrape", "firecrawl_map"):
+        check("mcp(firecrawl/%s)" % tool not in deny and "mcp(firecrawl/*)" not in deny,
+              "firecrawl/%s stays REACHABLE - it is 1 credit and it is the sanctioned last "
+              "resort for a bot-protected page. Neither a direct deny nor a wildcard over the "
+              "server may take it away, because a wildcard deny cannot be rescued by a more "
+              "specific allow (arm S)" % tool)
+    check("mcp(playwright/*)" not in deny,
+          "the playwright server is not denied wholesale - the owner's call, 2026-08-20. A "
+          "denial here is free in run terms, which is exactly why it is tempting to add one "
+          "nobody asked for")
     check("mcp(jina-mcp-server/show_api_key)" in deny,
           "wildcarding every server pulled the credential-revealing tool into reach, and the SAME "
           "change denies it - a widened allow and its matching deny belong in one commit")
