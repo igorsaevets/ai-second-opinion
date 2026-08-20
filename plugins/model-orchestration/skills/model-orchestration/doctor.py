@@ -280,6 +280,67 @@ def check_cli(r, mod, name, resolver, version_args):
     return b
 
 
+def check_agy_grep(r, mod):
+    r"""Can agy's `grep_search` tool find its binary IN THE ENVIRONMENT THE HARNESS HANDS IT?
+
+    🔴🔴 THIS COST TWO REVIEW ROUNDS, 2026-08-19. agy has a first-class `grep_search` tool that
+    shells out to `grep`. Windows has no grep; Git for Windows ships one in `Git\usr\bin`, the
+    one Git directory that is NOT on the ordinary PATH. Both lost rounds carry the same sentence
+    in their event stream - `exec: "grep": executable file not found in %PATH%` - and in one of
+    them the model then fell back to a raw PowerShell pipeline, which WAS denied and discarded
+    the whole run. The diagnostics named that denial as the cause.
+
+    🔴 THE SUBTLE HALF, AND THE REASON THIS CHECK IS SHAPED THE WAY IT IS: the answer depends on
+    WHICH SHELL LAUNCHED PYTHON. A Git-Bash parent puts `Git\usr\bin` on PATH three times over,
+    so grep resolves and everything looks healthy; a PowerShell parent does not, and the channel
+    dies. The first probe written for this bug ran from the Bash side and reported that the fix
+    was unnecessary. So a check that merely asks `shutil.which("grep")` in the doctor's own
+    environment would pass on the machine where the panel is about to fail. It has to ask
+    whether resolution survives a DIFFERENT launcher - i.e. whether posix_tools_dir() found a
+    directory, not whether this shell happens to carry one.
+    """
+    if os.name != "nt":
+        r.ok("agy grep_search", "not Windows - grep is on PATH by construction")
+        return
+    d = mod.posix_tools_dir()
+    env = mod._posix_child_env() or os.environ
+    resolved = shutil.which("grep", path=env.get("PATH"))
+    if not d:
+        if resolved:
+            r.warn("agy grep_search",
+                   "grep resolves ONLY because this shell supplies it (%s)" % resolved,
+                   "no POSIX toolset was found on disk, so a run launched from PowerShell - which "
+                   "is how the panel normally starts - would NOT resolve it, and agy's grep_search "
+                   "would fail on every call. Install Git for Windows, or set POSIX_TOOLS_DIR to a "
+                   "directory containing grep.exe.")
+        else:
+            r.warn("agy grep_search", "grep is not resolvable at all",
+                   mod.agy_grep_warning() or "install Git for Windows")
+        return
+    # Found on disk is not the same as runs. Execute it through the env agy will actually get -
+    # the codex-sandbox lesson: a version string is not a capability, and neither is a file path.
+    # Sentinel assembled by grep itself from a file we wrote, so the probe cannot read its own
+    # input back as the program's answer.
+    try:
+        import tempfile
+        fd, tmp = tempfile.mkstemp(suffix=".txt", text=True)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("alpha\nGREP-LIVES-HERE\nomega\n")
+        p = subprocess.run([resolved or "grep", "GREP-LIVES", tmp], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=60, env=env)
+        os.unlink(tmp)
+    except Exception as e:                                                # noqa: BLE001
+        r.warn("agy grep_search", "probe failed: %r" % (e,), "run grep by hand to see why")
+        return
+    if p.returncode == 0 and "GREP-LIVES-HERE" in (p.stdout or ""):
+        r.ok("agy grep_search", "%s - supplied to the child by posix_tools_dir(), so it resolves "
+                                "whichever shell launched python" % d)
+    else:
+        r.warn("agy grep_search", "grep found at %s but exited %d" % (d, p.returncode),
+               "agy's grep_search will error on every call; the model's usual fallback is a shell "
+               "command, which is denied and takes the whole run with it")
+
+
 def check_codex_sandbox(r, mod, binary):
     """Can codex's sandbox SPAWN A SHELL - the thing it will actually try to do?
 
@@ -647,7 +708,7 @@ def check_provider_prices_live(r, mod=None):
                 # escape hatch buys silence about the ALARM and never about the FACT. A registry
                 # that carries advice gets obeyed, so an exemption that hid the figure would become
                 # the default way to quiet this check.
-                why = (c.get("provider_route") or {}).get("order_reason")
+                why = (c.get("provider_route") or {}).get("_order_reason")
                 msg = ("%s: `order`%s sends requests to %s first at $%.4f/M while %s serves the "
                        "same model at $%.4f/M"
                        % (name, where, first[0], first[1], cheapest[0], cheapest[1]))
@@ -718,6 +779,9 @@ def main():
         if codex_b:
             check_codex_sandbox(r, mod, codex_b)
         check_agy_permissions(r, mod)
+        # Permissions are only half of what an agy run needs from this machine; the other half is
+        # that the tools it shells out to actually exist. See check_agy_grep.
+        check_agy_grep(r, mod)
         check_pii_gate(r, mod)
 
     if a.json:

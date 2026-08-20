@@ -1,5 +1,60 @@
 # Changelog
 
+## 1.31.0 — 2026-08-19
+
+**The round about a tool whose binary was missing, and an instrument that named the last frame.**
+One channel lost two consecutive review rounds. The diagnostics reported two different causes. The
+event streams say the same sentence in both, and it is neither of the two that were reported.
+
+- 🔴🔴 **`agy`'s `grep_search` tool could not find `grep`, and whether it could depended on which
+  shell launched Python.** The tool shells out to `grep`; Windows has none; Git for Windows ships
+  one in `Git\usr\bin`, the single Git directory that is *not* on the ordinary PATH. Measured:
+  from PowerShell `shutil.which("grep")` is `None`, from Git Bash it resolves — same machine, same
+  code, opposite outcomes, no message either way. New `posix_tools_dir()` locates a directory
+  containing `grep.exe` (env `POSIX_TOOLS_DIR` first, then the standard install locations) and
+  `_agy_env()` **appends** it to the child's PATH. Append, not prepend: that directory also ships
+  `find.exe` and `sort.exe`, which would otherwise shadow the Windows built-ins for everything else
+  the child runs. Nothing machine-wide changes.
+- 🔴🔴 **The permission denial was a symptom, and our warning prescribed a fix that could not
+  work.** In one of the two lost rounds `grep_search` failed three times first; only then did the
+  model fall back to a raw shell pipeline, and *that* was denied — and on this channel one denial
+  discards the entire run. The warning reported the denial and sent the reader to
+  `patch_agy_permissions.py`, which cannot install a missing binary. `errors` was a de-duplicated
+  list with no tool name attached, and the summary read `errors[-1]`. New `error_seq` keeps
+  `(tool, message)` in the order they happened: the incomplete-output warning now names the
+  **first** error and its tool, the permission warning says "this was NOT the first failure" when
+  something preceded it, and a missing binary is reported as a cause in its own right.
+- **`doctor` gained an `agy grep_search` check that asks the hard question rather than the easy
+  one.** `shutil.which("grep")` in the doctor's own environment would pass on a machine where the
+  panel is about to fail, because the doctor may itself have been launched from Git Bash — this is
+  not hypothetical, it is how the first probe written for this bug reached the wrong conclusion.
+  The check reports OK only when `posix_tools_dir()` found a directory on disk, i.e. when
+  resolution survives a *different* launcher, and warns explicitly when grep resolves only because
+  the current shell happens to supply it. It then executes grep through the env the child will get,
+  because a file path is not a capability.
+- 🔴🔴 **A COMMENT WAS BEING SENT TO THE VENDOR AS A PARAMETER, AND IT KILLED A CHANNEL FOR A
+  WHOLE ROUND.** `orglm52` returned in 0.1 s with
+  `HTTP 400 ... provider: Unrecognized key: "order_reason"`. That key was added one release
+  earlier as PROSE — a note explaining why the provider order is deliberately not price order —
+  and it sat in `provider_route`, which is handed to OpenRouter verbatim as the `provider` block.
+  The vendor was being asked to honour a comment. **Nothing caught it because the note was written
+  AFTER that release's panel had already run**, so the only channel that could have failed never
+  ran again until now. Underscore-prefixed keys are now stripped before the block is sent, the plan
+  prints `(annotations not sent: …)`, and a test walks the registry for any `provider_route` key
+  that is neither a documented OpenRouter parameter nor an underscore annotation. Fixed and
+  verified live: the channel answers again in 11.7 s.
+- **A canned cause contradicted its own numbers.** The empty-answer warning said "it discarded a
+  run it had already done the work for — 0 output tokens over 0 tool calls", and advised against a
+  retry. For a run that died before doing anything, that advice is exactly backwards. The sentence
+  is now gated on the meter it describes, and the zero case gets its own text saying a retry IS
+  worth one attempt.
+- **A test ledger could not record a legitimate event — third instance in one function.** The
+  cheap-panel anchor asserted that `ADDED_TO_CHEAP_SINCE` and `REMOVED_FROM_CHEAP_SINCE` are
+  disjoint. A channel added as a timed trial and removed when the trial answered no is two real
+  events; the check made them unsayable, and the only way to green it was to delete the addition.
+  Replaced with the property it was standing in for: a name in both books must really be out of the
+  panel now. The comments directly above it already record two earlier instances of the same shape.
+
 ## 1.30.0 — 2026-08-19
 
 **The round about a flag that gates more than its name says.** A channel gained a fallback model,

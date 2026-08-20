@@ -762,6 +762,103 @@ def _codex_env():
     return env
 
 
+def posix_tools_dir():
+    r"""A directory holding a POSIX `grep.exe` that a child process can actually spawn.
+
+    🔴🔴 MEASURED 2026-08-19, and it cost two AOS review rounds (R52, R53) before anyone
+    looked at the event stream instead of the summary. agy has a first-class `grep_search`
+    tool that shells out to `grep`. Windows has no grep. Git for Windows ships one - in
+    `Git\usr\bin`, which is the ONE Git directory that is not on the normal PATH:
+
+        PowerShell PATH: ...\Git\cmd, ...\Git\mingw64\bin        -> `grep` UNRESOLVABLE
+        Git Bash  PATH: the above + ...\Git\usr\bin (x3)         -> `grep` resolves
+
+    So the channel worked or died depending on which shell the caller happened to launch
+    Python from, with no message saying so. Both AOS failures carry the same sentence in
+    their event stream - `exec: "grep": executable file not found in %PATH%` - and in R52
+    that error came THREE TIMES before the model fell back to a raw PowerShell pipeline,
+    which was then denied. Our warning reported the denial and sent the reader to
+    patch_agy_permissions.py, which fixes nothing here.
+
+    Two arms, one variable, from a PowerShell parent (the invalid first attempt ran from the
+    Bash tool, whose PATH already had the directory - a control that cannot fail):
+
+        no  usr\bin -> grep_search: `executable file not found in %PATH%`   (the AOS error)
+        yes usr\bin -> grep_search: runs, 7 of 8 calls clean
+
+    APPEND, never prepend: this directory also ships `find.exe` and `sort.exe`, which would
+    shadow the Windows built-ins of those names for everything else the child runs. `grep`,
+    `sed` and `awk` have no Windows namesake, so appending is enough to resolve them and
+    changes nothing else. The child process only - nothing machine-wide is touched, because
+    Igor's PATH is his.
+
+    No absolute path is hard-coded into a shipped default: the env var wins, then the two
+    standard install locations, then a per-user install. A literal would ship one machine's
+    layout to the public kit that package.py generates from this file.
+    """
+    if os.name != "nt":
+        return None
+    cand = []
+    env_dir = os.environ.get("POSIX_TOOLS_DIR")
+    if env_dir:
+        cand.append(env_dir)
+    cand += [os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "usr", "bin"),
+             os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                          "Git", "usr", "bin"),
+             os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Git", "usr", "bin")]
+    for d in cand:
+        try:
+            if d and os.path.isfile(os.path.join(d, "grep.exe")):
+                return d
+        except OSError:
+            continue
+    return None
+
+
+def _posix_child_env():
+    """The environment for any agentic CLI child, with `grep` made resolvable if it is not.
+
+    🔴 NAMED FOR THE CLASS, NOT FOR THE CHANNEL THAT FOUND IT. This started as `_agy_env`,
+    which is how a fix stays applied to one channel: `mimo25pro` repeated `grok420`'s R37 bug
+    nine days later for exactly that reason. Three channels launch an agentic CLI as a child
+    here - agy, kimi/hermes and grokcli - and all three inherit whatever PATH the parent shell
+    happened to have.
+
+    Only agy is MEASURED to need it: its `grep_search` tool is what failed, twice, in
+    production. The other two get it by argument rather than by measurement, and the argument
+    is that the change cannot subtract: appending leaves every name that already resolved
+    resolving to the same binary, and the only difference is that a name which previously
+    errored now works. For an agentic CLI that is the desired direction, and the alternative -
+    waiting for each channel to lose a round of its own first - is the mistake this project
+    keeps naming.
+
+    Returns None when nothing needs changing: either grep already resolves (a Git-Bash parent)
+    or no POSIX toolset was found, in which case `agy_grep_warning()` says so rather than
+    letting the run die with an unexplained tool error.
+    """
+    if os.name != "nt":
+        return None
+    if shutil.which("grep"):
+        return None
+    d = posix_tools_dir()
+    if not d:
+        return None
+    env = dict(os.environ)
+    env["PATH"] = env.get("PATH", "") + os.pathsep + d
+    return env
+
+
+def agy_grep_warning():
+    """The message for the case the fix above cannot repair: no POSIX grep anywhere."""
+    if os.name != "nt" or shutil.which("grep") or posix_tools_dir():
+        return None
+    return ("`grep` is not resolvable and no Git-for-Windows toolset was found, so agy's "
+            "grep_search tool will fail on every call. That is survivable on its own, but "
+            "the model's usual fallback is a raw shell command, which IS denied and takes "
+            "the whole run with it. Install Git for Windows, or set POSIX_TOOLS_DIR to a "
+            "directory containing grep.exe.")
+
+
 def _seconds(v, fallback):
     """`"25m"` / `"90s"` / `1500` / `None` -> seconds. Config is written the way agy's flag is."""
     if v is None or v == "":
@@ -2586,7 +2683,8 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           timeout=_seconds(timeout, 2400))
+                           timeout=_seconds(timeout, 2400),
+                           env=_posix_child_env())
     except FileNotFoundError:
         # 🔴 WITHOUT THIS THE CHANNEL CRASHES ON EVERY MACHINE THAT DOES NOT HAVE THE CLI, which
         # is every machine except the author's. Measured 2026-08-16 by pointing GROK_BIN at a
@@ -2717,7 +2815,8 @@ def call_hermes(brief, marker, outfile, model=None, toolsets=None, system=None, 
     try:
         # 🔴 cwd, not the operator's directory. See neutral_cwd(): --ignore-rules does not stop this
         # CLI injecting the launch directory's CLAUDE.md into the vendor's context, outside the gate.
-        p, secs = _run(cmd, timeout=timeout, cwd=neutral_cwd())
+        p, secs = _run(cmd, timeout=timeout, cwd=neutral_cwd(),
+                       env=_posix_child_env())
     except FileNotFoundError:
         return {"channel": "kimi", "ok": False, "error": "binary not found: " + binary}
     except subprocess.TimeoutExpired:
@@ -3424,10 +3523,29 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # routing): `only`/`order`/`ignore`/`allow_fallbacks`/`sort` are all passed through unchanged.
     # A wrong key returns a plain 400 from the vendor which is the right layer to fail at, not
     # here - re-validating a documented API in prose is how a stale registry rots.
+    # 🔴🔴 STRIP THE ANNOTATIONS BEFORE THIS BLOCK IS SENT. Measured 2026-08-19 (R55): the whole
+    # dict used to go out verbatim, and `orglm52` died in 0.1 s with
+    # `HTTP 400 ... provider: Unrecognized key: "order_reason"`. That key was added one round
+    # earlier as PROSE - a note explaining why the provider order is not price order - and it sat
+    # in the same dict as the vendor's own parameters, so the vendor was asked to honour a comment.
+    # The channel had been dead since the moment the note was written, and nothing caught it,
+    # because the note was added AFTER that round's panel had already run.
+    #
+    # The paragraph above is still right about typos: a misspelt DOCUMENTED key should 400 at the
+    # vendor, not be re-validated here against a list that rots. This is the other case - a key
+    # that was never meant for the wire at all. Every other annotation in this registry already
+    # marks itself with a leading underscore (`_added`, `_temporary`, `_provider_pinned`), so the
+    # convention existed and this one key broke it. Honour the convention mechanically instead of
+    # allow-listing the vendor's parameters, which would turn every new OpenRouter feature into a
+    # false positive here.
     if provider_route:
-        body["provider"] = provider_route
-        log("  [%s] provider pin: %s" % (name, ", ".join("%s=%s" % (k, v)
-                                          for k, v in provider_route.items())))
+        wire = {k: v for k, v in provider_route.items() if not k.startswith("_")}
+        dropped = [k for k in provider_route if k.startswith("_")]
+        if wire:
+            body["provider"] = wire
+        log("  [%s] provider pin: %s%s"
+            % (name, ", ".join("%s=%s" % (k, v) for k, v in wire.items()),
+               ("  (annotations not sent: %s)" % ", ".join(dropped)) if dropped else ""))
     native_search = False
     if (web or {}).get("enabled"):
         if prov["search"] == "plugin":
@@ -4950,7 +5068,12 @@ def _parse_agy_stream(path):
     out = {"tools": {}, "denied": {}, "tool_errors": {}, "errors": [], "text": "", "status": None,
            "thinking": None, "out_tokens": None, "turns": None, "seconds": None,
            "perm_mode": None, "opened": set(), "queries": 0, "result_error": None,
-           "last_tool": None}
+           "last_tool": None,
+           # 🔴 `errors` is a SET of distinct messages and carries no tool name, so a reader
+           # cannot tell which tool failed first. R52 turned on exactly that: three
+           # grep_search failures, then one denied shell command, and the summary named the
+           # denial. `error_seq` keeps (tool, message) in the order they actually happened.
+           "error_seq": []}
     if not os.path.exists(path):
         return out
     with open(path, encoding="utf-8", errors="replace") as f:
@@ -5022,6 +5145,8 @@ def _parse_agy_stream(path):
                 out[bucket][name] = out[bucket].get(name, 0) + 1
                 if err and err not in out["errors"]:
                     out["errors"].append(err)
+                if err:
+                    out["error_seq"].append((name, err))
             else:
                 out["tools"][name] = out["tools"].get(name, 0) + 1
     return out
@@ -5296,7 +5421,10 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
         cmd += ["--add-dir", d]
     try:
         # cwd must be the workspace or the workspace-scoped agent is never discovered.
-        p, secs = _run(cmd, timeout=3600, cwd=workdir, stdout_path=ndjson)
+        # env: see posix_tools_dir() - without it this channel's grep_search tool cannot
+        # resolve its binary when Python was launched from PowerShell, and the model's
+        # fallback for a broken grep is a shell command, which is denied and fatal.
+        p, secs = _run(cmd, timeout=3600, cwd=workdir, stdout_path=ndjson, env=_posix_child_env())
     except FileNotFoundError:
         return {"channel": "agy", "ok": False,
                 "error": "binary not found (it is NOT on PATH): " + binary}
@@ -5313,13 +5441,35 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
     # default "ask" is auto-denied in headless mode (no prompt is possible), and that single
     # denial DISCARDS THE WHOLE RUN - 29 successful tool calls thrown away, response "",
     # status "SUCCESS", exit code 0. Nothing but the response length reveals it.
+    # 🔴🔴 A MISSING BINARY IS A CAUSE; THE DENIAL THAT FOLLOWS IT IS A SYMPTOM. Measured on
+    # the AOS R52 stream: grep_search failed three times with `exec: "grep": executable file
+    # not found in %PATH%`, the model then reached for a raw PowerShell pipeline to do the
+    # search by hand, and THAT was denied and discarded the run. The warning below reported
+    # only the denial and sent the reader to patch_agy_permissions.py - which cannot fix a
+    # missing grep, so the same failure returned the next round with a different face.
+    # Report what happened FIRST, and name the missing binary when there is one.
+    missing_bin = [(t, e) for t, e in ev["error_seq"] if "executable file not found" in e]
+    if missing_bin:
+        warn.append("A TOOL'S BINARY IS MISSING FROM THE CHILD'S PATH - this is a cause, not a "
+                    "symptom: %r failed %d time(s) with %r. On Windows `grep` lives only in "
+                    "Git\\usr\\bin, which is not on the PowerShell PATH; posix_tools_dir() "
+                    "appends it, so seeing this means Git for Windows is absent or "
+                    "POSIX_TOOLS_DIR is wrong. The model's fallback for a broken search tool "
+                    "is a shell command, and that IS denied and fatal."
+                    % (missing_bin[0][0], len(missing_bin), missing_bin[0][1]))
     denial = [e for e in ev["errors"] if "denied permission" in e]
     if denial or ("permission that headless mode cannot prompt for" in (p.stderr or "")):
-        warn.append("PERMISSION DENIAL KILLED THE RUN: %s. Fix it once by running "
-                    "patch_agy_permissions.py (adds the allow-rules for the free read-only web "
-                    "tools and deny-rules for the metered Firecrawl ones). Do NOT reach for "
-                    "--dangerously-skip-permissions: that also unlocks firecrawl_crawl."
-                    % (denial[0] if denial else "see stderr"))
+        first = ""
+        if ev["error_seq"] and "denied permission" not in ev["error_seq"][0][1]:
+            first = (" But this was NOT the first failure: %d error(s) came before it, "
+                     "starting with %r from %r. Fix that one first - a denial late in a run "
+                     "is usually the model working around a tool that had already broken."
+                     % (len(ev["error_seq"]) - 1, ev["error_seq"][0][1], ev["error_seq"][0][0]))
+        warn.append("PERMISSION DENIAL KILLED THE RUN: %s. If it is the FIRST error, fix it "
+                    "once by running patch_agy_permissions.py (adds the allow-rules for the "
+                    "free read-only web tools and deny-rules for the metered Firecrawl ones). "
+                    "Do NOT reach for --dangerously-skip-permissions: that also unlocks "
+                    "firecrawl_crawl.%s" % (denial[0] if denial else "see stderr", first))
     if marker and marker not in text:
         # 🔴 SAY WHY, NOT JUST WHAT. Until 2026-08-07 this was the whole message, and its stock
         # advice ("re-run alone, or lower --tier") pointed at a timeout. The round-25 agy36flash
@@ -5330,13 +5480,31 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
         why = ""
         if ev.get("result_error"):
             why = " CAUSE (from the channel's own result frame): %r." % ev["result_error"]
-            if not text.strip():
+            # 🔴 GATE THE SENTENCE ON THE METER IT DESCRIBES. It used to fire on any empty
+            # answer and said «it discarded a run it had already done the work for - 0 output
+            # tokens over 0 tool calls», which is a canned cause contradicting its own numbers.
+            # Measured R55 on agy31pro: 0 tokens, 0 tool calls, 4.2 s - the run died BEFORE
+            # doing anything, and «re-running would not have helped» is the opposite of true
+            # for that case. Same family as the R46 warning that printed «budget gone» over a
+            # 95%-unspent budget.
+            spent = ev.get("out_tokens") or 0
+            calls = sum(ev["tools"].values())
+            if not text.strip() and (spent or calls):
                 why += (" It discarded a run it had already done the work for - %s output tokens "
                         "over %s tool calls came back as an EMPTY answer, so re-running at a "
-                        "lower tier would not have helped."
-                        % (ev.get("out_tokens"), sum(ev["tools"].values())))
-        elif ev["errors"]:
-            why = " Last tool error seen: %r." % ev["errors"][-1]
+                        "lower tier would not have helped." % (spent, calls))
+            elif not text.strip():
+                why += (" It produced NOTHING - %s output tokens over %s tool calls in %.1fs - so "
+                        "the run died before any work was done. That is the opposite case from a "
+                        "discarded run: a retry is worth one attempt here."
+                        % (spent, calls, secs))
+        elif ev["error_seq"]:
+            # FIRST, not last. The last error is where the run stopped; the first is usually
+            # where it went wrong, and the two were the same message only by luck.
+            why = (" FIRST tool error (%d total): %r from %r."
+                   % (len(ev["error_seq"]), ev["error_seq"][0][1], ev["error_seq"][0][0]))
+            if len(ev["error_seq"]) > 1 and ev["error_seq"][-1][1] != ev["error_seq"][0][1]:
+                why += " Last was %r from %r." % (ev["error_seq"][-1][1], ev["error_seq"][-1][0])
         warn.append("END MARKER ABSENT - output is incomplete, do not parse it as a review." + why)
     note = []
     record_refusal(refusal_check(text, marker, min_chars=500), warn, note)

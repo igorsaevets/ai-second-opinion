@@ -2635,6 +2635,11 @@ def suite_panels():
         # 🔴 TEMPORARY BY HIS OWN WORD, and nothing here expires it - the channel's `_temporary`
         # key says what ends the trial. If this line is still present long after the latency
         # question has an answer, that is the trial having quietly become permanent.
+        # 🟢 IT DID NOT. The trial ended in R55 with a NO and the channel moved to `standard`;
+        # this line STAYS, paired with the matching entry in REMOVED_FROM_CHEAP_SINCE below.
+        # Deleting it would have been the tidier-looking edit and the wrong one: this table is a
+        # ledger, and erasing the addition would erase the fact that the trial ever happened -
+        # the same shape of quiet deletion that REMOVED_FROM_CHEAP_SINCE was created to stop.
         "orgpt56lunapro": "$0.20/M in - a tenth of Sol Pro; added as a TEMPORARY latency test",
     }
     # 🔴🔴 AN ADDITION HAD A NAMED HOME AND A REMOVAL HAD NONE, WHICH IS ITSELF THE DEFECT.
@@ -2654,6 +2659,14 @@ def suite_panels():
             "round, $0.3653 in R42 - and the panel keeps two other `role: code` voices "
             "(grokbuild, orglm52), so nothing is orphaned. Still reachable: standard INCLUDES "
             "cheap, so `--panel standard` runs it.",
+        "orgpt56lunapro":
+            "R55, 2026-08-19, Igor by name: «Luna pro перенеси из cheap panel в standart». It "
+            "entered the cheap panel in R54 as a TIMED TRIAL and the trial returned a NO: 604 s "
+            "and $0.8629 in its first real round - the last channel to return, and the highest "
+            "single-channel spend of the fourteen, on the cheapest metered rate card in the "
+            "registry. That pair is the finding: a RATE IS NOT A BILL, so `cost` and `panel` are "
+            "allowed to disagree and here they did. The entry in ADDED_TO_CHEAP_SINCE is kept "
+            "deliberately - an addition and its removal are two events, not one correction.",
     }
     # ---- R54: a declared fallback chain that can never fire ------------------------------------
     # 🔴 MEASURED, NOT READ: with `provider.allow_fallbacks: false`, a chain declared here does not
@@ -2726,8 +2739,28 @@ def suite_panels():
     # channel no longer exists", and it has to be written by a human either way.
     _retired = {c for c, why in REMOVED_FROM_CHEAP_SINCE.items()
                 if str(why).strip().upper().startswith("RETIRED")}
-    check(not (set(REMOVED_FROM_CHEAP_SINCE) & set(ADDED_TO_CHEAP_SINCE)),
-          "no channel is recorded as both added to and removed from the cheap panel")
+    # 🔴🔴 THIRD INSTANCE OF THE CLASS THIS FUNCTION HAS NOW RECORDED TWICE ABOVE, and it was
+    # mine. This used to assert `not (REMOVED & ADDED)` - "no channel in both books". R55 hit it
+    # honestly: orgpt56lunapro was ADDED to cheap in R54 as a timed trial and REMOVED in R55 when
+    # the trial answered no. That is two real events about one channel, and the check made them
+    # unsayable - the only way to green it was to delete the addition, i.e. to erase Igor's R54
+    # decision and its reason. Exactly what the comment forty lines up calls «the exact edit both
+    # books exist to forbid».
+    #
+    # It also guarded nothing. Everything it was standing in for is asserted elsewhere and more
+    # directly: the set arithmetic by the DICTATED|ADDED-REMOVED equality above, continued
+    # existence and retirement by the two checks below. Disjointness was a NORMALISATION rule -
+    # "don't record a no-op pair, delete the addition instead" - wearing a safety check's clothes.
+    #
+    # What a reader actually wants asserted is the property, so assert that: if a name is in both
+    # books it must really be out of the cheap panel now. A removal recorded on paper while the
+    # channel still sits in the panel is a lying record, and THAT is worth failing on.
+    _both = set(REMOVED_FROM_CHEAP_SINCE) & set(ADDED_TO_CHEAP_SINCE)
+    check(not (_both & actual_cheap),
+          "a channel recorded as both added to and removed from the cheap panel is really out "
+          "of it now - both entries stay, because an addition and its later removal are two "
+          "events and deleting the first one erases why it was ever tried",
+          "recorded as removed but still in cheap=%s" % sorted(_both & actual_cheap))
     check(all(c in CH for c in set(REMOVED_FROM_CHEAP_SINCE) - _retired),
           "a channel DEMOTED out of the cheap panel still exists in the registry; one that is "
           "gone for good says RETIRED in its reason",
@@ -3383,6 +3416,139 @@ def suite_r49_record_integrity():
           "run's beliefs, which is the property that stopped round 46 recurring")
 
 
+def suite_r55_child_env_and_first_error():
+    """R55. A tool whose BINARY is missing, and an instrument that named the last frame."""
+    section("R55. The child's PATH is a dependency, and the first error is the cause")
+    sys.path.insert(0, str(HERE))
+    import orchestrate as o
+    src = (HERE / "orchestrate.py").read_text(encoding="utf-8")
+
+    # ---- the knob has to reach the CALL --------------------------------------------------------
+    # This project's own rule, learned the expensive way: a knob you only DEFINED is not a knob.
+    # `_agy_env` existing proves nothing; what matters is that the agy subprocess is launched
+    # with it. Assert the dispatched call, not the helper.
+    agy_call = [ln for ln in src.splitlines()
+                if "_run(cmd" in ln and "stdout_path=ndjson" in ln]
+    check(len(agy_call) == 1 and "env=_posix_child_env()" in agy_call[0],
+          "the agy subprocess is launched WITH _posix_child_env() - without it grep_search "
+          "cannot resolve its binary from a PowerShell parent, and the model's fallback for a "
+          "broken search tool is a shell command, which is denied and discards the run",
+          "call=%r" % (agy_call[0].strip() if agy_call else None))
+    # 🔴 THE CLASS, NOT THE CHANNEL. agy is the one that lost rounds, but all three agentic-CLI
+    # children inherit the parent shell's PATH. Counting the call sites is the check: this
+    # project's recurring defect is a guard that runs on one branch of six.
+    # 🔴 READ THE WHOLE CALL, NOT ITS FIRST LINE. The first version of this check scanned
+    # line by line and reported "1 of 6", because `env=` sits on a CONTINUATION line in most
+    # of these calls. A checker that reads one line while the fact spans several is the same
+    # shape as the bug this suite exists for, committed inside the test for it.
+    cli_launches = []
+    for m in re.finditer(r"(?:p, secs = _run\(cmd|p = subprocess\.run\(cmd)", src):
+        depth, i = 0, m.end() - len("cmd")
+        while i < len(src):
+            if src[i] == "(":
+                depth += 1
+            elif src[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        cli_launches.append(src[m.start():i + 1])
+    with_env = [c for c in cli_launches if "env=" in c]
+    check(len(with_env) >= 3,
+          "every agentic-CLI child (agy, kimi/hermes, grokcli) is launched with an explicit "
+          "environment, so none of them depends on which shell started python",
+          "%d of %d whole call expressions pass env=" % (len(with_env), len(cli_launches)))
+    check("_agy_env" not in src.replace("`_agy_env`", ""),
+          "the helper is named for the CLASS, not for the channel that found it - a fix called "
+          "_agy_env is a fix nobody applies to kimi")
+
+    # ---- APPEND, never prepend -----------------------------------------------------------------
+    # Git\usr\bin also ships find.exe and sort.exe. Prepending would shadow the Windows built-ins
+    # of those names for everything else the child runs - a fix that quietly breaks its neighbours.
+    fn = src.split("def _posix_child_env(")[1].split("\ndef ")[0]
+    check('env["PATH"] = env.get("PATH", "") + os.pathsep + d' in fn,
+          "the POSIX toolset is APPENDED to the child PATH, so Windows `find`/`sort` still win")
+    check("if shutil.which(\"grep\"):" in fn,
+          "when grep already resolves (a Git-Bash parent) the environment is left alone entirely")
+
+    # ---- no machine's layout baked into a shipped default --------------------------------------
+    pt = src.split("def posix_tools_dir(")[1].split("\ndef ")[0]
+    check("POSIX_TOOLS_DIR" in pt, "an env var overrides the search, so no path is mandatory")
+    check(pt.count('os.path.isfile(os.path.join(d, "grep.exe"))') == 1,
+          "the directory is accepted only if grep.exe is actually IN it - existence of the "
+          "folder is not evidence that the binary is there")
+
+    # ---- it resolves on THIS machine, or says why ----------------------------------------------
+    # Executed, not read: a helper that returns None everywhere would pass every check above.
+    if os.name == "nt":
+        d = o.posix_tools_dir()
+        check(d is None or os.path.isfile(os.path.join(d, "grep.exe")),
+              "posix_tools_dir() returns a directory that really holds grep.exe, or None",
+              "resolved=%r" % d)
+        env = o._posix_child_env()
+        path = (env or os.environ).get("PATH", "")
+        check(shutil.which("grep", path=path) is not None or o.agy_grep_warning(),
+              "either grep is resolvable in the environment agy will actually get, or "
+              "agy_grep_warning() explains why it is not - never silently neither",
+              "which=%r" % shutil.which("grep", path=path))
+
+    # ---- a registry annotation must never reach the wire ---------------------------------------
+    # 🔴🔴 MEASURED, NOT REASONED: `orglm52` died in 0.1 s with `HTTP 400 ... provider:
+    # Unrecognized key: "order_reason"`. That key is PROSE - it explains why the provider order is
+    # not price order - and it lived in the same dict as the vendor's own parameters, so the vendor
+    # was asked to honour a comment. The channel was dead from the moment the note was written, and
+    # nothing caught it because the note was added AFTER that round's panel had already run.
+    check('wire = {k: v for k, v in provider_route.items() if not k.startswith("_")}' in src,
+          "underscore-prefixed keys are stripped from the provider block before it is sent - "
+          "every other annotation in this registry already marks itself that way")
+    _regpr = json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))
+    _OR_PROVIDER_KEYS = ("only", "order", "ignore", "allow_fallbacks", "sort", "quantizations",
+                         "require_parameters", "data_collection", "zdr", "max_price")
+    stray = {}
+    for cname, chn in (_regpr.get("channels") or {}).items():
+        if cname.startswith("_"):
+            continue
+        pr = chn.get("provider_route") or {}
+        odd = [k for k in pr if not k.startswith("_") and k not in _OR_PROVIDER_KEYS]
+        if odd:
+            stray[cname] = odd
+    check(not stray,
+          "no channel's provider_route carries a key that is neither a documented OpenRouter "
+          "provider parameter nor an underscore annotation - the vendor 400s on those instantly, "
+          "for the whole round", "stray=%r" % stray)
+
+    # ---- a canned cause may not contradict its own numbers -------------------------------------
+    check("It produced NOTHING" in src and "if not text.strip() and (spent or calls):" in src,
+          "the «it had already done the work» sentence is gated on the meter it describes - "
+          "agy31pro printed it over 0 tokens and 0 tool calls, where its advice is backwards")
+
+    # ---- the instrument reports the FIRST error ------------------------------------------------
+    # 🔴 AOS R52 and R53 were lost to the same missing binary and reported as two different
+    # failures, because the summary read the terminal frame. In R52 grep_search failed three
+    # times, the model fell back to a raw PowerShell pipeline, that was denied, and our warning
+    # named the denial and prescribed patch_agy_permissions.py - which cannot install grep.
+    check('"error_seq": []' in src and 'out["error_seq"].append((name, err))' in src,
+          "the agy stream parser keeps (tool, message) in the ORDER errors happened - `errors` "
+          "is a de-duplicated set with no tool name and cannot answer «which failed first»")
+    check('ev["errors"][-1]' not in src,
+          "nothing reports the LAST error as the cause any more")
+    check("FIRST tool error" in src,
+          "the END-MARKER-ABSENT warning names the first error, not the terminal one")
+    check("was NOT the first failure" in src,
+          "the permission-denial warning says so when an earlier error preceded it, instead of "
+          "sending the reader to a fix that cannot apply")
+    check("A TOOL'S BINARY IS MISSING FROM THE CHILD'S PATH" in src,
+          "a missing binary is reported as a CAUSE in its own right, with the tool that hit it")
+
+    # ---- the persona's ban names a category the MODEL does not use -----------------------------
+    # Kept as a check rather than a rewrite: the ban is about run_command and is correct. What was
+    # wrong was expecting it to cover `grep_search`, which is neither a terminal nor a shell in
+    # any wording the model sees. Prose does not decide tool access; this file says so already.
+    check("Permission rules are the only thing that decides tool access. Prose does not." in src,
+          "the measured lesson stays next to the persona that keeps tempting the next reader to "
+          "solve a tool problem with a sentence")
+
+
 def suite_r48_visibility():
     """R48. What the run PRODUCED, told truthfully - the round Igor read a table and it lied."""
     section("R48. The artifact measures itself, and a heading may not outrun its rows")
@@ -3513,7 +3679,7 @@ def main():
                   suite_agy_plan_class, suite_spend_guard, suite_panels,
                   suite_max_depth_and_explicit_only, suite_refs_and_meters,
                   suite_r47_causes, suite_dedup_scripts, suite_r48_visibility,
-                  suite_r49_record_integrity):
+                  suite_r49_record_integrity, suite_r55_child_env_and_first_error):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
