@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.31.1 — 2026-08-19
+
+**The review panel said the 1.31.0 ledger change was a rationalisation, and it was right.**
+
+- 🔴🔴 **9 of 11 reviewers, independently: «yes, the author is rationalising».** 1.31.0 replaced a
+  disjointness assertion on the two cheap-panel ledgers with a check on the CURRENT state. The
+  sharpest form of the objection (grokbuild): the replacement *is also a normalisation rule in a
+  safety check's clothing* — it says nothing about whether the ledger is coherent. One reviewer
+  (mimo25pro) named the concrete undetectable scenario the brief had asked for and the author could
+  not produce: **a channel entering both books through churn rather than through one deliberate
+  trial**, which a current-state check cannot see because the end state is identical. Another
+  (spark12cont) named the property in a phrase: what disjointness was really buying is **no silent
+  churn**.
+- **Both halves are asserted now, and neither stands in for the other.** (a) the end state — a name
+  in both books really is out of the panel; (b) the trail — a removal that cancels an addition must
+  explicitly name the addition it cancels. A deliberate trial can write that sentence; accidental
+  churn cannot. This keeps 1.31.0's actual fix (an added-then-removed channel is recordable at all)
+  without keeping its hole.
+- The lesson is the round's own, turned on its author: deleting a safety check because the reason
+  it fired is inconvenient is exactly what a panel exists to catch.
+
 ## 1.31.0 — 2026-08-19
 
 **The round about a tool whose binary was missing, and an instrument that named the last frame.**

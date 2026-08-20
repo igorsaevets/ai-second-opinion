@@ -2659,7 +2659,10 @@ def suite_panels():
             "round, $0.3653 in R42 - and the panel keeps two other `role: code` voices "
             "(grokbuild, orglm52), so nothing is orphaned. Still reachable: standard INCLUDES "
             "cheap, so `--panel standard` runs it.",
+        # The words ADDED_TO_CHEAP_SINCE below are load-bearing, not decoration: the pairing check
+        # looks for them, so a removal that cancels an addition has to SAY it cancels one.
         "orgpt56lunapro":
+            "Cancels this channel's entry in ADDED_TO_CHEAP_SINCE (R54). "
             "R55, 2026-08-19, Igor by name: «Luna pro перенеси из cheap panel в standart». It "
             "entered the cheap panel in R54 as a TIMED TRIAL and the trial returned a NO: 604 s "
             "and $0.8629 in its first real round - the last channel to return, and the highest "
@@ -2755,12 +2758,36 @@ def suite_panels():
     # What a reader actually wants asserted is the property, so assert that: if a name is in both
     # books it must really be out of the cheap panel now. A removal recorded on paper while the
     # channel still sits in the panel is a lying record, and THAT is worth failing on.
+    # 🔴🔴 AND THE r55 PANEL SAID I WAS RATIONALISING - 9 of 11 reviewers, independently, on the
+    # paragraph above. They were right, and the sharpest form of it (grokbuild) is that my
+    # replacement «is ALSO a normalisation rule in a safety-check's clothing»: it checks the
+    # CURRENT state and says nothing about the ledger's coherence. mimo25pro named the concrete
+    # scenario I had asked for and could not think of - a channel entering both books through
+    # CHURN rather than through one deliberate trial, which the current-state check cannot see
+    # because the end state looks identical. spark12cont named the property in one phrase: the
+    # books encode an audit trail, and what disjointness bought was NO SILENT CHURN.
+    #
+    # So both halves are now asserted, and neither substitutes for the other:
+    #   (a) the end state - a name in both books really is out of the panel;
+    #   (b) the trail - a pairing must be DELIBERATE, which means the removal entry has to name
+    #       the addition it cancels. Churn cannot write that sentence by accident.
+    # That keeps R55's fix (an added-then-removed channel is recordable at all) without keeping
+    # R55's hole. Deleting a safety check because the reason it fired is inconvenient is exactly
+    # what a panel is for.
     _both = set(REMOVED_FROM_CHEAP_SINCE) & set(ADDED_TO_CHEAP_SINCE)
     check(not (_both & actual_cheap),
           "a channel recorded as both added to and removed from the cheap panel is really out "
           "of it now - both entries stay, because an addition and its later removal are two "
           "events and deleting the first one erases why it was ever tried",
           "recorded as removed but still in cheap=%s" % sorted(_both & actual_cheap))
+    _unacknowledged = sorted(
+        c for c in _both
+        if "ADDED_TO_CHEAP_SINCE" not in str(REMOVED_FROM_CHEAP_SINCE.get(c, "")))
+    check(not _unacknowledged,
+          "a channel in BOTH ledgers has a removal reason that explicitly names the addition it "
+          "cancels - a deliberate trial can say that sentence and accidental churn cannot, which "
+          "is the no-silent-churn property the old disjointness rule was really buying",
+          "in both books without acknowledging the addition=%s" % _unacknowledged)
     check(all(c in CH for c in set(REMOVED_FROM_CHEAP_SINCE) - _retired),
           "a channel DEMOTED out of the cheap panel still exists in the registry; one that is "
           "gone for good says RETIRED in its reason",
