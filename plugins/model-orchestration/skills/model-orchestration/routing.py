@@ -1674,7 +1674,7 @@ def _decorate(plan, reg):
         # is a deliberate fallback for a corrupt registry) but the registry now actually wins.
         for extra in ("reasoning", "max_tokens", "toolsets", "role", "fetch_tool", "tools",
                       "provider", "provider_route", "prompt_suffix", "distribution",
-                      "thinking_level", "thinking_levels"):
+                      "thinking_level", "thinking_levels", "fallback_models"):
             if ch.get(extra) is not None:
                 p[extra] = ch[extra]
         # Hints are stored ONCE at top level and referenced, because the same 1.5 KB paragraph
@@ -1924,8 +1924,33 @@ def format_plan(plan, reg):
             ("  role=%s" % p["role"]) if p.get("role") else ""))
         for w in p["why"]:
             lines.append("           - %s" % w)
+        # 🔴 THE PLAN EXPLAINED EVERY SKIP EXCEPT THE ONES THAT MATTER MOST. Found R54 by reading
+        # the printout rather than the code: a channel filtered out by a panel says so, a channel
+        # blocked by explicit_only says so - but a channel that is simply `enabled: false` in the
+        # registry accumulates NO `why` at all, because every writer of that list runs only over
+        # channels that were still enabled when it ran. So three channels printed a bare `[skip]`
+        # with no reason, one of them the most expensive in the registry, and a reader could not
+        # tell "off by default" from "filtered out by your flags" from "broken". Printed here, at
+        # display time rather than in the plan data, so no decision depends on it.
+        if not p["enabled"] and not p["why"]:
+            lines.append("           - off by default in the registry (`enabled: false`)%s"
+                         % (" - and `explicit_only`, so ONLY its own name starts it: no group, "
+                            "no panel, no default" if p.get("explicit_only")
+                            else "; --only or a group word can still start it"))
         if p["enabled"] and cost == "expensive":
             lines.append("           - cost: EXPENSIVE channel")
+        # 🔴 A FALLBACK NOBODY IS TOLD ABOUT IS A SILENT MODEL SUBSTITUTION, and this registry has
+        # already paid for one: `--set spark12cont=muse-spark-1.2` ran a whole round on the wrong
+        # checkpoint, and the only reason anyone ever found out was the «⚠ MODEL OVERRIDDEN» line.
+        # A fallback chain is that same substitution with the vendor pulling the lever instead of a
+        # human, so it is printed BEFORE the spend, by name, and the answer records which model
+        # actually served. The money half matters too: on the one channel that has this today the
+        # primary is free and the fallback is metered, so «it worked» and «it was free» stopped
+        # being the same statement.
+        if p["enabled"] and p.get("fallback_models"):
+            lines.append("           - fallback: if %s errors, OpenRouter tries %s and bills for "
+                         "whichever answers. `model_served` in the report says which one did."
+                         % (p.get("model"), " then ".join(p["fallback_models"])))
         # 🔴 THE PRICE LINE USED TO KEY ON THE WORD `expensive`, WHICH ONLY CODEX CARRIES - so the
         # channel that actually ran away printed nothing at all. Measured 2026-08-14: orgpt56terrapro
         # is tagged `metered`, the same word as a $0.10 channel, and billed $12.08 in one round while

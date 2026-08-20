@@ -202,7 +202,14 @@ def suite_routing():
     # используй все модели, ее не использовать». That is a POLICY with a measured price behind it
     # (~$1.80 a review, ~7x kimik3), so it gets a test rather than a paragraph: turning it on by
     # default should fail here, in both the working copy and a shipped kit.
-    OPT_IN = {"orgpt56terrapro": "rationed: ~$1.80/review, strategic questions only"}
+    # 🔴 R54: the KEY moved with the seat when Igor said «Terra Pro меняем на Sol Pro». Worth one
+    # line about why this dict is keyed on a channel name at all, given this file's own rule that a
+    # test hard-coding the value a human is meant to change tests the human: the thing under test
+    # here is not WHICH model sits in the seat, it is that SOMETHING rationed exists and stays off.
+    # The rename made all three of this round's failures loud, which is the behaviour that was
+    # wanted - a conditional `if "orgpt56terrapro" in _CHANS` would have skipped silently instead.
+    OPT_IN = {"orgpt56solpro": "rationed: predecessor measured ~$1.80/review and this model costs "
+                               "25% more per token; strategic questions only"}
     for c, why in sorted(OPT_IN.items()):
         if kit_tree:
             # 🔴 R47, Igor: «Terra Pro модель в репозитории вообще давай отключим (или удалим),
@@ -2621,6 +2628,14 @@ def suite_panels():
         # decision about which room it belongs in.
         "grokbuild":  "subscription CLI, free at the margin exactly like the agy seats",
         "orglm52":    "$0.308/M in, cheaper than ordeepseekv4pro which he did name as cheap",
+        # R54, 2026-08-19, Igor: «Добавь так же временно Luna Pro для теста, посмотрим как быстро
+        # будет отвечать, не будет ли тормозить других в cheap panel». He put it in the cheap panel
+        # himself, and the price agrees: $0.20/M in and $1.20/M out, read live, which is a TENTH of
+        # its Sol Pro sibling and cheaper per token than any other metered member of this panel.
+        # 🔴 TEMPORARY BY HIS OWN WORD, and nothing here expires it - the channel's `_temporary`
+        # key says what ends the trial. If this line is still present long after the latency
+        # question has an answer, that is the trial having quietly become permanent.
+        "orgpt56lunapro": "$0.20/M in - a tenth of Sol Pro; added as a TEMPORARY latency test",
     }
     # 🔴🔴 AN ADDITION HAD A NAMED HOME AND A REMOVAL HAD NONE, WHICH IS ITSELF THE DEFECT.
     #
@@ -2640,6 +2655,38 @@ def suite_panels():
             "(grokbuild, orglm52), so nothing is orphaned. Still reachable: standard INCLUDES "
             "cheap, so `--panel standard` runs it.",
     }
+    # ---- R54: a declared fallback chain that can never fire ------------------------------------
+    # 🔴 MEASURED, NOT READ: `provider.allow_fallbacks: false` also suppresses MODEL-level fallback.
+    # Four arms, one variable, the primary genuinely failing (a real upstream 429 from the free
+    # tier) in all of them: with `false` the 429 came back and the fallback model was NEVER tried;
+    # with `true`, and with the flag omitted, the fallback answered. Nothing in OpenRouter's docs
+    # says so - the flag is documented purely as provider-level.
+    #
+    # This is the [[depth-knobs-judged-by-meter]] shape one level up: a field that is SET, parses,
+    # costs nothing, and silently does not act. Left untested it would have failed on exactly one
+    # day - the day the free tier was down, which is the only day the fallback matters.
+    for cname, ch in sorted(CH.items()):
+        fb = ch.get("fallback_models")
+        if not fb:
+            continue
+        pr = ch.get("provider_route") or {}
+        check(pr.get("allow_fallbacks") is not False,
+              "%s declares fallback_models AND does not pin allow_fallbacks:false - measured R54: "
+              "that flag suppresses model-level fallback too, so the chain would never fire"
+              % cname, "provider_route=%r" % pr)
+        # Every model this channel can actually run must be describable: label, data_policy,
+        # aliases. A fallback target missing from `models` is a model the plan cannot name.
+        missing = [m for m in fb if m not in (ch.get("models") or {})]
+        check(not missing,
+              "%s declares every fallback target in its `models` table, so each one has a label "
+              "and a data_policy the plan can print" % cname, "missing=%s" % missing)
+        # 🔴 The free tier's data terms differ from the paid one's; if the plan prints only the
+        # primary's policy, a reader is told about the wrong one. Both must be stated.
+        for m in [ch.get("model")] + list(fb):
+            check((ch.get("models") or {}).get(m, {}).get("data_policy"),
+                  "%s: model %s states a data_policy - the free and paid tiers of one model do "
+                  "NOT share terms, and the fallback can serve either" % (cname, m))
+
     actual_cheap = {c for c, v in CH.items() if v.get("panel") == "cheap"}
     check(not (DICTATED_CHEAP - actual_cheap - set(REMOVED_FROM_CHEAP_SINCE)),
           "every channel Igor named as cheap is STILL cheap, or its removal is recorded here",
@@ -3172,9 +3219,29 @@ def suite_r47_causes():
     pkg = HERE / "package.py"
     if pkg.is_file():
         psrc = pkg.read_text(encoding="utf-8")
-        check('PUBLISH_EXCLUDE_CHANNELS = ["orgpt56terrapro"]' in psrc,
-              "package.py deletes the rationed channel from the shipped registry (R47: employees "
-              "walked every lock rung on purpose - absence is the only lock that survives naming)")
+        # 🔴 R54: THIS USED TO ASSERT THE EXACT SOURCE LINE, LITERAL NAME AND ALL, and that is the
+        # defect this file has recorded twice under its own name - «a test hard-coding the value a
+        # human is meant to change tests the human». It went red the moment the seat was re-pointed
+        # from Terra Pro to Sol Pro, which was CORRECT behaviour, but the only repair it offered
+        # was «paste the new name in», so it would have passed again while asserting nothing about
+        # whether the exclusion still covers what needs excluding. Now it DERIVES: whatever the
+        # registry marks `explicit_only` is what the published tree must not contain.
+        excl = re.search(r"PUBLISH_EXCLUDE_CHANNELS\s*=\s*\[([^\]]*)\]", psrc)
+        shipped_excl = set(re.findall(r'"([^"]+)"', excl.group(1))) if excl else set()
+        _reg54 = json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))
+        _chans54 = {k: v for k, v in _reg54["channels"].items() if not k.startswith("_")}
+        rationed = {c for c, v in _chans54.items() if v.get("explicit_only")}
+        check(bool(excl), "package.py declares PUBLISH_EXCLUDE_CHANNELS at all")
+        check(rationed and rationed <= shipped_excl,
+              "every explicit_only channel is DELETED from the shipped registry (R47: employees "
+              "walked every lock rung on purpose - absence is the only lock that survives naming)",
+              "explicit_only=%s excluded=%s missing=%s"
+              % (sorted(rationed), sorted(shipped_excl), sorted(rationed - shipped_excl)))
+        # An exclusion for a channel that no longer exists is dead weight that reads as protection.
+        check(shipped_excl <= set(_chans54),
+              "every excluded name is a channel that actually exists - a stale exclusion looks "
+              "exactly like a live one and protects nothing",
+              "unknown=%s" % sorted(shipped_excl - set(_chans54)))
 
 
 def suite_dedup_scripts():

@@ -87,6 +87,7 @@
         "or"
       ],
       "_membership_updated_2026_08_14": "orgpt56terrapro added round 38.",
+      "_membership_updated_2026_08_19": "R54: `orgpt56terrapro` REPLACED by `orgpt56solpro` (the operator: «Terra Pro меняем на Sol Pro»), and `orgpt56lunapro` added as a temporary speed test. ELEVEN channels. 🔴 The membership of THIS group is what makes `--skip openrouter` a real lever rather than a cosmetic one, and it is also what `explicit_only` exists to survive: Sol Pro stays in the group ON PURPOSE, so «не используй openrouter» still excludes it, while `explicit_only` stops «--only openrouter» from starting it. Removing it from the group to protect it would have made the EXCLUSION silently incomplete - the mirror-image bug, and the more dangerous one.",
       "_membership_updated_2026_08_15": "ordeepseekv4pro added round 42. NINE channels now, and this group is the one that matters most for a failure mode the panel cannot route around: they all spend ONE key, so a single channel's runaway can 403 every other member - measured 2026-08-14, when orgpt56terrapro's $12.08 round exhausted the monthly cap and took four channels down with it in the next round, including the FREE one. `--skip openrouter` is therefore a real lever, not a cosmetic one."
     },
     "grok": {
@@ -227,12 +228,11 @@
         "gpt-5.6-sol": {
           "label": "GPT-5.6 Sol",
           "_lost_the_bare_5.6_alias_2026_08_14": "🔴 THIS MODEL USED TO ANSWER TO A BARE `5.6`, and round 38 removed it the moment a SECOND 5.6 model entered the registry (openai/gpt-5.6-terra-pro). Third instance of one class in a single round, after the `openai` alias on this same channel and the `gemini` group on 2026-08-07: a name is unambiguous only until the thing it names gets a sibling, and nothing fails when it stops being so. This one was not theoretical - it broke the exact sentence the operator asked to support. In «используй все модели и 5.6 Terra Pro» the scanner consumed `terra pro` first, leaving `5.6` free to match HERE, so the route reported «mentions codex» and refused. `5.6 sol`, `5.6-sol`, `sol` and `соль` all still work and none of them is ambiguous. A bare version number shared by two models cannot route, and the right answer is to stop accepting it rather than to guess.",
+          "_lost_the_bare_sol_alias_2026_08_19": "🔴 FOURTH INSTANCE OF ONE CLASS, ON THIS SAME MODEL, AND THE SECOND TIME IT HAS BEEN THIS EXACT ENTRY. R38 removed the bare `5.6` from here when openai/gpt-5.6-terra-pro arrived; R54 removes the bare `sol` and `соль` because openai/gpt-5.6-SOL-PRO arrived, and `sol` now names two different models on two different transports - this subscription CLI and a metered OpenRouter channel that is explicit-only precisely so it cannot start by accident. Leaving it would mean «используй sol» quietly resolving to the cheap subscription voice while a human who meant the expensive one watched a plan that named neither ambiguity. `gpt-5.6-sol`, `5.6 sol` and `5.6-sol` all survive and none of them is ambiguous: the alias index sorts LONGEST FIRST, so «5.6 sol pro» is consumed whole by the Sol Pro entry before `5.6 sol` can match a prefix of it. The general rule, now written down for the fourth time: a name is unambiguous only until the thing it names gets a sibling, and NOTHING FAILS when it stops being so - the router keeps working and silently means less than it used to.",
           "aliases": [
             "gpt-5.6-sol",
             "5.6 sol",
-            "5.6-sol",
-            "sol",
-            "соль"
+            "5.6-sol"
           ]
         },
         "gpt-5.4": {
@@ -1129,21 +1129,29 @@
       "provider": "openrouter",
       "enabled": true,
       "distribution": "both",
-      "label": "GLM 5.2",
+      "label": "GLM 5.2 (free, falls back to paid)",
       "cost": "metered",
-      "model": "z-ai/glm-5.2",
+      "model": "z-ai/glm-5.2:free",
+      "fallback_models": [
+        "z-ai/glm-5.2"
+      ],
       "role": "code",
       "provider_route": {
         "only": [
+          "decart",
           "streamlake",
           "novita"
         ],
         "order": [
           "streamlake",
-          "novita"
+          "novita",
+          "decart"
         ],
-        "allow_fallbacks": false
+        "allow_fallbacks": true,
+        "order_reason": "NOT price order, deliberately. On the PAID model decart is the CHEAPEST of the three ($0.684/M against streamlake's $0.7252) - and it is also the only fp4 host, where streamlake and novita are fp8. Four-bit weights are a quality cut on a channel whose whole product is the quality of a review, and escaping fp4 is the entire point of falling back off the free tier; landing back on it to save 3 US cents per million tokens would defeat the fallback while looking like thrift. decart stays LAST in `order`, and is in `only` at all only because the FREE variant has no other host."
       },
+      "🔴🔴_FREE_FIRST_PAID_SECOND_2026_08_19_R54_AND_THREE_THINGS_MEASURED_TO_MAKE_IT_WORK": "the operator: «Добавь free версию glm 5.2, а если free не сработает то fallback на платную. https://openrouter.ai/z-ai/glm-5.2:free».\n\nSHAPE: OpenRouter's own `models` array does this natively - docs read live at /docs/guides/routing/model-fallbacks.md: «Provide an array of model IDs in priority order. If the first model returns an error, OpenRouter will automatically try the next model in the list», and «Requests are priced using the model that was ultimately used, which will be returned in the `model` attribute». One request, no harness retry logic, and `model_served` records which one answered. It is ONE channel and therefore ONE voice, which is the rule a second `orglm52free` entry would have broken - two seats for one model is paying twice for one opinion.\n\n🔴 (1) `allow_fallbacks` HAD TO FLIP TO TRUE, AND NOTHING DOCUMENTS THAT. Four arms, one variable, with the primary genuinely failing in every arm (the free tier returned a real upstream 429): allow_fallbacks FALSE -> the 429 was returned and the paid model was NEVER TRIED; TRUE -> answered by the paid model on Novita; omitted -> same. So a provider-level switch gates the MODEL-level retry too. Had this been left at R48's `false`, the fallback the operator asked for would have existed in the config and never once fired - and it would have failed silently, on the day the free tier was down, which is the only day it matters.\n\n🔴 (2) THE COST OF THAT FLIP IS REAL AND IS BOUNDED HERE. R48 chose `false` deliberately - «a round losing one of thirteen voices loudly beats a legal brief silently routed at double price». Turning it on re-opens silent re-routing, so the blast radius is held by `only` (three named providers, nothing else can serve either model) and the preference by `order`. A fourth arm proves `only` is what does the holding: with NO pin at all the same request landed on DigitalOcean, undiscounted, which is exactly the drift `false` used to prevent.\n\n🔴 (3) `decart` IS IN `only` FOR THE FREE MODEL AND MUST BE LAST IN `order` FOR THE PAID ONE. The free variant has exactly ONE endpoint, `decart/fp4`, so without decart in `only` the free model is dropped at routing time and never runs - measured: pinning only [streamlake, novita] answered from the PAID model every time, which looks like a working fallback and is really the free tier never being tried. But `decart/fp4` is ALSO on the paid model, at $0.684/M and 4-BIT, so a bare union pin would let the paid fallback land straight back on the quantization it exists to escape. `order` puts the two discounted fp8 hosts first and decart last, which is the only arrangement that serves both models correctly from one provider block.",
+      "🔴🔴_THE_FREE_MODEL_IS_NOT_THE_SAME_MODEL_AND_THIS_IS_THE_PART_TO_READ": "Three differences, all read live 2026-08-19, none of them visible from the word «free»:\n\n· QUANTIZATION. The free variant's only host serves `decart/fp4` - FOUR-BIT. Our paid pin deliberately uses fp8 hosts. This is a weights-precision downgrade, not a billing arrangement, and on a panel whose product is the QUALITY of disagreement it is the difference that matters most.\n· CONTEXT. 256,000 tokens against the paid model's 1,048,576. Every brief this harness has ever sent fits, so it is not a live constraint today - but it is a fourfold cut and it is not announced anywhere else.\n· DATA. A free tier's price IS the training grant. This registry already measured that: `provider.data_collection: \"deny\"` DROPS a free model with `404 No endpoints found matching your data policy (Free model training)` - logically necessary, since the discount is the permission. So a brief sent through the free primary is materially more exposed than one sent through the paid pin, and that is now stated in `data_policy` where the plan prints it.\n\n🔴 AND IT IS RATE-LIMITED ON A SHARED POOL. Both probe runs this round got `429 ... temporarily rate-limited upstream ... limit_source: upstream_provider_shared_pool` from Decart, minutes apart. So the realistic steady state is that this channel falls back to the paid model OFTEN - meaning it may cost roughly what it did before while delivering fp4 quality on the rounds where free does work. That is the honest expectation to hold, not «GLM is free now».\n\nONE-LINE REVERT if that trade turns out to be wrong: set `model` back to `z-ai/glm-5.2`, delete `fallback_models`, drop `decart` from `only`/`order`, and set `allow_fallbacks` back to false.",
       "🔴_BAIDU_DROPPED_2026_08_19_R48_FOUND_BY_THE_NEW_CHECK_NOT_BY_A_HUMAN": "🟢 THIS IS THE CLASS FIX REACHING ITS SECOND MEMBER, AND IT DID SO WITHIN A MINUTE OF EXISTING. `doctor.py --online` gained `check_provider_prices_live` for `ordeepseekv4pro`, whose pin had gone stale; on its first run it warned about THIS channel too, which no human had looked at. Read live 2026-08-19 from GET /api/v1/models/z-ai/glm-5.2/endpoints: streamlake $0.7336/M in, discount 0.476, uptime 99.8%; novita $0.7406/M, discount 0.471, uptime 99.9%; baidu $1.40/M, DISCOUNT 0, uptime 100%. The `order` was already correct - streamlake first - so the ordering check passed and only the DISCOUNT check fired: baidu sat SECOND, at 1.9x the price of the two around it, and would have served every request the moment streamlake blinked. the operator's «только если со скидкой» was said about deepseek, and applying it only there would have been the same defect this project keeps paying for: a fix applied to the channel that failed rather than to the class. THE TRADE-OFF, stated because it is real: `allow_fallbacks: false` means this list is the whole world for this channel, so dropping from three providers to two makes a simultaneous outage of both a channel failure instead of an expensive success. That is the preferred direction here - a round losing one of thirteen voices loudly beats a legal brief silently routed at double price - and both survivors are status 0 with >99.8% uptime over the last 30 minutes. The alternative considered and rejected: keep baidu as a LAST-RESORT third entry, which reads as prudence and is really a silent 1.9x waiting to happen, invisible in every report because `provider` only records which one served.",
       "_added": "2026-08-16 (R44), the operator: «https://openrouter.ai/z-ai/glm-5.2 (не забудь прочитать с официальных сайтов документацию по всем параметрам и интернету)». Tenth vendor family. 1M context, open-weights flagship from Z.ai; OpenRouter lists 35 endpoints for it at prices spanning 7x.",
       "🔴_THE_GATEWAY_RENAMES_THE_LADDER_AND_BOTH_DOCS_ARE_RIGHT": "Z.ai's own documentation, opened live 2026-08-16 at docs.z.ai/guides/llm/glm-5.2, says reasoning_effort takes `max` or `high` and that the DEFAULT is max. OpenRouter's catalogue for the same model says supported_efforts ['xhigh','high'] with default_effort 'high'. Neither is wrong: OpenRouter normalises effort names across vendors and its `xhigh` IS Z.ai's `max`. Consequence with teeth - through THIS channel the top rung is spelled `xhigh`, and sending Z.ai's own spelling would be the unknown value; a direct api.z.ai channel would need `max`. Note also that OpenRouter's default is a rung BELOW its own top, so leaving effort unset would quietly run this channel short.",
@@ -1156,6 +1164,7 @@
       ],
       "max_tokens": 128000,
       "_why_128000_and_not_131072": "The pinned providers do NOT agree: StreamLake caps completions at 128000 while Baidu and Novita allow 131072. A request may be served by any of the three, so the binding limit is the MINIMUM across the pinned set, not the best of them - asking 131072 and landing on StreamLake is a 400 that would look like a channel failure. Z.ai's own overview page independently states 'Maximum Output Tokens 128K', so two sources agree on the floor. This is the general form of the max_tokens rule: min(vendor cap, 131072) becomes min(cap of every provider that could serve it, 131072) the moment a pin lists more than one.",
+      "_128000_STILL_HOLDS_AFTER_THE_FREE_VARIANT_R54": "Re-checked rather than assumed when the free model became the primary, because the minimum is taken across everything that can now serve this channel. `z-ai/glm-5.2:free` reports max_completion_tokens 256000 - it RAISES the ceiling, it does not lower it - so the binding constraint is still StreamLake's 128000 and the value is unchanged. 🔴 The free variant's CONTEXT is the number that shrank (256,000 against the paid model's 1,048,576), and context is not what this field bounds. Worth stating because the two are easy to conflate and only one of them moved: a 128,000-token answer inside a 256,000-token window leaves 128,000 for the brief, which is roughly 500 KB of text - four times the largest brief this harness has ever sent.",
       "_why_these_three_providers": "Cheapest three of the 35, AND the same three already proven to serve this account on ordeepseekv4pro. R42's lesson is that a catalogue lists what EXISTS while the account decides what is REACHABLE - the best-argued pin that round 404'd on the account's data policy, and neither /models nor /endpoints shows that. Reusing a provider set with a live track record is a hypothesis with evidence behind it rather than a fresh guess; it is still a hypothesis until this channel itself returns.",
       "spend_guard": {
         "max_usd_per_review": 2.0,
@@ -1174,9 +1183,20 @@
         "max_calls": 11
       },
       "models": {
+        "z-ai/glm-5.2:free": {
+          "label": "GLM 5.2 (free tier, 4-bit)",
+          "data_policy": "🔴 FREE TIER - THE PRICE IS THE TRAINING GRANT. Served by ONE host, Decart, at fp4 (4-bit) with a 256,000-token context. A brief sent here is materially more exposed than one sent through the paid pin, and that is not an inference: OpenRouter refuses a free model outright when you ask for privacy, with `404 No endpoints found matching your data policy (Free model training)` - measured on ornemotron3ultra, and logically necessary, because the discount IS the permission. Same class as spark12cont's Contributor tier. If a brief must not train anyone, this channel is the wrong one and `--skip orglm52` is the lever.",
+          "aliases": [
+            "z-ai/glm-5.2:free",
+            "glm-5.2:free",
+            "glm 5.2 free",
+            "glm52free",
+            "глм фри"
+          ]
+        },
         "z-ai/glm-5.2": {
-          "label": "GLM 5.2",
-          "data_policy": "Metered API through OpenRouter, restricted to three third-party hosts (StreamLake, Baidu, Novita) - the payload goes to whichever of them serves the call, NOT to Z.ai itself. OpenRouter documents `provider.data_collection: deny` and `provider.zdr: true` as per-request controls; NEITHER IS SET HERE - see _data_controls_not_wired at the end of this file.",
+          "label": "GLM 5.2 (paid, fp8)",
+          "data_policy": "Metered API through OpenRouter, restricted to third-party hosts (StreamLake, Novita, and Decart only as a last resort) - the payload goes to whichever of them serves the call, NOT to Z.ai itself. OpenRouter documents `provider.data_collection: deny` and `provider.zdr: true` as per-request controls; NEITHER IS SET HERE - see _data_controls_not_wired at the end of this file.",
           "aliases": [
             "z-ai/glm-5.2",
             "glm-5.2",
@@ -1187,6 +1207,7 @@
           ]
         }
       },
+      "_both_models_are_declared_ON_PURPOSE": "`models` is the table every guard reads, and a fallback target that is not in it would be a model this channel can run and cannot describe - no label, no data_policy, no alias. The `ONE CHANNEL = ONE MODEL` rule is not weakened by this: `model` is still exactly one, `--set orglm52=<anything>` is still refused, and the second entry is a DECLARED FALLBACK rather than an alternative a human may select. The distinction that keeps it honest is that the vendor chooses between them, never the caller, and the plan prints the chain before the round while `model_served` records the outcome after it.",
       "aliases": [
         "orglm52",
         "glm",

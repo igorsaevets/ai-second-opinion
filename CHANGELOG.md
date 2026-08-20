@@ -1,5 +1,53 @@
 # Changelog
 
+## 1.30.0 — 2026-08-19
+
+**The round about a flag that gates more than its name says.** A channel gained a fallback model,
+and the fallback would never have fired — not because it was misconfigured, but because a
+*different* documented setting silently suppressed it. Most of what follows comes from measuring
+that rather than reading about it.
+
+- 🔴🔴 **New registry field `fallback_models`, and the trap that makes it work.** OpenRouter's
+  `models: [primary, fallback]` array retries a different MODEL when the first errors. Measured
+  across four arms with one variable, the primary genuinely failing in every arm: with
+  `provider.allow_fallbacks: false` the error came straight back and **the fallback model was
+  never tried**; with `true`, and with the flag omitted, the fallback answered. That flag is
+  documented purely as a *provider*-level switch. A channel declaring `fallback_models` while
+  pinning `allow_fallbacks: false` therefore has a chain that can never fire — and it would fail
+  on exactly one day, the day the primary was down. `selftest` now refuses the combination.
+- 🟢 **The plan prints the chain before the round, and the report names which model answered.**
+  A vendor-chosen model substitution is the same event as the `--set` substitution that once ran a
+  whole round on the wrong checkpoint, and the only reason that was ever noticed was a printed
+  line.
+- 🔴 **`glm-5.2` now leads with the free tier and falls back to paid.** Spelled out in the
+  registry because the word "free" hides three things: the free variant is served by a single host
+  at **4-bit** quantization (the paid pin uses 8-bit), its context is 256K rather than 1M, and a
+  free tier's price *is* the training grant. It is also rate-limited on a shared pool — two probes
+  minutes apart both got `429 … upstream_provider_shared_pool` — so the realistic steady state is
+  frequent fallback to paid.
+- 🟢 **The expensive OpenAI channel moved from GPT-5.6 Terra Pro to GPT-5.6 Sol Pro**, keeping
+  every lock (off by default, explicit-only, separate spend acknowledgement). Terra's discount had
+  lapsed — its pinned endpoint went from `$1/$6` to `$2/$12` with `discount: 0`. Its measured
+  spend figures were **not** inherited onto the new model; they are labelled as another model's
+  and as a floor, because the plan prints them and "measured" must not come to mean "measured on
+  something else".
+- 🟢 **`cost: "expensive"` now belongs to more than one channel.** It decides whether the plan
+  prints a cost line at all, and it had been carried by a single channel while the one with the
+  only measured runaway in this project's history was tagged the same word as a $0.10 channel.
+- 🔴 **The plan explained every skipped channel except the ones that are simply off by default** —
+  including the most expensive in the registry, which printed a bare `[skip]` with no reason.
+  A reader could not tell "off by default" from "filtered out by your flags" from "broken".
+- 🟢 **A test that asserted an exact source line now derives its expectation.** It went red on a
+  rename, correctly, but its only available repair was to paste the new name in — after which it
+  would have passed while asserting nothing. It now checks that *whatever* the registry marks
+  explicit-only is absent from the published tree, and that no exclusion names a channel that no
+  longer exists.
+- 🔵 **Note for anyone reading a vendor catalogue:** the `/models/<slug>/endpoints` response no
+  longer carries `supported_reasoning_efforts`, `default_reasoning_effort` or
+  `supports_native_web_search`. The effort ladder still exists — on the per-model object at
+  `/models` — so "the vendor removed it" is the wrong reading. A field missing from one endpoint
+  is not a field missing from the API.
+
 ## 1.29.0 — 2026-08-19
 
 **The round about a record that survives being interrupted.** 1.28.0 made the run's record

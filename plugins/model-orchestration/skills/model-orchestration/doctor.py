@@ -559,48 +559,108 @@ def check_provider_prices_live(r, mod=None):
 
     drift, checked = [], 0
     for name, c in sorted(pinned.items()):
-        model = c.get("model") or ""
-        if "/" not in model:
+        # 🔴🔴 THE PIN SERVES EVERY MODEL THE CHANNEL CAN RUN, NOT JUST `model` - R54, and this
+        # check FIRED FALSELY the moment `fallback_models` existed. `orglm52` leads with
+        # `z-ai/glm-5.2:free`, which has exactly ONE host (decart), while the paid fallback lives
+        # on streamlake and novita. Reading the pin against the primary alone, the two paid hosts
+        # look like providers that «no longer serve this model» - true of the free variant,
+        # irrelevant to the pin, and wrong as a warning.
+        #
+        # It matters more than a cosmetic misprint. A warning that fires on correct configuration
+        # every single run is the false-positive-in-a-safety-gate class this project keeps
+        # recording: it teaches the reader to skip the whole line, and THIS line is the one that
+        # caught baidu sitting second at 1.9x the price in R48. Union the models, and require a
+        # provider to be absent from ALL of them before calling it missing.
+        models = [c.get("model") or ""] + list(c.get("fallback_models") or [])
+        models = [m for m in models if "/" in m]
+        if not models:
             continue
-        url = "https://openrouter.ai/api/v1/models/%s/endpoints" % model
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "model-orchestration/doctor"})
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                eps = (json.loads(resp.read().decode("utf-8")).get("data") or {}).get("endpoints")
-        except Exception as e:                              # noqa: BLE001
-            r.warn("provider prices", "%s: endpoints not reachable (%r)" % (name, e),
+        live, eps_by_model, failed = {}, {}, []
+        for model in models:
+            url = "https://openrouter.ai/api/v1/models/%s/endpoints" % model
+            try:
+                req = urllib.request.Request(
+                    url, headers={"User-Agent": "model-orchestration/doctor"})
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    eps = ((json.loads(resp.read().decode("utf-8")).get("data")
+                            or {}).get("endpoints"))
+            except Exception as e:                          # noqa: BLE001
+                failed.append((model, e))
+                continue
+            eps_by_model[model] = eps or []
+            # Provider slugs in `only`/`order` are lowercase tags; the endpoint list reports a
+            # display name and a `tag` like "streamlake/fp8". Match on either, lowercased.
+            # First model wins a duplicate tag: `order` is judged against the PRIMARY's prices,
+            # which is what a request actually pays when the primary answers.
+            for ep in eps_by_model[model]:
+                for keyname in ((ep.get("tag") or "").split("/")[0],
+                                (ep.get("provider_name") or "")):
+                    if keyname:
+                        live.setdefault(keyname.strip().lower(), ep)
+        if failed and not eps_by_model:
+            r.warn("provider prices",
+                   "%s: endpoints not reachable for %s (%r)"
+                   % (name, ", ".join(m for m, _ in failed), failed[0][1]),
                    "harmless offline; re-run with a network")
             continue
         checked += 1
-        # Provider slugs in `only`/`order` are lowercase tags; the endpoint list reports a
-        # display name and a `tag` like "streamlake/fp8". Match on either, lowercased.
-        live = {}
-        for ep in (eps or []):
-            for keyname in ((ep.get("tag") or "").split("/")[0],
-                            (ep.get("provider_name") or "")):
-                if keyname:
-                    live.setdefault(keyname.strip().lower(), ep)
         order = [str(p).lower() for p in c["provider_route"]["order"]]
-        priced = [(p, _num((live[p].get("pricing") or {}).get("prompt")),
-                   (live[p].get("pricing") or {}).get("discount"))
-                  for p in order if p in live]
+        # Presence is a UNION question - a pinned provider is only useless if it serves NONE of
+        # the models this channel can run.
         missing = [p for p in order if p not in live]
         if missing:
-            drift.append("%s: pinned provider(s) %s no longer serve this model"
-                         % (name, ", ".join(missing)))
-        usable = [(p, v, d) for p, v, d in priced if v is not None]
-        if len(usable) >= 2:
-            first = usable[0]
-            cheapest = min(usable, key=lambda t: t[1])
+            drift.append("%s: pinned provider(s) %s no longer serve %s"
+                         % (name, ", ".join(missing),
+                            "any of %s" % ", ".join(models) if len(models) > 1
+                            else "this model"))
+        # 🔴🔴 PRICE IS A PER-MODEL QUESTION, AND UNIONING IT PRODUCED TWO FALSE ALARMS IMMEDIATELY.
+        # The first version of this R54 fix built ONE provider->endpoint map across every model the
+        # channel can run, then compared prices inside it. On orglm52 that put decart's FREE-variant
+        # endpoint ($0.0000, discount 0) beside streamlake's PAID one ($0.7252, discount 0.476), and
+        # duly reported that `order` was sending requests to a dearer host and that decart carried
+        # no discount. Both readings are arithmetically correct and both are meaningless: they
+        # compare two different models. A cheaper fix for one false positive that manufactures two
+        # is not a fix - it is the same defect with better manners.
+        for model in models:
+            mlive = {}
+            for ep in eps_by_model.get(model, []):
+                for keyname in ((ep.get("tag") or "").split("/")[0],
+                                (ep.get("provider_name") or "")):
+                    if keyname:
+                        mlive.setdefault(keyname.strip().lower(), ep)
+            usable = [(p, _num((mlive[p].get("pricing") or {}).get("prompt")),
+                       (mlive[p].get("pricing") or {}).get("discount"))
+                      for p in order if p in mlive]
+            usable = [(p, v, d) for p, v, d in usable if v is not None]
+            # One provider serving a model says nothing about ordering. That is exactly the free
+            # variant's situation - a single host - and it must not be compared with anything.
+            if len(usable) < 2:
+                continue
+            where = " for %s" % model if len(models) > 1 else ""
+            first, cheapest = usable[0], min(usable, key=lambda t: t[1])
             if cheapest[0] != first[0]:
-                drift.append("%s: `order` sends requests to %s first at $%.4f/M while %s serves "
-                             "the same model at $%.4f/M"
-                             % (name, first[0], first[1], cheapest[0], cheapest[1]))
+                # 🔴 AND EVEN A CORRECT PRICE GAP CAN BE A DELIBERATE CHOICE. On orglm52 the
+                # cheapest paid host is decart at 4-BIT while the two ahead of it are 8-bit, so
+                # this check's own advice - «reorder cheapest-first» - would make the config worse.
+                # A channel may therefore declare WHY its order is not price order. This is kept
+                # deliberately weak: the number is still printed, at the same prominence, so the
+                # escape hatch buys silence about the ALARM and never about the FACT. A registry
+                # that carries advice gets obeyed, so an exemption that hid the figure would become
+                # the default way to quiet this check.
+                why = (c.get("provider_route") or {}).get("order_reason")
+                msg = ("%s: `order`%s sends requests to %s first at $%.4f/M while %s serves the "
+                       "same model at $%.4f/M"
+                       % (name, where, first[0], first[1], cheapest[0], cheapest[1]))
+                if why:
+                    r.ok("provider prices", "%s - declared deliberate: %s" % (msg, why))
+                else:
+                    drift.append(msg)
             undiscounted = [p for p, _v, d in usable if not d]
             if undiscounted and len(undiscounted) < len(usable):
-                drift.append("%s: pinned provider(s) %s carry no discount while %d sibling(s) in "
+                drift.append("%s: pinned provider(s) %s carry no discount%s while %d sibling(s) in "
                              "the same pin do"
-                             % (name, ", ".join(undiscounted), len(usable) - len(undiscounted)))
+                             % (name, ", ".join(undiscounted), where,
+                                len(usable) - len(undiscounted)))
     if drift:
         r.warn("provider prices", "; ".join(drift),
                "re-read the endpoints and reorder `provider_route.order` cheapest-first in "

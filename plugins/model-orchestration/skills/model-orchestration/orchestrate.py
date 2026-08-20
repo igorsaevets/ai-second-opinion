@@ -3263,7 +3263,7 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
 def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2400,
                       web=None, name="kimi", reasoning=None, max_tokens=None,
                       fetch_tool=None, provider="openrouter", provider_route=None,
-                      spend_guard=None):
+                      spend_guard=None, fallback_models=None):
     """
     Any OpenAI-protocol model over /chat/completions, DIRECTLY - no CLI in between.
 
@@ -3360,6 +3360,32 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     body = {"model": model, "messages": msgs,
             "max_tokens": max_tokens or 64000,
             "stream": streaming}
+    # 🔴 MODEL-LEVEL FALLBACK, added 2026-08-19 (R54). Igor: «Добавь free версию glm 5.2, а если
+    # free не сработает то fallback на платную». OpenRouter's own `models` array does exactly
+    # that - docs read live at /docs/guides/routing/model-fallbacks.md: "Provide an array of model
+    # IDs in priority order. If the first model returns an error, OpenRouter will automatically try
+    # the next model in the list", and "Requests are priced using the model that was ultimately
+    # used, which will be returned in the `model` attribute of the response body". So the harness
+    # needs no retry logic of its own, and `model_served` - which it already records - is the
+    # evidence of which one answered.
+    #
+    # 🔴🔴 THE TRAP, MEASURED THIS ROUND AND NOT IN ANY DOC: `provider.allow_fallbacks: false`
+    # ALSO SUPPRESSES THIS. Four arms, one variable, the primary genuinely failing (a real 429
+    # from the free tier's shared pool) in every arm:
+    #     allow_fallbacks FALSE    -> 429 returned, the paid model was NEVER tried
+    #     allow_fallbacks TRUE     -> answered by the paid model on Novita
+    #     allow_fallbacks omitted  -> answered by the paid model on Novita
+    # The flag is documented as a PROVIDER-level switch; it turns out to gate the whole retry path.
+    # A channel that declares `fallback_models` while pinning `allow_fallbacks: false` therefore
+    # has a fallback that can never fire, which is why selftest now refuses that combination
+    # rather than leaving it to be discovered on the round it was needed.
+    if fallback_models:
+        # `model` and `models` are alternatives, not siblings: sending both is ambiguous rather
+        # than redundant, so the single-model key goes away when the array is present.
+        body.pop("model", None)
+        body["models"] = [model] + [m for m in fallback_models if m != model]
+        log("  [%s] model fallback chain: %s (billed at whichever answers; `model_served` in "
+            "diagnostics.json records which one did)" % (name, " -> ".join(body["models"])))
     if prov["depth"] == "reasoning":
         body["reasoning"] = dict(reasoning) if reasoning else {"max_tokens": 24000}
     elif prov["depth"] == "thinking":
@@ -6039,7 +6065,8 @@ def main():
                                         fetch_tool=p.get("fetch_tool"),
                                         provider=p.get("provider") or "openrouter",
                                         provider_route=p.get("provider_route"),
-                                        spend_guard=p.get("spend_guard"))
+                                        spend_guard=p.get("spend_guard"),
+                                        fallback_models=p.get("fallback_models"))
             elif kind == "xai":
                 # 🔴 THE TIER TIMEOUT WAS NEVER PASSED HERE, and the plan claimed otherwise.
                 # Found by codex in the round-29 panel, reviewing this very change: the tier note
