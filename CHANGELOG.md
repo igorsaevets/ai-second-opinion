@@ -9,12 +9,19 @@ that rather than reading about it.
 
 - 🔴🔴 **New registry field `fallback_models`, and the trap that makes it work.** OpenRouter's
   `models: [primary, fallback]` array retries a different MODEL when the first errors. Measured
-  across four arms with one variable, the primary genuinely failing in every arm: with
+  across three arms holding the provider pin constant, the primary genuinely failing in each: with
   `provider.allow_fallbacks: false` the error came straight back and **the fallback model was
-  never tried**; with `true`, and with the flag omitted, the fallback answered. That flag is
-  documented purely as a *provider*-level switch. A channel declaring `fallback_models` while
-  pinning `allow_fallbacks: false` therefore has a chain that can never fire — and it would fail
-  on exactly one day, the day the primary was down. `selftest` now refuses the combination.
+  never tried**; with `true`, and with the flag omitted, the fallback answered. A channel
+  declaring `fallback_models` while pinning `allow_fallbacks: false` therefore has a chain that
+  cannot survive the failure it exists for — rate-limiting and downtime are runtime failures.
+  `selftest` refuses the combination.
+  - 🔴 **The first wording of this entry over-generalised, and a reviewer of this very release
+    forced the correction.** It said `allow_fallbacks: false` "suppresses model-level fallback",
+    full stop. A separate arm of the same probe refutes that: with the pin set to the *paid*
+    model's providers only, `allow_fallbacks: false`, the free model was dropped at **routing**
+    time and the paid one answered — so model fallback fires perfectly well with the flag off.
+    What the flag governs is whether any further attempt happens after a **dispatched** request
+    fails upstream. The disconfirming arm was in hand the whole time and went unreconciled.
 - 🟢 **The plan prints the chain before the round, and the report names which model answered.**
   A vendor-chosen model substitution is the same event as the `--set` substitution that once ran a
   whole round on the wrong checkpoint, and the only reason that was ever noticed was a printed

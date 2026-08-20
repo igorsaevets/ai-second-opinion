@@ -2656,11 +2656,18 @@ def suite_panels():
             "cheap, so `--panel standard` runs it.",
     }
     # ---- R54: a declared fallback chain that can never fire ------------------------------------
-    # 🔴 MEASURED, NOT READ: `provider.allow_fallbacks: false` also suppresses MODEL-level fallback.
-    # Four arms, one variable, the primary genuinely failing (a real upstream 429 from the free
-    # tier) in all of them: with `false` the 429 came back and the fallback model was NEVER tried;
-    # with `true`, and with the flag omitted, the fallback answered. Nothing in OpenRouter's docs
-    # says so - the flag is documented purely as provider-level.
+    # 🔴 MEASURED, NOT READ: with `provider.allow_fallbacks: false`, a chain declared here does not
+    # survive an upstream failure. Three arms holding the provider pin constant, the primary
+    # genuinely failing (a real 429 from the free tier's shared pool) in each: with `false` the 429
+    # came back and the fallback model was NEVER tried; with `true`, and with the flag omitted, the
+    # fallback answered.
+    #
+    # 🔴 THE CLAIM THIS ASSERTION ORIGINALLY CARRIED WAS TOO BROAD - «false suppresses model-level
+    # fallback» - and another arm of the same probe refutes it: with the pin set to the paid
+    # model's providers only, the free model was dropped at ROUTING time and the paid one answered,
+    # flag false. So model fallback is not suppressed in general; what the flag stops is any
+    # further attempt after a DISPATCHED request fails. The assertion is unchanged, because
+    # rate-limiting and downtime - the failures a fallback exists for - are all runtime ones.
     #
     # This is the [[depth-knobs-judged-by-meter]] shape one level up: a field that is SET, parses,
     # costs nothing, and silently does not act. Left untested it would have failed on exactly one

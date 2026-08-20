@@ -3369,16 +3369,26 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # needs no retry logic of its own, and `model_served` - which it already records - is the
     # evidence of which one answered.
     #
-    # 🔴🔴 THE TRAP, MEASURED THIS ROUND AND NOT IN ANY DOC: `provider.allow_fallbacks: false`
-    # ALSO SUPPRESSES THIS. Four arms, one variable, the primary genuinely failing (a real 429
-    # from the free tier's shared pool) in every arm:
+    # 🔴🔴 THE TRAP: `provider.allow_fallbacks: false` STOPS THIS CHAIN AFTER A RUNTIME FAILURE.
+    # Three arms holding the provider pin constant, the primary genuinely failing in each (a real
+    # 429 from the free tier's shared pool):
     #     allow_fallbacks FALSE    -> 429 returned, the paid model was NEVER tried
     #     allow_fallbacks TRUE     -> answered by the paid model on Novita
     #     allow_fallbacks omitted  -> answered by the paid model on Novita
-    # The flag is documented as a PROVIDER-level switch; it turns out to gate the whole retry path.
-    # A channel that declares `fallback_models` while pinning `allow_fallbacks: false` therefore
-    # has a fallback that can never fire, which is why selftest now refuses that combination
-    # rather than leaving it to be discovered on the round it was needed.
+    #
+    # 🔴 THE FIRST WORDING OF THIS COMMENT SAID «false SUPPRESSES MODEL-LEVEL FALLBACK», FULL STOP,
+    # AND THAT IS REFUTED BY ANOTHER ARM OF MY OWN PROBE - which I had in hand and did not
+    # reconcile until a reviewer forced the question. With the pin set to the PAID model's
+    # providers only, `allow_fallbacks: false`, the free model was dropped at ROUTING time (no
+    # matching endpoint) and the paid model answered. So model fallback fires perfectly well with
+    # the flag off. What the flag governs is whether ANY further attempt is made after a DISPATCHED
+    # request fails upstream: a routing-time exclusion falls through, a 429 does not.
+    #
+    # The practical rule is unchanged and is what selftest enforces - `fallback_models` plus
+    # `allow_fallbacks: false` is a chain that cannot survive the failure it exists for, because
+    # rate-limiting and downtime are runtime failures. The generalisation was wrong; the
+    # configuration it produced was right. Recorded this way round because a comment that
+    # overstates its evidence is the thing this file keeps being burned by.
     if fallback_models:
         # `model` and `models` are alternatives, not siblings: sending both is ambiguous rather
         # than redundant, so the single-model key goes away when the array is present.
@@ -3924,10 +3934,40 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # field on every chunk; comparing it to what we asked for costs nothing and is the same rule
     # as the rest of this release - judge by what came BACK.
     served = [m for m in served_models if m]
+    # 🔴🔴 A DECLARED FALLBACK IS NOT A SUBSTITUTION, AND THIS GUARD CALLED IT ONE ON THE VERY
+    # FIRST ROUND `fallback_models` EXISTED. The r54 panel ran with orglm52 leading on the free
+    # tier; the free tier was rate-limited, the paid model answered exactly as configured - and
+    # this check marked the channel NOT OK with «MODEL SUBSTITUTION», because it compares the
+    # served model against `model` alone and knows nothing about a chain.
+    #
+    # That is the third false positive this one change produced (doctor's provider-price check
+    # made two), and the same lesson each time: a guard written before a feature existed does not
+    # become wrong when the feature arrives - it becomes LOUD ABOUT THE WRONG THING, which is
+    # worse, because «a false positive in a safety gate teaches you to pass the override by
+    # reflex». Every round where the free tier is down would have shipped a scary red warning
+    # about correct behaviour, until nobody read the line at all - and the line's real job is to
+    # catch the `--set spark12cont=...` case, where a whole round silently ran on another model.
+    #
+    # The information is KEPT and only the alarm is dropped: an expected fallback still says which
+    # model answered, in the notes, because that is the fact a reader needs either way.
+    # Collected here and merged into `note` where that list is created, ~150 lines below: this
+    # function builds `warn` early and `note` late, and appending to `note` here would be wiped by
+    # its own initialiser. Found by reading the scope rather than by the traceback it would have
+    # produced on the first fallback round - which is the round this exists for.
+    fallback_notes = []
+    expected = set(fallback_models or [])
     if served and model and not any(m == model for m in served):
-        warn.append("MODEL SUBSTITUTION: we asked for %r and the provider's own response says it "
-                    "served %s. Every finding below belongs to THAT model, not to this channel's "
-                    "name." % (model, ", ".join(repr(m) for m in served)))
+        if expected and all(m in expected for m in served):
+            fallback_notes.append(
+                "FALLBACK SERVED: %r did not answer and the declared fallback %s did, "
+                "which is this channel's configured behaviour. The findings below belong "
+                "to THAT model - weigh them as its work, not the primary's."
+                % (model, ", ".join(repr(m) for m in served)))
+        else:
+            warn.append("MODEL SUBSTITUTION: we asked for %r and the provider's own response says "
+                        "it served %s, which this channel does NOT declare as a fallback. Every "
+                        "finding below belongs to THAT model, not to this channel's name."
+                        % (model, ", ".join(repr(m) for m in served)))
     # 🔴🔴 A CEILING THAT COULD NOT BE ENFORCED MUST SAY SO. spark12cont, reviewing this diff the
     # day it was written, called the guard "a dead switch whenever `cost` is missing": the whole
     # mechanism depends on the vendor returning `usage.cost`, there is no fallback, and if that
@@ -4064,7 +4104,9 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             "the loop asked it to answer. Read the file before counting this channel: any "
             "bracket-balance or short-answer note on it describes the MARKUP, not damage in "
             "transit and not a terse review.")
-    note = []
+    # Seeded rather than empty: `fallback_notes` was collected ~150 lines above, where `note` does
+    # not exist yet. Assigning `[]` here would have discarded it silently.
+    note = list(fallback_notes)
     record_refusal(refusal_check(text, marker), warn, note)
     # Tokens are SUMMED across tool rounds, not taken from the last response. Each round re-sends
     # the whole conversation, so the final call's prompt_tokens is only the last leg and reading
