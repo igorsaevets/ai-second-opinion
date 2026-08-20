@@ -2209,8 +2209,13 @@ def suite_spend_guard():
                 raise urllib.error.HTTPError(
                     "u", 403, "Forbidden", {},
                     io.BytesIO(b'{"error":{"message":"Key limit exceeded (monthly limit)."}}'))
-            if "tools" not in _json.loads(req.data.decode()):
-                return FakeResp(answer_round(0.50))    # tools removed = the answer is demanded
+            _body = _json.loads(req.data.decode())
+            # R59: the forced-final signal is now `tool_choice: "none"` (tools STAY in the
+            # payload so xAI/Anthropic don't 400 and the prompt-cache prefix survives). Before
+            # R59 the signal was `tools` absence. Both are checked here so an older code path
+            # that still pops tools would also pass this test.
+            if _body.get("tool_choice") == "none" or "tools" not in _body:
+                return FakeResp(answer_round(0.50))    # tool_choice=none = the answer is demanded
             return FakeResp(responses[min(i, len(responses) - 1)])
 
         real_open, real_fetch, real_log = (urllib.request.urlopen, o._safe_fetch_url, o.log)
@@ -4033,6 +4038,153 @@ def suite_r48_visibility():
               repr(pr))
 
 
+def suite_r59_grokbuild_cyrillic_and_recitation():
+    """R59. Grokbuild survives a Cyrillic-path workdir; ornemotron3ultra has more fetch
+    headroom; goog37flash has a real diagnosis when the recitation filter fires.
+
+    Two-sided per property (R57 rule), and each check names the AOS Round 55 defect it exists
+    to prevent so a future edit that reverts the fix hits a failing test that describes what
+    the code used to do wrong.
+    """
+    section("R59. grokbuild Cyrillic + ornemotron3ultra budget + goog37flash recitation")
+
+    sys.path.insert(0, HERE)
+    import orchestrate as _o
+    import json as _j
+
+    # Fix 1: _ascii_safe_workdir helper — extracted from _agy_once R37, now used by grokbuild
+    # too. Two-sided: ASCII passes through unchanged, non-ASCII is deterministically mirrored
+    # to an ASCII sibling under %TEMP%.
+    p_ascii = os.path.join(tempfile.gettempdir(), "r59-ascii-test")
+    check(_o._ascii_safe_workdir(p_ascii, "grokbuild", "grokbuild") == p_ascii,
+          "R59: ASCII workdir passes through _ascii_safe_workdir unchanged")
+
+    p_cyr = os.path.join("D:", "Claude Projects", "AOS 2026",
+                         "07-Исследования-и-рецензии", "reviews", "grokbuild-ws")
+    m1 = _o._ascii_safe_workdir(p_cyr, "grokbuild", "grokbuild")
+    check(m1 != p_cyr, "R59: Cyrillic workdir IS mirrored — the fix triggers")
+    check(_ascii_ok(m1),
+          "R59: mirrored workdir is ASCII-clean — grokcli's Node runtime will not stumble")
+    check("orch-grokbuild-ws" in m1,
+          "R59: tag_prefix 'grokbuild' produces %TEMP%/orch-grokbuild-ws/ — the helper "
+          "parameter is not decorative")
+
+    # Determinism: same input twice must land in the same directory so retries reuse it.
+    # A UUID-based mirror would fail this. Documented in the helper's docstring.
+    m2 = _o._ascii_safe_workdir(p_cyr, "grokbuild", "grokbuild")
+    check(m1 == m2,
+          "R59: _ascii_safe_workdir is deterministic — retries land in the same directory "
+          "so files inside survive across invocations")
+
+    # Distinct inputs -> distinct mirrors. Without this, collision-by-basename could serve
+    # channel B's PROMPT.md to channel A.
+    m3 = _o._ascii_safe_workdir(p_cyr + "-other", "grokbuild", "grokbuild")
+    check(m3 != m1,
+          "R59: distinct workdirs map to distinct mirrors — no cross-channel collision")
+
+    # tag_prefix parameterisation: agy and grokbuild get different subroots. Without this,
+    # concurrent runs of the two channels sharing one mirror root would race on temp files.
+    m_agy = _o._ascii_safe_workdir(p_cyr, "agy", "agy")
+    check("orch-agy-ws" in m_agy and "orch-agy-ws" not in m1,
+          "R59: tag_prefix separates agy and grokbuild mirror roots — no cross-channel race")
+
+    # Fix 2: ornemotron3ultra fetch budget raised from 11 to 16, per-channel in the registry.
+    # Two-sided: nemotron gets the bump, other paid openrouter channels do NOT.
+    reg = _j.load(open(os.path.join(HERE, "channels.json"), encoding="utf-8"))
+    nemo = reg["channels"]["ornemotron3ultra"]["fetch_tool"]
+    check(nemo["max_calls"] == 16,
+          "R59: ornemotron3ultra.fetch_tool.max_calls == 16 (raised from 11 for the free "
+          "channel where wall clock is the only cost)")
+
+    # The bump is CHANNEL-SPECIFIC. Every OTHER openrouter channel that carries a fetch_tool
+    # must keep the default 11 - a bump-everywhere would multiply cost on paid channels.
+    for name, ch in reg["channels"].items():
+        if name == "ornemotron3ultra":
+            continue
+        ft = (ch or {}).get("fetch_tool") or {}
+        if ft.get("enabled") and ft.get("max_calls") is not None:
+            check(ft["max_calls"] <= 11,
+                  "R59: %s keeps the default max_calls ceiling — the bump is deliberately "
+                  "confined to the free channel" % name,
+                  "actual: %d" % ft["max_calls"])
+
+    # The registry entry also carries a `_raised_from_11_2026_08_20` explainer key so a
+    # future audit can find the reason without reading git blame.
+    check("_raised_from_11_2026_08_20" in nemo,
+          "R59: the raise carries an inline explanation naming the round it exists to fix")
+
+    # Fix 2b: `tool_choice="none"` is set on the forced-final round, AND `tools` stays in the
+    # payload (not popped). The panel reversed the initial R59 draft that popped tools - three
+    # providers 400/422 on the pop (xAI, Anthropic-via-OpenRouter, plus prompt-cache breakage).
+    # Grep the source: tool_choice must be present, AND the pop line must be gone.
+    src = open(os.path.join(HERE, "orchestrate.py"), encoding="utf-8").read()
+    check('body["tool_choice"] = "none"' in src,
+          "R59: tool_choice='none' is set on the forced-final turn (explicit instruction to "
+          "the model that supplements the built-in behaviour when tools stay present)")
+    check('body.pop("tools", None)' not in src,
+          "R59: `tools` is NOT popped on the forced-final turn - popping busts prompt-cache "
+          "and 400s xAI/Anthropic. Keep tools + set tool_choice='none'.")
+
+    # Fix 1c: The workdir passed to call_grokcli is absolutized BEFORE the mirror is applied.
+    # This is the ACTUAL root cause of AOS R55 - grokcli resolves relative --prompt-file
+    # against `--cwd neutral_cwd()` rather than the parent's cwd, so a relative path always
+    # points nowhere. Without abspath, an ASCII path fails just as reliably as a Cyrillic one,
+    # which the R59 panel proved live in this project's `runs/r59/` (ASCII) directory.
+    check('workdir = os.path.abspath(workdir)' in src,
+          "R59: call_grokcli absolutizes workdir before use - grokcli resolves relative "
+          "--prompt-file against --cwd, not the parent cwd, so an unabsolutized relative "
+          "path always points nowhere")
+
+    # Fix 1d: The ASCII-mirror helper uses sha256, not md5. FIPS-enabled Python raises
+    # `ValueError: [Beyond FIPS] md5 is not allowed`. sha256[:12] gives the same 48 bits of
+    # entropy for a directory-disambiguator use.
+    orch_src = src
+    check("hashlib.sha256(workdir.encode" in orch_src,
+          "R59: _ascii_safe_workdir uses sha256, not md5 - md5 raises on FIPS-enabled "
+          "Python builds (measured by 3 of 9 R59 panellists)")
+    check("hashlib.md5(workdir.encode" not in orch_src,
+          "R59: no md5 lingers in the workdir-mirror path - md5 was replaced, not shadowed")
+
+    # Fix 3: goog37flash recitation - a dedicated KNOWN_FAILURES entry that matches the
+    # 400 error string and gives a specific fix. The generic REFUSAL row must NOT win the
+    # match on this error, otherwise the advice ("rewrite the brief as verification") is
+    # actively wrong for this class - the filter is not tuneable.
+    cause, fix = _o.diagnose(
+        'HTTP 400: {"error":{"message":"Request blocked due to copyright/recitation content..."}}')
+    check(cause is not None and "recitation" in cause.lower(),
+          "R59: the recitation-filter cause is diagnosed by name, not left as unrecognised",
+          repr(cause)[:120])
+    check(fix is not None and "goog36flash" in fix,
+          "R59: the fix recommends the sister channel that has been observed to handle the "
+          "same brief - route the round, don't rewrite the brief",
+          repr(fix)[:180])
+    # Negative control: the RECITATION diagnosis must NOT fire on unrelated 400 errors.
+    unrelated_cause, _ = _o.diagnose("HTTP 400: bad request")
+    check(unrelated_cause is None or "recitation" not in (unrelated_cause or "").lower(),
+          "R59: an unrelated 400 error does NOT falsely surface the recitation diagnosis")
+
+    # Order matters: our new pattern must be BEFORE the generic REFUSAL entry so it wins
+    # the match on a record that carries both words. The `diagnose()` function returns the
+    # first match. This checks the KNOWN_FAILURES list order directly.
+    patterns = [row[0] for row in _o.KNOWN_FAILURES]
+    idx_rec = next((i for i, p in enumerate(patterns) if "recitation" in p.lower()), -1)
+    idx_ref = next((i for i, p in enumerate(patterns) if p == "REFUSAL"), -1)
+    check(idx_rec != -1, "R59: recitation pattern is in KNOWN_FAILURES", "patterns=%d" % len(patterns))
+    check(idx_ref != -1, "R59: REFUSAL pattern is still in KNOWN_FAILURES (control)")
+    check(idx_rec < idx_ref,
+          "R59: recitation entry is placed BEFORE the generic REFUSAL - the more specific "
+          "cause wins the match on the record that carries both words",
+          "recitation@%d vs REFUSAL@%d" % (idx_rec, idx_ref))
+
+
+def _ascii_ok(s):
+    try:
+        s.encode("ascii")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -4067,7 +4219,8 @@ def main():
                   suite_r49_record_integrity, suite_r55_child_env_and_first_error,
                   suite_r56_agy_concurrency_and_permissions,
                   suite_r57_agy_capability_model,
-                  suite_r58_update_check):
+                  suite_r58_update_check,
+                  suite_r59_grokbuild_cyrillic_and_recitation):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

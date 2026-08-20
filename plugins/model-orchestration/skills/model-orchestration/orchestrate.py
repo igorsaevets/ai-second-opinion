@@ -1123,6 +1123,27 @@ KNOWN_FAILURES = [
      "The harness re-runs this once with a do-the-work instruction automatically. If it still "
      "happens, the brief is probably too large or too task-shaped for this channel's agent - "
      "shrink it or send it to a non-CLI channel."),
+    # Placed ABOVE the generic REFUSAL entry so it wins on records that carry both words.
+    # 🔴 R59 (2026-08-20), from AOS Round-55: goog37flash returned `HTTP 400: {"error":{"message":
+    # "Request blocked due to copyright/recitation content..."}}` on a legal brief that
+    # goog36flash and orgemini37flash both answered cleanly. Google's consumer Gemini API has a
+    # recitation filter that cannot be tuned via safety_settings - it is a built-in copyright
+    # protection, and https://ai.google.dev/gemini-api/docs/safety-settings does not mention it
+    # at all. 3.7-flash trips it more aggressively than 3.6-flash on identical statute text.
+    # This is NOT a framing problem and --system legal-research does not fix it. The right
+    # response is to route the round to a channel whose transport does not trip this filter.
+    ("copyright/recitation|RECITATION",
+     "The Google recitation/copyright filter blocked this response. It fires when a Gemini "
+     "model would produce a long verbatim excerpt of text resembling something in its training "
+     "corpus - published federal statute and regulation are exactly this shape, so it can kill a "
+     "legal review on this transport. The filter is hard-coded on the consumer Gemini API and "
+     "cannot be disabled via safety_settings.",
+     "Route this round to another Google transport of the same model family - the OpenRouter "
+     "Vertex-pinned orgemini37flash and the direct goog36flash have both handled identical "
+     "briefs without tripping this filter. Do NOT rewrite the brief to paraphrase quotations - "
+     "verbatim quotation of statute is what makes a legal review verifiable, and shortening it "
+     "just to placate the filter defeats the point. Skip goog37flash for legal briefs with "
+     "--skip goog37flash if it repeats."),
     ("REFUSAL",
      "The model declined the task on policy grounds rather than failing technically.",
      "This is almost always a framing problem, not a subject ban. Rewrite the brief as "
@@ -2561,6 +2582,23 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     and the Windows command line is not, which is the exact trap the agy channel documents.
     """
     binary = grok_bin()
+    # 🔴🔴 R55/R59 root cause, corrected mid-round by the panel: grokbuild dies with
+    # `Failed to read '...\\...\\PROMPT.md': Системе не удается найти указанный путь.
+    # (os error 3)` when --prompt-file is a RELATIVE path, because the CLI resolves it against
+    # `--cwd neutral_cwd()` rather than the parent's cwd. The AOS Round 55 failure LOOKED like a
+    # Cyrillic-path bug because the path was Cyrillic, but the R59 panel reproduced the identical
+    # failure on a pure ASCII workdir (`D:\Claude Code\runs\r59\`). So there are TWO fixes here
+    # and they address two different classes:
+    #  (a) `os.path.abspath(workdir)` BEFORE os.makedirs, so the makedirs+pf are absolute and the
+    #      CLI's --prompt-file cannot be misresolved. This is the actual R55 fix.
+    #  (b) `_ascii_safe_workdir()` on top of (a), because agy R37 established that the same CLI
+    #      class also stumbles on non-ASCII path COMPONENTS via its own filesystem calls, and the
+    #      panel confirmed this is still worth defending against - the AOS path really was
+    #      non-ASCII, so the R55 error CARRIED both defects and (b) alone was insufficient. Only
+    #      what grokbuild reads (PROMPT.md) needs to be ASCII-clean; the outfile stays at the
+    #      caller's original path because Python writes it after grokbuild returns.
+    workdir = os.path.abspath(workdir)
+    workdir = _ascii_safe_workdir(workdir, name, "grokbuild")
     os.makedirs(workdir, exist_ok=True)
     # Position matters: R40 measured the same instruction obeyed 2/2 from the BRIEF and 0/1 from
     # a persona slot, so the preset leads the file rather than going to --system-prompt-override
@@ -2757,6 +2795,50 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
             "usd_reported_unverified": data.get("total_cost_usd"),
             "turns": data.get("num_turns"),
             "warnings": warn, "notes": note}
+
+
+def _ascii_safe_workdir(workdir, channel_name, tag_prefix):
+    """Return a workdir a Windows-hosted child process can address without stumbling.
+
+    A CLI whose host-language console codec is not UTF-8 fails opaquely when a
+    path component is non-ASCII: agy R37 (2026-08-14) saw its stream-json output
+    print "...\\???????????\\...", losing workspace-agent discovery on Cyrillic
+    paths; grokbuild R55 (2026-08-20) died with ERROR_PATH_NOT_FOUND (os error 3)
+    reading its own --prompt-file. In both cases the run cost time and produced
+    no answer, and the original path could not be recovered from the symptom.
+
+    The fix is the same: mirror the workdir to an ASCII sibling under %TEMP%,
+    run the CLI there, and let Python (which uses Windows' wide-path APIs
+    correctly) write the outfile at the caller's original path afterwards. The
+    mirror location is deterministic on an md5 of the original workdir so
+    retries land in the same directory and any files inside survive across
+    invocations.
+
+    Extracted 2026-08-20 (R59) after grokbuild reproduced the R37 failure that
+    had already been fixed once for agy. Same class, different channel - the
+    instance-not-class defect this project keeps meeting. Any CLI added later
+    that shells to a Node/Python/Ruby host on Windows should route its workdir
+    through this before doing anything with it.
+    """
+    try:
+        workdir.encode("ascii")
+        return workdir
+    except UnicodeEncodeError:
+        import hashlib
+        safe_root = os.path.join(tempfile.gettempdir(), "orch-%s-ws" % tag_prefix)
+        os.makedirs(safe_root, exist_ok=True)
+        # sha256[:12] not md5[:12] since R59: md5 raises `ValueError: [Beyond FIPS] md5 is not
+        # allowed` on Linux/Windows enterprise builds with FIPS mode enabled (measured against
+        # a FIPS-Python probe by 3 of 9 panellists). The digest is used as a directory
+        # disambiguator, not a cryptographic primitive, so any secure hash truncated to 12 hex
+        # gives 48 bits of entropy either way. Path stays identical shape.
+        digest = hashlib.sha256(workdir.encode("utf-8")).hexdigest()[:12]
+        tag = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(workdir))[:24] or "ws"
+        mirrored = os.path.join(safe_root, "%s-%s" % (tag, digest))
+        log("  [%s] workdir path contains non-ASCII; running in %s so the child "
+            "process does not stumble on the non-ASCII characters. The output "
+            "file stays at the path you asked for." % (channel_name, mirrored))
+        return mirrored
 
 
 def neutral_cwd():
@@ -3879,7 +3961,29 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                         body["messages"].append(
                             {"role": "tool", "tool_call_id": c["id"] or ("call_%d" % i),
                              "content": stop_msg})
-                    body.pop("tools", None)      # no more tool rounds; force a final answer
+                    # 🔴🔴 R59: KEEP `tools` in the body, do NOT pop, and set tool_choice="none".
+                    # The R59 panel (ORGLM52 with primary-source citations, corroborated by
+                    # ORGEMINI37FLASH and SPARK12CONT) reversed the R59 initial draft that popped
+                    # tools before setting tool_choice="none". Three reasons and each has a
+                    # measured provider behind it:
+                    #  (a) xAI's backend rejects `tools:[]` + `tool_choice:"none"` with
+                    #      `A tool_choice was set on the request but no tools were specified`
+                    #      (400). Popping is worse than xAI-safe; it just moves the failure.
+                    #  (b) Anthropic (via OpenRouter, and directly) rejects any request whose
+                    #      history contains `tool_use`/`tool_result` blocks while `tools` is
+                    #      absent - and by the time this branch fires, the conversation history is
+                    #      full of them. Popping guarantees a 400 on that route.
+                    #  (c) Popping busts the prompt-cache prefix. `tool_choice="none"` while
+                    #      `tools` stays is the cache-friendly form the OpenRouter SDK itself now
+                    #      uses. Free-tier channels bill per search, not per token, but paid ones
+                    #      pay for the prefix on every round.
+                    # The R55 failure was ornemotron3ultra returning finish_reason=tool_calls on
+                    # the forced-final turn AFTER tools were popped - conformant vendors would
+                    # honour the pop, but Baseten's serving layer did not. Keeping tools plus an
+                    # explicit tool_choice="none" is the belt-and-braces form: the API-level
+                    # instruction is unambiguous, and providers who need it heard it. Nothing here
+                    # ships a `tools:[]` payload at any point.
+                    body["tool_choice"] = "none"
                     forced_final = True
                     continue
                 break
@@ -5489,28 +5593,14 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
     the tool. Pick by size.
     """
     binary = agy_bin()
-    # 🔴 R37 2026-08-14: agy corrupts non-ASCII characters in its own stream-json output
-    # (observed: a directory with a Cyrillic component came back as "...\\???????????\\..."),
-    # so a workspace-scoped agent at <workdir>/.agents/agents/... is not reliably discovered
-    # when workdir contains non-ASCII. The AOS runner worked around this by hand ("беру
-    # ASCII-путь"). Do it transparently here: mirror workdir to an ASCII sibling under %TEMP%
-    # deterministically hashed off the original path (so retries reuse it), run agy there,
-    # and leave the OUTFILE where the caller asked - Python writes it after agy finishes and
-    # handles non-ASCII paths correctly. Only the workspace agy actually reads (BRIEF.md, the
+    # R37 (2026-08-14) fix for agy corrupting non-ASCII path components in stream-json output
+    # ("...\\???????????\\..."), which broke workspace-scoped agent discovery. Same shape as
+    # the grokbuild R55 failure (ERROR_PATH_NOT_FOUND on --prompt-file); R59 extracted the
+    # workaround into _ascii_safe_workdir(), so both channels now share one implementation and
+    # any CLI added later gets it in one line. Only what agy actually reads (BRIEF.md and the
     # workspace-scoped agent) needs to be ASCII-clean; the caller's REPORT.md and diagnostics
-    # can stay wherever they were.
-    try:
-        workdir.encode("ascii")
-    except UnicodeEncodeError:
-        import hashlib
-        safe_root = os.path.join(tempfile.gettempdir(), "orch-agy-ws")
-        os.makedirs(safe_root, exist_ok=True)
-        digest = hashlib.md5(workdir.encode("utf-8")).hexdigest()[:12]
-        # basename tag helps a human find their own runs among sibling hashes
-        tag = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(workdir))[:24] or "ws"
-        workdir = os.path.join(safe_root, "%s-%s" % (tag, digest))
-        log("  [agy] workdir path contains non-ASCII; running in %s so agy's telemetry stays "
-            "readable. The output file stays at the path you asked for." % workdir)
+    # can stay wherever they were - Python writes them.
+    workdir = _ascii_safe_workdir(workdir, "agy", "agy")
     os.makedirs(workdir, exist_ok=True)
     _write_agy_agent(workdir)
     ndjson = os.path.splitext(outfile)[0] + ".events.ndjson"

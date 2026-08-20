@@ -952,7 +952,8 @@
       },
       "fetch_tool": {
         "enabled": true,
-        "max_calls": 11
+        "max_calls": 16,
+        "_raised_from_11_2026_08_20": "R55 (AOS 2026 Round-55): finish_reason=tool_calls after 12 rounds with the fetch budget of 11 spent - the model went on asking for pages after the harness told it to answer, so the run ended with NO ANSWER TURN and 0 bytes on disk. The panel report literally named the fix: 'raise ornemotron3ultra.fetch_tool.max_calls'. 16 gives this specific model 5 more rounds of headroom before it hits the same wall; it is a per-channel bump because this channel is FREE and wall clock is the only cost. The default 11 stays on the paid channels (kimik3, qwen38max, orgemini*, etc.) where every extra fetch is a real bill and where the same model behaviour would represent a genuine budget-vs-brief mismatch. 🔴 The DEFENSIVE half of the fix lives in orchestrate.py: R59 also sets `tool_choice: 'none'` on the forced-final turn, so a future channel exhibiting the same non-conformant post-refusal behaviour gets one more line of defense before it dies silently."
       },
       "models": {
         "nvidia/nemotron-3-ultra-550b-a55b:free": {

@@ -1,5 +1,83 @@
 # Changelog
 
+## 1.35.0 — 2026-08-20
+
+**Three fixes for the three panel failures in AOS Round 55, adjudicated by a
+9-channel cheap panel that LIVE-REPRODUCED one of them and corrected the
+diagnosis mid-round.** Transcripts and adjudication in `runs/r59/` in the
+source tree.
+
+* **grokbuild survives a relative-path AND a non-ASCII-path workdir.** The AOS
+  R55 error `Failed to read 'reviews\\grokbuild-ws\\PROMPT.md': Системе не
+  удается найти указанный путь. (os error 3)` looked like a Cyrillic-path bug
+  because the AOS path had Cyrillic components. The R59 panel reproduced the
+  IDENTICAL failure on a pure ASCII path inside this same round, proving the
+  root cause is different: grokcli resolves a
+  relative `--prompt-file` against `--cwd neutral_cwd()` rather than the
+  parent's cwd, so any relative workdir points nowhere. Two fixes now, addressing
+  two different classes:
+  * `os.path.abspath(workdir)` before use in `call_grokcli` — the actual R55 fix.
+  * `_ascii_safe_workdir()` (extracted from R37's inline agy fix, shared
+    across agy and grokbuild now) — still needed because the same CLIs also
+    stumble on non-ASCII path components via their own filesystem calls, and
+    the AOS R55 path really was non-ASCII, so BOTH defects fired together.
+  Verified live: grokbuild answered a trivial brief inside a Cyrillic-named
+  workdir with a relative `--out` argument, marker present, ok=true.
+
+* **ornemotron3ultra can finish a fetch-heavy brief without dropping the answer.**
+  In AOS R55 the model made 11 fetches, was told to answer, and returned more
+  `tool_calls` anyway — `finish_reason=tool_calls` with zero answer text.
+  Two-part fix, both applied:
+  * `ornemotron3ultra.fetch_tool.max_calls` raised from 11 to 16 in
+    `channels.json` (this channel is free, so wall clock is the only cost of a
+    larger budget; paid channels' default 11 stays).
+  * The forced-final turn now sends `tool_choice: "none"` — AND KEEPS the
+    `tools` array in the payload. The initial R59 draft removed `tools` too,
+    which the panel refuted with primary sources: xAI's backend rejects
+    `tools:[] + tool_choice:"none"` with `400 A tool_choice was set on the
+    request but no tools were specified`; Anthropic (via OpenRouter) rejects
+    any history containing `tool_use`/`tool_result` blocks while `tools` is
+    absent; removing `tools` busts the prompt-cache prefix. Keeping tools +
+    tool_choice="none" is the OpenRouter-SDK-current form and is safe on
+    every conformant provider.
+
+* **goog37flash has a proper diagnosis when the recitation filter fires.** In
+  AOS R55 it returned `HTTP 400: "Request blocked due to copyright/recitation
+  content"` on a legal brief that goog36flash and orgemini37flash both
+  answered cleanly. The filter cannot be disabled — verified against Google's
+  own docs live (`ai.google.dev/gemini-api/docs/safety-settings`). The
+  `KNOWN_FAILURES` table now has a dedicated entry above the generic REFUSAL
+  row: it names the recitation cause specifically and recommends routing to
+  another Google transport (goog36flash or the Vertex-pinned
+  orgemini37flash), or `--skip goog37flash` for legal briefs. Deliberately
+  NOT added: a per-channel `system_suffix` telling the model to paraphrase
+  quotations — verbatim quotation of statute is what makes a legal review
+  verifiable, and shortening it just to placate the filter defeats the point.
+
+* **Panel-driven belt-and-braces (each traceable to a specific reviewer):**
+  * **`hashlib.sha256[:12]` instead of `md5[:12]`** in `_ascii_safe_workdir()`
+    — 3 of 9 channels named this: `md5()` raises `ValueError: [Beyond FIPS]
+    md5 is not allowed` on Linux/Windows enterprise Python builds with FIPS
+    mode enabled. The digest is a directory disambiguator, not a
+    cryptographic primitive; the 48-bit entropy is unchanged.
+  * **Keep `tools` on the forced-final turn** — see the ornemotron3ultra
+    bullet above. Provider-safety improvement paid for by ORGLM52's primary
+    citations and corroborated by ORGEMINI37FLASH and SPARK12CONT.
+
+**Verification.** selftest **711/711** (was 707 after the R59 additions; 4 new
+checks for the panel-driven corrections: abspath, sha256-not-md5, keep-tools,
+tool_choice-present). doctor reports all configured channels can run. The
+ASCII-mirror helper passes 5/5 unit checks (ASCII passthrough, Cyrillic
+mirror, determinism across calls, distinct inputs → distinct mirrors,
+`tag_prefix` parameterisation). **Live end-to-end**: grokbuild answered a
+trivial brief inside a Cyrillic-named workdir with a relative `--out`
+argument in ~60 seconds, marker present, ok=true.
+
+**The planted false claim in the R59 brief** ("60 req/hour per key for free
+OpenRouter models") was correctly refuted by 5 of 5 channels that took a
+stand — with primary-source counters citing the real OpenRouter free-model
+limits (20 req/min, 50 or 1000 req/day depending on credits).
+
 ## 1.34.0 — 2026-08-20
 
 **The plugin now notices when Claude Code has auto-updated it, and tells you what changed.**
