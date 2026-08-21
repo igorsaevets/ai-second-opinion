@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.37.1 — 2026-08-21
+
+* **orglm53 effort vocabulary fixed.** R61's cheap panel found the issue:
+  `supported_efforts` had `["xhigh", "high", "low"]` (GLM 5.2 vocabulary)
+  instead of `["max", "high", "low"]` (GLM 5.3 vocabulary). Z.ai docs say
+  GLM 5.3 only accepts `max`/`high`/`low`; the R61 run succeeded because
+  Z.ai's Coding Plan path maps `xhigh→max`, but the config now matches the
+  documented vocabulary. `measured_usd` updated with R61's first real run:
+  $0.39, 651s, 179K in / 22.7K out / 17K reasoning.
+
 ## 1.37.0 — 2026-08-21
 
 Two fixes, one visible and one invisible until now:

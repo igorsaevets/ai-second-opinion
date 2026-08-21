@@ -1138,12 +1138,12 @@
         "allow_fallbacks": false,
         "_note_r61": "R61: GLM 5.2 → 5.3, free tier removed, paid only. Old provider pins (decart/streamlake/novita) were specific to GLM 5.2. Run doctor --online to discover and pin GLM 5.3 providers."
       },
-      "_added": "2026-08-16 (R44) as orglm52 (GLM 5.2). R54: free tier added. R61 2026-08-21: the operator: «orglm53 free давай удалим, а 5.2 заменим на 5.3 и оставим только платный». GLM 5.3 released 2026-08-18, $1.40/M in, $4.40/M out (was ~$0.33/M in on GLM 5.2). Reasoning always on, efforts: low/high/max (OpenRouter normalises max to xhigh).",
+      "_added": "2026-08-16 (R44) as orglm52 (GLM 5.2). R54: free tier added. R61 2026-08-21: the operator: «orglm53 free давай удалим, а 5.2 заменим на 5.3 и оставим только платный». GLM 5.3 released 2026-08-18, $1.40/M in, $4.40/M out (was ~$0.33/M in on GLM 5.2). Reasoning always on, efforts: low/high/max. R61.1: fixed xhigh→max after panel review — Z.ai docs say GLM 5.3 only supports max/high/low, xhigh errors on the native API; OR page also lists max, not xhigh. The Coding Plan path maps xhigh→max, which is why R61's run succeeded, but the config should match the documented vocabulary.",
       "reasoning": {
-        "effort": "xhigh"
+        "effort": "max"
       },
       "supported_efforts": [
-        "xhigh",
+        "max",
         "high",
         "low"
       ],
@@ -1151,8 +1151,8 @@
       "_max_tokens_r61": "GLM 5.3 reports max_completion_tokens 131072 (OpenRouter catalogue, read 2026-08-21). No provider cap known yet — verify after first run with doctor --online.",
       "spend_guard": {
         "max_usd_per_review": 5.0,
-        "_arithmetic": "R61: GLM 5.3 at $1.40/M in, $4.40/M out — roughly 4x more expensive than GLM 5.2. The worst runaway this project measured was 7.4M billed input at ~$0.33/M ($2.44); at the new rate that is $10.36. $5.00 sits well above any normal review and stops a runaway at roughly half the old worst case in dollar terms. Measured_usd stays null until a real review.",
-        "measured_usd": null
+        "_arithmetic": "R61: GLM 5.3 at $1.40/M in, $4.40/M out — roughly 4x more expensive than GLM 5.2. The worst runaway this project measured was 7.4M billed input at ~$0.33/M ($2.44); at the new rate that is $10.36. $5.00 sits well above any normal review and stops a runaway at roughly half the old worst case in dollar terms.",
+        "measured_usd": "$0.39 — R61 cheap panel, 651s, 179K in, 22.7K out, 17K reasoning, 5 rounds. The $5.00 guard was not hit."
       },
       "web": {
         "enabled": true,
