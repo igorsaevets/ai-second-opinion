@@ -1,5 +1,66 @@
 # Changelog
 
+## 1.36.0 — 2026-08-20
+
+**A bug report from an employee running v1.24.1 exposed a class of self-check
+that had been RED on every install.ps1 install since 1.9.1 — twelve days for
+this reporter, and structurally for every non-plugin install for eleven
+releases before that.** The colleague ran the exact command INSTALL.md and
+TROUBLESHOOTING.md point at as "the difference between the assistant said it
+fixed it and the fix is verified", and it returned 497/498 for reasons the
+harness itself could see and never surfaced. His note included the sharpest
+line in the bug report: **«красный индикатор, который научились игнорировать,
+— это выключенный индикатор»** — a red anchor people learn to ignore is a
+disabled anchor, and it teaches everyone to read a failing test suite as
+"normal", which is the state next real regression sails past.
+
+Reproduction on 1.35.0 here confirmed the primary bug AND surfaced a second
+one of the same class (a different check going red for a different
+build-time reason). Both are fixed at the source; a new suite runs the
+SHIPPED selftest from the SHIPPED install location on every build so the
+class as a whole is caught now, not by the next reporter.
+
+* **`suite_prose_matches_behaviour` — the shipped-docs check now passes on
+  every install path.** Added in 1.9.1 because a public README once promised
+  a PII block the code did not perform, this check walks parents from
+  `selftest.py` looking for `README.md` + `PRIVACY.md`; if neither is
+  present, it fails RED on purpose ("not vacuously green"). On a plain-copy /
+  install.ps1 / install.sh install ONLY the plugin skill folder is copied
+  into `~/.claude/skills/model-orchestration/` — the parents are the user's
+  home directory, which has no repo documents — so the check has been red
+  for every such install since it was added. package.py now copies the
+  substituted `README.md` and `PRIVACY.md` from the build output into
+  `plugins/model-orchestration/skills/model-orchestration/kit/`, which is
+  the FIRST location the check tries. Plugin marketplace installs already
+  had docs 5 levels up; they now also have them at zero levels up.
+
+* **`suite_panels` — kit-excluded channels no longer trigger the "REMOVED
+  without a RETIRED note" drift check.** `orgpt56lunapro` was demoted from
+  the cheap panel in R55 AND held back from published distribution
+  (`PUBLISH_EXCLUDE_CHANNELS` in package.py — see the R54 note above about
+  employees walking all three enabled/explicit_only/requires_ack locks). On
+  dev the channel is still in `channels.json` (standard panel), so the check
+  passed silently; on shipped it is entirely absent, and the check flagged
+  it as a lying record when the real cause was a build-time hold-back the
+  shipped selftest had no way to know about. package.py now stamps the
+  hold-back list into shipped `channels.json` as `_kit_excluded_channels`;
+  the check unions this set with the `RETIRED`-marked set. Dev unchanged
+  (the key is absent, so the union is empty); shipped now green.
+
+* **`suite_r60_shipped_docs_and_kit_exclusion` — the class as a whole is
+  now caught at build time.** Runs `package.py` to a fresh temp dir and then
+  runs the SHIPPED selftest from the shipped location. If any check goes red
+  from that layout — the shape the reporter's own probe revealed — the build
+  fails, before push. The suite silently skips on installs (no `package.py`
+  there), which is what dev-tool contracts should do; the point is to run it
+  in the ONE place a shipped-tree bug is visible.
+
+Panel adjudication: cheap panel of 8 free channels (agy skipped per
+standing instruction). Transcripts in `runs/r60/` in the source tree.
+Planted false claim ("Fix A's cost is ~500 KB duplication") refuted by every
+channel that reached a verdict on it (real cost: 24 KB — measured README
+17,833 B + PRIVACY 6,341 B).
+
 ## 1.35.0 — 2026-08-20
 
 **Three fixes for the three panel failures in AOS Round 55, adjudicated by a

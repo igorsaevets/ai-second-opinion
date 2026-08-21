@@ -501,7 +501,30 @@ def suite_prose_matches_behaviour():
     # levels down. SEARCH for them rather than counting `.parents[n]` - the first version of this
     # counted, got the depth wrong, and the built kit failed. Which is the check doing its job:
     # "not vacuously green" is asserted precisely so a wrong path cannot read as a clean pass.
-    roots = [here / "kit"] + list(here.parents)
+    #
+    # 🔴 R60 (2026-08-20): the walk is BOUNDED. Before this, `list(here.parents)` reached the
+    # filesystem root. Any ancestor happening to contain both README.md and PRIVACY.md - a
+    # homedir dump, another checkout, a docs pack - would let `bool(docs)` become true against
+    # documents THIS TOOL DOES NOT SHIP, and section 3b would then run its PII regex over the
+    # wrong files. Caught by the R60 cheap panel (grokbuild's C3), which named it the same
+    # "vacuous green" hole the check exists to close, pointing the other way. The bound stops
+    # at the first ancestor carrying VERSION (a built/shipped tree) or `.git` (a source tree)
+    # or `.claude-plugin` (a plugin-cache root) - the three markers this tool uses to mean
+    # "here is one of our own layouts". If no marker is found, the walk stops before leaving
+    # the immediate `.claude/` tree or the parent of the current package - never at C:\Users.
+    def _bound_parents(start):
+        stopped, out = False, []
+        for p in start.parents:
+            out.append(p)
+            if (p / "VERSION").is_file() or (p / ".git").exists() or \
+               (p / ".claude-plugin").is_dir():
+                stopped = True
+                break
+            if p.name in (".claude", ""):
+                break
+        return out, stopped
+    parents_bounded, _bound_hit = _bound_parents(here)
+    roots = [here / "kit"] + parents_bounded
     docs, used = [], None
     for root in roots:
         found = sorted(root.glob("*.md")) if root.is_dir() else []
@@ -2787,6 +2810,15 @@ def suite_panels():
     # channel no longer exists", and it has to be written by a human either way.
     _retired = {c for c, why in REMOVED_FROM_CHEAP_SINCE.items()
                 if str(why).strip().upper().startswith("RETIRED")}
+    # 🔴 R60 (2026-08-20): kit-excluded channels are LEGITIMATELY absent from the shipped
+    # registry - PUBLISH_EXCLUDE_CHANNELS in package.py deletes them at build time. They are
+    # not retired (still live on the maintainer's machine), so the RETIRED prefix does not fit;
+    # not present on shipped installs, so `c in CH` is false. Before R60 the shipped selftest
+    # went red on every install for orgpt56lunapro (demoted cheap→standard in R55 AND excluded
+    # from distribution because it is a running experiment), presenting a real drift signal as
+    # a broken record. `_kit_excluded_channels` is written into the shipped channels.json by
+    # package.py; on the dev tree the key is absent → empty set → the check runs unchanged.
+    _kit_excluded = set(RAW.get("_kit_excluded_channels", []))
     # 🔴🔴 THIRD INSTANCE OF THE CLASS THIS FUNCTION HAS NOW RECORDED TWICE ABOVE, and it was
     # mine. This used to assert `not (REMOVED & ADDED)` - "no channel in both books". R55 hit it
     # honestly: orgpt56lunapro was ADDED to cheap in R54 as a timed trial and REMOVED in R55 when
@@ -2825,11 +2857,13 @@ def suite_panels():
     # What survives here is the half that is genuinely about the REGISTRY rather than the ledger:
     # a channel written out of the cheap panel must still exist somewhere, unless its reason says
     # it is dead.
-    check(all(c in CH for c in set(REMOVED_FROM_CHEAP_SINCE) - _retired),
+    check(all(c in CH for c in set(REMOVED_FROM_CHEAP_SINCE) - _retired - _kit_excluded),
           "a channel DEMOTED out of the cheap panel still exists in the registry; one that is "
-          "gone for good says RETIRED in its reason",
-          "vanished without a RETIRED note=%s"
-          % sorted(c for c in set(REMOVED_FROM_CHEAP_SINCE) - _retired if c not in CH))
+          "gone for good says RETIRED in its reason (kit-excluded channels are OK - see "
+          "PUBLISH_EXCLUDE_CHANNELS in package.py and _kit_excluded_channels in channels.json)",
+          "vanished without a RETIRED-or-kit-excluded note=%s"
+          % sorted(c for c in set(REMOVED_FROM_CHEAP_SINCE) - _retired - _kit_excluded
+                   if c not in CH))
     # And the mirror: RETIRED must mean retired. A name marked retired that is still in the
     # registry is a record that has drifted from the thing it describes - the same defect,
     # pointing the other way, and the cheaper one to leave rotting because nothing breaks.
@@ -4185,6 +4219,128 @@ def _ascii_ok(s):
         return False
 
 
+def suite_r60_shipped_docs_and_kit_exclusion():
+    """R60. The shipped tree self-checks pass from an install location.
+
+    Reported by an employee on 1.24.1 who could not get past a red selftest: running
+    `python selftest.py` from `~/.claude/skills/model-orchestration/` failed
+    "the shipped documents were located" on every install.ps1 install since 1.9.1 (12+ days).
+    Reproduced on 1.35.0 here. And a second failure of the same class - `orgpt56lunapro` was
+    demoted cheap->standard AND excluded from published distribution, so on shipped trees the
+    "REMOVED-not-marked-RETIRED" check flagged it as a lying record when the real cause was a
+    build-time hold-back the shipped selftest had no way to know about.
+
+    The class the colleague named: a red indicator people learn to ignore is a disabled
+    indicator. Both defects fired only against installs, and both installs are what employees
+    receive, so nobody in CI ever saw either red. Two two-sided fixes; a third check that would
+    have caught the class at build time before it reached anyone (this suite).
+
+    Two-sided against a real BUILD of the shipped kit, not a hand-crafted mock: the check that
+    made the shape possible was the one nobody thought to run against a fresh install directory.
+    """
+    section("R60. shipped-docs check + kit-excluded channel drift")
+
+    # This suite requires a source tree with kit/ and package.py to build a real kit. Silently
+    # skip on installed trees (which are what this test is DEFENDING) - they have no package.py.
+    pkg_py = HERE / "package.py"
+    if not pkg_py.is_file():
+        return
+
+    # --- Fix 1a: KIT_PLUGIN_FILES ships the two docs the shipped-doc check requires ---------
+    # The check at suite_prose_matches_behaviour looks for README.md + PRIVACY.md at
+    # `here / "kit"` first. package.py must copy them there at build time.
+    pkg_text = pkg_py.read_text(encoding="utf-8")
+    check('"_OUT/README.md":' in pkg_text and '"kit", "README.md")' in pkg_text,
+          "R60: KIT_PLUGIN_FILES ships README.md into plugins/*/skills/*/kit/ - the fastest "
+          "path for the shipped-doc check to find it (install.ps1 users had no other route)")
+    check('"_OUT/PRIVACY.md":' in pkg_text and '"kit", "PRIVACY.md")' in pkg_text,
+          "R60: KIT_PLUGIN_FILES ships PRIVACY.md alongside README.md - the check requires "
+          "BOTH; shipping only one would still fail 'not vacuously green'")
+    # Reads from _OUT/ (already substituted), not HERE/kit/ (substitution source with `Igor` in
+    # it) - the leak sweep would catch a pre-substitution copy at build time and refuse to ship.
+    check('_OUT/README.md' in pkg_text,
+          "R60: reads from _OUT/README.md (build-output, substituted) not HERE/kit/README.md "
+          "(pre-substitution source) - the leak sweep would refuse the raw copy")
+
+    # --- Fix 1b: end-to-end. Build the kit to a temp dir, verify the docs are in place ------
+    # This is what the reporter's own probe was: run the check from an install layout. Now that
+    # the shipped tree PUTS the docs there, the check finds them at `here / "kit"` immediately.
+    build_dir = Path(tempfile.mkdtemp(prefix="orch-r60-build-"))
+    try:
+        p = subprocess.run([PY, str(pkg_py), "--out", str(build_dir), "--check"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=120)
+        # --check builds and removes the output. To VERIFY files we need to build without --check.
+        # Do that in a second temp dir so a slow build failure does not double the time cost.
+        pass
+    finally:
+        shutil.rmtree(str(build_dir), ignore_errors=True)
+
+    # Real build (no --check) so we can inspect what would be shipped.
+    build_dir = Path(tempfile.mkdtemp(prefix="orch-r60-build2-"))
+    try:
+        p = subprocess.run([PY, str(pkg_py), "--out", str(build_dir)],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=120)
+        check(p.returncode == 0, "R60: package.py builds cleanly",
+              "exit=%d stderr=%r" % (p.returncode, (p.stderr or "")[:200]))
+        if p.returncode == 0:
+            skill_out = build_dir / "plugins" / "model-orchestration" / "skills" / "model-orchestration"
+            kit_dir = skill_out / "kit"
+            check(kit_dir.is_dir(),
+                  "R60: shipped plugin skill has a kit/ subdir (the check's first lookup)")
+            readme = kit_dir / "README.md"
+            privacy = kit_dir / "PRIVACY.md"
+            check(readme.is_file(),
+                  "R60: shipped README.md lives at plugins/*/skills/*/kit/README.md so the "
+                  "check's `here / 'kit'` lookup succeeds on every install method")
+            check(privacy.is_file(),
+                  "R60: shipped PRIVACY.md lives alongside README.md - both are required")
+            if readme.is_file():
+                body = readme.read_text(encoding="utf-8", errors="replace")
+                # Substitution SANITY: the shipped README must not carry the raw operator name
+                # or an author-only path. The leak sweep would refuse a raw copy, so this is a
+                # defense-in-depth check.
+                check("C:\\Users\\igors" not in body and "Igor Saevets" in body,
+                      "R60: shipped README carries the intended maintainer credit "
+                      "('Igor Saevets') but NOT the author's home path (defence in depth)")
+            # --- Fix 2: the built channels.json advertises kit-excluded channels --------------
+            shipped_ch = skill_out / "channels.json"
+            if shipped_ch.is_file():
+                reg = json.loads(shipped_ch.read_text(encoding="utf-8"))
+                excl = reg.get("_kit_excluded_channels")
+                check(isinstance(excl, list) and len(excl) >= 1,
+                      "R60: shipped channels.json declares _kit_excluded_channels - a list, so "
+                      "the shipped selftest can distinguish 'held back' from 'drift'",
+                      "value=%r" % excl)
+                # The check that used to fail on Luna Pro. Simulate its condition: any channel
+                # in REMOVED_FROM_CHEAP_SINCE that is not in the shipped registry MUST be in
+                # _kit_excluded_channels (otherwise the check would go red on install).
+                for c in excl or []:
+                    check(c not in reg["channels"],
+                          "R60: excluded channel %r is actually absent from the shipped "
+                          "registry (not just declared)" % c)
+            # --- Fix 1c: run the SHIPPED selftest from the shipped location ------------------
+            # This is what the reporter did, and what nobody in CI ever did. On the fixed build
+            # it must exit 0 with 0 failures. If it does not, ANY new bug of the "check works
+            # on dev, breaks on install" class is caught right here at build time, before push.
+            sh_selftest = skill_out / "selftest.py"
+            if sh_selftest.is_file():
+                p2 = subprocess.run([PY, str(sh_selftest), "--quiet"],
+                                    capture_output=True, text=True, encoding="utf-8",
+                                    errors="replace", timeout=300, cwd=str(skill_out))
+                # Extract the summary line. On failure, its last line is the tail of the failure
+                # list; on success, it says "N/N checks passed".
+                out = (p2.stdout or "") + (p2.stderr or "")
+                last_lines = "\n".join(out.strip().splitlines()[-8:])
+                check(p2.returncode == 0,
+                      "R60: the SHIPPED selftest passes from the SHIPPED install location "
+                      "(the check nobody had ever run before this round)",
+                      "exit=%d tail=%s" % (p2.returncode, last_lines[:400]))
+    finally:
+        shutil.rmtree(str(build_dir), ignore_errors=True)
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -4220,7 +4376,8 @@ def main():
                   suite_r56_agy_concurrency_and_permissions,
                   suite_r57_agy_capability_model,
                   suite_r58_update_check,
-                  suite_r59_grokbuild_cyrillic_and_recitation):
+                  suite_r59_grokbuild_cyrillic_and_recitation,
+                  suite_r60_shipped_docs_and_kit_exclusion):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
