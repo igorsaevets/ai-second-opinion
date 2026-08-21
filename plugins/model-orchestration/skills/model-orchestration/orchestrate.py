@@ -4898,7 +4898,7 @@ _LEGACY_KINDS = {"http": "http", "spark": "http", "spark11": "http", "spark12": 
                  "orgemini36flash": "openrouter", "orgemini37flash": "openrouter",
                  "ormimo25pro": "openrouter",
                  "orgrok420": "openrouter", "ornemotron3ultra": "openrouter",
-                 "ordeepseekv4pro": "openrouter", "orglm52": "openrouter",
+                 "ordeepseekv4pro": "openrouter", "orglm53": "openrouter",
                  "orgpt56terrapro": "openrouter",
                  "goog36flash": "gemini", "goog37flash": "gemini",
                  "mimo25pro": "oai", "grok420": "xai", "grokbuild": "grokcli",

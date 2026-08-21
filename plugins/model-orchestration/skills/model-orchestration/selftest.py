@@ -2245,6 +2245,12 @@ def suite_spend_guard():
         urllib.request.urlopen = fake_urlopen
         o._safe_fetch_url = lambda url: "PAGE TEXT " * 50
         o.log = lambda *a, **k: None
+        # CI has no OPENROUTER_API_KEY; the key check fires BEFORE the monkeypatched urlopen
+        # is ever called, returning a dict without "usd" and blowing up on the bracket access
+        # at `cap["usd"]` below. A dummy value is safe: the transport is fully faked.
+        _had_key = "OPENROUTER_API_KEY" in os.environ
+        if not _had_key:
+            os.environ["OPENROUTER_API_KEY"] = "test-dummy-not-a-real-key"
         try:
             return o.call_oai_reviewer("brief", "END-01", None, model="test/model",
                                        name="probe",
@@ -2252,6 +2258,8 @@ def suite_spend_guard():
                                        spend_guard=spend_guard), n[0]
         finally:
             urllib.request.urlopen, o._safe_fetch_url, o.log = real_open, real_fetch, real_log
+            if not _had_key:
+                os.environ.pop("OPENROUTER_API_KEY", None)
 
     r, _ = run([fetch_round(0.60), fetch_round(0.96), fetch_round(1.15), answer_round(2.10)])
     check(abs((r.get("usd") or 0) - 4.81) < 1e-6,
@@ -2705,6 +2713,13 @@ def suite_panels():
          "highest single-channel spend of fourteen, on the CHEAPEST metered rate card in the "
          "registry. That pair is the finding: A RATE IS NOT A BILL, so `cost` and `panel` are "
          "allowed to disagree, and here they did."),
+        ("R61 2026-08-21", "REMOVE", "orglm52",
+         "RETIRED — replaced by orglm53 (GLM 5.3). Igor: «orglm53 free давай удалим, а 5.2 "
+         "заменим на 5.3 и оставим только платный». The free tier kept falling back to paid "
+         "anyway (429 rate limits from Decart's shared pool). GLM 5.3 released 2026-08-18."),
+        ("R61 2026-08-21", "ADD", "orglm53",
+         "Same instruction. z-ai/glm-5.3, $1.40/M in, $4.40/M out, reasoning always on. "
+         "Replaces orglm52 in the cheap panel — the price went up but the model is stronger."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -4065,7 +4080,7 @@ def suite_r48_visibility():
     check("def check_provider_prices_live" in doc and "check_provider_prices_live(r, mod)" in doc,
           "doctor --online re-reads provider prices and compares them against the pinned order")
     reg = json.loads((HERE / "channels.json").read_text(encoding="utf-8"))
-    for name in ("ordeepseekv4pro", "orglm52"):
+    for name in ("ordeepseekv4pro", "orglm53"):
         pr = (reg["channels"][name].get("provider_route") or {})
         check("baidu" not in [p.lower() for p in pr.get("only", [])],
               "%s no longer routes to the undiscounted provider the pin had put first" % name,

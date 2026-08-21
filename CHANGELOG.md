@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.37.0 — 2026-08-21
+
+Two fixes, one visible and one invisible until now:
+
+* **GLM 5.2 replaced by GLM 5.3 (paid only).** The free tier of GLM 5.2
+  (`z-ai/glm-5.2:free`) kept falling back to the paid model on 429 rate
+  limits from Decart's shared pool, so the "free" channel was paying anyway
+  and reporting the wrong model. GLM 5.3 was released 2026-08-18 with
+  reasoning always on, efforts low/high/max, and ~4x higher pricing
+  ($1.40/M in, $4.40/M out). The channel is renamed from `orglm52` to
+  `orglm53`; `spend_guard.max_usd_per_review` raised to $5.00 accordingly.
+  `fallback_models` removed (no free tier to fall back from). The old
+  `provider_route` pins (decart/streamlake/novita) are cleared — run
+  `doctor --online` after the first real run to discover and pin providers.
+
+* **CI has been GREEN for the first time since at least v1.31.1.**
+  `suite_spend_guard` tested `call_oai_reviewer` with a monkeypatched
+  transport but never injected a dummy API key. On CI (no key),
+  `call_oai_reviewer` returned early at the key check with a dict
+  missing the `"usd"` field, causing `KeyError('usd')` on every
+  platform and Python version. The fix injects a temporary dummy key
+  for the duration of the monkeypatched call. Verified both with and
+  without the real key locally.
+
 ## 1.36.0 — 2026-08-20
 
 **A bug report from an employee running v1.24.1 exposed a class of self-check
