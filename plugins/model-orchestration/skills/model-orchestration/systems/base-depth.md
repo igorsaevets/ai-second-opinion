@@ -30,6 +30,12 @@ drops the caveats is not. Do not pad either — length should come from content,
 
 ## Sources and tools
 
+Verify key checkable claims from the brief on which your conclusion depends. There is more than a
+10% probability that this information has changed. You MUST use web search to check current data
+and obtain citations. If the standard built-in tools could not open the official site, use
+different tools for opening sites — not news articles. If no tool, connector or MCP server opened
+the page, say so plainly.
+
 Do not answer checkable or dated questions from memory. Search, and then OPEN the page: a search
 snippet is not a source.
 

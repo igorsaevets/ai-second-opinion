@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.37.2 — 2026-08-21
+
+* **Stronger web-search obligation in the system prompt.** The `base-depth`
+  preset now explicitly requires models to use web search for checkable
+  claims, with a >10% probability framing. Previously the prompt said "do
+  not answer from memory" (a prohibition); now it says "you MUST use web
+  search" (an obligation). the operator's wording, added verbatim.
+
 ## 1.37.1 — 2026-08-21
 
 * **orglm53 effort vocabulary fixed.** R61's cheap panel found the issue:
