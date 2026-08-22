@@ -2720,6 +2720,10 @@ def suite_panels():
         ("R61 2026-08-21", "ADD", "orglm53",
          "Same instruction. z-ai/glm-5.3, $1.40/M in, $4.40/M out, reasoning always on. "
          "Replaces orglm52 in the cheap panel — the price went up but the model is stronger."),
+        ("R62 2026-08-22", "REMOVE", "orglm53",
+         "Igor: moved to standard panel. Solo run failed — model burned all 11 fetches on "
+         "irrelevant content (Python docs, 124K chars) and generation timed out (exit 255). "
+         "At $1.40/M input it belongs in standard, not cheap. Still runs on --panel standard."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -2792,6 +2796,26 @@ def suite_panels():
             check((ch.get("models") or {}).get(m, {}).get("data_policy"),
                   "%s: model %s states a data_policy - the free and paid tiers of one model do "
                   "NOT share terms, and the fallback can serve either" % (cname, m))
+
+    # --- HTTP channel fallback_model (harness-level, singular) — R62
+    for cname, ch in sorted(CH.items()):
+        fb = ch.get("fallback_model")
+        if not fb:
+            continue
+        check(ch.get("kind") == "http",
+              "%s: fallback_model is only meaningful for kind:http channels (Meta API); "
+              "OpenRouter channels use fallback_models (plural) which the vendor handles"
+              % cname, "kind=%s" % ch.get("kind"))
+        check(fb in (ch.get("models") or {}),
+              "%s: fallback_model %r must be in the channel's `models` table so it has a "
+              "label and data_policy the plan can print" % (cname, fb),
+              "models=%s" % sorted((ch.get("models") or {}).keys()))
+        check(fb != ch.get("model"),
+              "%s: fallback_model must differ from the primary model — falling back to "
+              "yourself is a no-op that wastes a retry" % cname)
+        check((ch.get("models") or {}).get(fb, {}).get("data_policy"),
+              "%s: fallback model %s states a data_policy — the Contributor and Standard "
+              "tiers have DIFFERENT data terms" % (cname, fb))
 
     actual_cheap = {c for c, v in CH.items() if v.get("panel") == "cheap"}
     check(not (DICTATED_CHEAP - actual_cheap - set(REMOVED_FROM_CHEAP_SINCE)),

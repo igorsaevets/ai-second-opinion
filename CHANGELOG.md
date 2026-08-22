@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.38.0 — 2026-08-22
+
+* **Spark Contributor fallback to Standard tier.** When `spark12cont`
+  (muse-spark-1.2-contributor, $0.10/M input) fails for a reason other than
+  a content filter, the harness now retries with `muse-spark-1.2` (Standard
+  tier, $1.25/M input) automatically. The Contributor tier has 100 RPM vs
+  3000 RPM on Standard, so rate-limit failures (429) now recover instead of
+  failing the channel. Content-filter blocks are NOT retried — same payload
+  to the same vendor's filter gives the same result. Diagnostics report
+  `fallback_used: true` and `primary_model` when the fallback fires.
+  Rate limits measured from `dev.meta.ai/docs/pricing-rate-limits` on
+  2026-08-22: Contributor 100 RPM / 3M TPM, Standard 3000 RPM / 4M TPM.
+
+* **GLM 5.3 moved from cheap to standard panel.** Solo run failed: model
+  burned all 11 page fetches on irrelevant content (Python docs, 124K chars)
+  and generation timed out (exit 255, 30+ min, no answer). At $1.40/M input
+  it belongs in the standard panel. Still runs on `--panel standard`.
+
+* **Contributor tier rate limits corrected.** Prior note said 60 RPM /
+  2.1M TPM; live docs (2026-08-22) say 100 RPM / 3M TPM. Cached input
+  pricing also documented: $0.002/M (Contributor) vs $0.15/M (Standard).
+
 ## 1.37.2 — 2026-08-21
 
 * **Stronger web-search obligation in the system prompt.** The `base-depth`

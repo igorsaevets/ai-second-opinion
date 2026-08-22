@@ -176,10 +176,12 @@
       "label": "Spark12Cont",
       "cost": "cheap",
       "model": "muse-spark-1.2-contributor",
+      "fallback_model": "muse-spark-1.2",
+      "_fallback_added": "2026-08-22 R62, the operator: «Если запускаем standart panel и Spark 1.2 Cont не сработал (проверить ответ), то на fallback поставить дорогой Spark 1.2.» Implemented as a HARNESS-LEVEL retry in call_http_reviewer: same endpoint, same key, only the model changes. Content-filter failures are NOT retried - same payload to the same vendor's filter gives the same result. Rate limits (429) and server errors ARE retried: Contributor has 100 RPM / 3M TPM, Standard has 3000 RPM / 4M TPM (measured from dev.meta.ai/docs/pricing-rate-limits, 2026-08-22). The fallback CANNOT be activated by --set: routing still refuses model overrides on this channel. It fires ONLY on a failure of the primary model. Diagnostics report `fallback_used: true` and `primary_model` when it fires. Cost: $0.10/M -> $1.25/M input, $0.20/M -> $4.25/M output - a 12.5x/21x price increase, which is why it is a fallback and not a default.",
       "_added": "2026-08-06, the operator: «добавь новый muse-spark-1.2-contributor параллельно с spark 1.1». PARALLEL is the requirement, not a replacement - one channel runs one model per round, so a second voice needs a second entry. This is the first channel added purely by editing this file, and it is therefore also the test of the dispatch fix above.",
       "_renamed": "2026-08-06 (round 23) from `spark12`, the operator: «spark12 в Spark12Cont - что бы если кто-то использует не muse-spark-1.2-contributor мы визуально это увидели». The name carries the TIER, which is the thing that matters and the thing a bare version number hides. Lower case on disk because the name is also a filesystem path component and Windows would collide `Spark12Cont.md` with `spark12cont.md`; the display label keeps the operator's capitalisation.",
       "_catalogue": "VERIFIED 2026-08-06 against GET /v1/models on the live endpoint: it returns exactly three ids - muse-spark-1.2-contributor, muse-spark-1.2, muse-spark-1.1 - and a 16-token probe of the contributor id came back with model=muse-spark-1.2-contributor. Confirmed independently the same day from dev.meta.ai/docs/models.md.",
-      "_tier": "Contributor is a PRICING tier: $0.10/M in and $0.20/M out against Standard's $1.25 and $4.25, same weights as plain muse-spark-1.2. Rate limits 60 RPM / 2,100,000 TPM. Its data terms are Meta's, are stated in the kit's PRIVACY.md for anyone installing this, and are the reason it is cheap - that is a fact about the vendor, not an instruction to this channel's callers.",
+      "_tier": "Contributor is a PRICING tier: $0.10/M in and $0.20/M out against Standard's $1.25 and $4.25, same weights as plain muse-spark-1.2. Rate limits 100 RPM / 3,000,000 TPM (measured 2026-08-22 from dev.meta.ai/docs/pricing-rate-limits; prior note said 60 RPM / 2,100,000 TPM). Standard: 3,000 RPM / 4,000,000 TPM. Cached input: $0.002/M (Contributor) vs $0.15/M (Standard). Web search: $2.50/1K queries (both tiers). Its data terms are Meta's, are stated in the kit's PRIVACY.md for anyone installing this, and are the reason it is cheap.",
       "_the_warning_was_removed_2026_08_08": "🔴 THIS ENTRY USED TO CARRY A LOUD DO-NOT-SEND WARNING AND IT WAS ACTING AS A DEFAULT. the operator, 2026-08-08: «spark12cont убери всякие комментарии, что на нем обучаются, ИИ боится и не использует его». Twice-observed and both failures were caused by the prose, not prevented by it: one session obeyed the advice literally and silently ran the whole round on a DIFFERENT model, and a later one dropped the channel with --skip. So the warning did not protect a payload, it removed a reviewer. This registry already learnt the general form of that on 2026-08-07 - «A REGISTRY THAT CARRIES ADVICE GETS OBEYED», and a documented escape hatch IS the default - and then left the biggest piece of advice in the file sitting in this very entry. What replaces it: the fact lives in `_tier` above and in PRIVACY.md, stated once, neutrally, where it informs rather than instructs. What is DELIBERATELY NOT reintroduced: any sentence telling a caller when to avoid this channel. The lever for a confidential brief is `--skip spark12cont`, it is documented in SKILL.md where levers belong, and the human choosing to spend money is the one who should be reading it.",
       "_locked_to_contributor": "2026-08-07, the operator: «указать в коде только эту модель: muse-spark-1.2-contributor», «лучше вообще из кода временно удалить модель не contributor». TEMPORARY BY HIS OWN WORD - restoring is one object, pasted back into `models` below, and nothing else changes because every guard reads this table rather than a literal: {\"muse-spark-1.2\": {\"label\": \"Muse Spark 1.2\", \"data_policy\": \"Standard tier, same weights as the Contributor id, ~12x the input price.\", \"aliases\": [\"muse-spark-1.2\", \"spark 1.2\", \"спарк 1.2\"]}}. Rejected alternative: a separate `spark12std` channel carrying the Standard checkpoint - that is the removed model under a new name, which is what «удалить» excludes, and it would re-open the substitution path one alias away.",
       "models": {
@@ -192,6 +194,15 @@
             "1.2-contributor",
             "контрибьютор"
           ]
+        },
+        "muse-spark-1.2": {
+          "label": "Muse Spark 1.2 (Standard fallback)",
+          "data_policy": "Standard tier - prompts and completions are NOT used for training.",
+          "aliases": [
+            "muse-spark-1.2",
+            "spark 1.2",
+            "спарк 1.2"
+          ]
         }
       },
       "aliases": [
@@ -200,7 +211,7 @@
         "спарк12",
         "http12"
       ],
-      "notes": "Same endpoint, same key, same verification as spark11. Runs as an independent voice, not a replacement: the value of a panel is disagreement, and two variants of one family disagreeing is a cheaper signal than any single one being right. 🔴 ONE MODEL ONLY since 2026-08-07 - `--set spark12cont=<anything>` is refused by routing, so the name is a guarantee rather than a description."
+      "notes": "Same endpoint, same key, same verification as spark11. Runs as an independent voice, not a replacement. Primary model is Contributor ($0.10/M in); on failure, falls back to Standard ($1.25/M in) — same weights, 30x more RPM. `--set spark12cont=<anything>` is still refused by routing; the fallback fires only on failure, never by override."
     },
     "codex": {
       "kind": "codex",
@@ -930,7 +941,8 @@
       "label": "Nemotron 3 Ultra (free)",
       "cost": "free",
       "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
-      "role": "analysis",
+      "role": "code",
+      "reading_note": "Weak model outside code/programming. Skip this answer if the brief is not about code.",
       "_added": "2026-08-08, the operator gave the URL: openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b:free. Seventh vendor family (NVIDIA) and the first FREE voice in the panel - which changes what a marginal reviewer costs from a few cents to nothing, so the argument for including it in every round is different in kind from the argument for any other channel.",
       "_catalogue": "READ LIVE 2026-08-08. The :free variant is not merely the paid one with the meter off: context_length 1 000 000 against the paid variant's 512 288, max_completion_tokens 65 536, $0/$0. supported_parameters: include_reasoning, max_tokens, reasoning, reasoning_effort, seed, temperature, tool_choice, tools, top_p - so it takes an effort value and our fetch_url tool. reasoning_config is null, i.e. no declared ladder, so `effort` is passed but not proven to bite: judge it by reasoning tokens in the first real round, not by the 200.",
       "🟢_MEASURED_2026_08_17_R47_the_knob_bites_and_the_26_was_a_read_bug": "Three arms on the live :free endpoint, judged by completion_tokens_details.reasoning_tokens: no reasoning block = 102, effort medium = 101, effort HIGH = 181 - the knob MOVES the meter (~1.8x over the other arms) and the DEFAULT already thinks, unlike grok-4.20's default-off. All three arms answered the arithmetic control correctly, finish_reason=stop. The AOS round-40 record's reasoning_tokens=26 beside reasoning_chars=4948 was NOT an inert knob: the record read the LAST tool round's usage while chars summed every round - the R41 two-counters class one field over, fixed in the same commit as this note (reas_tot). That review's real failure was the missing end marker on a mid-heading stop, which the new finish_reason capture will name next time.",
@@ -1125,7 +1137,7 @@
     },
     "orglm53": {
       "kind": "openrouter",
-      "panel": "cheap",
+      "panel": "standard",
       "vendor": "zai",
       "provider": "openrouter",
       "enabled": true,

@@ -275,7 +275,7 @@ def _read_sse(resp):
 
 
 def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, name="spark",
-                       effort=None):
+                       effort=None, fallback_model=None):
     """Probe, then the real call, with retries that distinguish network blips from refusals.
 
     `model` comes from the routing plan, i.e. from channels.json. 🔴 Until 2026-08-06 it did not
@@ -287,6 +287,14 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, na
 
     `name` exists because two channels now share this function (spark 1.1 and spark 1.2 run in
     parallel) and a log line reading `[http]` twice describes neither of them.
+
+    `fallback_model` (added R62): if the primary model fails for a reason OTHER than a content
+    filter, retry the whole call with this model. Same endpoint, same key, same brief — only the
+    model changes. The content-filter exclusion is deliberate: same payload + same filter = same
+    result, and a wasted retry on the paid model costs $1.25/M instead of $0.10/M. The use case
+    is spark12cont (Contributor, 100 RPM) falling back to muse-spark-1.2 (Standard, 3000 RPM)
+    when the Contributor tier is rate-limited or returns a server error. Implemented as a
+    recursive call with fallback_model=None to avoid duplicating the retry logic.
     """
     # _env_key, not an inline winreg copy: the inline form predated the helper, and R47 taught
     # the helper a divergence warning the copies would silently lack (a rotated key masked by a
@@ -407,6 +415,30 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, na
             last = "transport: %r" % (e,)
             log("  [%s] %s - retry %d/3 in %ds" % (name, last, attempt + 1, 2 ** attempt))
             time.sleep(2 ** attempt)
+    # --- fallback: if the primary model failed and a fallback is configured, retry with it.
+    # Content filter is excluded: same payload to the same vendor's filter = same result.
+    # Rate limits (429) and server errors (500+) ARE retried: the Contributor tier has 30×
+    # lower RPM (100 vs 3000), so a 429 on Contributor can succeed on Standard.
+    if fallback_model and fallback_model != model:
+        is_filter = last and ("content management policy" in last or "CONTENT FILTER" in last)
+        if not is_filter:
+            log("  [%s] FALLBACK: primary %s failed (%s), retrying with %s (Standard tier)"
+                % (name, model, (last or "unknown")[:80], fallback_model))
+            res = call_http_reviewer(brief, system, tier, marker, timeout=timeout,
+                                     model=fallback_model, name=name, effort=effort,
+                                     fallback_model=None)
+            if res.get("ok"):
+                res["fallback_used"] = True
+                res["primary_model"] = model
+                log("  [%s] FALLBACK SERVED: %s answered after primary %s failed"
+                    % (name, fallback_model, model))
+            else:
+                log("  [%s] FALLBACK ALSO FAILED: %s -> %s"
+                    % (name, fallback_model, res.get("error", "")[:80]))
+                res["primary_error"] = last
+            return res
+        else:
+            log("  [%s] fallback skipped: content filter blocks both tiers equally" % name)
     return {"channel": "http", "ok": False, "error": last}
 
 
@@ -6560,7 +6592,8 @@ def main():
                 jobs[cname] = ex.submit(call_http_reviewer, cbrief, _system_for(system, p),
                                         a.tier, a.marker,
                                         model=p.get("model"), name=cname,
-                                        effort=p.get("effort"))
+                                        effort=p.get("effort"),
+                                        fallback_model=p.get("fallback_model"))
             elif kind == "codex":
                 jobs[cname] = ex.submit(call_codex, cbrief, a.marker, workdir, outfile,
                                         model=p.get("model"), effort=p.get("effort"),
@@ -6664,6 +6697,9 @@ def main():
         _dmg = transport_damage(r.get("text"))
         for _d in _dmg:
             r.setdefault("notes", []).append(_d)
+        _rn = _registry_default(name, "reading_note", None)
+        if _rn and r.get("ok"):
+            r.setdefault("notes", []).append(_rn)
         # 🔴 THE ANSWER IS AN EGRESS TOO (kimik3, R46 panel): the harness scans what it SENDS
         # and scrubs diagnostics/console, but the review text itself is written to disk RAW -
         # deliberately, a reviewer's words are never altered - so a reviewer that read a
