@@ -406,7 +406,19 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, na
             if e.code == 401 or "content management policy" in body:
                 break                                  # never retry auth or filter unchanged
             if e.code == 429 or e.code >= 500:
-                time.sleep(2 ** attempt)
+                retry_after = e.headers.get("Retry-After") if hasattr(e, "headers") else None
+                if e.code == 429:
+                    ra_msg = ("Retry-After: %s" % retry_after) if retry_after else "no Retry-After header"
+                    log("  [%s] 429 RATE LIMITED (%s) - attempt %d/3"
+                        % (name, ra_msg, attempt + 1))
+                    last = "HTTP 429 rate limited (%s): %s" % (ra_msg, body[:200])
+                wait = 2 ** attempt
+                if retry_after:
+                    try:
+                        wait = max(wait, min(int(retry_after), 30))
+                    except (ValueError, TypeError):
+                        pass
+                time.sleep(wait)
                 continue
             break
         except Exception as e:
@@ -4017,7 +4029,44 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                     # ships a `tools:[]` payload at any point.
                     body["tool_choice"] = "none"
                     forced_final = True
-                    continue
+                    # 🔴 R64 FIX (AGY31PRO / AGY37FLASH / GOOG37FLASH panel, 2026-08-23):
+                    # DO NOT `continue`. The outer for-loop is `range(max_rounds + 1)`, and
+                    # `continue` on the last iteration (`_round == max_rounds`) exhausts the
+                    # loop SILENTLY. The forced-final `_stream_once` - which is the whole point
+                    # of setting `tool_choice="none"` and telling the model «answer as it
+                    # stands» - never runs, `text_parts[-1]` holds the tool-call chunk, and the
+                    # channel returns `ok=False, END MARKER ABSENT` after paying for the full
+                    # fetch budget. Three panel channels with code access converged on this in
+                    # R64; my prior refutation was arithmetically wrong (`range(max_rounds+1)`
+                    # has iterations 0..max_rounds, not an extra iteration beyond max_rounds).
+                    # Instead of extending the range (which just shifts the boundary by 1 and
+                    # fails the same way if fetches burst on the new last iteration), do the
+                    # forced-final round INLINE: no dependence on outer-loop iterations.
+                    chunk_f, rch_f, use_f, _calls_f, served_f, _fin_f = _stream_once(body)
+                    rounds_done += 1
+                    if _fin_f:
+                        last_finish = _fin_f
+                    served_models.update(served_f)
+                    reasoning_chars += rch_f
+                    in_tot += (use_f or {}).get("prompt_tokens") or 0
+                    out_tot += (use_f or {}).get("completion_tokens") or 0
+                    cached_tot += (((use_f or {}).get("prompt_tokens_details") or {})
+                                   .get("cached_tokens") or 0)
+                    reas_tot += (((use_f or {}).get("completion_tokens_details") or {})
+                                 .get("reasoning_tokens") or 0)
+                    _c_f = (use_f or {}).get("cost")
+                    if _c_f is not None:
+                        try:
+                            _c_f = float(_c_f)
+                            usd_tot += _c_f
+                            usd_max_round = max(usd_max_round, _c_f)
+                            usd_seen = True
+                        except (TypeError, ValueError):
+                            pass
+                    usage = use_f or usage
+                    if chunk_f:
+                        text_parts.append(chunk_f)
+                    break
                 break
             body["messages"].append(
                 {"role": "assistant", "content": chunk,
@@ -4161,8 +4210,13 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             detail = e.read().decode("utf-8", "replace")[:300]
         except Exception:
             pass
+        retry_after = e.headers.get("Retry-After") if hasattr(e, "headers") else None
+        if e.code == 429 and retry_after:
+            log("  [%s] 429 RATE LIMITED (Retry-After: %s)" % (name, retry_after))
         out = {"channel": name, "ok": False,
                "error": "HTTP %s from OpenRouter: %s" % (e.code, detail)}
+        if retry_after:
+            out["retry_after"] = retry_after
         out.update(_telemetry())
         if usd_seen and usd_tot:
             log("  [%s] ⚠ this channel had already billed $%.4f before it failed - that money is "

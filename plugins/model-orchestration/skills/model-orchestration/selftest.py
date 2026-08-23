@@ -2222,7 +2222,7 @@ def suite_spend_guard():
                     "model": "test/model"},
                    {"usage": {"prompt_tokens": 2000, "completion_tokens": 300, "cost": cost}})
 
-    def run(responses, spend_guard=None, raise_at=None):
+    def run(responses, spend_guard=None, raise_at=None, max_calls=8):
         n = [0]
 
         def fake_urlopen(req, timeout=None):
@@ -2254,7 +2254,7 @@ def suite_spend_guard():
         try:
             return o.call_oai_reviewer("brief", "END-01", None, model="test/model",
                                        name="probe",
-                                       fetch_tool={"enabled": True, "max_calls": 8},
+                                       fetch_tool={"enabled": True, "max_calls": max_calls},
                                        spend_guard=spend_guard), n[0]
         finally:
             urllib.request.urlopen, o._safe_fetch_url, o.log = real_open, real_fetch, real_log
@@ -2417,6 +2417,32 @@ def suite_spend_guard():
           "--accept-spend exists as a flag")
     check("requires_ack" in src and "REFUSING TO SPEND" in src,
           "main() refuses rather than warns when an opt-in channel was selected without it")
+
+    # 🔴 R64: forced-final loop-exhaustion regression. Set max_calls=3 (so the outer
+    # `range(max_rounds + 1) = range(4)` has iterations 0..3) and feed 4 fetch_rounds.
+    # Iterations 0-2 consume the budget (fetches goes 0→1→2→3). Iteration 3 sees
+    # `fetches >= max_rounds` with calls still pending → enters the forced-final
+    # branch. BEFORE the fix, `continue` on the last iteration exhausted the loop
+    # silently: `text_parts[-1]` held the "opening a page" chunk, no `END-01` marker,
+    # channel returned `ok=False, END MARKER ABSENT` after paying for the full
+    # budget. AFTER the fix, the forced-final `_stream_once` runs INLINE (fake_urlopen
+    # sees `tool_choice="none"` and serves the answer_round), the marker appears,
+    # channel returns `ok=True`. Panel R64: AGY31PRO, AGY37FLASH, GOOG37FLASH all
+    # converged on this defect after direct code reading.
+    # 🔴 DISTINCT URLs per round: [fetch_round(x)] * 4 multiplies one SSE with one URL,
+    # and the _fetch_key cache from round-38 serves the 2nd..4th requests without counting
+    # against fetches. That measures the URL-cache, not this bug. Use a comprehension so
+    # `fetch_round` runs 4 times and `seq_n[0]` increments 4 times.
+    r_ff, n_ff = run([fetch_round(0.10) for _ in range(4)], max_calls=3)
+    check(r_ff.get("ok") is True,
+          "R64: forced-final fires INLINE, not via `continue` on the last iteration",
+          "ok=%s warnings=%r" % (r_ff.get("ok"), r_ff.get("warnings")))
+    check((r_ff.get("text") or "").strip().endswith("END-01"),
+          "R64: the forced-final answer reaches text_parts (not the tool-call chunk)",
+          "text tail=%r" % (r_ff.get("text") or "")[-60:])
+    check((r_ff.get("fetches") or 0) == 3,
+          "R64: fetch budget is respected (3 out of max_calls=3, no overrun)",
+          "fetches=%s" % r_ff.get("fetches"))
 
 
 def suite_max_depth_and_explicit_only():

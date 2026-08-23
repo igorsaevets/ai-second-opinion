@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.38.1 — 2026-08-23
+
+* **Forced-final loop-exhaustion fix in `call_oai_reviewer`.** When an
+  OpenRouter/OAI channel spent its full fetch budget (default 8) AND the
+  model still tried to fetch on the last outer-loop iteration, the harness
+  set `forced_final = True; continue` — and the `for _round in
+  range(max_rounds + 1):` loop exhausted silently. The forced-final
+  `_stream_once` (with `tool_choice="none"`, asking the model to answer
+  from what it already has) never ran, `text_parts[-1]` held the last
+  tool-call chunk, and the channel returned `ok=False, END MARKER ABSENT`
+  after paying for every fetch. R64 cheap panel: three channels with code
+  access (AGY31PRO, AGY37FLASH, GOOG37FLASH) converged on this defect,
+  which the prior R64 audit had refuted arithmetically in error. Fix
+  performs the forced-final `_stream_once` INLINE right after setting
+  the flag, so termination no longer depends on the outer for-loop
+  having another iteration available. Symptom before the fix: rare
+  `EMPTY OUTPUT` on channels hitting the fetch budget, e.g. the
+  recurring `mimo25pro OUTPUT BUDGET EXHAUSTED` and possibly some
+  `ornemotron3ultra` empty returns.
+
 ## 1.38.0 — 2026-08-22
 
 * **Spark Contributor fallback to Standard tier.** When `spark12cont`
