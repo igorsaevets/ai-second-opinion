@@ -555,7 +555,7 @@ def _verify_http(data, marker, floor, secs, tier):
     if data.get("stop_reason") not in (None, "end_turn"):
         fail.append("stop_reason=%s (TRUNCATED - the tail of the analysis is missing)"
                     % data.get("stop_reason"))
-    if marker and not text.strip().endswith(marker):
+    if marker and not _marker_on_last_line(text, marker):
         fail.append("END MARKER NOT ON LAST LINE - output is incomplete, do not parse it as a finished review")
     if not text.strip():
         fail.append("EMPTY ANSWER despite a successful HTTP call")
@@ -691,6 +691,25 @@ def record_refusal(msg, hard, soft):
         soft.append(msg[len(SOFT):])
     else:
         hard.append(msg)
+
+
+def _marker_on_last_line(text, marker):
+    """R67: the end marker must be the ONLY content on the last non-empty line.
+
+    Line-equality strictly dominates the R66 endswith(marker) rule on suffix-confusion:
+    for marker `REVIEW-DONE-R66`, endswith accepts a stray `PREVIEW-DONE-R66` (false positive
+    suffix match); line-equality rejects it. Every other case (trailing period, embedded
+    text on the same line, empty output) behaves the same or stricter, and empirically all
+    12 R66 panel channels placed the marker on its own line — no observed regression.
+
+    Named by panel R66: spark12cont, agy36flash, goog36flash, grokbuild — the four strongest
+    voices in the cheap panel for code review. Igor 2026-08-23 left the call at my discretion
+    (r66→r67); this is the one-line hardening they converged on.
+    """
+    if not marker:
+        return True
+    lines = text.strip().splitlines()
+    return bool(lines) and lines[-1].strip() == marker
 
 
 def refusal_check(text, marker=None, min_chars=800):
@@ -2548,7 +2567,7 @@ def call_codex(brief, marker, workdir, outfile, model=None, effort=None, system=
             text = f.read()
     warn = []
     # Codex emits partial output and keeps thinking. Exit code 0 does not mean finished.
-    if marker and not text.strip().endswith(marker):
+    if marker and not _marker_on_last_line(text, marker):
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip():
         warn.append("EMPTY OUTPUT (exit=%d) %s" % (p.returncode, (p.stderr or "")[:200]))
@@ -2808,7 +2827,7 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     if text:
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
-    if marker and not text.strip().endswith(marker):
+    if marker and not _marker_on_last_line(text, marker):
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip() and not warn:
         warn.append("EMPTY OUTPUT despite exit 0")
@@ -2959,7 +2978,7 @@ def call_hermes(brief, marker, outfile, model=None, toolsets=None, system=None, 
     low = text.lower()
     if "no usable credentials" in low or "is not a valid model id" in low:
         warn.append("PROVIDER/MODEL ERROR returned as prose: " + text.strip()[:160])
-    if marker and not text.strip().endswith(marker):
+    if marker and not _marker_on_last_line(text, marker):
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip():
         warn.append("EMPTY OUTPUT (exit=%d) %s" % (p.returncode, (p.stderr or "")[:200]))
@@ -3428,7 +3447,7 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
 
     u = data.get("usage") or {}
     warn, note = [], []
-    if marker and not text.strip().endswith(marker):
+    if marker and not _marker_on_last_line(text, marker):
         warn.append("END MARKER NOT ON LAST LINE - output is incomplete, do not parse it as a finished review")
     if not text:
         warn.append("EMPTY ANSWER despite a successful call")
@@ -4293,7 +4312,7 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                     "the vendor returned no cost meter on any of the %d round(s), so nothing "
                     "bounded this run. Treat its price as unknown, not as zero."
                     % (usd_ceiling, rounds_done))
-    if marker and not text.strip().endswith(marker):
+    if marker and not _marker_on_last_line(text, marker):
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
         # 🔴 R47: the marker warning stood ALONE on the AOS round-40 nemotron review - 32 KB of
         # text ending mid-heading - because the finish_reason that would have named the cutter
@@ -4645,7 +4664,7 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
             f.write(text)
 
     warn, note = [], []
-    if marker and not text.strip().endswith(marker):
+    if marker and not _marker_on_last_line(text, marker):
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip():
         # 🔴 "EMPTY OUTPUT from stream" AND NOTHING ELSE was all this said until 2026-08-08, and
@@ -5861,7 +5880,7 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
                     "free read-only web tools and deny-rules for the metered Firecrawl ones). "
                     "Do NOT reach for --dangerously-skip-permissions: that also unlocks "
                     "firecrawl_crawl.%s" % (denial[0] if denial else "see stderr", first))
-    if marker and not text.strip().endswith(marker):
+    if marker and not _marker_on_last_line(text, marker):
         # 🔴 SAY WHY, NOT JUST WHAT. Until 2026-08-07 this was the whole message, and its stock
         # advice ("re-run alone, or lower --tier") pointed at a timeout. The round-25 agy36flash
         # failure was not a timeout: it died at 84 seconds having ALREADY produced 8,145 output

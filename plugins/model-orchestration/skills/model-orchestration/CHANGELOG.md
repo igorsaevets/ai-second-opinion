@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.39.1 — 2026-08-23
+
+* **Marker line-equality hardening (R66 panel finding → R67).** R66 aligned
+  three verification paths (`_verify_http`, `call_gemini_direct`, `_agy_once`)
+  from `marker not in text` to `text.strip().endswith(marker)`. The R66 cheap
+  panel then converged on a residual weakness: `endswith("REVIEW-DONE-R66")`
+  accepts a stray `PREVIEW-DONE-R66` (false-positive suffix match). Named by
+  four independent channels — `spark12cont`, `agy36flash`, `goog36flash`,
+  `grokbuild` — all strong for code review. Fix replaces `endswith(marker)`
+  at all EIGHT verification sites (R66's 3 + 5 pre-existing CLI channels) with
+  a single helper `_marker_on_last_line(text, marker)` that returns
+  `bool(lines) and lines[-1].strip() == marker`. Empirically all 12 R66 panel
+  answers placed the marker on its own line, so no observed regression; the
+  new check is strictly stricter on suffix-confusion and same-behavior on
+  every other case (trailing punctuation, embedded text, empty output).
+
+* **7 new selftest checks** (742 total): 3 R66 checks updated to assert the
+  new helper (was: `"endswith(marker)"` substring), plus 7 behavior checks on
+  the helper itself — empty text, PREVIEW-suffix rejection, marker-on-own-line
+  acceptance, whitespace-around tolerance, trailing punctuation rejection,
+  embedded-in-longer-line rejection (the stricter case, deliberately named),
+  and pass-through when marker is empty.
+
 ## 1.39.0 — 2026-08-23
 
 * **Timeout drift fix (R66 audit, 3 of 4 R64 backlog items).** Four dispatch

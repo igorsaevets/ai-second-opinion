@@ -2452,16 +2452,40 @@ def suite_spend_guard():
           "R64: fetch budget is respected (3 out of max_calls=3, no overrun)",
           "fetches=%s" % r_ff.get("fetches"))
 
-    # 🔴 R66: marker check uses `endswith`, not `not in`. Until R66 three verification
-    # paths (_verify_http, call_gemini_direct, call_agy) used `marker not in text` which
-    # misses "marker in the middle" — the model wrote the marker then continued. All CLI
-    # channels already used `endswith`. Aligned all to `endswith` for consistency.
-    check("endswith(marker)" in inspect.getsource(o._verify_http),
-          "R66: _verify_http uses endswith(marker), not `marker not in text`")
-    check("endswith(marker)" in inspect.getsource(o.call_gemini_direct),
-          "R66: call_gemini_direct uses endswith(marker), not `marker not in text`")
-    check("endswith(marker)" in inspect.getsource(o._agy_once),
-          "R66: _agy_once uses endswith(marker), not `marker not in text`")
+    # 🔴 R66→R67: marker check uses line-equality via _marker_on_last_line, not `endswith`
+    # or `not in`. R66 aligned three verification paths (_verify_http, call_gemini_direct,
+    # _agy_once) from `marker not in text` to `endswith(marker)`. R67 (panel R66:
+    # spark12cont, agy36flash, goog36flash, grokbuild — 4 strong channels for code review)
+    # tightened further to line-equality: `endswith("REVIEW-DONE-R66")` accepts a stray
+    # `PREVIEW-DONE-R66` (false-positive suffix); line-equality rejects it. Empirically
+    # all 12 R66 panel channels put the marker on its own line — no observed regression.
+    # This assertion is on ALL 8 verification sites (R66 fixed 3 + 5 pre-existing CLI
+    # channels), because half-migration would leave 5 channels weaker than the other 3.
+    check("_marker_on_last_line(text, marker)" in inspect.getsource(o._verify_http),
+          "R67: _verify_http uses _marker_on_last_line (line-equality), not endswith(marker)")
+    check("_marker_on_last_line(text, marker)" in inspect.getsource(o.call_gemini_direct),
+          "R67: call_gemini_direct uses _marker_on_last_line (line-equality), not endswith(marker)")
+    check("_marker_on_last_line(text, marker)" in inspect.getsource(o._agy_once),
+          "R67: _agy_once uses _marker_on_last_line (line-equality), not endswith(marker)")
+    # 🔴 R67: helper itself is correct — the point of line-equality is that (a) empty text
+    # returns False (no marker), (b) suffix confusion (PREVIEW-DONE-R66 vs REVIEW-DONE-R66)
+    # returns False, (c) the marker on its own last line returns True even with a message
+    # body above. If any of these three flips, verification is silently either too strict
+    # (rejects valid answers) or too loose (accepts fabricated suffix matches).
+    check(o._marker_on_last_line("", "REVIEW-DONE-R66") is False,
+          "R67: empty text is not a marker match (fail-closed)")
+    check(o._marker_on_last_line("some text\nPREVIEW-DONE-R66", "REVIEW-DONE-R66") is False,
+          "R67: PREVIEW-DONE-R66 does not pass as REVIEW-DONE-R66 (the whole point of R67)")
+    check(o._marker_on_last_line("some body\nREVIEW-DONE-R66", "REVIEW-DONE-R66") is True,
+          "R67: marker on its own last line, body above — accepted (normal case)")
+    check(o._marker_on_last_line("some body\n   REVIEW-DONE-R66   \n", "REVIEW-DONE-R66") is True,
+          "R67: whitespace around the marker on its own line — stripped, accepted")
+    check(o._marker_on_last_line("some body\nREVIEW-DONE-R66.", "REVIEW-DONE-R66") is False,
+          "R67: trailing punctuation on the marker line — rejected (same as R66 endswith)")
+    check(o._marker_on_last_line("body ending REVIEW-DONE-R66", "REVIEW-DONE-R66") is False,
+          "R67: marker embedded in a longer last line — REJECTED (stricter than endswith)")
+    check(o._marker_on_last_line("body", "") is True,
+          "R67: no marker required (marker=='') is a pass-through")
 
 
 def suite_max_depth_and_explicit_only():
