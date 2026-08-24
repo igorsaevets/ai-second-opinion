@@ -555,8 +555,8 @@ def _verify_http(data, marker, floor, secs, tier):
     if data.get("stop_reason") not in (None, "end_turn"):
         fail.append("stop_reason=%s (TRUNCATED - the tail of the analysis is missing)"
                     % data.get("stop_reason"))
-    if marker and marker not in text:
-        fail.append("END MARKER ABSENT - output is incomplete, do not parse it as a finished review")
+    if marker and not text.strip().endswith(marker):
+        fail.append("END MARKER NOT ON LAST LINE - output is incomplete, do not parse it as a finished review")
     if not text.strip():
         fail.append("EMPTY ANSWER despite a successful HTTP call")
     record_refusal(refusal_check(text, marker), fail, note)
@@ -3428,8 +3428,8 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
 
     u = data.get("usage") or {}
     warn, note = [], []
-    if marker and marker not in text:
-        warn.append("END MARKER ABSENT - output is incomplete, do not parse it as a finished review")
+    if marker and not text.strip().endswith(marker):
+        warn.append("END MARKER NOT ON LAST LINE - output is incomplete, do not parse it as a finished review")
     if not text:
         warn.append("EMPTY ANSWER despite a successful call")
     if data.get("status") and data["status"] != "completed":
@@ -5861,7 +5861,7 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
                     "free read-only web tools and deny-rules for the metered Firecrawl ones). "
                     "Do NOT reach for --dangerously-skip-permissions: that also unlocks "
                     "firecrawl_crawl.%s" % (denial[0] if denial else "see stderr", first))
-    if marker and marker not in text:
+    if marker and not text.strip().endswith(marker):
         # 🔴 SAY WHY, NOT JUST WHAT. Until 2026-08-07 this was the whole message, and its stock
         # advice ("re-run alone, or lower --tier") pointed at a timeout. The round-25 agy36flash
         # failure was not a timeout: it died at 84 seconds having ALREADY produced 8,145 output
@@ -6645,6 +6645,7 @@ def main():
             if kind == "http":
                 jobs[cname] = ex.submit(call_http_reviewer, cbrief, _system_for(system, p),
                                         a.tier, a.marker,
+                                        timeout=_seconds(p.get("timeout"), 2400),
                                         model=p.get("model"), name=cname,
                                         effort=p.get("effort"),
                                         fallback_model=p.get("fallback_model"))
@@ -6670,7 +6671,8 @@ def main():
             elif kind == "hermes":
                 jobs[cname] = ex.submit(call_hermes, cbrief, a.marker, outfile,
                                         model=p.get("model"), toolsets=p.get("toolsets"),
-                                        system=_system_for(system, p))
+                                        system=_system_for(system, p),
+                                        timeout=_seconds(p.get("timeout"), 2400))
             elif kind in ("openrouter", "oai"):
                 # Two kind names, ONE implementation. `openrouter` is kept because it accurately
                 # names the channels that go through OpenRouter and because existing installs
@@ -6685,7 +6687,8 @@ def main():
                                         provider=p.get("provider") or "openrouter",
                                         provider_route=p.get("provider_route"),
                                         spend_guard=p.get("spend_guard"),
-                                        fallback_models=p.get("fallback_models"))
+                                        fallback_models=p.get("fallback_models"),
+                                        timeout=_seconds(p.get("timeout"), 2400))
             elif kind == "xai":
                 # 🔴 THE TIER TIMEOUT WAS NEVER PASSED HERE, and the plan claimed otherwise.
                 # Found by codex in the round-29 panel, reviewing this very change: the tier note
@@ -6704,7 +6707,8 @@ def main():
                 jobs[cname] = ex.submit(call_gemini_direct, cbrief, a.marker, outfile,
                                         model=p.get("model"), system=_system_for(system, p),
                                         name=cname, thinking_level=p.get("thinking_level"),
-                                        tools=p.get("tools"), max_tokens=p.get("max_tokens"))
+                                        tools=p.get("tools"), max_tokens=p.get("max_tokens"),
+                                        timeout=_seconds(p.get("timeout"), 2400))
             else:
                 # Named in the registry, unknown to the code. A log line is NOT enough: a log
                 # line scrolls, and every downstream consumer - the "N/M channels returned"
@@ -7014,6 +7018,9 @@ def main():
                         "Switch channel rather than opening a metered API path.")
             log("    no TOOL telemetry on this channel: it never reports which pages it opened, "
                 "so the citation audit below is the only grounding instrument that works here")
+        if kind == "hermes":
+            log("    exit=%s | model=%s | no token telemetry from this CLI"
+                % (r.get("exit"), r.get("model")))
         if kind == "agy" and r.get("tool_calls") is not None:
             # This channel used to report nothing at all about its own work, so a fluent answer
             # written entirely from training data was indistinguishable from a researched one.

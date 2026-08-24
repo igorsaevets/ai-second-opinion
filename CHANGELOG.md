@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.39.0 — 2026-08-23
+
+* **Timeout drift fix (R66 audit, 3 of 4 R64 backlog items).** Four dispatch
+  paths (http, openrouter/oai, gemini, hermes) silently ignored the registry's
+  `timeout` field and fell back to the 2400 s default. Channels with explicit
+  timeout in `channels.json` (agy, codex, grokcli, xai) were unaffected.
+  Fix passes `timeout=_seconds(p.get("timeout"), 2400)` to all four.
+
+* **Marker consistency fix.** Three verification paths (`_verify_http`,
+  `call_gemini_direct`, `_agy_once`) used `marker not in text` which checks
+  whether the marker appears ANYWHERE — missing the case where a model writes
+  the marker mid-answer and then continues. All five CLI channels already used
+  `text.strip().endswith(marker)` which catches both absent and misplaced
+  markers. Aligned the three paths to `endswith` for consistency.
+
+* **Hermes reporter telemetry.** The reporter's `if kind == ...` chain had
+  no branch for `hermes`, so that channel printed no telemetry line at all.
+  Same defect class as R46 (dispatch is loud, reporting is quiet). Added a
+  minimal telemetry line (exit code + model).
+
+* **15 new selftest checks** (735 total): 12 verifying timeout reaches
+  every dispatch kind, 3 verifying `endswith(marker)` in the three fixed
+  verification functions.
+
 ## 1.38.1 — 2026-08-23
 
 * **Forced-final loop-exhaustion fix in `call_oai_reviewer`.** When an

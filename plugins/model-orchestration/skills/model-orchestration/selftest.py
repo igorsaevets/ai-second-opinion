@@ -699,6 +699,14 @@ def suite_dispatch():
             if rows:
                 check(all(r[field] for r in rows),
                       "the tier delivered %s to every %s channel" % (field, kind))
+        # 🔴 R66: timeout must reach EVERY kind, not just codex/agy/grokcli/xai. Until R66 four
+        # dispatch paths (http, openrouter, oai, gemini, hermes) silently dropped the registry's
+        # timeout and fell back to the function's default. The stub captures timeout from kwargs;
+        # _seconds(p.get("timeout"), 2400) ensures a non-None value even when the registry omits it.
+        for r in launched:
+            check(r.get("timeout") is not None,
+                  "R66: timeout reached the %s (%s) call" % (r["name"], r["kind"]),
+                  "timeout=%s" % r.get("timeout"))
         # 🔴 ONLY CHANNELS THAT ACTUALLY RUN. `web.enabled` is a property of the channel; "the
         # setting reached the call" is a property of a LAUNCH, and a channel that is disabled here
         # never makes one. Before the local/kit split every channel ran, so the two sets were the
@@ -2443,6 +2451,17 @@ def suite_spend_guard():
     check((r_ff.get("fetches") or 0) == 3,
           "R64: fetch budget is respected (3 out of max_calls=3, no overrun)",
           "fetches=%s" % r_ff.get("fetches"))
+
+    # 🔴 R66: marker check uses `endswith`, not `not in`. Until R66 three verification
+    # paths (_verify_http, call_gemini_direct, call_agy) used `marker not in text` which
+    # misses "marker in the middle" — the model wrote the marker then continued. All CLI
+    # channels already used `endswith`. Aligned all to `endswith` for consistency.
+    check("endswith(marker)" in inspect.getsource(o._verify_http),
+          "R66: _verify_http uses endswith(marker), not `marker not in text`")
+    check("endswith(marker)" in inspect.getsource(o.call_gemini_direct),
+          "R66: call_gemini_direct uses endswith(marker), not `marker not in text`")
+    check("endswith(marker)" in inspect.getsource(o._agy_once),
+          "R66: _agy_once uses endswith(marker), not `marker not in text`")
 
 
 def suite_max_depth_and_explicit_only():
