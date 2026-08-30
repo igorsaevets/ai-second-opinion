@@ -116,7 +116,7 @@ is one OpenRouter key to the same models. `--dry-run` shows which is which.
 | flag | what it does |
 |---|---|
 | `--brief` | file with the question. Required unless you pass `--ask`. Its last line should instruct the model to end with your marker |
-| `--ask` | **one-shot question instead of a round.** `--ask "text"` or `--ask @file`. Defaults to `spark12cont` (cheapest); `--ask-channel <name>` picks another. Prints the ANSWER to stdout, skips the citation audit. ~20 s |
+| `--ask` | **one-shot question instead of a round.** `--ask "text"` or `--ask @file`. Default: first `ask_default` entry (channels.json) with its key present; `--ask-channel <name>` overrides. Prints the ANSWER to stdout; no citation audit. ~20 s |
 | `--tier` | **one tier, `max`, and it is the default.** `strategic`/`deep` are aliases kept so old commands run. Depth is never a choice — see §2 |
 | `--panel` | `cheap` (default) · `standard`. WHO is in the room; never changes depth. See §2 |
 | `--marker` | literal string the reply must end with. If it is absent the output is incomplete |

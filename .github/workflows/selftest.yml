@@ -31,9 +31,13 @@ jobs:
             python: '3.9'
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      # v7 pins land the two open dependabot PRs (#3, #4) at the SOURCE: this file is what
+      # package.py ships, so merging them only in the generated repo would be silently undone
+      # by the next build (the R53 lesson - a hand edit in the generated tree is not a change).
+      # Both bumps ran green on all four CI matrix legs on the dependabot branches first.
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
 

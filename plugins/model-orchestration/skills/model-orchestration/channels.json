@@ -16,11 +16,13 @@
   "groups": {
     "_doc": "A word a human types that means SEVERAL channels. Without these, splitting agy into two channels would have broken `--only agy` and «не используй gemini» with 'unknown channel' - the exact defect that made `--only http` unusable for weeks in 2026-07. A group is expanded by routing before anything else runs, so every flag and every free-text route accepts it. Group names and their aliases share one namespace with channel and model aliases, and a collision is refused at load time.",
     "spark": {
-      "label": "both Spark voices",
+      "label": "all Spark voices, on both transports",
       "channels": [
         "spark11",
-        "spark12cont"
+        "spark12cont",
+        "orspark12cont"
       ],
+      "_membership_updated_2026_08_30": "orspark12cont added in R69 - the same Contributor checkpoint through OpenRouter, for kit users who hold no MODEL_API_KEY. From this moment `spark` names the MODEL FAMILY across transports, exactly as `gemini` (2026-08-07) and `grok` (2026-08-08) already do, and «не используй spark» must drop all three. `label` renamed from «both» to «all» in the same edit - the agy group's 2026-08-13 lesson verbatim: a group's label has to describe its actual contents.",
       "aliases": [
         "spark",
         "спарк",
@@ -79,8 +81,10 @@
         "orgrok420",
         "ornemotron3ultra",
         "ordeepseekv4pro",
-        "orglm53"
+        "orglm53",
+        "orspark12cont"
       ],
+      "_membership_updated_2026_08_30": "R69: orspark12cont added - TWELVE channels. It spends the same OPENROUTER_API_KEY as the rest, so both properties this group exists for now cover it: «--skip openrouter» excludes it, and one runaway member's 403 takes it down with the others.",
       "aliases": [
         "openrouter",
         "опенроутер",
@@ -177,7 +181,7 @@
       "cost": "cheap",
       "model": "muse-spark-1.2-contributor",
       "fallback_model": "muse-spark-1.2",
-      "_fallback_added": "2026-08-22 R62, the operator: «Если запускаем standart panel и Spark 1.2 Cont не сработал (проверить ответ), то на fallback поставить дорогой Spark 1.2.» Implemented as a HARNESS-LEVEL retry in call_http_reviewer: same endpoint, same key, only the model changes. Content-filter failures are NOT retried - same payload to the same vendor's filter gives the same result. Rate limits (429) and server errors ARE retried: Contributor has 100 RPM / 3M TPM, Standard has 3000 RPM / 4M TPM (measured from dev.meta.ai/docs/pricing-rate-limits, 2026-08-22). The fallback CANNOT be activated by --set: routing still refuses model overrides on this channel. It fires ONLY on a failure of the primary model. Diagnostics report `fallback_used: true` and `primary_model` when it fires. Cost: $0.10/M -> $1.25/M input, $0.20/M -> $4.25/M output - a 12.5x/21x price increase, which is why it is a fallback and not a default.",
+      "_fallback_added": "2026-08-22 R62, the operator: «Если запускаем standart panel и Spark 1.2 Cont не сработал (проверить ответ), то на fallback поставить дорогой Spark 1.2.» Implemented as a HARNESS-LEVEL retry in call_http_reviewer: same endpoint, same key, only the model changes. Content-filter failures are NOT retried - same payload to the same vendor's filter gives the same result. Rate limits (429) and server errors ARE retried: Contributor has 100 RPM / 3M TPM, Standard has 3000 RPM / 4M TPM (measured from dev.meta.ai/docs/pricing-rate-limits, 2026-08-22). 🔴 SUPERSEDED 2026-08-30 (R69), measured by execution: --set spark12cont=muse-spark-1.2 IS ACCEPTED by routing - re-listing the Standard model in `models` (which this same R62 change did) made it legal again, and this sentence was never re-checked against that. The run is loud, not silent: [RUN] with «⚠ MODEL OVERRIDDEN» in the plan. The fallback MECHANISM still fires ONLY on a failure of the primary model, never by override. Diagnostics report `fallback_used: true` and `primary_model` when it fires. Cost: $0.10/M -> $1.25/M input, $0.20/M -> $4.25/M output - a 12.5x/21x price increase, which is why it is a fallback and not a default.",
       "_added": "2026-08-06, the operator: «добавь новый muse-spark-1.2-contributor параллельно с spark 1.1». PARALLEL is the requirement, not a replacement - one channel runs one model per round, so a second voice needs a second entry. This is the first channel added purely by editing this file, and it is therefore also the test of the dispatch fix above.",
       "_renamed": "2026-08-06 (round 23) from `spark12`, the operator: «spark12 в Spark12Cont - что бы если кто-то использует не muse-spark-1.2-contributor мы визуально это увидели». The name carries the TIER, which is the thing that matters and the thing a bare version number hides. Lower case on disk because the name is also a filesystem path component and Windows would collide `Spark12Cont.md` with `spark12cont.md`; the display label keeps the operator's capitalisation.",
       "_catalogue": "VERIFIED 2026-08-06 against GET /v1/models on the live endpoint: it returns exactly three ids - muse-spark-1.2-contributor, muse-spark-1.2, muse-spark-1.1 - and a 16-token probe of the contributor id came back with model=muse-spark-1.2-contributor. Confirmed independently the same day from dev.meta.ai/docs/models.md.",
@@ -211,7 +215,72 @@
         "спарк12",
         "http12"
       ],
-      "notes": "Same endpoint, same key, same verification as spark11. Runs as an independent voice, not a replacement. Primary model is Contributor ($0.10/M in); on failure, falls back to Standard ($1.25/M in) — same weights, 30x more RPM. `--set spark12cont=<anything>` is still refused by routing; the fallback fires only on failure, never by override."
+      "notes": "Same endpoint, same key, same verification as spark11. Runs as an independent voice, not a replacement. Primary model is Contributor ($0.10/M in); on failure, falls back to Standard ($1.25/M in) — same weights, 30x more RPM. SUPERSEDED 2026-08-30 (R69), measured by execution: `--set spark12cont=muse-spark-1.2` IS accepted - the Standard model has been back in this channel's legal `models` table since R62 itself, so routing allows it and prints ⚠ MODEL OVERRIDDEN in the plan before spend. What stays true: a model OUTSIDE the table is still refused, and the FALLBACK fires only on failure, never by override."
+    },
+    "orspark12cont": {
+      "kind": "openrouter",
+      "panel": "cheap",
+      "vendor": "meta",
+      "provider": "openrouter",
+      "enabled": true,
+      "distribution": "kit",
+      "_distribution": "🔴 KIT ONLY since 2026-08-30 (R69). Locally this machine holds a direct MODEL_API_KEY, and spark12cont is the same model at the same Contributor price without the reseller in the path - running both would pay two vendors for one voice, which INSTALL.md itself tells users not to do. In the kit the calculus inverts, and this channel is the whole point of R69: a first-time user who holds ONLY an OPENROUTER_API_KEY had NO Spark voice at all, and the --ask default (spark12cont) pointed the one-shot path at the one channel they cannot run. package.py flips `enabled` on build and prints the flip.",
+      "label": "OR Spark 1.2 Cont",
+      "cost": "metered",
+      "model": "meta/muse-spark-1.2-contributor",
+      "fallback_models": [
+        "meta/muse-spark-1.2"
+      ],
+      "_added": "2026-08-30 (R69), the operator: «пользователь установит первый раз наш репозиторий. Напрямую meta ключа у него нет, а только openrouter. У него будет модель от openrouter: openrouter.ai/meta/muse-spark-1.2-contributor с fallback на openrouter.ai/meta/muse-spark-1.2». Catalogue read LIVE the same day (GET /api/v1/models, 396 models): $0.10/M in, $0.20/M out, ctx 1,048,576, top_provider.max_completion_tokens 943,718, web_search $0.0025/search, reasoning {mandatory: true, supported_efforts: [xhigh, high, medium, low, minimal], default_effort: medium}. 🔴 default_effort is MEDIUM - the R44 lesson verbatim (a gateway defaults BELOW its own top), which is why reasoning.effort xhigh is pinned explicitly below. NO prompt_suffix on purpose, although the other two training-tier channels carry one: package.py strips prompt_suffix from the kit, and locally this channel is disabled - a suffix here would be config no build could ever send. 🟢 EXECUTED, same day, from the built kit tree with the real key: --ask probe answered in 25.5s, `model_served: meta/muse-spark-1.2-contributor` (the CONTRIBUTOR endpoint itself - the R42 unreachable-slug risk did not materialize on this account; fallback_used None), reasoning_tokens 3815 of out 3830 at effort xhigh, provider-reported cost $0.001021, marker verified and stripped. The channel is tested, not merely configured.",
+      "_fallback": "Same failure-only shape as orglm52's R54 free->paid chain, reusing the `models` array mechanism call_oai_reviewer already has - NOT a second hand-rolled retry. Contributor and Standard are the SAME weights at 12.5x/21x different prices, so the fallback fires only on a real failure of the primary (429, downtime, or an account for which the Contributor endpoint is unreachable - the R42 class where a catalogue slug is a hypothesis until one call returns). Deliberately NO provider_route and NO allow_fallbacks:false - measured R54: that flag stops the model chain after a dispatched failure, which is exactly the failure the chain exists for. `model_served` in diagnostics.json records which tier answered; the plan prints the chain before anything is spent.",
+      "reasoning": {
+        "effort": "xhigh"
+      },
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ],
+      "max_tokens": 131072,
+      "_max_tokens": "min(the vendor's declared 943,718, the registry-wide 131,072 rule) = 131072 - see _max_tokens_rule at the end of this file. 943,718 is the largest max_completion_tokens in this registry and nothing here has ever approached 131,072.",
+      "spend_guard": {
+        "max_usd_per_review": 1.0,
+        "_arithmetic": "Computed for THIS chain, not copied. Primary at $0.10/M in, $0.20/M out: the worst runaway this project ever measured (7.4M billed input tokens in one round) would cost $0.74 here. What actually sizes the guard is the FALLBACK: muse-spark-1.2 bills $1.25/M in, so the same runaway on the fallback tier would be $9.25 - $1.00 stops it at roughly a tenth of that while sitting ~20x above any normal review on the primary tier.",
+        "measured_usd": null
+      },
+      "web": {
+        "enabled": true,
+        "max_results": 5,
+        "_engine_deliberately_unset": "Same reasoning as orgemini36flash: naming `exa` would FORCE the excerpt engine. The catalogue prices web_search at $0.0025 for this model - exactly Meta's own $2.50/1K queries and HALF Exa's flat $0.005 - which reads as native Meta search being wired through OpenRouter. UNVERIFIED until a real round returns page-level citations; if the first runs come back with Exa's [...]-elided excerpts, the inference was wrong and this note must say so."
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 11
+      },
+      "models": {
+        "meta/muse-spark-1.2-contributor": {
+          "label": "Muse Spark 1.2 Contributor (via OpenRouter)",
+          "data_policy": "Contributor tier THROUGH OpenRouter: the payload passes OpenRouter (their privacy policy applies) and lands on Meta's Contributor data terms - discounted because the vendor may train on what you send. See PRIVACY.md.",
+          "aliases": [
+            "meta/muse-spark-1.2-contributor"
+          ]
+        },
+        "meta/muse-spark-1.2": {
+          "label": "Muse Spark 1.2 (Standard fallback, via OpenRouter)",
+          "data_policy": "Standard tier through OpenRouter - prompts and completions are NOT used for training. 12.5x the Contributor input price; fires only when the primary fails.",
+          "aliases": [
+            "meta/muse-spark-1.2"
+          ]
+        }
+      },
+      "aliases": [
+        "orspark12cont",
+        "orspark",
+        "орспарк"
+      ],
+      "notes": "The Spark voice for anyone whose only key is OPENROUTER_API_KEY - the same Contributor checkpoint as spark12cont, reached through the reseller. `--set orspark12cont=meta/muse-spark-1.2` is ACCEPTED like any model listed in `models` and printed as ⚠ MODEL OVERRIDDEN (measured 2026-08-30 on the twin channel); the fallback itself fires only on failure, never by override. When MODEL_API_KEY is absent, --ask resolves to this channel via `ask_default`."
     },
     "codex": {
       "kind": "codex",
@@ -1207,6 +1276,11 @@
   "_panels_hidden_cost_doc": "🔴 THE THING THE CHEAP PANEL COSTS IS VENDOR DIVERSITY, NOT DEPTH - and it is invisible if you only read the price. Counted on this machine 2026-08-15: of the 11 cheap channels enabled here, SIX are Gemini (agy31pro, agy36flash, agy37flash, goog36flash, goog37flash, orgemini37flash). In the generated kit it is five of ten. A panel's whole product is disagreement between independent voices, and six seats sharing one vendor's training data are not six independent voices on a question where that vendor is systematically wrong - they will agree with each other and the convergence will read as corroboration. What `standard` actually buys, therefore, is not «more expensive», it is four more VENDORS: OpenAI (codex), Moonshot (kimik3), Alibaba (qwen38max) and Meta's Standard tier (spark11). The plan prints the vendor breakdown of whatever set resolves, so this is checkable at run time rather than trusted from this paragraph.",
   "default_panel": "cheap",
   "_default_panel_is_cheap_SINCE_2026_08_16": "Flipped 2026-08-16 (R45) on the operator's instruction «Дефолт сделай на дешевые», after being offered and declined in R42 and R44. WHAT THE OLD NOTE FEARED, kept because it names the real cost: a cheaper default silently removes codex, kimik3, qwen38max and spark11 from every round launched with no flag - including legal rounds in another project, where the loss is four VENDORS on a question with a filing deadline. A default that quietly spends more is a bug; a default that quietly reviews LESS is also a bug, and the second is harder to notice.\n\nWHY IT IS SAFE TO TAKE NOW, and this is a property of the code rather than a promise: the plan printer is SYMMETRIC. It already prints «--panel standard would ALSO run: codex, kimik3, qwen38max, spark11» on every cheap run, by name, from the same `gain`/`lose` computation that used to print the drop list on standard runs. So the loss the old note called invisible is printed before anything is spent, on every single round, and a reader who wants the four vendors back is told the exact flag. Verified by reading routing.py's panel block, not assumed from the fact that a feature with that name exists.\n\n🔴 WHAT STILL BITES, said plainly: this changes the default for OTHER PROJECTS' scripts too, and a script that passed no --panel now gets 4 vendors fewer without being edited. The mitigation is the printed line, not a guarantee - if a caller pipes the plan to a file nobody reads, the loss is silent again. Pass `--panel standard` explicitly in anything whose value depends on vendor breadth.",
+  "ask_default": [
+    "spark12cont",
+    "orspark12cont"
+  ],
+  "_ask_default_doc": "Added 2026-08-30 (R69). The order --ask resolves its channel when --ask-channel is not passed: the FIRST entry that is enabled AND whose transport key is actually present in the environment wins; if none has a key, the first enabled entry runs and its preflight explains what is missing. Until R69 the default was the argparse literal `spark12cont`, which for a kit user holding only an OPENROUTER_API_KEY pointed the one-shot path at the one channel they cannot run - degradation was graceful, but the default was wrong for exactly the user the kit exists for. the operator's 2026-08-08 instruction «--ask по умолчанию идёт на spark12cont - оставляем на нем» is preserved by the ORDER: spark12cont is first, so any machine with a MODEL_API_KEY behaves exactly as before. Names here must be CHANNEL names - not groups, not aliases - and selftest enforces that.",
   "panels": {
     "cheap": {
       "label": "cheap panel",

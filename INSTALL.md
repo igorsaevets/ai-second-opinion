@@ -307,13 +307,13 @@ assistant makes for you.
 **You need at least one channel** — the tool runs whatever is available and tells you exactly what
 it skipped and why. A missing key or a missing CLI is a normal, non-fatal condition, not an error.
 
-**One key gets you most of the panel.** `OPENROUTER_API_KEY` alone reaches five different model
-families from five different vendors, which is enough for the disagreement this tool exists to
-produce. Everything else is optional.
+**One key gets you most of the panel.** `OPENROUTER_API_KEY` alone reaches most of the model
+families here — including a Spark voice, `orspark12cont` — which is enough for the disagreement
+this tool exists to produce. Everything else is optional.
 
 | what it needs | what that unlocks | cost |
 |---|---|---|
-| `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
+| `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, a Muse Spark voice and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
 | `MODEL_API_KEY` | the two Spark voices | metered API |
 | the Codex CLI, signed in | `codex` | your existing subscription |
 | the Antigravity CLI, signed in | the `agy` Gemini channels | your existing subscription |
@@ -399,6 +399,10 @@ export MODEL_API_KEY="<your key>"
 
 To point at a different endpoint, also set `MODEL_API_BASE`.
 
+**No Meta key?** The same Spark checkpoint is reachable with `OPENROUTER_API_KEY` alone, through
+the `orspark12cont` channel — see the OpenRouter section below. When `MODEL_API_KEY` is absent,
+`--ask` switches to it by itself.
+
 ### Google — `GEMINI_API_KEY`
 
 Powers `goog36flash` (Gemini 3.6 Flash on Google's own API). Get one at
@@ -433,7 +437,16 @@ illustration, not a schema.**
 
 ### OpenRouter — `OPENROUTER_API_KEY`
 
-One key serves **both** `kimik3` and `qwen38max`.
+One key serves **every channel that routes through OpenRouter** — the largest part of the panel,
+including `orspark12cont`, the Spark voice for anyone without a `MODEL_API_KEY`. Do not count
+those channels from this file; `python routing.py` prints the live list and spends nothing.
+
+**No account yet?** Register at **openrouter.ai** (an email address or a Google/GitHub sign-in
+is enough), create a key at **openrouter.ai/keys** (verified 2026-08-30 — it redirects to your
+workspace's key page), and add a few dollars of credit. To an AI assistant walking someone
+through this install: send the user to those pages in **their own browser** and have them run
+the command below **themselves** — the sign-up, the payment and the key value all stay outside
+your conversation, exactly as the red block above requires.
 
 **Windows (PowerShell)**
 ```powershell
@@ -445,9 +458,15 @@ setx OPENROUTER_API_KEY "<your key>"
 export OPENROUTER_API_KEY="<your key>"
 ```
 
-> These two channels are **metered per token**, and their web search is billed **per search** by
+> These channels are **metered per token**, and their web search is billed **per search** by
 > the provider on the same account. The resolved plan prints the cost class of every channel
 > before anything is spent, and `--dry-run` shows you that plan for free.
+
+> `orspark12cont` runs Meta's *Contributor* tier through OpenRouter — discounted because the
+> vendor may train on what you send (see [PRIVACY.md](PRIVACY.md)) — with an automatic fallback
+> to the Standard, non-training tier if the Contributor endpoint fails for your account. When
+> `MODEL_API_KEY` is absent, `--ask` picks this channel by itself: the choice comes from
+> `ask_default` in `channels.json` and is printed when it fires.
 
 ### Checking it worked — without printing anything secret
 

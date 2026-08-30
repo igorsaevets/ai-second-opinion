@@ -1,5 +1,65 @@
 # Changelog
 
+## 1.40.0 — 2026-08-30
+
+* **New channel `orspark12cont` — the Spark voice for OpenRouter-only installs (R69).**
+  `meta/muse-spark-1.2-contributor` through OpenRouter ($0.10/M in, $0.20/M out,
+  read from the live catalogue on release day), with an automatic vendor-side
+  fallback to `meta/muse-spark-1.2` (Standard, non-training tier) via the
+  `models` array — the same failure-only mechanism the GLM channel used, never
+  activated by `--set`. Reasoning pinned at `xhigh` explicitly because the
+  gateway's own `default_effort` is `medium` — a gateway defaults below its
+  vendor's top. `max_tokens` 131072 (vendor declares 943,718; the registry-wide
+  cap applies), Exa/native web search on, harness fetch tool on, $1.00 spend
+  guard sized to the FALLBACK tier's prices, cheap panel. Until now a
+  first-time user holding only an `OPENROUTER_API_KEY` had no Spark voice at
+  all. Same Contributor data terms as `spark12cont` — the vendor may train on
+  what you send; PRIVACY.md now names all three such channels.
+
+* **`--ask` default is resolved, not hard-coded.** The one-shot path used to
+  default to `spark12cont` by argparse literal — for an OpenRouter-only install
+  that pointed `--ask` at the one channel it cannot run. The default now comes
+  from `ask_default` in channels.json: the first entry that is enabled and
+  whose transport key is present (spark12cont first, so machines with a
+  `MODEL_API_KEY` behave exactly as before), and the resolved choice is
+  printed when it fires. `--ask-channel <name>` still overrides.
+
+* **`spark` now names the model family across transports** — the group covers
+  `spark11`, `spark12cont` and `orspark12cont`, so «не используй spark» drops
+  all three, exactly as `gemini` and `grok` already work. `orspark12cont` also
+  joins the `openrouter` group: `--skip openrouter` excludes it, and it shares
+  that key's fate when another member exhausts the account.
+
+* **Docs corrected where they had rotted.** INSTALL.md's OpenRouter section
+  claimed one key serves "both kimik3 and qwen38max" — true in 2026-08-06,
+  eleven channels stale today. It now says what the key actually serves, tells
+  a new user where to REGISTER (openrouter.ai, key at openrouter.ai/keys —
+  verified by redirect on release day) and instructs an AI assistant running
+  the install to send the user to those pages in their own browser, keeping
+  the sign-up, payment and key value out of the conversation. The registry's
+  own claim that `--set spark12cont=muse-spark-1.2` is "refused by routing"
+  was measured false (the Standard model has been a listed legal model since
+  the fallback landed; the override is accepted and printed loudly) and is
+  corrected as SUPERSEDED in place.
+
+* **Retry-After cap 30 → 60 s** on the direct-Meta retry loop (backlog A3): a
+  vendor answering `Retry-After: 45` was retried 15 s early against a window
+  it had just declared, guaranteeing a second 429. Sixty still bounds a
+  pathological header; a 429 bills nothing, so the retry is free.
+
+* **CI actions bumped at the source**: `actions/checkout` v5 → v7 and
+  `actions/setup-python` v6 → v7 in the shipped workflow, landing the two open
+  dependabot PRs where package.py actually reads from — a merge only in the
+  generated repo would have been silently reverted by the next build. Both
+  bumps ran green on all four CI matrix legs first.
+
+* **23 new selftest checks (777 total locally):** `ask_default` hygiene (real
+  channel names, ≥2 candidates), the resolution function pinned on synthetic
+  registries (key-present, key-absent, disabled-candidate, empty-registry) and
+  on the shipped registry layout-aware, the key-readiness predicate per kind,
+  a source census that the argparse literal default is gone — plus the derived
+  per-channel checks the new registry entry picks up automatically.
+
 ## 1.39.2 — 2026-08-30
 
 * **Verify and strip now obey the same rule (R68 audit).** 1.39.1 moved marker

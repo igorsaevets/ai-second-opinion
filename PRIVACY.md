@@ -36,7 +36,7 @@ before anything is sent.** Both are free.
 | `MODEL_API_KEY` | Meta, over HTTPS |
 | the Codex CLI | OpenAI, through the CLI you already have installed |
 | the Antigravity CLI | Google, through the CLI you already have installed |
-| `OPENROUTER_API_KEY` | **OpenRouter, which forwards to the model's owner** — currently Moonshot, Alibaba, Google, Xiaomi, xAI and NVIDIA, depending on the channel |
+| `OPENROUTER_API_KEY` | **OpenRouter, which forwards to the model's owner** — which company depends on the channel's model id (Meta, Moonshot, Alibaba, Google and others); the resolved plan names the one that applies before anything is sent |
 | `GEMINI_API_KEY` | Google, directly through their API |
 | `XAI_API_KEY` | xAI, directly through their API |
 | `MIMO_API_KEY` | Xiaomi, directly through their API |
@@ -49,10 +49,12 @@ Each vendor's own privacy policy and retention rules apply to what you send them
 and does not change them. **Once a brief has been sent it cannot be recalled.** If you enable no
 channels, nothing is transmitted.
 
-## Two channels are cheap because of their data terms
+## Three channels are cheap because of their data terms
 
 Some tiers are discounted, or free, **in exchange for permission to train on what you send**. As
-published, two channels are on such a tier: `spark12cont` (a vendor "contributor" tier) and
+published, three channels are on such a tier: `spark12cont` (Meta's "contributor" tier, reached
+directly), `orspark12cont` (the **same** contributor tier reached through OpenRouter — so the
+payload passes OpenRouter's own policy on the way to Meta's contributor terms), and
 `ornemotron3ultra` (a free tier, which on OpenRouter requires the account-level prompt-training
 setting to be on).
 
@@ -61,7 +63,7 @@ anything is spent, and it is the reason those channels cost almost nothing. If a
 be trained on, drop them for that run:
 
 ```
---skip spark12cont ornemotron3ultra
+--skip spark12cont orspark12cont ornemotron3ultra
 ```
 
 Assume retention on those tiers is permanent.

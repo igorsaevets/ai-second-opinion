@@ -111,7 +111,7 @@ Several accounts, none of which this tool provides — but **one of them gets yo
 
 | What you need | What it unlocks | Rough cost |
 |---|---|---|
-| **`OPENROUTER_API_KEY`** | The biggest group in one account: Kimi, Qwen, Gemini, MiMo, Grok, **and a free NVIDIA Nemotron** — six vendors' models, five billing lines and one signup | Metered per token, **plus per web search**. The Nemotron model itself is free |
+| **`OPENROUTER_API_KEY`** | The biggest group in one account: Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, **a Muse Spark voice** and **a free NVIDIA Nemotron** — one signup | Metered per token, **plus per web search**. The Nemotron model itself is free |
 | **`MODEL_API_KEY`** | The two Spark voices | Metered per use |
 | **A paid OpenAI plan with Codex** | `codex` | Subscription, weekly limit |
 | **An eligible Google account** | The two `agy` Gemini channels | Subscription, with limits |
@@ -126,12 +126,13 @@ it has changed most weeks. `python routing.py` prints the live list and spends n
 prose copy of that list in this repository has been wrong within days of being written — including,
 at one point, two different numbers four lines apart in this very file.)
 
-**Two channels are cheap because of their data terms, not despite them.** `spark12cont` runs a
-discounted *Contributor* tier and `ornemotron3ultra` runs a *free* tier; on both, the vendor may
-use prompts and completions for training. That is the trade being made, it is stated in
+**Three channels are cheap because of their data terms, not despite them.** `spark12cont` and
+`orspark12cont` run the same discounted *Contributor* tier — directly and through OpenRouter
+respectively — and `ornemotron3ultra` runs a *free* tier; on all three, the vendor may use
+prompts and completions for training. That is the trade being made, it is stated in
 [PRIVACY.md](PRIVACY.md) with each vendor named, and the tool prints each channel's data policy in
 the plan **before** it spends anything. If a brief should not be trained on, drop those channels
-for that run: `--skip spark12cont ornemotron3ultra`.
+for that run: `--skip spark12cont orspark12cont ornemotron3ultra`.
 
 Nothing else in this file will tell you when to avoid a channel, and that is deliberate. An
 earlier version carried a loud warning here and in the registry, and it was obeyed twice in ways

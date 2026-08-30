@@ -1655,6 +1655,61 @@ def suite_settings_and_upgrade():
     check(o._free_extras("nosuchchannel__") is not None,
           "the free-channel lookup never raises - a lookup must not die over its extras")
 
+    # --- R69: --ask's DEFAULT channel is resolved from the registry, by key presence --------
+    # Until R69 the default was an argparse literal (spark12cont), which pointed a kit user
+    # holding only an OPENROUTER_API_KEY at the one channel they cannot run. The default now
+    # comes from `ask_default` in channels.json: the first entry that is enabled AND whose
+    # transport key is present. Igor's 2026-08-08 «--ask по умолчанию идёт на spark12cont -
+    # оставляем на нем» survives as the ORDER of that list, not as a literal in the code.
+    ad = pristine.get("ask_default")
+    check(isinstance(ad, list) and len(ad) >= 2,
+          "ask_default exists in channels.json with at least two candidates", repr(ad))
+    for _c in (ad or []):
+        check(_c in pristine["channels"],
+              "ask_default entry %r is a real CHANNEL name (not a group or an alias)" % _c)
+    _synth = {"ask_default": ["spark12cont", "orspark12cont"],
+              "channels": {"spark12cont": {"kind": "http", "enabled": True},
+                           "orspark12cont": {"kind": "openrouter", "provider": "openrouter",
+                                             "enabled": True}}}
+    check(o._pick_ask_channel(_synth, lambda ch: ch.get("kind") != "http") == "orspark12cont",
+          "--ask default falls to the OR twin when only OPENROUTER_API_KEY is present")
+    check(o._pick_ask_channel(_synth, lambda ch: True) == "spark12cont",
+          "--ask default stays spark12cont when its key is present (order keeps the 08-08 rule)")
+    check(o._pick_ask_channel(_synth, lambda ch: False) == "spark12cont",
+          "no key at all -> the first candidate runs and its preflight explains what is missing")
+    _synth2 = {"ask_default": ["spark12cont", "orspark12cont"],
+               "channels": {"spark12cont": {"kind": "http", "enabled": True},
+                            "orspark12cont": {"kind": "openrouter", "enabled": False}}}
+    check(o._pick_ask_channel(_synth2, lambda ch: ch.get("kind") != "http") == "spark12cont",
+          "a DISABLED candidate is never resolved to, even when its key is the one present")
+    check(o._pick_ask_channel({}, lambda ch: True) == "spark12cont",
+          "an empty registry still resolves - same never-raises stance as _free_extras")
+    # The shipped registry itself, layout-aware: locally orspark12cont is distribution=kit
+    # (enabled false), in the built kit package.py flips it on. Derive the expectation from
+    # the file under test rather than hard-coding either layout.
+    _ors = pristine["channels"].get("orspark12cont") or {}
+    _expect = "orspark12cont" if _ors.get("enabled") else "spark12cont"
+    check(o._pick_ask_channel(pristine, lambda ch: ch.get("kind") != "http") == _expect,
+          "the shipped registry resolves per its own enabled flags", "expected " + _expect)
+    # Key-readiness: the predicate reads the right env var per kind; CLI kinds need none.
+    _saved_env = o._env_key
+    try:
+        o._env_key = lambda v: "x" if v == "OPENROUTER_API_KEY" else ""
+        check(o._channel_key_ready({"kind": "openrouter", "provider": "openrouter"}) is True,
+              "openrouter kind reads OPENROUTER_API_KEY through its provider entry")
+        check(o._channel_key_ready({"kind": "http"}) is False,
+              "http kind requires MODEL_API_KEY - absent here, so not ready")
+        check(o._channel_key_ready({"kind": "codex"}) is True,
+              "subscription CLI kinds are always 'ready' - their gate is a binary, not a key")
+    finally:
+        o._env_key = _saved_env
+    # The argparse default must be None so 'not passed' is detectable at resolution time.
+    _src_o = Path(HERE, "orchestrate.py").read_text(encoding="utf-8")
+    check('ap.add_argument("--ask-channel", default=None' in _src_o,
+          "--ask-channel argparse default is None (the real default is resolved, not a literal)")
+    check('default="spark12cont"' not in _src_o,
+          "the old literal --ask-channel default is gone from orchestrate.py")
+
     # --- the plugin-cache rescue: the one update path upgrade.py is never on ---------------
     # codex refused the sentence "this makes every update method correct" and was right: the hop
     # INTO 1.7.0 loses the edit on any path that never runs the script, i.e. the recommended,
@@ -2838,6 +2893,12 @@ def suite_panels():
          "Igor: moved to standard panel. Solo run failed — model burned all 11 fetches on "
          "irrelevant content (Python docs, 124K chars) and generation timed out (exit 255). "
          "At $1.40/M input it belongs in standard, not cheap. Still runs on --panel standard."),
+        ("R69 2026-08-30", "ADD", "orspark12cont",
+         "Igor's R69 scenario: a first-time kit user with ONLY an OPENROUTER_API_KEY had no "
+         "Spark voice at all. Same Contributor checkpoint as spark12cont (already in "
+         "DICTATED_CHEAP), same $0.10/M price, reached through the reseller. Kit-distribution, "
+         "so locally it carries enabled:false — panel membership and enablement are different "
+         "questions (the grokbuild precedent above)."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because

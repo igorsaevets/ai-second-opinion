@@ -415,7 +415,12 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, na
                 wait = 2 ** attempt
                 if retry_after:
                     try:
-                        wait = max(wait, min(int(retry_after), 30))
+                        # Cap raised 30 -> 60 in R69 (backlog A3): a vendor answering
+                        # Retry-After between 31 and 60 was being retried early against a
+                        # window it had just declared, guaranteeing a second 429. 60 still
+                        # bounds a pathological header (3600 cannot hold a 3-attempt loop
+                        # for an hour); the retry itself is free - a 429 bills nothing.
+                        wait = max(wait, min(int(retry_after), 60))
                     except (ValueError, TypeError):
                         pass
                 time.sleep(wait)
@@ -5054,7 +5059,8 @@ _LEGACY_KINDS = {"http": "http", "spark": "http", "spark11": "http", "spark12": 
                  "ormimo25pro": "openrouter",
                  "orgrok420": "openrouter", "ornemotron3ultra": "openrouter",
                  "ordeepseekv4pro": "openrouter", "orglm53": "openrouter",
-                 "orgpt56terrapro": "openrouter",
+                 "orgpt56terrapro": "openrouter", "orgpt56solpro": "openrouter",
+                 "orgpt56lunapro": "openrouter", "orspark12cont": "openrouter",
                  "goog36flash": "gemini", "goog37flash": "gemini",
                  "mimo25pro": "oai", "grok420": "xai", "grokbuild": "grokcli",
                  "hermes": "hermes"}
@@ -6067,6 +6073,66 @@ def _free_extras(primary):
             if c != primary and ch.get("enabled", True) and ch.get("cost") == "free"]
 
 
+def _channel_key_ready(ch):
+    """
+    True when the env var this channel's transport needs is present; True unconditionally for
+    the subscription CLIs, whose reachability is a binary on PATH, not a key - preflight checks
+    that separately and this function must not duplicate it. Used only to RANK `ask_default`
+    candidates; it never gates a run.
+    """
+    kind = ch.get("kind")
+    if kind == "http":
+        return bool(_env_key("MODEL_API_KEY"))
+    if kind in ("openrouter", "oai"):
+        prov = OAI_PROVIDERS.get(ch.get("provider") or "openrouter") or {}
+        env = prov.get("key_env")
+        return bool(_env_key(env)) if env else False
+    if kind == "gemini":
+        return bool(_env_key("GEMINI_API_KEY"))
+    if kind == "xai":
+        return bool(_env_key("XAI_API_KEY"))
+    return True                                          # codex / agy / grokcli / hermes
+
+
+def _pick_ask_channel(reg, key_ready):
+    """
+    Resolve --ask's default channel from the registry's `ask_default` list (R69).
+
+    Order of preference is the LIST's order; the first entry that exists, is enabled, and whose
+    key is present wins. If no candidate has a key, the first enabled one is returned anyway -
+    its preflight then explains exactly what is missing, which is the pre-R69 behaviour for a
+    keyless machine and strictly better than failing to resolve at all. Pure function of
+    (registry, key predicate) so selftest can pin every branch without touching the environment.
+
+    Igor's 2026-08-08 instruction «--ask по умолчанию идёт на spark12cont - оставляем на нем» is
+    preserved by ORDER, not by code: spark12cont is first in `ask_default`, so any machine with
+    a MODEL_API_KEY behaves exactly as before. What R69 adds is the second candidate: a kit
+    user whose only key is OPENROUTER_API_KEY gets their Spark voice (orspark12cont) instead of
+    a preflight failure on a channel they cannot run.
+    """
+    order = [c for c in (reg.get("ask_default") or []) if isinstance(c, str)]
+    chans = reg.get("channels") or {}
+    live = [c for c in order if c in chans and (chans[c] or {}).get("enabled", True)]
+    for cname in live:
+        if key_ready(chans[cname] or {}):
+            return cname
+    if live:
+        return live[0]
+    return order[0] if order else "spark12cont"
+
+
+def _ask_default_channel():
+    """Registry-backed --ask default; the historical literal only when the registry is
+    unreadable, for the same never-raises reason as _free_extras above."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import routing
+        reg = routing.load_registry()
+    except Exception:                                    # noqa: BLE001 - see _free_extras
+        return "spark12cont"
+    return _pick_ask_channel(reg, _channel_key_ready)
+
+
 # Extensions treated as scannable text inside --attach-dir. Anything else is sniffed for a NUL
 # byte and skipped as binary - LOUDLY, because a folder file the secrets scan silently skipped
 # is a folder file that reaches a CLI reviewer unscanned.
@@ -6192,12 +6258,18 @@ def main():
                          "Defaults to the cheapest channel and a temp output dir; `@path` reads "
                          "the question from a file. Everything else (--only, --tier, --system) "
                          "still applies")
-    ap.add_argument("--ask-channel", default="spark12cont", metavar="CHANNEL",
-                    help="the FIRST channel --ask uses when --only is not given (default: "
-                         "spark12cont, the cheapest). Every channel the registry prices `free` "
-                         "runs alongside it - that set is read from channels.json, so a free "
-                         "channel added later joins on its own. 🔴 The default and the free tiers "
-                         "are contributor tiers: their vendors may train on what you send. Pass "
+    # default=None so "not passed" is detectable: the real default is RESOLVED from the
+    # registry's `ask_default` list by which transport key is actually present (R69). The old
+    # literal default pointed a kit user holding only an OPENROUTER_API_KEY at the one channel
+    # they cannot run - graceful degradation, wrong default, for exactly the user the kit is for.
+    ap.add_argument("--ask-channel", default=None, metavar="CHANNEL",
+                    help="the FIRST channel --ask uses when --only is not given. Default: "
+                         "resolved from `ask_default` in channels.json - the first entry whose "
+                         "API key is present on this machine - and the choice is printed when it "
+                         "fires. Every channel the registry prices `free` runs alongside it - "
+                         "that set is read from channels.json, so a free channel added later "
+                         "joins on its own. 🔴 The default candidates and the free tiers are "
+                         "contributor tiers: their vendors may train on what you send. Pass "
                          "--only spark11 for anything you would not publish")
     ap.add_argument("--system", help="path to the system prompt for the HTTPS channel")
     # 🔴 TWO DELIVERY MODES FOR ONE DOCUMENT, split by what a channel can physically reach.
@@ -6331,6 +6403,10 @@ def main():
                 question = fh.read()
         if a.marker == "REVIEW-COMPLETE":
             a.marker = "ASK-DONE"
+        if a.ask_channel is None:
+            a.ask_channel = _ask_default_channel()
+            log("--ask channel: %s (resolved from `ask_default` in channels.json by which "
+                "transport key is present; --ask-channel <name> overrides)" % a.ask_channel)
         if not a.only:
             a.only = [a.ask_channel] + _free_extras(a.ask_channel)
             if len(a.only) > 1:
