@@ -712,6 +712,23 @@ def _marker_on_last_line(text, marker):
     return bool(lines) and lines[-1].strip() == marker
 
 
+def _strip_marker_tail(text, marker):
+    """Remove the end marker from a display/analysis copy - by the SAME rule that verified it.
+
+    R68. _marker_on_last_line() tolerates whitespace around the marker line, and an
+    endswith-only strip does two things that rule cannot: it leaves a whitespace-decorated
+    marker line in the shown answer, and on a suffix-confused tail (`...PREVIEW-DONE-R66`
+    against marker `REVIEW-DONE-R66`) it cuts len(marker) characters out of a WORD and
+    mangles the last line of the display. One rule decides both questions now: if the marker
+    owns the last line, that line comes off; anything else is left exactly as the model wrote
+    it, so a defective tail stays visible to the reader instead of being half-eaten.
+    """
+    body = (text or "").strip()
+    if not marker or not _marker_on_last_line(body, marker):
+        return body
+    return "\n".join(body.splitlines()[:-1]).rstrip()
+
+
 def refusal_check(text, marker=None, min_chars=800):
     """
     Return a warning string if this looks like a decline rather than a review, else None.
@@ -731,10 +748,17 @@ def refusal_check(text, marker=None, min_chars=800):
     the alarm that matters - which is a sentence already in this project's own documentation, and
     this function was the counter-example to it.
     """
-    body = (text or "").strip()
-    if marker and body.endswith(marker):
-        body = body[:-len(marker)].strip()
+    body = _strip_marker_tail(text, marker)
     if not body:
+        if (text or "").strip():
+            # Non-empty text that strips to nothing means the output was the marker and only
+            # the marker. The per-channel EMPTY check cannot see this (the text is not empty),
+            # and the marker check passes it (the marker IS on the last line) - so until R68 a
+            # model that emitted the marker and nothing else was graded ok with no warnings.
+            # Same family as the refusal-with-marker measured 2026-07-31: the marker proves
+            # the model ended its turn, never that it did the work.
+            return ("MARKER-ONLY ANSWER: the output is nothing but the end marker. The model "
+                    "reached the end of its turn without doing any of the work.")
         return None                      # emptiness is caught by the per-channel checks
     head = body[:400].lower()
     if len(body) < min_chars and any(t in head for t in REFUSAL_TELLS):
@@ -2183,14 +2207,40 @@ def codex_postmortem(started_after=None):
     """
     try:
         root = os.path.join(os.path.expanduser("~"), ".codex", "sessions")
-        newest, newest_m = None, 0
-        for dirpath, _dirnames, filenames in os.walk(root):
-            for fn in filenames:
-                if fn.startswith("rollout-") and fn.endswith(".jsonl"):
-                    p = os.path.join(dirpath, fn)
-                    m = os.path.getmtime(p)
-                    if m > newest_m and (started_after is None or m >= started_after - 60):
-                        newest, newest_m = p, m
+
+        def _newest_rollout(prune_before):
+            best, best_m = None, 0
+            for dirpath, dirnames, filenames in os.walk(root):
+                if prune_before is not None:
+                    # sessions/ is YYYY/MM/DD/, one directory per day, and a day directory's
+                    # mtime stops moving once its day is over - so directory mtime skips months
+                    # of history without parsing dates out of path names (R68, the R66 backlog
+                    # item). Pruning wrongly would be a SILENT miss - the postmortem would say
+                    # None while the rollout exists - so the caller retries unpruned when the
+                    # pruned pass finds nothing: a wrong prune costs one extra walk, never the
+                    # diagnosis.
+                    kept = []
+                    for d in dirnames:
+                        try:
+                            if os.path.getmtime(os.path.join(dirpath, d)) >= prune_before:
+                                kept.append(d)
+                        except OSError:
+                            kept.append(d)
+                    dirnames[:] = kept
+                for fn in filenames:
+                    if fn.startswith("rollout-") and fn.endswith(".jsonl"):
+                        p = os.path.join(dirpath, fn)
+                        m = os.path.getmtime(p)
+                        if m > best_m and (started_after is None or m >= started_after - 60):
+                            best, best_m = p, m
+            return best
+
+        # Two days of slack between what the mtime filter accepts (started_after - 60) and what
+        # the walk prunes: clock skew, the directory layout's timezone and a rollout that started
+        # yesterday all fit inside it.
+        newest = _newest_rollout(None if started_after is None else started_after - 172800)
+        if newest is None and started_after is not None:
+            newest = _newest_rollout(None)
         if not newest:
             return None
         rows = []
@@ -7392,9 +7442,7 @@ def main():
         order = sorted(results, key=lambda n: (n != a.ask_channel, n))
         for name in order:
             r = results[name]
-            body = (r.get("text") or "").strip()
-            if a.marker and body.endswith(a.marker):
-                body = body[:-len(a.marker)].rstrip()
+            body = _strip_marker_tail(r.get("text"), a.marker)
             extra = "" if name == a.ask_channel or len(order) == 1 else "   (free second voice)"
             print("\n" + "=" * 78)
             print("ANSWER  [%s]%s%s" % (name, extra,

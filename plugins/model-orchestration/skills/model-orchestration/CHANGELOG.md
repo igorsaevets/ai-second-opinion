@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.39.2 — 2026-08-30
+
+* **Verify and strip now obey the same rule (R68 audit).** 1.39.1 moved marker
+  VERIFICATION to line-equality but left the two marker-STRIP sites
+  (`refusal_check` and the `--ask` answer display) on an endswith-only cut. On
+  a suffix-confused tail (`...PREVIEW-DONE-R66` against marker
+  `REVIEW-DONE-R66`) that cut removes `len(marker)` characters out of a word
+  and shows the reader a mangled last line. New helper
+  `_strip_marker_tail(text, marker)` strips the marker LINE when — and only
+  when — `_marker_on_last_line` verified it; any other tail is left exactly as
+  the model wrote it, visible. On texts that PASS verification behavior is
+  unchanged (the outer `.strip()` already neutralized the divergence there),
+  so this is consistency hardening, not a production-bug fix.
+
+* **Marker-only answers are now a hard fail.** An output consisting of nothing
+  but the end marker passed every check in BOTH the 1.39.0 and 1.39.1
+  editions: not empty (the marker is text), marker verified (it owns the last
+  line), no refusal flag (the stripped body is empty). Three greens over zero
+  work. `refusal_check` now returns a hard `MARKER-ONLY ANSWER` warning.
+
+* **`codex_postmortem` prunes its rollout walk (R66 backlog item).** The
+  newest-rollout search walked every session directory codex ever wrote. It
+  now prunes date directories whose mtime is older than the run's start minus
+  a 2-day slack — and if the pruned walk finds nothing while a start time was
+  given, it re-walks unpruned: a wrong prune costs one extra walk and can
+  never silently lose the diagnosis.
+
+* **12 new selftest checks (754 total):** 6 behavior probes on
+  `_strip_marker_tail` (clean strip, whitespace-decorated strip,
+  suffix-confusion left visible, embedded tail left alone, None-safety, empty
+  marker), 2 on the marker-only hard fail, and a 4-check source CENSUS — the
+  class guard 1.39.1 lacked: zero raw marker-`endswith` anywhere in
+  `orchestrate.py` and exact call-site counts for both helpers, so a future
+  channel cannot reintroduce the suffix hole invisibly.
+
+* **Source-repo hygiene:** `reviews/` is now gitignored in the source tree (a
+  `run.log` had been tracked-and-modified since round 28); the kit's own
+  gitignore already refused this class for employees.
+
 ## 1.39.1 — 2026-08-23
 
 * **Marker line-equality hardening (R66 panel finding → R67).** R66 aligned

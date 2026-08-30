@@ -2487,6 +2487,51 @@ def suite_spend_guard():
     check(o._marker_on_last_line("body", "") is True,
           "R67: no marker required (marker=='') is a pass-through")
 
+    # 🔴 R68: verify and strip obey the SAME rule. R67 moved verification to line-equality but
+    # left two strip sites (refusal_check, the --ask display) on an endswith-only cut, which
+    # mangles a suffix-confused tail: cutting len("REVIEW-DONE-R66") characters out of
+    # "...PREVIEW-DONE-R66" leaves a stray "P" as the last thing the reader sees. The helper
+    # strips the marker LINE when - and only when - the line-equality rule says the marker is
+    # there; any other tail is left exactly as the model wrote it, visible.
+    check(o._strip_marker_tail("body\nREVIEW-DONE-R66", "REVIEW-DONE-R66") == "body",
+          "R68: clean marker line is stripped for display/analysis")
+    check(o._strip_marker_tail("body\n   REVIEW-DONE-R66   \n", "REVIEW-DONE-R66") == "body",
+          "R68: whitespace-decorated marker line is stripped (an endswith cut could not)")
+    check(o._strip_marker_tail("body\nPREVIEW-DONE-R66", "REVIEW-DONE-R66")
+          == "body\nPREVIEW-DONE-R66",
+          "R68: suffix-confused tail is NOT half-eaten - left visible for the reader")
+    check(o._strip_marker_tail("body ending REVIEW-DONE-R66", "REVIEW-DONE-R66")
+          == "body ending REVIEW-DONE-R66",
+          "R68: marker embedded in a longer line is left alone (verification already failed it)")
+    check(o._strip_marker_tail(None, "REVIEW-DONE-R66") == "",
+          "R68: None text degrades to empty string, never raises")
+    check(o._strip_marker_tail("  body  ", "") == "body",
+          "R68: no marker required - plain strip of the text")
+    # 🔴 R68: an answer that is ONLY the marker passed every check in both the R66 and R67
+    # editions: not empty (the marker is text), marker verified (it owns the last line),
+    # refusal_check None (the stripped body is empty). Three greens over zero work.
+    check("MARKER-ONLY" in (o.refusal_check("REVIEW-DONE-R66", "REVIEW-DONE-R66") or ""),
+          "R68: an answer that is ONLY the marker is a hard fail, not a silent pass")
+    check(o.refusal_check("", "REVIEW-DONE-R66") is None,
+          "R68: truly empty text stays None here - the per-channel EMPTY check owns it")
+    # 🔴 R68 census: the CLASS guard R67 lacked. A future channel that verifies or strips with
+    # a raw endswith reintroduces the suffix hole invisibly - so the module source itself is
+    # the assertion surface. Exact counts on purpose: a new verification site must update
+    # these numbers consciously, in the same commit that adds it.
+    src_all = inspect.getsource(o)
+    check(".endswith(marker)" not in src_all and ".endswith(a.marker)" not in src_all,
+          "R68 census: no raw marker-endswith anywhere in orchestrate.py")
+    check(src_all.count("def _marker_on_last_line(") == 1 and
+          src_all.count("not _marker_on_last_line(") == 9,
+          "R68 census: 8 verification sites + 1 use inside _strip_marker_tail, one def",
+          "def=%d not_calls=%d" % (src_all.count("def _marker_on_last_line("),
+                                   src_all.count("not _marker_on_last_line(")))
+    check(src_all.count("_strip_marker_tail(") == 3,
+          "R68 census: def + refusal_check + --ask display, nothing else",
+          "count=%d" % src_all.count("_strip_marker_tail("))
+    check("_strip_marker_tail(text, marker)" in inspect.getsource(o.refusal_check),
+          "R68: refusal_check strips by the shared rule, not its own copy")
+
 
 def suite_max_depth_and_explicit_only():
     """
