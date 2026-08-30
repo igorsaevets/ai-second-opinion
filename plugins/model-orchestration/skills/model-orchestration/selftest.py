@@ -4555,6 +4555,161 @@ def suite_r60_shipped_docs_and_kit_exclusion():
         shutil.rmtree(str(build_dir), ignore_errors=True)
 
 
+def suite_r70_transport_retry_and_timeout():
+    """R70. The transport survives what the vendor rejects, and cuts what hangs.
+
+    Functional checks against real loopback sockets, not mocks of our own code —
+    both still cost nothing and call no vendor (127.0.0.1 only).
+
+    (a) A5: one 429 used to kill the WHOLE review on the OAI transport, while
+        call_http_reviewer had retried that class for weeks. A loopback HTTP
+        server answers 429, 429, then a well-formed completion: the channel must
+        recover on the third request, honouring Retry-After. The control that can
+        fail: a 400 on the same server must NOT be retried — an unconditional
+        retry passes the first arm and fails this one.
+
+    (b) The functional timeout. Every urlopen in orchestrate.py passes timeout=,
+        but a value passed is not a value enforced (the depth-knob lesson applied
+        to our own code): a server that accepts the connection and never answers
+        must cut _post at roughly the requested seconds — not at the 2400s
+        default, and not never.
+    """
+    section("R70. transport retry (A5) + functional timeout")
+    import http.server
+    import socket
+    import threading
+    import time
+    import orchestrate as o
+
+    # ---- (a) 429, 429, completion -> ok=True on the third request -------------------
+    hits: list[str] = []
+    completion = {
+        "choices": [{"message": {"content": "Verified, trivially.\nR70-DONE-MARK"},
+                     "finish_reason": "stop"}],
+        "model": "selftest/echo",
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    }
+
+    class _Seq(http.server.BaseHTTPRequestHandler):
+        codes = [429, 429, 200]
+
+        def do_POST(self):
+            n = len(hits)
+            hits.append(self.path)
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            code = self.codes[min(n, len(self.codes) - 1)]
+            payload = (json.dumps(completion) if code == 200
+                       else '{"error": "slow down"}').encode("utf-8")
+            self.send_response(code)
+            if code == 429:
+                self.send_header("Retry-After", "3")
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass                        # keep the suite's stdout to check() lines
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _Seq)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = "http://127.0.0.1:%d/v1/chat/completions" % srv.server_address[1]
+
+    sleeps: list[float] = []
+    real_sleep, real_envkey = o.time.sleep, o._env_key
+    o.OAI_PROVIDERS["_selftest"] = {
+        "key_env": "SELFTEST_NOT_A_KEY", "url": url, "depth": "reasoning",
+        "search": "plugin", "usage_request": None, "label": "selftest loopback",
+        "streaming": False,
+    }
+    outdir = tempfile.mkdtemp(prefix="orch-r70-")
+    try:
+        # Capturing sleep does double duty: the suite stays fast AND the waits are
+        # asserted as VALUES — a retry that slept the wrong amount would still "work".
+        o.time.sleep = lambda s: sleeps.append(s)
+        o._env_key = lambda name: "selftest-dummy"
+        res = o.call_oai_reviewer(
+            BRIEF, "R70-DONE-MARK", os.path.join(outdir, "a.md"),
+            model="selftest/echo", name="_selftest", provider="_selftest",
+            fetch_tool={"enabled": False}, max_tokens=200, timeout=30)
+        check(res.get("ok") is True and len(hits) == 3,
+              "R70/A5: two 429s then a completion - the channel recovers on the 3rd "
+              "request instead of failing the review",
+              "ok=%r hits=%d err=%s" % (res.get("ok"), len(hits),
+                                        str(res.get("error"))[:120]))
+        check(sleeps == [3, 4],
+              "R70/A5: the waits are Retry-After-aware - 3s (header beats the 2s "
+              "floor), then 4s (exponential floor beats the header)",
+              "sleeps=%r" % (sleeps,))
+
+        hits.clear()
+        sleeps.clear()
+        _Seq.codes = [400]
+        res = o.call_oai_reviewer(
+            BRIEF, "R70-DONE-MARK", os.path.join(outdir, "b.md"),
+            model="selftest/echo", name="_selftest", provider="_selftest",
+            fetch_tool={"enabled": False}, max_tokens=200, timeout=30)
+        check(res.get("ok") is False and len(hits) == 1 and not sleeps,
+              "R70/A5: a 400 is NOT retried - one request, no sleeps, channel FAILED "
+              "(the control an unconditional retry cannot pass)",
+              "ok=%r hits=%d sleeps=%r" % (res.get("ok"), len(hits), sleeps))
+    finally:
+        o.time.sleep = real_sleep
+        o._env_key = real_envkey
+        o.OAI_PROVIDERS.pop("_selftest", None)
+        srv.shutdown()
+        srv.server_close()
+        shutil.rmtree(outdir, ignore_errors=True)
+
+    # ---- (b) a server that never answers: _post is cut at the requested timeout ----
+    lst = socket.socket()
+    lst.bind(("127.0.0.1", 0))
+    lst.listen(1)
+    conns = []          # keeps the accepted socket referenced, so it stays OPEN
+
+    def _sink():
+        try:
+            c, _ = lst.accept()
+            conns.append(c)
+            c.recv(65536)               # read the request, answer NOTHING
+        except OSError:
+            pass
+
+    threading.Thread(target=_sink, daemon=True).start()
+    t0 = time.time()
+    exc = None
+    try:
+        o._post("http://127.0.0.1:%d/x" % lst.getsockname()[1],
+                {"probe": 1}, "selftest-dummy", 2, False)
+    except Exception as e:                                        # noqa: BLE001
+        exc = e
+    elapsed = time.time() - t0
+    # The lower bound is the control-that-can-fail: an instant ConnectionRefused
+    # (server not really listening) would also "not hang", without ever exercising
+    # the timeout. It must have WAITED for roughly the 2s asked for.
+    check(exc is not None and 1.5 <= elapsed < 30,
+          "R70: _post(timeout=2) against a hung server is cut by the socket layer "
+          "in ~2s - neither hangs toward the 2400s default nor fails instantly",
+          "exc=%r elapsed=%.1fs" % (exc, elapsed))
+    for c in conns:
+        try:
+            c.close()
+        except OSError:
+            pass
+    lst.close()
+
+    # ---- census: a timeout must be PASSED everywhere before it can be enforced -----
+    src = (HERE / "orchestrate.py").read_text(encoding="utf-8")
+    bare = [ln.strip()[:90] for ln in src.splitlines()
+            if ("urlopen(" in ln or "opener.open(" in ln)
+            and not ln.strip().startswith("#") and "timeout" not in ln]
+    check(not bare,
+          "R70: every urlopen/opener.open call site in orchestrate.py passes "
+          "timeout= on the same line (if a refactor wrapped a call across lines, "
+          "keep `timeout=` on the line with the open call - this census reads lines)",
+          "; ".join(bare))
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -4591,7 +4746,8 @@ def main():
                   suite_r57_agy_capability_model,
                   suite_r58_update_check,
                   suite_r59_grokbuild_cyrillic_and_recitation,
-                  suite_r60_shipped_docs_and_kit_exclusion):
+                  suite_r60_shipped_docs_and_kit_exclusion,
+                  suite_r70_transport_retry_and_timeout):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

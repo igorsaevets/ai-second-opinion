@@ -496,9 +496,11 @@ Add a channel by editing `channels.json`: a default model, a `models` map with a
 class, and the valid efforts per model. Aliases in that file are what free-text routing matches
 against.
 
-Planned additions (see the roadmap in [README.md](README.md)): **Kimi K3 via Hermes**, and
-**direct OpenRouter support** — one credential reaching many models, which is what makes four or
-five independent reviewers practical instead of an installation project per reviewer.
+The live channel list is `python routing.py`; your own additions go in the local overlay file
+described in [README.md](README.md), where no update can touch them. (An earlier revision of this
+paragraph listed planned additions — Kimi, and OpenRouter as the one-credential route to many
+models. Both shipped, and the sentence kept promising them as future work for weeks afterwards,
+breaking the first rule of §12 below in the same file that states it.)
 
 ---
 

@@ -103,7 +103,7 @@ It costs nothing. A model that "confirms" your planted falsehood has just told y
 all its other confirmations are worth. In the three-channel rounds this test was built on, all
 three models caught both planted claims — which is the only reason to believe the things they
 *did* confirm. (Scope stated on purpose: that measurement is from a three-channel round and has
-not been repeated across all nine. A number is worth only the run it came from.)
+not been repeated across the full panel. A number is worth only the run it came from.)
 
 ## What it costs, honestly
 
@@ -264,18 +264,17 @@ report, without checking them first.
 That is the intended workflow when you are stuck: hand `diagnostics.json` to your AI assistant and
 ask it to diagnose the cause. See **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**.
 
-## Roadmap
+## Adding a model
 
-Planned for the next versions:
+Every model this tool knows about lives in a single `channels.json` registry: adding a channel is
+an edit to that file, not new code, and your own additions go in the local settings file described
+above, where no update can touch them. What changed recently is in [CHANGELOG.md](CHANGELOG.md);
+the live channel list is `python routing.py`.
 
-- **Kimi K3 via Hermes** — added as a fourth reviewer channel through the Hermes gateway.
-- **Direct OpenRouter support** — one credential reaching many models, so you can add reviewers
-  without a separate account and CLI for each. This makes running four or five independent
-  reviewers practical rather than an installation project.
-- Per-run cost reporting, and a summary that drafts the disagreement table for you.
-
-Both additions are configuration, not new code: every model this tool knows about lives in a
-single `channels.json` registry, and adding a channel is an edit to that file.
+(An earlier version of this section was a roadmap. Its main items shipped — OpenRouter is now the
+biggest group in the table above, and every run reports its own cost — while the section went on
+promising them as future work for weeks. A list of plans in a README rots faster than anything
+else in it, so this is now one line: the registry is the roadmap.)
 
 ## What this is not
 

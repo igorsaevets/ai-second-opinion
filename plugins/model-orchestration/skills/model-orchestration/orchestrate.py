@@ -3996,9 +3996,42 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                 "seconds": round(time.time() - start, 1)}
 
     last_finish = {}
+    # 🔴 A5 (R70): a single 429 used to kill the WHOLE review on this transport, while the
+    # Spark path had retried exactly this class for weeks (call_http_reviewer, its
+    # `e.code == 429 or e.code >= 500` branch). The retry is safe by construction, twice
+    # over: `body` is appended to only AFTER a successful round, so the failed request is
+    # re-sent verbatim; and an HTTPError is raised at the door - status line read, no
+    # completion delivered - so a 429 billed nothing (the reasoning A3 recorded beside the
+    # Retry-After cap) and a 5xx delivered nothing to bill for. What is deliberately NOT
+    # retried: timeouts and mid-stream drops. An unstreamed call that timed out may have
+    # finished - and billed - on the vendor's side, and re-sending it would pay twice for
+    # one answer; those still fail the channel loudly, exactly as before (they surface as
+    # URLError / socket errors, which this handler does not catch).
+    retries_left = 2
     try:
         for _round in range(max_rounds + 1):
-            chunk, rch, use, calls, served, _fin = _stream_once(body)
+            while True:
+                try:
+                    chunk, rch, use, calls, served, _fin = _stream_once(body)
+                    break
+                except urllib.error.HTTPError as e:
+                    if retries_left <= 0 or (e.code != 429 and e.code < 500):
+                        raise
+                    retries_left -= 1
+                    ra = e.headers.get("Retry-After") if hasattr(e, "headers") else None
+                    wait = 2 ** (2 - retries_left)          # 2s, then 4s
+                    if ra:
+                        try:
+                            wait = max(wait, min(int(ra), 60))   # same 60s cap as A3
+                        except (ValueError, TypeError):
+                            pass
+                    log("  [%s] HTTP %d%s - transient; retrying the same request in %ds "
+                        "(%d retr%s left for this review). The conversation is unchanged "
+                        "and the rejected attempt billed nothing."
+                        % (name, e.code,
+                           (" (Retry-After: %s)" % ra) if ra else "",
+                           wait, retries_left, "y" if retries_left == 1 else "ies"))
+                    time.sleep(wait)
             rounds_done += 1
             # The FINAL round's finish_reason is the one that ended the answer; a tool round's
             # `tool_calls` value is overwritten by whatever the last generation reports.

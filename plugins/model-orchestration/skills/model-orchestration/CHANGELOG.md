@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.41.0 — 2026-08-30
+
+* **A 429 no longer kills a whole review on the OpenAI-protocol transport (backlog
+  A5, R70).** Every OpenRouter/direct-API channel now retries a 429 or 5xx up to
+  twice, honouring `Retry-After` (capped at 60s, the same cap the Spark path got
+  in 1.40.0), before failing. The retry is safe by construction: the conversation
+  body is only appended to after a successful round, so the rejected request is
+  re-sent verbatim — and an HTTP rejection delivers no completion, so the failed
+  attempt billed nothing. Deliberately NOT retried: timeouts and mid-stream drops,
+  because an unstreamed call that timed out may have finished — and billed — on
+  the vendor's side, and re-sending it would pay twice for one answer.
+* **The timeout is now proven functional, not just present.** New selftest suite
+  (+5 checks, 782 total) runs against real loopback sockets, still calling no
+  vendor: a server answering 429, 429, then a completion must be recovered on the
+  third request with the exact waits asserted (3s Retry-After beats the 2s floor;
+  4s exponential floor beats the header); a 400 must NOT be retried — the control
+  an unconditional retry cannot pass; a server that accepts and never answers must
+  cut `_post(timeout=2)` in ~2s rather than the 2400s default; and a census
+  requires every `urlopen` call site to pass `timeout=`.
+* **README.ru.md fully re-synced with README.md — including a dangerous 23-day-old
+  lie.** Since the 1.4.0-era policy inversion the Russian page still promised that
+  personal data is «blocked by default, requiring a deliberate flag». The code
+  itemises and then SENDS it (with `--strict-pii` as the opt-in hard stop), names
+  and street addresses are not detected at all, and the English README and
+  PRIVACY.md have said so since 2026-08-07. The Russian page now says exactly what
+  the English one says, section for section, including the AI-assistant install
+  path and its key-handling security model, which it had never carried.
+* **The roadmap sections rotted and are gone — both languages, both files.**
+  README's "Roadmap" still promised Kimi and "direct OpenRouter support" as future
+  work weeks after both shipped (OpenRouter is now the largest group in the cost
+  table), and TECHNICAL.md §11 repeated the same promise two paragraphs above the
+  §12 rule that forbids asserting mutable values in documents. Replaced by an
+  "Adding a model" section: the registry is the roadmap. Also dropped the
+  planted-claim paragraph's channel count ("across all nine" → "across the full
+  panel") — no prose copy of the channel count has ever stayed correct.
+* **GitHub Releases backfilled.** The Releases page had stopped at v1.27.0 while
+  tags ran to v1.40.0, so the repo advertised a wrong "Latest" for 13 shipped
+  versions. All 24 missing releases created (v1.2.1 … v1.40.0), each carrying its
+  CHANGELOG section; upgrades never depended on Releases (the update check reads
+  tags), so this is honesty of the storefront, not a repair of the mechanism.
+
 ## 1.40.0 — 2026-08-30
 
 * **New channel `orspark12cont` — the Spark voice for OpenRouter-only installs (R69).**
