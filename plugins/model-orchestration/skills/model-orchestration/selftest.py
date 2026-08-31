@@ -2356,11 +2356,19 @@ def suite_spend_guard():
     # day this shipped: `if usd_ceiling` read `max_usd_per_review: 0` - "never spend anything on
     # this channel" - as no ceiling at all. Nothing in the registry uses 0, so this was a trap
     # left for whoever set it first.
-    zero, _ = run([fetch_round(0.10) for _ in range(4)] + [answer_round(0.05)],
-                  spend_guard={"max_usd_per_review": 0})
-    check(zero.get("spend_stopped") is True,
-          "max_usd_per_review: 0 ARMS the guard (it is not read as absent)",
-          "usd=%s" % zero.get("usd"))
+    # 🔴 SEMANTICS SHARPENED R74 (agy31pro again, R73): the in-loop breaker can only arm AFTER
+    # the first billed round, so «spend nothing» used to spend one round. A non-positive
+    # ceiling now refuses DISPATCH - no transport rounds run at all, which is why this fixture
+    # expects a refusal instead of a mid-run stop.
+    zero, zt = run([fetch_round(0.10) for _ in range(4)] + [answer_round(0.05)],
+                   spend_guard={"max_usd_per_review": 0})
+    check(zero.get("ok") is False and "SPEND NOTHING" in (zero.get("error") or ""),
+          "max_usd_per_review: 0 refuses DISPATCH outright (the only spend of zero is no "
+          "call; the in-loop breaker armed one billed round too late)",
+          repr(zero.get("error"))[:90])
+    check(zt == 0,
+          "and NO transport call was made - the refusal is pre-flight, not an early stop",
+          "%s transport calls" % zt)
     none_guard, _ = run([fetch_round(0.10) for _ in range(4)] + [answer_round(0.05)],
                         spend_guard={"requires_ack": True})
     check(none_guard.get("spend_stopped") is None,
@@ -4890,6 +4898,300 @@ def suite_r72_reading_protocol():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def suite_r74_panel_fixes():
+    """R74 — the fixes bought by the R73 full-code panel, each with the control that can fail.
+
+    (a) fallback_model reaches the PLAN (grokbuild: the registry's one auto-fallback was
+        decorative from birth - the R62 test called call_http_reviewer directly and so tested
+        the function, not the wiring).
+    (b) --skip beats a group --only (orgemini37flash: skip ran first and the only-branch
+        re-enabled the skipped member).
+    (c) ★ must_read census + the handoff sorts the ★ row first within its tier and states
+        the mandatory-minimum rule (Idea 3, Igor 2026-09-01).
+    (d) --ask defaults the cap OFF and drops the «no length requirement» sentence when a cap
+        is explicitly given; a review payload carries the cap AFTER the attachments and
+        BEFORE the marker (agy31pro: an instruction a megabyte before the end is dropped).
+    (e) citecheck: bracketed-IPv6 URL_RE, never-raising normalise, DNS-class refusal in
+        probe_url, single-word FR slug threshold.
+    (f) XAI_KEY secret pattern, with negative control.
+    (g) update_check: single-command hook shape; malformed settings.json refuses instead of
+        wiping; legacy args-shape uninstall; upgraded stamp does not serve the stale nag.
+    (h) alias words survive in BOTH worlds: openai/gpt/chatgpt resolve on this registry and
+        on the kit's folded one (package.py moves a dropped group's words to the survivor).
+    (i) a non-positive spend ceiling refuses DISPATCH (agy31pro: the in-loop breaker armed
+        only after the first billed round).
+    """
+    section("R74. panel fixes: fallback wiring, skip-beats-only, ★ minimum, gates")
+    import orchestrate as o
+    import routing as r
+    import citecheck as cc
+    import update_check as uc
+
+    reg = r.load_registry(overlay=False)
+
+    # ---- (a) fallback_model is IN the plan ------------------------------------------------
+    # only=[...] so the check holds in BOTH worlds: the kit ships spark12cont disabled
+    # (distribution: local) and --only is the documented resurrection path.
+    plan = r.resolve(reg, only=["spark12cont"])
+    want_fb = (reg["channels"].get("spark12cont") or {}).get("fallback_model")
+    check(bool(want_fb), "the registry still declares the Spark HTTP fallback (precondition)")
+    check(plan.get("spark12cont", {}).get("fallback_model") == want_fb,
+          "the PLAN carries fallback_model - the dispatcher reads p.get(), so this wiring is "
+          "the feature", repr(plan.get("spark12cont", {}).get("fallback_model")))
+
+    # ---- (b) --skip beats a group --only --------------------------------------------------
+    # apply_flags directly, not resolve(): the ORDERING of the two flags is the unit under
+    # test, and resolve()'s later layers (panel filter, ack gates) differ between the source
+    # world and the shipped kit - a world-dependent expectation is the R45 class.
+    p2 = r.apply_flags(r.initial_plan(reg), reg, only=["grok"], skip=["grok420"])
+    check(p2["grok420"]["enabled"] is False and "--skip" in p2["grok420"]["why"],
+          "--only grok --skip grok420 leaves grok420 OFF (an explicit exclusion beats an "
+          "explicit inclusion)", repr(p2["grok420"]["why"]))
+    p3 = r.apply_flags(r.initial_plan(reg), reg, only=["grok"])
+    check(p3["grok420"]["enabled"] is True,
+          "the control that can fail: without --skip the group member runs")
+
+    # ---- (c) ★ must_read: census + handoff placement --------------------------------------
+    musts = sorted(n for n, ch in reg.get("channels", {}).items() if ch.get("must_read"))
+    check(bool(musts), "at least one channel carries must_read (Idea 3 has a bearer)")
+    bad = [n for n in musts
+           if reg["channels"][n].get("read_order") != 1
+           or reg["channels"][n].get("panel") != "cheap"]
+    check(not bad,
+          "every must_read channel is read_order 1 and panel cheap (cheap ⊂ standard, so the "
+          "★ exists in BOTH rooms; no test pins WHICH channel - Igor rotates it)",
+          ", ".join(bad))
+    d = tempfile.mkdtemp(prefix="orch-r74-")
+    try:
+        out = os.path.join(d, "h")
+        os.makedirs(out)
+        mk = "R74-H-MARK"
+        # Two tier-1 files; the ★ one is alphabetically LAST, so alphabetical order is the
+        # control that fails on broken code.
+        specs = {"AAA.md": ("plain smart answer.\n" + mk, "chan_a", 1, False),
+                 "ZZZ.md": ("the mandatory voice.\n" + mk, "chan_z", 1, True),
+                 "MMM.md": ("mid answer.\n" + mk, "chan_m", 2, False)}
+        results = {}
+        for fn, (body, cn, ro, must) in specs.items():
+            with open(os.path.join(out, fn), "w", encoding="utf-8") as f:
+                f.write(body)
+            results[cn] = {"answer_file": fn, "read_order": ro, "must_read": must,
+                           "seconds": 1.0}
+        with contextlib.redirect_stdout(io.StringIO()):
+            h = o.write_handoff(out, results, marker=mk, answer_cap=20000)
+        check(h.get("read_order_files") == ["ZZZ.md", "AAA.md", "MMM.md"],
+              "the ★ row sorts FIRST within its tier, ahead of the alphabet",
+              repr(h.get("read_order_files")))
+        text = open(os.path.join(out, "HANDOFF.md"), encoding="utf-8").read()
+        check("| 1★ |" in text and "mandatory minimum" in text and "Строку со ★" in text,
+              "★ is printed in the read column, and the mandatory-minimum rule appears in the "
+              "protocol AND in the Russian resume prompt")
+
+        # ---- (d) ask-mode cap + payload order ---------------------------------------------
+        captured = {}
+
+        def _capture_gate(parts, *, strict_pii=False, warn_pii=False):
+            captured["brief"] = dict(parts).get("brief", "")
+            return 0
+
+        real_gate, real_argv = o.pii_gate, sys.argv[:]
+        o.pii_gate = _capture_gate
+        try:
+            sys.argv = ["orchestrate.py", "--ask", "R74 ask question", "--dry-run",
+                        "--out", os.path.join(d, "a1")]
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc1 = o.main()
+            ask_plain = captured.get("brief", "")
+            sys.argv = ["orchestrate.py", "--ask", "R74 ask question", "--dry-run",
+                        "--out", os.path.join(d, "a2"), "--answer-cap", "7777"]
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc2 = o.main()
+            ask_capped = captured.get("brief", "")
+            att = os.path.join(d, "att.md")
+            with open(att, "w", encoding="utf-8") as f:
+                f.write("R74-ATT attached document body.")
+            bp = os.path.join(d, "brief.md")
+            with open(bp, "w", encoding="utf-8") as f:
+                f.write("R74-BRIEF: no vendor is called by this test.")
+            sys.argv = ["orchestrate.py", "--brief", bp, "--attach", att,
+                        "--marker", "R74-DONE-MARK", "--dry-run",
+                        "--out", os.path.join(d, "a3")]
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc3 = o.main()
+            rev = captured.get("brief", "")
+        finally:
+            o.pii_gate, sys.argv = real_gate, real_argv
+        check(rc1 == 0 and rc2 == 0 and rc3 == 0, "all three --dry-run runs return 0",
+              "rc=%r/%r/%r" % (rc1, rc2, rc3))
+        check("Length discipline" not in ask_plain
+              and "no length requirement" in ask_plain,
+              "--ask alone: cap OFF and the no-length promise present (they used to "
+              "contradict in one payload)")
+        check("7777" in ask_capped and "no length requirement" not in ask_capped,
+              "--ask --answer-cap 7777: the explicit cap wins and the contradicting "
+              "sentence is dropped")
+        i_att = rev.find("R74-ATT")
+        i_cap = rev.find("Length discipline")
+        i_mk = rev.rfind("R74-DONE-MARK")
+        check(0 <= i_att < i_cap < i_mk,
+              "review payload order is [attachments][cap][marker] - the cap rides the tail, "
+              "not a megabyte before it", repr((i_att, i_cap, i_mk)))
+
+        # ---- (e) citecheck hardening ------------------------------------------------------
+        m6 = cc.URL_RE.findall("see https://[2001:db8::1]/x/y and more")
+        check(m6 and m6[0].startswith("https://[2001:db8::1]"),
+              "URL_RE keeps a bracketed IPv6 URL whole", repr(m6))
+        check(cc.normalise("https://[2001:db8::1oops")[1] == "\x00unparseable",
+              "normalise survives a malformed IPv6 bracket instead of raising")
+        v, why = cc.probe_url("http://2130706433/")
+        # Windows getaddrinfo REFUSES the decimal form outright (gaierror, measured R74) while
+        # glibc resolves it to 127.0.0.1 - both roads end refused, so assert the refusal, not
+        # which door said no.
+        check(v == "SKIPPED" and ("non-public" in why or "DNS failed" in why),
+              "a decimal-encoded loopback IP is refused offline (resolved-private on glibc, "
+              "unresolvable on Windows - fail-closed either way)", repr((v, why)))
+        real_gai = cc.socket.getaddrinfo
+        try:
+            cc.socket.getaddrinfo = lambda h, p: [(2, 1, 6, "", ("127.0.0.1", 0))]
+            v2, why2 = cc.probe_url("http://r74-fake-public-host.example/")
+            check(v2 == "SKIPPED" and "non-public" in why2,
+                  "a hostname RESOLVING to loopback is refused before any connection",
+                  repr((v2, why2)))
+        finally:
+            cc.socket.getaddrinfo = real_gai
+
+        class _FakeResp:
+            def __init__(self, payload):
+                self._p = payload
+            def read(self):
+                return json.dumps(self._p).encode("utf-8")
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+
+        real_open = cc.urllib.request.urlopen
+        try:
+            cc.urllib.request.urlopen = (
+                lambda *a, **k: _FakeResp({"title": "Public Charge Ground of Inadmissibility",
+                                           "citation": "87 FR 55472",
+                                           "publication_date": "2022-09-09"}))
+            v3 = cc.resolve_federal_register(
+                "https://www.federalregister.gov/documents/2022/09/09/2022-18867/inadmissibility")
+            check(v3 and v3[0] == "TITLE MATCHES",
+                  "a single-word FR slug can now MATCH (the old floor demanded 2 hits of a "
+                  "slug that can supply at most 1)", repr(v3))
+            cc.urllib.request.urlopen = (
+                lambda *a, **k: _FakeResp({"title": "Area Navigation Route T-232 Fairbanks",
+                                           "citation": "x", "publication_date": "2022-01-01"}))
+            v4 = cc.resolve_federal_register(
+                "https://www.federalregister.gov/documents/2022/09/09/2022-19286/inadmissibility")
+            check(v4 and v4[0] == "WRONG DOCUMENT",
+                  "the control that can fail: an unrelated title is still WRONG DOCUMENT",
+                  repr(v4))
+        finally:
+            cc.urllib.request.urlopen = real_open
+
+        # ---- (f) XAI key pattern ----------------------------------------------------------
+        sec, _pii = o.scan_payload("XAI_API_KEY=xai-" + "Ab1" * 10, "t")
+        check(any("XAI_KEY" in s for s in sec), "an xai- prefixed key is caught", repr(sec))
+        sec2, _ = o.scan_payload("the xai-tools folder and xai-shaped prose", "t")
+        check(not any("XAI_KEY" in s for s in sec2),
+              "short xai- words in prose stay silent - the negative control")
+
+        # ---- (g) update_check -------------------------------------------------------------
+        home = os.path.join(d, "home")
+        os.makedirs(os.path.join(home, ".claude"))
+        real_exp = uc.os.path.expanduser
+        try:
+            uc.os.path.expanduser = lambda p: home if p == "~" else real_exp(p)
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = uc.cmd_install_hook(None)
+            sp = os.path.join(home, ".claude", "settings.json")
+            data = json.load(open(sp, encoding="utf-8"))
+            hook = data["hooks"]["SessionStart"][0]["hooks"][0]
+            check(rc == 0 and "args" not in hook and "--hook" in hook.get("command", "")
+                  and '"' in hook.get("command", ""),
+                  "the installed hook is ONE command string (quoted path, --hook), never "
+                  "command+args - the old shape ran a bare `python` and hung", repr(hook))
+            with open(sp, "w", encoding="utf-8") as f:
+                f.write("{broken json")
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc2b = uc.cmd_install_hook(None)
+            still = open(sp, encoding="utf-8").read()
+            check(rc2b == 1 and still == "{broken json",
+                  "malformed settings.json REFUSES the install and the file is untouched - "
+                  "the old path wiped the user's whole config")
+            legacy = {"hooks": {"SessionStart": [{
+                "matcher": "startup",
+                "hooks": [
+                    {"type": "command", "command": "python",
+                     "args": [os.path.abspath(uc.__file__), "--check"], "timeout": 5},
+                    {"type": "command", "command": "echo other-tool"},
+                ]}]}}
+            with open(sp, "w", encoding="utf-8") as f:
+                json.dump(legacy, f)
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc3b = uc.cmd_uninstall_hook(None)
+            data3 = json.load(open(sp, encoding="utf-8"))
+            left = data3["hooks"]["SessionStart"][0]["hooks"]
+            check(rc3b == 0 and len(left) == 1 and left[0]["command"] == "echo other-tool",
+                  "uninstall removes the legacy args-shape hook and KEEPS the co-tenant - "
+                  "the old counter returned before writing", repr(left))
+        finally:
+            uc.os.path.expanduser = real_exp
+
+        saved = {}
+        real = (uc.is_check_disabled, uc.read_local_version, uc.read_stamp,
+                uc.fetch_latest_tag, uc.check_agy_stale, uc.write_stamp)
+        try:
+            uc.is_check_disabled = lambda: False
+            uc.read_local_version = lambda: "9.9.9"
+            fresh_stamp = {"last_check_utc": uc._iso_now(), "consecutive_failures": 0,
+                           "installed_version": "9.9.8", "pending_message": "OLD NAG"}
+            uc.read_stamp = lambda: dict(fresh_stamp)
+            uc.fetch_latest_tag = lambda s: ("9.9.9", s)
+            uc.check_agy_stale = lambda: False
+            uc.write_stamp = lambda s: saved.update(s)
+            action, _p = uc.do_check()
+            check(action in ("up-to-date", "agy-only")
+                  and saved.get("pending_message") is None,
+                  "after an upgrade a fresh stamp does NOT serve the stale nag: the check "
+                  "re-runs and clears pending_message", repr((action, saved.get(
+                      "pending_message"))))
+            fresh_stamp["installed_version"] = "9.9.9"
+            action2, _p2 = uc.do_check()
+            check(action2 == "cached",
+                  "the control that can fail: same version -> the fresh stamp IS served")
+        finally:
+            (uc.is_check_disabled, uc.read_local_version, uc.read_stamp,
+             uc.fetch_latest_tag, uc.check_agy_stale, uc.write_stamp) = real
+        check("per_page=100" in uc.GITHUB_TAGS_URL,
+              "the tags query asks for 100 (this repo already exceeds 30 tags)")
+
+        # ---- (h) the family words resolve in BOTH worlds ----------------------------------
+        for w in ("openai", "gpt", "chatgpt", "опенай"):
+            check(bool(r.canon_channel_safe(reg, w)),
+                  "the word %r resolves to at least one channel (source: the group; kit: "
+                  "package.py folds a dropped group's words onto the survivor)" % w)
+
+        # ---- (i) a zero spend ceiling refuses dispatch ------------------------------------
+        real_key = o._env_key
+        try:
+            o._env_key = lambda name: "r74-test-key-not-a-real-one"
+            with contextlib.redirect_stdout(io.StringIO()):
+                res = o.call_oai_reviewer("brief", "R74-X", os.path.join(d, "x.md"),
+                                          model="test-model", provider="openrouter",
+                                          spend_guard={"max_usd_per_review": 0})
+            check(res.get("ok") is False and "SPEND NOTHING" in (res.get("error") or ""),
+                  "max_usd_per_review=0 refuses DISPATCH - the in-loop breaker could only "
+                  "arm after the first billed round", repr(res.get("error"))[:100])
+        finally:
+            o._env_key = real_key
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -4929,7 +5231,8 @@ def main():
                   suite_r60_shipped_docs_and_kit_exclusion,
                   suite_r70_transport_retry_and_timeout,
                   suite_r71_bom_payload_and_gate_signature,
-                  suite_r72_reading_protocol):
+                  suite_r72_reading_protocol,
+                  suite_r74_panel_fixes):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

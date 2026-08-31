@@ -1,5 +1,111 @@
 # Changelog
 
+## 1.44.0 — 2026-09-01
+
+Everything in this release was bought by R73 — a 13-channel panel sent the
+harness's own full source. Verdicts were adjudicated against the code, one by
+one; what follows is the accepted set. (The panel also unanimously refuted the
+planted honesty-control claim, 12/12 of the readable answers.)
+
+* **A5 retry completed as a CLASS** (6 of 12 reviewers converged on the first
+  item): the forced-final call — the most expensive request of a review — ran
+  OUTSIDE the retry loop, so a lone 429 there discarded the whole paid round;
+  the retry budget was per-REVIEW, so a burst in round 1 left a later round's
+  single 503 fatal; and the gemini-direct/xAI transports had no door retry at
+  all. Now: one `_stream_with_retry` per call (2 retries, 429/5xx, verbatim
+  re-send, Retry-After ≤60 s) covers every round including the forced final;
+  the single-shot transports share the same policy at the door. The log no
+  longer claims a 5xx «billed nothing» — upstream metering is unknowable from
+  this door (codex); retries are counted in telemetry.
+* **The Spark Contributor→Standard fallback was DEAD from birth** (grokbuild):
+  `fallback_model` was never copied onto the plan, so the dispatcher always got
+  `None` and the registry's one documented auto-fallback could not fire — the
+  R62 test called the function directly and so tested the function, not the
+  wiring. Wired; `REPORT.md` now shows the model that actually answered with a
+  ⚠ FALLBACK flag when it fires, and the fallback path carries `--answer-cap`
+  (4 reviewers independently).
+* **`--skip` now beats a group `--only`** (orgemini37flash): `--only grok
+  --skip grok420` silently RAN grok420 — skip was applied first and the group
+  expansion re-enabled it. An explicit exclusion wins every clash, for the same
+  reason a deny beats an allow.
+* **★ mandatory minimum in the reading protocol** (Idea 3, the operator): the
+  ordering session reads at least the strongest voice ITSELF whatever the
+  context pressure — `must_read` in `channels.json` (currently the Spark
+  channel, present in both panels), sorted first within its tier, printed as
+  `1★` with the rule under the table and in the resume prompt.
+* **The answer cap rides the payload TAIL** (agy31pro): it used to sit before
+  the attachments — an instruction up to a megabyte before the model's pen.
+  Now `[brief][attachments][cap][marker]`. And `--ask` defaults the cap OFF:
+  a lookup's «no length requirement» promise and the review cap used to
+  contradict each other in one payload (grokbuild); an explicit cap with
+  `--ask` is honoured and drops the promise instead.
+* **Zero-valued knobs mean zero, not default** (codex + agy31pro):
+  `fetch_tool.max_calls: 0` was silently 8; `max_usd_per_review: 0` armed the
+  spend breaker only AFTER the first billed round — «spend nothing» spent one
+  round. A non-positive ceiling now refuses dispatch outright.
+* **`citecheck.py` hardened** (codex, agy36flash, agy37flash, goog36/37flash):
+  the URL prober now DNS-resolves every host and refuses private/loopback
+  answers at every redirect hop (the old check regex-matched the first hostname
+  string and then let `urlopen` follow redirects on its own); bracketed-IPv6
+  URLs parse (`URL_RE` synced with orchestrate's); `normalise()` survives a
+  malformed IPv6 citation instead of killing the audit; the standalone entry
+  point finally resolves Google grounding wrappers before judging (grounded
+  wrapper citations were branded UNVERIFIED); a single-word Federal Register
+  slug can now match (the floor demanded 2 hits of a slug that supplies 1).
+* **`update_check.py`: four real defects** (goog36/37flash, orgemini37flash,
+  agy36flash): the SessionStart hook was written as `command`+`args` — a shape
+  Claude Code's schema does not have, so it ran a bare `python` that hung until
+  its timeout on every session start; installing over a malformed
+  `settings.json` REPLACED the user's whole config with just the hook (now
+  refuses); uninstall silently did nothing when the hook shared an entry with
+  another tool's; a fresh stamp served the stale «update now» nag after the
+  user had already updated. Hook migrates to a single quoted command running
+  `--hook` (local-only); tags query asks for 100 (the repo passed 30 tags).
+* **The kit's `openai`/`gpt`/`chatgpt` words work again** (spark12cont +
+  goog37flash + orgemini37flash, independently): excluding the two explicit-only
+  OpenAI channels left the `openai` group with one member, the build dropped the
+  group, and every documented word for the family died with `RouteError` in the
+  published kit. A group folded to one member now moves its words onto the
+  survivor, printed at build time; selftest resolves the words in BOTH worlds.
+* **Logging and telemetry under concurrency** (4 reviewers): `log()` and the
+  per-channel system-prompt records are locked (Windows append-mode sharing
+  violations were silently swallowed — a thinner `run.log` with no error), and
+  the system-prompt digest is keyed by channel NAME (three seats share the
+  label «Gemini 3.6 Flash» and overwrote each other's digests). HTTP errors
+  from OAI-protocol vendors now name the vendor instead of blaming OpenRouter.
+* **Gates**: an `xai-` key pattern joins the outbound secrets scan (a whole
+  vendor this harness sends to had no pattern); a secret-shaped NAME among
+  files the folder scan SKIPPED (.env, .pem, id_rsa…) refuses the round —
+  those files are exactly what refs-mode CLI reviewers can still read
+  (5 reviewers converged on the hole; ordinary skipped files keep the warning);
+  the fetch tool refuses a URL that itself contains secret- or PII-shaped
+  content (the cheapest exfiltration shape, spark12cont).
+* **Prose brought back to truth**: the docs claimed a browser denial the agy
+  DENY list never contained — the recorded owner call (2026-08-20, selftest-
+  asserted) is that `playwright` stays reachable, so the PROSE was the bug and
+  now says so; a comment still promised «PII blocked by default» two weeks
+  after the policy inverted; the registry's kind list said five of nine; the
+  cheap panel's code-voice note named a channel that moved to standard weeks
+  ago; `_tiers_doc`'s «TWO TIERS» header is marked SUPERSEDED;
+  `patch_codex_firecrawl.py` says «needs Python 3.11+» instead of a bare
+  `ModuleNotFoundError` on 3.8–3.10; the ё-normalisation in alias matching now
+  applies to both sides; REPORT.md states the real PII default (summary only)
+  and prints the answer cap, which is now recorded in diagnostics.
+* Selftest: +32 (832 source), including both-worlds alias resolution, the
+  ★ sort with an alphabetical control, ask-mode cap semantics, payload order,
+  the SSRF refusals (offline), the FR threshold with a negative control, the
+  hook shapes, and the zero-ceiling refusal with a zero-transport-calls check.
+
+Rejected with proof, for the record: lowering `max_tokens` to enforce the cap
+(starves reasoning — the decree is maximum depth always); a `--force-secrets`
+override (a false positive in a safety gate teaches override-by-reflex, and
+the secrets class has no override by design); scanning fetched page content
+(vendor docs legitimately contain key-shaped examples; the SSRF fence plus
+budgets bound that channel); denying `firecrawl_map` (the owner's policy is
+scrape+map, map is the sanctioned 1-credit enumeration); an all-alphabetic
+Bearer pattern (documented trade: ~3 % of random tokens against silence on
+English prose, in the no-override class).
+
 ## 1.43.1 — 2026-08-31
 
 * **The reading table's `read` column works in real rounds now.** The first live

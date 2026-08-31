@@ -67,7 +67,14 @@ def _rows(d):
             # without a matching edit in this dict. Every previous new field needed one, and the
             # ones that got forgotten are why this file has a comment on almost every column.
             "raw": r,
-            "model": p.get("model") or r.get("model") or _UNKNOWN,
+            # When the HTTP fallback fired, the RESULT's model is the one that actually
+            # answered (call_http_reviewer sets fallback_used + the fallback model); showing
+            # the plan's primary there would conceal the substitution in the one table headed
+            # «Which model actually answered» (goog36flash, R73). Everywhere else the plan
+            # remains authoritative - not every dispatcher writes r["model"].
+            "model": ((r.get("model") if r.get("fallback_used") else None)
+                      or p.get("model") or r.get("model") or _UNKNOWN),
+            "fallback_from": p.get("model") if r.get("fallback_used") else None,
             "label": p.get("model_label") or _UNKNOWN,
             "overridden": bool(p.get("model_overridden")),
             "default": p.get("model_default"),
@@ -223,14 +230,22 @@ def render(d):
     # the thing that reports on the code did not. `allow_pii` is still read so that OLD
     # diagnostics files keep rendering truthfully rather than silently re-labelling history.
     if "strict_pii" in inv:
+        # «were listed and sent» overstated the default (codex, R73): since 2026-08-16 the
+        # default prints a one-line SUMMARY only - line-level listing needs --warn-pii. An
+        # operator reading this row believed an observability the run did not have.
         pii = ("enforced (--strict-pii)" if inv.get("strict_pii")
-               else "WARN-AND-SEND (default since 2026-08-07) — identifiers were listed and sent; "
-                    "secrets are refused at every setting")
+               else "SENT by default (since 2026-08-16; summary only — --warn-pii lists "
+                    "identifiers line by line, --strict-pii refuses); secrets are refused at "
+                    "every setting")
     elif "allow_pii" in inv:
         pii = "BYPASSED (--allow-pii)" if inv.get("allow_pii") else "enforced (pre-2026-08-07 run)"
     else:
         pii = "not recorded"
     L.append("| PII gate | %s | |" % pii)
+    if inv.get("answer_cap") is not None:
+        L.append("| answer cap | %s chars | prompt-level length discipline for the FINAL "
+                 "answer; 0 = uncapped. Never enforced via max_tokens - depth is untouched. |"
+                 % _fmt_int(inv.get("answer_cap")))
     L.append("")
 
     # ---- model identity. The thing a name can lie about. ----
@@ -262,6 +277,9 @@ def render(d):
     L.append("|---|---|---|---|")
     for r in ran_rows:
         flag = " 🔴 **OVERRIDDEN** (registry default: `%s`)" % r["default"] if r["overridden"] else ""
+        if r.get("fallback_from"):
+            flag += (" ⚠ **FALLBACK** (primary `%s` failed; this is the model that answered)"
+                     % r["fallback_from"])
         L.append("| `%s` | %s `%s`%s | %s | %s |"
                  % (r["name"], r["label"], r["model"], flag, r["effort"],
                     (r["data_policy"] or "-")[:110]))

@@ -22,15 +22,17 @@ correct - as here - but it was not verified, and it must not be reported as if i
 """
 
 import argparse
+import ipaddress
 import json
 import os
 import random
 import re
+import socket
 import sys
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 
 def _resolve_line(url, enabled):
@@ -43,12 +45,24 @@ def _resolve_line(url, enabled):
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-URL_RE = re.compile(r"https?://[^\s)\]>\"'`|]+")
+# Bracketed-IPv6 alternative first, then the general form - kept in step with orchestrate.py's
+# _URL_RE (R74; goog36flash, R73: orchestrate gained the bracket form and this copy did not, so
+# a standalone run truncated IPv6 URLs at the first `]`).
+URL_RE = re.compile(r"https?://\[[0-9A-Fa-f:.]+\][^\s)\]>\"'`|]*"
+                    r"|https?://[^\s)\]>\"'`|]+")
 
 
 def normalise(u):
-    """Compare on host+path only: tracking params and trailing slashes are not differences."""
-    s = urlsplit(u.rstrip(".,;:"))
+    """Compare on host+path only: tracking params and trailing slashes are not differences.
+
+    Never raises (R74): urlsplit throws ValueError on malformed IPv6 brackets, and the URLs
+    this runs on are model-emitted text - one hostile-shaped citation must not kill the audit
+    of all the others. A URL that cannot be split is returned as an unmatchable degenerate key.
+    """
+    try:
+        s = urlsplit(u.rstrip(".,;:"))
+    except ValueError:
+        return (u.lower(), "\x00unparseable")
     path = (s.path or "/").rstrip("/")
     return (s.netloc.lower().replace("www.", ""), path.lower())
 
@@ -134,8 +148,15 @@ def resolve_federal_register(url):
     # The slug is generated from the title, so a real match shares most of its words.
     slug_words = {w for w in slug.split("-") if len(w) > 3}
     title_words = {w.strip(".,;:()").lower() for w in title.split() if len(w) > 3}
+    # R74 (orgemini37flash, R73): the required-hits floor must never exceed what the slug can
+    # supply. `max(2, ...)` demanded 2 hits of a single-word slug (`.../inadmissibility`),
+    # which can produce at most 1 - every such real citation was branded WRONG DOCUMENT. And
+    # a slug with NO comparable words cannot be judged at all; saying either verdict would lie.
+    if not slug_words:
+        return ("UNRESOLVED", "%s = %r - slug has no comparable words" % (doc, title))
+    need = min(len(slug_words), max(2, len(slug_words) // 2))
     hit = len(slug_words & title_words)
-    verdict = "TITLE MATCHES" if hit >= max(2, len(slug_words) // 2) else "WRONG DOCUMENT"
+    verdict = "TITLE MATCHES" if hit >= need else "WRONG DOCUMENT"
     return (verdict, "%s = %r (%s, %s)" % (doc, title, d.get("citation"),
                                            d.get("publication_date")))
 
@@ -144,6 +165,32 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 
 _PRIVATE = re.compile(r"^(?:localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|\[?::1\]?$)")
+
+
+def _host_resolves_public(host):
+    """DNS-resolve the host and refuse if ANY answer is non-public.
+
+    R74, three R73 reviewers converged (codex, agy37flash, goog37flash): the string regex
+    above never resolved anything, so `localtest.me`, an attacker DNS record, or a decimal
+    IP (`2130706433` = 127.0.0.1) walked straight past it into urlopen. Same class of check
+    as orchestrate._fetch_guard_host; the remaining TOCTOU (urllib re-resolves at connect)
+    is shared with that fence and documented there - this closes the «never resolved at
+    all» half, not the rebinding half.
+    Returns None if public, else a short reason string.
+    """
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError as e:
+        return "DNS failed (%s)" % getattr(e, "strerror", e)
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(str(info[4][0]).split("%")[0])
+        except ValueError:
+            continue
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return "resolves to non-public address %s" % ip
+    return None
 
 
 def probe_url(u, timeout=20):
@@ -156,7 +203,7 @@ def probe_url(u, timeout=20):
         MOVED    200 after a redirect - the page is real, the citation is stale
         DEAD     404/410 - the page does not exist. This is the one that means fabrication.
         BLOCKED  401/403/429 - a bot wall. Says NOTHING about whether the page exists.
-        UNKNOWN  anything else, including a redirect this client would not follow
+        UNKNOWN  anything else, including a redirect chain longer than this client follows
 
     BLOCKED and UNKNOWN must never be reported as fabrication. Inferring "it is fake" from "I
     could not check" is precisely the move this harness forbids the models to make, and it would
@@ -164,21 +211,36 @@ def probe_url(u, timeout=20):
 
     Only public http(s) hosts are probed. A cited URL is attacker-controlled text as far as this
     process is concerned - a model can emit http://127.0.0.1:8080/admin - so loopback and RFC1918
-    targets are refused rather than fetched.
+    targets are refused rather than fetched. R74: refused at EVERY hop, with DNS resolution -
+    the old check matched a regex against the first hostname string only, so a public host
+    redirecting to loopback, a DNS name resolving private, or a decimal-encoded IP sailed
+    through into a default urlopen that follows redirects on its own (codex + agy37flash +
+    goog37flash, R73, independently). Redirects are now followed manually, each hop re-checked.
     """
     try:
-        s = urlsplit(u)
-        if s.scheme not in ("http", "https"):
-            return "SKIPPED", "not http(s)"
-        host = (s.hostname or "").lower()
-        if not host or _PRIVATE.match(host):
-            return "SKIPPED", "non-public host"
-        req = urllib.request.Request(u, method="GET", headers={"User-Agent": UA})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            final = r.geturl()
-            if final.split("?")[0].rstrip("/") == u.split("?")[0].rstrip("/"):
+        cur = u
+        for _hop in range(6):
+            s = urlsplit(cur)
+            if s.scheme not in ("http", "https"):
+                return "SKIPPED", "not http(s)" + ("" if cur == u else " after redirect")
+            host = (s.hostname or "").lower()
+            if not host or _PRIVATE.match(host):
+                return "SKIPPED", "non-public host" + ("" if cur == u else " after redirect")
+            bad = _host_resolves_public(host)
+            if bad:
+                return "SKIPPED", bad + ("" if cur == u else " (after redirect)")
+            req = urllib.request.Request(cur, method="GET", headers={"User-Agent": UA})
+            op = urllib.request.build_opener(_StopAtRedirect)
+            try:
+                with op.open(req, timeout=timeout):
+                    pass
+            except _Redirected as r:
+                cur = urljoin(cur, r.url)      # a relative Location is legal
+                continue
+            if cur.split("?")[0].rstrip("/") == u.split("?")[0].rstrip("/"):
                 return "LIVE", ""
-            return "MOVED", "-> " + final
+            return "MOVED", "-> " + cur
+        return "UNKNOWN", "more than 5 redirects"
     except urllib.error.HTTPError as e:
         if e.code in (404, 410):
             return "DEAD", "HTTP %d" % e.code
@@ -341,12 +403,19 @@ def main():
           % (len(opened_any), len(opened_ok), len(queries)))
     print("answer cites %d distinct URL(s)\n" % len(cited))
 
+    # Wrapper citations resolve to their publisher URL BEFORE grounding is judged (R74;
+    # agy36flash, R73: orchestrate.py calls resolve_wrappers and this standalone entry point
+    # never did, so a Google grounding-api-redirect citation was branded UNVERIFIED against
+    # the very publisher page the event log shows was opened).
+    wrapped = resolve_wrappers([raw for raw, _ in cited if WRAPPER_MARK in raw])
     grounded, unopened = [], []
     for raw, n in cited:
-        if n in opened_ok:
-            grounded.append(raw)
+        pub = wrapped.get(raw)
+        shown = raw + ((" -> " + pub) if pub else "")
+        if n in opened_ok or (pub and normalise(pub) in opened_ok):
+            grounded.append(shown)
         else:
-            unopened.append((raw, n in opened_any))
+            unopened.append((shown, n in opened_any))
 
     for u in grounded:
         print("  GROUNDED   %s" % u)

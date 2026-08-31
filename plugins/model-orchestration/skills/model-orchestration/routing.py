@@ -1225,11 +1225,16 @@ def canon_channel(reg, name):
     if name in plan_names(reg):
         return [name]
     key = str(name).lower().replace("ё", "е")
+    # ё→е on BOTH sides (R74; orgemini37flash, R73): the key was normalised and the registry
+    # side was not, so an alias spelled with ё in channels.json could never match. Latent
+    # today - the one ё-word in the registry («всё») ships its е-twin - but every other
+    # alias-matching site in this file already normalises both sides.
     for gname, g in (reg.get("groups") or {}).items():
-        if key == gname.lower() or key in [a.lower() for a in g.get("aliases", [])]:
+        if (key == gname.lower().replace("ё", "е")
+                or key in [str(a).lower().replace("ё", "е") for a in g.get("aliases", [])]):
             return list(g["channels"])
     for cname, ch in reg["channels"].items():
-        if key in [a.lower() for a in ch.get("aliases", [])]:
+        if key in [str(a).lower().replace("ё", "е") for a in ch.get("aliases", [])]:
             return [cname]
     # 🔴 MODEL ALIASES ARE THE LAST RESORT, AND THEY WERE MISSING ENTIRELY UNTIL R43. The free-text
     # router resolves them (`_scan` indexes model aliases too), so «только 5.6 terra» worked while
@@ -1281,9 +1286,12 @@ def apply_flags(plan, reg, only=None, skip=None, sets=None):
         plan[c]["model"] = m
         plan[c]["enabled"] = True
         plan[c]["why"].append("--set %s" % m)
-    for c in skip:
-        plan[c]["enabled"] = False
-        plan[c]["why"].append("--skip")
+    # 🔴 --skip is applied AFTER --only (R74; orgemini37flash, R73): the old order ran skip
+    # first, and the --only branch then re-enabled every member of a named GROUP - so
+    # `--only grok --skip grok420` silently ran grok420, the flag the user typed precisely to
+    # exclude it. An explicit exclusion beats an explicit inclusion in every ambiguous pair,
+    # for the same reason a deny beats an allow (R57): the safe reading of a contradiction is
+    # the one that does not spend.
     if only:
         for c in plan:
             if c not in only:
@@ -1301,6 +1309,9 @@ def apply_flags(plan, reg, only=None, skip=None, sets=None):
                 if not plan[c]["enabled"] and not plan[c].get("default_enabled", True):
                     plan[c]["why"].append("--only named it explicitly (overrides default-off)")
                 plan[c]["enabled"] = True
+    for c in skip:
+        plan[c]["enabled"] = False
+        plan[c]["why"].append("--skip")
     return plan
 
 
@@ -1672,9 +1683,18 @@ def _decorate(plan, reg):
         # exact reason that one survived for weeks. It would have become a real defect the first
         # time anyone edited the registry to drop url_context. Both homes still exist (the literal
         # is a deliberate fallback for a corrupt registry) but the registry now actually wins.
+        # 🔴 fallback_model (SINGULAR, the Spark HTTP Contributor→Standard retry) was missing
+        # from this tuple from the day R62 shipped the feature: the dispatcher reads
+        # p.get("fallback_model"), the plan never carried it, so the registry's one documented
+        # auto-fallback could never fire - decorative config in its purest form, found by
+        # grokbuild in R73 (the R62 test called call_http_reviewer directly and so tested the
+        # function, not the wiring). `read_order`/`reading_note`/`must_read` are deliberately
+        # NOT here: those are reader-side fields stamped from the registry at the handoff site
+        # (one home) - copying them into the plan too would be a second home that drifts.
         for extra in ("reasoning", "max_tokens", "toolsets", "role", "fetch_tool", "tools",
                       "provider", "provider_route", "prompt_suffix", "distribution",
-                      "thinking_level", "thinking_levels", "fallback_models"):
+                      "thinking_level", "thinking_levels", "fallback_models",
+                      "fallback_model"):
             if ch.get(extra) is not None:
                 p[extra] = ch[extra]
         # Hints are stored ONCE at top level and referenced, because the same 1.5 KB paragraph

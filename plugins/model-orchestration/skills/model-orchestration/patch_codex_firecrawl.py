@@ -16,7 +16,19 @@ import os
 import re
 import shutil
 import sys
-import tomllib
+
+# tomllib is 3.11+ stdlib while the repo's documented floor is 3.8 (R74; agy37flash +
+# goog37flash, R73: the bare import was an instant ModuleNotFoundError on 3.8-3.10 with no
+# hint). This is optional local tooling, so the honest failure is a sentence, not a traceback.
+try:
+    import tomllib
+except ModuleNotFoundError:
+    try:
+        import tomli as tomllib      # the PyPI backport, if the user happens to have it
+    except ModuleNotFoundError:
+        sys.exit("patch_codex_firecrawl.py needs Python 3.11+ (stdlib tomllib) or "
+                 "`pip install tomli` on 3.8-3.10. Python running now: %s."
+                 % sys.version.split()[0])
 
 CONFIG = os.path.join(os.path.expanduser("~"), ".codex", "config.toml")
 

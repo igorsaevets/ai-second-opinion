@@ -84,9 +84,23 @@ Both are mechanism now, not advice:
 - The resume prompt and the run's own tail both now carry the same protocol line, because the
   strongest placement this project has measured is the instruction at the decision point.
 
-What this changes about the ~40K rule above: with the cap on, a full cheap panel lands around
-10 × 20K chars ≈ 50K tokens *worst case* and usually well under — often readable directly, smart
-tiers first. The deferral rule still applies when it is not.
+Why the cap is in **characters** and not tokens — the operator's own reasoning, 2026-09-01, kept
+because it decides how the instruction is worded: «писал именно символы, потому что мне
+кажется, что бы посчитать токены, ей надо больше напрягаться» — a model can count characters
+far more cheaply than it can estimate its own tokenizer. The cap is also per answer, per
+model — 20K from *each* reviewer, not a pool. The meter in `HANDOFF.md` accordingly measures
+`len(text)` in characters (bytes would flag a Cyrillic answer at half the promised length).
+
+### v3 (R74, 2026-09-01): the ★ mandatory minimum — Idea 3
+
+the operator: «читать ИИ самому самую умную, если запустил standart панель. А в cheap panel читать
+самому Spark». The floor under the smart-first protocol: whatever the context pressure, the
+ordering session itself reads at least the strongest voice — never delegated, never deferred.
+Mechanism: `must_read: true` on a channel in `channels.json` (currently `spark12cont`, which
+satisfies both halves of the instruction at once — it sits in both panels and is the
+measured-strongest voice in each). `write_handoff` sorts the ★ row first within its tier,
+prints the rule under the table and in the resume prompt, and the ★ answer is read before even
+a deferred round's telemetry report. Move the flag in the registry as models rotate.
 
 ## Alternatives considered, and why they were not built
 

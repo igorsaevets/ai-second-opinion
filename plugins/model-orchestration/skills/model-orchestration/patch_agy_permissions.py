@@ -162,6 +162,13 @@ DENY = [
     "mcp(cloakbrowser/cloak_get_cookies)",   # session material, outbound
     "mcp(cloakbrowser/cloak_network_intercept)",
     "mcp(cloakbrowser/cloak_network_continue)",
+    # 🔴 playwright is deliberately NOT here - the owner's call, 2026-08-20, asserted by
+    # selftest (suite R57) in both directions. R74 nearly added `mcp(playwright/*)` on an R73
+    # panel finding that the DOCS promised a browser denial this list never contained; the
+    # recorded owner call wins over the reviewer, so the fix went to the prose (SKILL.md now
+    # names what is actually denied). The finding's substance stands as an open question for
+    # the owner: playwright's persistent profile has held live logins (2026-08-01), and under
+    # `mcp(*)` an unlisted server is reachable.
 ]
 
 # The shell rule is separated so --keep-shell can drop exactly it, and so the checker below can

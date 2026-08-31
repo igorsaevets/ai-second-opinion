@@ -54,9 +54,11 @@ changes a decision is in this block.
 - 🔴 **agy dies silently on an UNLISTED tool — a DENIED one is harmless.** A tool in neither list
   cancels the whole turn and reports it as an empty answer with `status: SUCCESS`, exit 0; an
   explicitly denied one is an ordinary error the model recovers from. **Silence is the dangerous
-  state, not refusal.** Fixed by `python patch_agy_permissions.py`, which allows every MCP server
-  with one `mcp(*)` and explicitly denies the shell, Firecrawl and the browser-with-live-logins.
-  Run it after any update: those rules live in `~/.gemini/`, not in this tree, so pulling a new
+  state, not refusal.** Fixed by `python patch_agy_permissions.py`: one `mcp(*)` allow, denies
+  the shell, Firecrawl's metered tools and cloakbrowser's session/JS tools; `playwright`
+  deliberately stays reachable (owner's call 2026-08-20, selftest-asserted) — this line once
+  promised a browser denial the list never contained (R73); the prose was the bug. Run it
+  after any update: those rules live in `~/.gemini/`, not in this tree, so pulling a new
   version does not apply them. Check it first if agy returns empty.
 - **agy re-runs itself once if it cites sources and opened none** — announced before it spends
   (0/3 grounded → 8/8). If the retry also grounds nothing the *first* answer is returned, both
@@ -108,35 +110,35 @@ That runs **every enabled channel in parallel**, writes one `<CHANNEL>.md` per c
 wrong within days. `python routing.py` prints the live set and spends nothing. Output filenames
 are the registry key, upper-cased.
 
-🔴 **Some channels are deliberately off HERE and on in the published kit, and vice versa**, per the
-registry's `distribution` field: this machine has direct vendor keys where the kit's install story
-is one OpenRouter key to the same models. `--dry-run` shows which is which.
+🔴 **Some channels are deliberately off HERE and on in the published kit, and vice versa**, per
+`distribution`: this machine holds direct vendor keys; the kit's story is one OpenRouter key.
+`--dry-run` shows which.
 
 | flag | what it does |
 |---|---|
-| `--brief` | file with the question. Required unless you pass `--ask`. Its last line should instruct the model to end with your marker |
-| `--ask` | **one-shot question instead of a round.** `--ask "text"` or `--ask @file`. Default: first `ask_default` entry (channels.json) with its key present; `--ask-channel <name>` overrides. Prints the ANSWER to stdout; no citation audit. ~20 s |
+| `--brief` | file with the question. Required unless `--ask`. Last line should ask for your marker |
+| `--ask` | **one-shot question instead of a round.** `--ask "text"` or `--ask @file`. Default per `ask_default` in channels.json; `--ask-channel` overrides. Prints the ANSWER to stdout; no citation audit. ~20 s |
 | `--tier` | **one tier, `max`, and it is the default.** `strategic`/`deep` are aliases kept so old commands run. Depth is never a choice — see §2 |
 | `--panel` | `cheap` (default) · `standard`. WHO is in the room; never changes depth. See §2 |
-| `--marker` | literal string the reply must end with. If it is absent the output is incomplete |
+| `--marker` | literal string the reply must end with; absent ⇒ incomplete |
 | `--out` | output directory. Default `./reviews` |
-| `--system` | preset name or path (§0.2). The harness **appends the no-non-existence rule** to whatever you pass — end the file with a newline or that sentence collides with your last word |
+| `--system` | preset name or path (§0.2). The no-non-existence rule is appended — end the file with a newline |
 | `--attach` / `--attach-dir` | document / folder beside the brief. CLI channels get the **absolute path** and read it from disk (read-only); API channels get files **inline**, folders named as unreadable. Secrets-scanned either way. 🔴 Refs trust the attachment: only material you authored |
-| `--answer-cap` | ask every reviewer to keep the FINAL answer under N chars (default `20000` ≈ 5K tokens; `0` = off). Prompt-level, measured on return — depth and `max_tokens` untouched; `HANDOFF.md` names who exceeded it or declared `TRUNCATED-BY-LIMIT` |
-| `--only` | restrict channels. Names, aliases and **group** words all work — a vendor family (`gemini`, `grok`, `spark`) or a billing path (`agy`, `openrouter`, `direct`); `routing.py` prints every accepted spelling. 🔴 One channel per argument: `--only a b c`, never `--only "a b c"` |
-| `--skip` | the inverse of `--only` |
-| `--set` | pin a model without editing anything: `--set codex=gpt-5.4` |
+| `--answer-cap` | ask every reviewer to keep the FINAL answer under N chars (default `20000` ≈ 5K tokens; `0` = off and the `--ask` default — a lookup promises «no length requirement»). Prompt-level at the payload TAIL, after attachments — depth and `max_tokens` untouched; `HANDOFF.md` names who exceeded it or declared `TRUNCATED-BY-LIMIT` |
+| `--only` | restrict channels. Names, aliases and **group** words all work — vendor families and billing paths; `routing.py` prints every accepted spelling. 🔴 One channel per argument: `--only a b c`, never `--only "a b c"` |
+| `--skip` | the inverse of `--only`; on a clash (`--only <group> --skip <member>`) **skip wins** |
+| `--set` | pin a model: `--set codex=gpt-5.4` |
 | `--route` | **paste what the operator typed, verbatim** — see §0.1 |
-| `--dry-run` | full preflight — plan, brief, preset, keys, binaries, gates — then exit, spending nothing |
-| `--strict-pii` | the identifier gate is **OFF by default since R45** (one summary line, then send): `--warn-pii` restores the itemised list, `--strict-pii` refuses. `--allow-pii` parses and is a no-op. **Secrets can never be sent, at any setting** |
+| `--dry-run` | full preflight (plan, payload, keys, gates), then exit — spends nothing |
+| `--strict-pii` | identifier gate **OFF by default since R45** (summary line, then send); `--warn-pii` itemises, `--strict-pii` refuses, `--allow-pii` is a no-op. **Secrets can never be sent, at any setting** |
 
 ### 0.1 Choosing channels and models without editing code
 
 Weekly limits run out on one model at a time, so the channel/model choice changes per request,
 in prose: *«не использовать 5.6 Sol, а использовать вместо нее 5.5»*, *«не использовать для
-этого промта Spark»*. Paste that string into `--route`. It is parsed deterministically — Russian
-and English, negation, substitution (including *«вместо нее»* anaphora) and *«только»* — against
-the alias table in **`channels.json`**, which is the single place any model name lives.
+этого промта Spark»*. Paste that string into `--route`. Parsed deterministically (RU/EN,
+negation, substitution incl. anaphora, *«только»*) against the alias table in
+**`channels.json`** — the single home of every model name.
 
 ```powershell
 --route "не использовать 5.6 Sol, а использовать вместо нее 5.5. И не использовать для этого промта Spark"
@@ -185,7 +187,7 @@ stable and worth knowing:
 | Antigravity CLI | `agy`, **not on PATH** on Windows; resolved via `AGY_BIN` → PATH → `%LOCALAPPDATA%\agy\bin\agy.exe` |
 | agy models | one model per channel, base slug plus `--effort`. **Not** `gemini-3.1-pro-high` — a suffixed slug plus a disagreeing `--effort` is exit 1 in 3 s (`references/channels.md` §6.3) |
 | Grok Build CLI | `grok`, **not on PATH**; `GROK_BIN` → PATH → `%USERPROFILE%\.grok\bin`. Subscription session, no key. Reads `CLAUDE.md` from its cwd upward → neutral cwd. 🔴 **One denied tool discards the whole turn**, and `--tools` does not bound the MCP gateway. Flags in `channels.json` |
-| harness | `orchestrate.py`, standard library only, no `pip install`, Python 3.8+ |
+| harness | `orchestrate.py`, standard library only, no `pip install`, Python 3.8+ (`patch_codex_firecrawl.py` alone needs 3.11+ and says so) |
 
 **Secrets.** Never `Read`, `cat`, `echo` or `Write-Output` the key. The script reads it from the
 environment; `doctor.py` reports presence and length only. Printing the value is a hard failure —
@@ -207,21 +209,20 @@ at the ceiling its own vendor accepts, in every mode: **only the number of model
 🔴 **Neither a panel nor a GROUP enables anything.** `--only openrouter`, *«только грок»* run only
 the members already on. **Naming a channel is the one way to start one that ships off** —
 `--only goog36flash`. 🔴 **What `cheap` costs is vendor diversity, not depth**: it drops OpenAI,
-Moonshot, Alibaba, DeepSeek and Meta-Standard, and nearly half its seats are Google. The plan
-prints the vendor tally and names what `standard` adds — six Geminis agreeing is one opinion
-repeated, not corroboration.
+Moonshot, Alibaba, DeepSeek and Meta-Standard; the plan prints the vendor tally and what
+`standard` adds — six Geminis agreeing is one opinion repeated.
 
 **`--tier` parses and chooses nothing.** One tier, `max`; `strategic`/`deep` are aliases so old
 commands work. `quick` is still an argparse error. Resolved depth is printed per channel.
 
 **A below-floor note names its cause.** With the default `--answer-cap` a short FINAL answer is
-what was asked for; "under-allocated" only means something with the cap off and no brevity ask.
+what was asked for; "under-allocated" means something only with the cap off.
 Streaming is automatic above a 32,000 budget — why, in `references/channels.md`.
 
 **Your own settings go in `~/.claude/model-orchestration.local.json`, never in `channels.json`** —
 an update replaces the skill folder and cannot reach that file. `{"channels": {"<name>":
-{"enabled": true}}, "tiers": {"strategic": {"gemini_thinking_level": "low"}}}`. There it may change
-anything and add channels or tiers (`"_new": true`). Both files' changes print in the plan. 🔴 A
+{"enabled": true}}}`. There it may change anything and add channels or tiers (`"_new": true`).
+Both files' changes print in the plan. 🔴 A
 change to WHERE a document goes needs `python routing.py --accept-settings` once, or a paid round
 refuses. Rules and errors: `references/when-it-breaks.md`. Updating: `python upgrade.py`.
 
@@ -292,10 +293,12 @@ arrived under "what are we missing". Always include that question.
 🔴 **`HANDOFF.md` is the reading list — a `listdir`, never built by hand — priced in tokens and
 sorted smart-first** (`read` 1 = frontier reasoners, 3 = flash-class and measured-weak; tiers in
 `channels.json → read_order`). **Read the answers YOURSELF in that order — never via sub-agents;
-open the 3s only if context room remains.** With the default `--answer-cap` the full read is
-usually direct-readable. Over ~40K tokens with a session already large: do NOT read them this
-turn — report the telemetry, hand the operator the resume prompt, let a fresh context read after
-`/compact`. Detail: `references/reading-the-answers.md`.
+open the 3s only if context room remains. ★ = the mandatory minimum** (the operator 2026-09-01): read
+that row yourself whatever the pressure, even before a deferred round's telemetry report —
+flag `must_read` in `channels.json`. With the default `--answer-cap` the full read is usually
+direct-readable. Over ~40K tokens with a session already large: do NOT read them this turn —
+report the telemetry, hand the operator the resume prompt, let a fresh context read after `/compact`.
+Detail: `references/reading-the-answers.md`.
 
 ---
 

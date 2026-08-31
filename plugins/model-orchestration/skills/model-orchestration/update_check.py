@@ -64,7 +64,11 @@ GITHUB_OWNER = os.environ.get("MODEL_ORCH_UPDATE_OWNER", "igorsaevets")
 GITHUB_REPO = os.environ.get("MODEL_ORCH_UPDATE_REPO", "ai-second-opinion")
 # /tags rather than /releases/latest: measured 2026-08-20, this repo's Releases stop at
 # v1.27.0 while tags continue to v1.33.1. Tags is authoritative.
-GITHUB_TAGS_URL = "https://api.github.com/repos/%s/%s/tags?per_page=30" % (
+# per_page=100 (R74; agy36flash, R73): this repo already carries more than 30 tags, and the
+# GitHub /tags ordering is not semver - relying on the newest landing in an unsorted first 30
+# is a drift trap. 100 is the API maximum; real pagination is not worth a stdlib page-walker
+# for a repo that gains ~1 tag a day.
+GITHUB_TAGS_URL = "https://api.github.com/repos/%s/%s/tags?per_page=100" % (
     GITHUB_OWNER, GITHUB_REPO)
 
 # Stamp OUTSIDE the plugin tree — an upgrade must not lose the snooze.
@@ -397,7 +401,12 @@ def do_check(force=False):
     if not local:
         return ("no-version", None)
     stamp = read_stamp()
-    if not force and stamp_is_fresh(stamp):
+    # A fresh stamp is only trustworthy for the version it was written against (R74;
+    # goog37flash, R73): after an upgrade the cached pending_message still told the user to
+    # update to the version they were already running, for up to the whole freshness window.
+    # A missing installed_version (old stamps) also falls through to one real check.
+    if (not force and stamp_is_fresh(stamp)
+            and stamp.get("installed_version") == local):
         if stamp.get("pending_message"):
             return ("cached", stamp)
         return ("fresh", stamp)
@@ -558,28 +567,57 @@ def cmd_install_hook(args):
     try:
         with open(settings_path, encoding="utf-8") as f:
             settings = json.load(f)
-    except (OSError, ValueError):
-        settings = {}
+    except OSError:
+        settings = {}                     # no file yet - a fresh install starts one
+    except ValueError as exc:
+        # 🔴 R74 (goog36flash, R73): this used to fall through to `settings = {}` and WRITE
+        # that back - one malformed byte in settings.json and installing a hook silently
+        # replaced the user's entire Claude Code configuration with just the hook. A parse
+        # failure on an EXISTING file is the user's config being unreadable, not absent.
+        print("%s REFUSING: %s exists but is not valid JSON (%s). Fix the file first - "
+              "installing would have overwritten it wholesale."
+              % (BANNER_HEAD, settings_path, exc))
+        return 1
     hooks = settings.setdefault("hooks", {})
     session_start = hooks.setdefault("SessionStart", [])
+    my_path = os.path.abspath(__file__)
+    # 🔴 One COMMAND STRING, not command+args (R74; orgemini37flash, R73): Claude Code's hook
+    # schema has no `args` field, so the old shape ran a bare `python` that sat waiting on
+    # stdin until the timeout killed it - every session start, for every user who installed
+    # this. `--hook` rather than `--check`: SessionStart wants the local-only JSON emitter;
+    # the network check already runs from orchestrate's own preflight.
+    my_cmd = 'python "%s" --hook' % my_path
     entry = {
         "matcher": "startup",
-        "hooks": [{
-            "type": "command",
-            "command": "python",
-            "args": [os.path.abspath(__file__), "--check"],
-            "timeout": 5,
-        }],
+        "hooks": [{"type": "command", "command": my_cmd, "timeout": 5}],
     }
-    already = any(
-        any(h.get("args") == entry["hooks"][0]["args"] for h in (e.get("hooks") or []))
-        for e in session_start
-    )
-    if already:
+
+    def _is_mine(h):
+        if not isinstance(h, dict):
+            return False
+        if isinstance(h.get("args"), list):        # the legacy broken shape
+            return my_path in " ".join(str(x) for x in h["args"])
+        return my_path in str(h.get("command") or "")
+
+    migrated = False
+    for e in session_start:
+        hl = e.get("hooks") or []
+        inner = [h for h in hl if not (_is_mine(h) and h.get("command") != my_cmd)]
+        if len(inner) != len(hl):
+            e["hooks"] = inner
+            migrated = True
+    session_start[:] = [e for e in session_start if e.get("hooks")]
+    already = any(any((h or {}).get("command") == my_cmd for h in (e.get("hooks") or []))
+                  for e in session_start)
+    if already and not migrated:
         print("%s SessionStart hook already installed in %s"
               % (BANNER_HEAD, settings_path))
         return 0
-    session_start.append(entry)
+    if not already:
+        session_start.append(entry)
+    if migrated:
+        print("%s migrating the old command+args hook shape (it ran a bare `python` and "
+              "hung until its timeout)" % BANNER_HEAD)
     os.makedirs(os.path.dirname(settings_path), exist_ok=True)
     tmp = settings_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -602,15 +640,27 @@ def cmd_uninstall_hook(args):
         return 0
     hooks = settings.get("hooks") or {}
     session_start = hooks.get("SessionStart") or []
-    my_args = [os.path.abspath(__file__), "--check"]
+    my_path = os.path.abspath(__file__)
+
+    def _is_mine(h):
+        if not isinstance(h, dict):
+            return False
+        if isinstance(h.get("args"), list):        # the legacy command+args shape
+            return my_path in " ".join(str(x) for x in h["args"])
+        return my_path in str(h.get("command") or "")
+
+    # 🔴 Count removed HOOKS, not only emptied entries (R74; orgemini37flash, R73): when our
+    # hook shared a SessionStart entry with another tool's, the old counter stayed 0, the
+    # early return fired, and the filtered settings were never written - an uninstall that
+    # reported failure while silently doing nothing.
     keep, removed = [], 0
     for e in session_start:
-        inner = [h for h in (e.get("hooks") or []) if h.get("args") != my_args]
+        hl = e.get("hooks") or []
+        inner = [h for h in hl if not _is_mine(h)]
+        removed += len(hl) - len(inner)
         if inner:
             e["hooks"] = inner
             keep.append(e)
-        else:
-            removed += 1
     if not removed:
         print("%s no matching SessionStart hook found in %s"
               % (BANNER_HEAD, settings_path))
@@ -626,7 +676,7 @@ def cmd_uninstall_hook(args):
         json.dump(settings, f, indent=2, ensure_ascii=False)
         f.write("\n")
     os.replace(tmp, settings_path)
-    print("%s removed %d SessionStart entry(ies) from %s"
+    print("%s removed %d SessionStart hook(s) from %s"
           % (BANNER_HEAD, removed, settings_path))
     return 0
 

@@ -172,6 +172,9 @@ AGY_ARGV_LIMIT = 30000       # Windows command line dies somewhere past ~32K cha
 _LOG = {"path": None, "lines": []}
 
 
+_LOG_LOCK = threading.Lock()
+
+
 def log(msg):
     # Scrubbed at the single choke point rather than at each call site. Caught while testing the
     # crash handler: an exception whose MESSAGE contained a key printed it to the console in full,
@@ -179,15 +182,20 @@ def log(msg):
     # model and archived to disk, so it is the same exfiltration surface as any other - and the
     # one call site that forgets is the one that matters. scrub() is defined further down; the
     # lookup happens at call time, so ordering is not a problem.
+    # Locked (R74): every channel worker calls this from the ThreadPoolExecutor, and on Windows
+    # two concurrent opens of the same file in append mode can raise a sharing-violation OSError
+    # that the except below then SWALLOWS - a silently thinner run.log. Four R73 reviewers
+    # converged on the class; the lock costs nothing and keeps print/list/file in one order.
     msg = scrub(str(msg))
-    print(msg, flush=True)
-    _LOG["lines"].append(msg)
-    if _LOG["path"]:
-        try:
-            with open(_LOG["path"], "a", encoding="utf-8") as f:
-                f.write(msg + "\n")
-        except OSError:
-            pass          # a broken log must never take the run down with it
+    with _LOG_LOCK:
+        print(msg, flush=True)
+        _LOG["lines"].append(msg)
+        if _LOG["path"]:
+            try:
+                with open(_LOG["path"], "a", encoding="utf-8") as f:
+                    f.write(msg + "\n")
+            except OSError:
+                pass          # a broken log must never take the run down with it
 
 
 # =============================================================================================
@@ -442,9 +450,11 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, na
         if not is_filter:
             log("  [%s] FALLBACK: primary %s failed (%s), retrying with %s (Standard tier)"
                 % (name, model, (last or "unknown")[:80], fallback_model))
+            # answer_cap rides along (R74, four R73 reviewers): without it the fallback's
+            # below-floor note phrased a capped short answer as under-allocation.
             res = call_http_reviewer(brief, system, tier, marker, timeout=timeout,
                                      model=fallback_model, name=name, effort=effort,
-                                     fallback_model=None)
+                                     fallback_model=None, answer_cap=answer_cap)
             if res.get("ok"):
                 res["fallback_used"] = True
                 res["primary_model"] = model
@@ -1021,8 +1031,11 @@ SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
 #
 # Two classes, and they are NOT the same:
 #   SECRET  - a key, token or private key. Never overridable. There is no review that needs one.
-#   PII     - identifiers about a person. Blocked by default, overridable with --allow-pii,
-#             because reviewing e.g. a public contact page legitimately contains an address.
+#   PII     - identifiers about a person. SENT by default since 2026-08-16 (Igor inverted the
+#             policy: only keys/passwords are critical); --warn-pii lists them, --strict-pii
+#             refuses. `--allow-pii` is a retired no-op kept for old scripts. This comment said
+#             «blocked by default» for two weeks after the code stopped doing that - the exact
+#             prose-is-a-claim rot the public README carried in R71 (grokbuild caught it, R73).
 #
 # Findings are reported as KIND + LINE NUMBER + length only. Printing the match would defeat the
 # purpose: this console output is read by the orchestrating model and lands in its transcript,
@@ -1037,6 +1050,9 @@ SECRET_PATTERNS = [
                                      r"\bgithub_pat_[A-Za-z0-9_]{30,}")),
     ("SLACK_TOKEN",       re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}")),
     ("GOOGLE_API_KEY",    re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
+    # xAI keys have a stable `xai-` prefix; a whole vendor this gate sends to had no pattern
+    # (grokbuild, R73). Prefix + 20 alnum is unambiguous - `xai-tools` and prose stay silent.
+    ("XAI_KEY",           re.compile(r"\bxai-[A-Za-z0-9]{20,}")),
     # Labelled assignment: catches .env lines and `Authorization: <token>` pasted into a brief.
     # `(?<![A-Za-z])` and not `\b`, because underscore counts as a word character: `\bapi_key`
     # never matches inside FIRECRAWL_API_KEY, which is the exact shape a real .env line has.
@@ -1482,7 +1498,8 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
         for _cn, _r in (results or {}).items():
             _af = (_r.get("answer_file") or "").lower() if isinstance(_r, dict) else ""
             if _af:
-                by_file[_af] = (_cn, _r.get("read_order"), _r.get("reading_note"))
+                by_file[_af] = (_cn, _r.get("read_order"), _r.get("reading_note"),
+                                bool(_r.get("must_read")))
         files = []
         for fn in sorted(os.listdir(outdir)):
             if not fn.endswith(".md") or fn in skip:
@@ -1507,12 +1524,15 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             except OSError:
                 body = ""
             tail = [ln for ln in body.splitlines() if ln.strip()]
-            cname, r_order, r_note = by_file.get(fn.lower(), (None, None, None))
+            cname, r_order, r_note, r_must = by_file.get(fn.lower(), (None, None, None, False))
             files.append({
                 "file": fn,
                 "channel": cname,
                 "note": r_note,
                 "read_order": r_order if r_order in (1, 2, 3) else 9,
+                # ★ Idea 3 (Igor, 2026-09-01): the one answer the ordering session must read
+                # ITSELF whatever the context pressure - `must_read` in channels.json.
+                "must_read": bool(r_must),
                 # chars, not bytes, for the cap compare: the cap was asked in CHARACTERS and a
                 # Cyrillic answer is ~2 bytes/char in UTF-8, so a byte compare would flag it at
                 # half the promised length.
@@ -1531,7 +1551,9 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
         fresh = [f for f in files if not f["stale"]]
         # Smartest voices first (R72). Sorting the MANIFEST is the mechanism: the reader walks
         # the table top-down, so the order the table is printed in IS the reading order.
-        fresh.sort(key=lambda f: (f["read_order"], f["file"]))
+        # Within a tier the ★ mandatory-read row leads (R74, Idea 3) - it is the row the
+        # reader must reach even if nothing after it is read.
+        fresh.sort(key=lambda f: (f["read_order"], not f["must_read"], f["file"]))
         stale_files = [f for f in files if f["stale"]]
         total = sum(f["bytes"] for f in fresh)
         est = total // CHARS_PER_TOKEN
@@ -1558,7 +1580,8 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
              "|---:|---|---|---:|---:|---|"]
         for f in fresh:
             L.append("| %s | %s | `%s` | %s | ~%s | %s |"
-                     % (f["read_order"] if f["read_order"] != 9 else "?",
+                     % (("%s★" % f["read_order"] if f["must_read"] else f["read_order"])
+                        if f["read_order"] != 9 else ("★" if f["must_read"] else "?"),
                         f["channel"] or "-",
                         f["file"], f"{f['bytes']:,}".replace(",", " "),
                         f"{f['est_tokens']:,}".replace(",", " "),
@@ -1605,6 +1628,12 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
               "rather than delegating to sub-agents: a sub-agent starts with none of this "
               "session's context and returns a summary, and the value of a panel is the "
               "disagreement between full answers.", ""]
+        if any(f["must_read"] for f in fresh):
+            L += ["**★ is the mandatory minimum.** Whatever the context pressure, the ★ "
+                  "row(s) are read by the ordering session ITSELF — never delegated, never "
+                  "dropped (Igor, 2026-09-01: in the standard panel read the smartest voice "
+                  "yourself; in the cheap panel that is Spark). The flag is `must_read` in "
+                  "`channels.json`; move it there as models rotate.", ""]
         if answer_cap:
             over = [f for f in fresh if f["over_cap"]]
             trunc = [f for f in fresh if f["truncated_note"]]
@@ -1643,6 +1672,8 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
               "Порядок — колонка `read` в таблице HANDOFF.md: сначала 1 (умные), потом 2; "
               "тройки (flash-класс) — только если остался бюджет контекста. Читай сам, "
               "суб-агентам чтение не отдавай.",
+              "Строку со ★ прочитай САМ в любом случае — это обязательный минимум, даже "
+              "если больше ни на что не хватит контекста.",
               "По каждой находке: принял / отклонил с доказательством / в бэклог. "
               "Совпадения между каналами считай отдельно от одиночных мнений.",
               ("Маркер конца ответа: %s. Файл без него на последней строке — неполный."
@@ -1670,7 +1701,8 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
                    (" (%s)" % ", ".join(_over)) if _over else "",
                    ("; declared TRUNCATED-BY-LIMIT: " + ", ".join(_trunc)) if _trunc else ""))
         log("  Reading order: the HANDOFF.md table is sorted smart-first (read 1 -> 3); read "
-            "the answers yourself, 3s only if context room remains.")
+            "the answers yourself, 3s only if context room remains. A ★ row is the mandatory "
+            "minimum - read it yourself even when nothing else fits.")
         log("  The manifest and a ready-to-paste resume prompt are in %s"
             % os.path.join(os.path.abspath(outdir), "HANDOFF.md"))
         return {"files": fresh, "total_bytes": total, "est_tokens": est,
@@ -2253,16 +2285,23 @@ def _system_for(system, slot):
 # produces. So: byte count, added bytes, and a short digest. Two channels with the same digest
 # received the same prompt; two with different digests did not, and the reader can see which.
 _SYSTEM_SEEN = {}
+_SYSTEM_LOCK = threading.Lock()
 
 
 def _record_system(slot, text, added):
+    # `_name` is stamped onto every plan slot by the dispatch loop (R74): before that, this fell
+    # through to `label`, and two channels sharing a display label (three Gemini 3.6 Flash seats
+    # exist) silently overwrote each other here - `identical_system_for_all` was then computed
+    # over a collapsed dict. agy37flash named it in R73. Locked for the same reason log() is:
+    # every worker thread writes this dict.
     name = (slot or {}).get("_name") or (slot or {}).get("label") or "?"
     import hashlib
-    _SYSTEM_SEEN[name] = {
-        "bytes": len((text or "").encode("utf-8")),
-        "added_by_channel": added,
-        "sha256_12": hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:12],
-    }
+    with _SYSTEM_LOCK:
+        _SYSTEM_SEEN[name] = {
+            "bytes": len((text or "").encode("utf-8")),
+            "added_by_channel": added,
+            "sha256_12": hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:12],
+        }
 
 
 def _registry_default(channel, field, fallback):
@@ -3303,6 +3342,17 @@ def _safe_fetch_url(url, timeout=25):
                 return ("REFUSED: URL is %d characters. Real page URLs are short; a long one is "
                         "usually data being smuggled into a query string. Fetch the page, do not "
                         "encode content into the address." % len(url))
+            # R74 (spark + agy31pro, R73): the length cap bounds VOLUME, not KIND. A URL whose
+            # query carries a secret- or PII-shaped string is the exfiltration shape above in
+            # its cheapest form, and unlike the general case it IS checkable: the same patterns
+            # the outbound gate runs on the payload run here on the address. Legitimate page
+            # URLs do not contain key-shaped tokens, so the loss is theoretical and the closed
+            # lane is not. Narrows the residual risk documented above; does not close it.
+            _sec, _pii = scan_payload(url, "fetch-url")
+            if _sec or _pii:
+                return ("REFUSED: the URL itself contains %s-shaped content. Fetch pages by "
+                        "address; never encode brief content, identifiers or credentials into "
+                        "a URL." % ", ".join(sorted({h.split(" at ")[0] for h in _sec + _pii})))
             bad = _fetch_guard_host(parts.hostname)
             if bad:
                 return "REFUSED: " + bad
@@ -3477,6 +3527,38 @@ def parse_gemini_steps(data):
             "n_annotations": n_annotations}
 
 
+def _urlopen_transient_retry(rq, timeout, log_name):
+    """The A5 door-status retry for the single-shot transports.
+
+    R74, from grokbuild's R73 half-applied-class finding: R70 gave the OAI loop a 429/5xx
+    retry and gave gemini-direct and xAI nothing, so a lone 429 still killed those channels
+    outright. Same policy as call_oai_reviewer's _stream_with_retry: two retries per call,
+    429/5xx only, the request re-sent verbatim, Retry-After honoured with the same 60 s cap.
+    Timeouts and mid-stream drops are deliberately NOT retried - an unstreamed call that
+    timed out may have finished, and billed, on the vendor's side.
+    """
+    retries_left = 2
+    while True:
+        try:
+            return urllib.request.urlopen(rq, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if retries_left <= 0 or (e.code != 429 and e.code < 500):
+                raise
+            retries_left -= 1
+            ra = e.headers.get("Retry-After") if hasattr(e, "headers") else None
+            wait = 2 ** (2 - retries_left)          # 2s, then 4s
+            if ra:
+                try:
+                    wait = max(wait, min(int(ra), 60))
+                except (ValueError, TypeError):
+                    pass
+            log("  [%s] HTTP %d - transient at the door; retrying the same request in %ds "
+                "(%d retr%s left for this call)."
+                % (log_name, e.code, wait, retries_left,
+                   "y" if retries_left == 1 else "ies"))
+            time.sleep(wait)
+
+
 def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=2400,
                        name="gemini36flash", tools=None, max_tokens=None, thinking_level=None):
     """Gemini on Google's OWN Interactions API - the third way to reach this family.
@@ -3569,7 +3651,7 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
         rq = urllib.request.Request(GEMINI_URL, data=json.dumps(body).encode("utf-8"),
                                     headers={"x-goog-api-key": key,
                                              "Content-Type": "application/json"})
-        with urllib.request.urlopen(rq, timeout=timeout) as resp:
+        with _urlopen_transient_retry(rq, timeout, name) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:400]
@@ -3867,7 +3949,11 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # list - the grounding evidence Codex structurally cannot provide.
     ft = fetch_tool if fetch_tool is not None else {"enabled": True}
     fetch_on = bool((ft or {}).get("enabled"))
-    max_rounds = int((ft or {}).get("max_calls") or 8)
+    # `is None`, not `or 8`: `max_calls: 0` is an owner saying «zero fetches», and `or` read
+    # the strictest setting as no setting at all - the exact class the usd_ceiling comment
+    # below already names (R73, codex named this instance).
+    _mc = (ft or {}).get("max_calls")
+    max_rounds = 8 if _mc is None else int(_mc)
     tools = []
     if native_search:
         tools.append(dict(prov["search_tool"]))
@@ -4065,6 +4151,14 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # this file: a legitimate zero and an absent key are different facts, and only `is None`
     # distinguishes them. Nothing shipped with a zero, so this was a trap for the next person.
     usd_ceiling = float(usd_ceiling) if usd_ceiling is not None else None
+    # 🔴 R74 (agy31pro, R73): the in-loop breaker arms only after `usd_seen` - the FIRST round
+    # always ran and billed, so a ceiling of 0 («spend nothing») failed exactly when it was
+    # strictest. A non-positive ceiling now refuses DISPATCH: the only spend of zero is no call.
+    if usd_ceiling is not None and usd_ceiling <= 0:
+        return {"channel": name, "ok": False,
+                "error": "spend_guard max_usd_per_review=%g means SPEND NOTHING - the channel "
+                         "was not dispatched (the in-loop breaker can only arm after the first "
+                         "billed round, which would already have spent money)." % usd_ceiling}
     spend_stop = False
     # 🔴 THE FORCED-ANSWER ROUND HAD NO EXIT, and that was true of the fetch-budget path too since
     # it was written. `body.pop("tools")` is what normally stops the model asking for another page,
@@ -4084,45 +4178,55 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                 "usd": round(usd_tot, 6) if usd_seen else None,
                 "usd_rounds": rounds_done if usd_seen else None,
                 "fetches": fetches if fetch_on else None,
+                "retries": retries_used or None,
                 "seconds": round(time.time() - start, 1)}
 
     last_finish = {}
-    # 🔴 A5 (R70): a single 429 used to kill the WHOLE review on this transport, while the
-    # Spark path had retried exactly this class for weeks (call_http_reviewer, its
-    # `e.code == 429 or e.code >= 500` branch). The retry is safe by construction, twice
-    # over: `body` is appended to only AFTER a successful round, so the failed request is
-    # re-sent verbatim; and an HTTPError is raised at the door - status line read, no
-    # completion delivered - so a 429 billed nothing (the reasoning A3 recorded beside the
-    # Retry-After cap) and a 5xx delivered nothing to bill for. What is deliberately NOT
-    # retried: timeouts and mid-stream drops. An unstreamed call that timed out may have
-    # finished - and billed - on the vendor's side, and re-sending it would pay twice for
-    # one answer; those still fail the channel loudly, exactly as before (they surface as
-    # URLError / socket errors, which this handler does not catch).
-    retries_left = 2
+    # 🔴 A5 (R70, reshaped R74): a single 429 used to kill the WHOLE review on this transport,
+    # while the Spark path had retried exactly this class for weeks. The retry is safe by
+    # construction, twice over: `body` is appended to only AFTER a successful round, so the
+    # failed request is re-sent verbatim; and an HTTPError is raised at the door - status line
+    # read, no completion delivered - so a 429 billed nothing and a 5xx delivered nothing to
+    # bill for HERE. Whether the vendor metered work upstream before failing is NOT knowable
+    # from this door, so the log no longer claims «billed nothing» for a 5xx (R73, codex).
+    # Deliberately NOT retried: timeouts and mid-stream drops - an unstreamed call that timed
+    # out may have finished, and billed, on the vendor's side (they surface as URLError /
+    # socket errors, which this handler does not catch). R74, six R73 reviewers converging:
+    # the budget is per CALL, not per review - the old per-review budget let a burst in round
+    # 1 make round 5's single 503 fatal after every paid fetch; and the forced-final call,
+    # the most expensive request of the review, sat outside the loop entirely. Both now go
+    # through _stream_with_retry.
+    retries_used = 0
+
+    def _stream_with_retry(b):
+        nonlocal retries_used
+        retries_left = 2
+        while True:
+            try:
+                return _stream_once(b)
+            except urllib.error.HTTPError as e:
+                if retries_left <= 0 or (e.code != 429 and e.code < 500):
+                    raise
+                retries_left -= 1
+                retries_used += 1
+                ra = e.headers.get("Retry-After") if hasattr(e, "headers") else None
+                wait = 2 ** (2 - retries_left)          # 2s, then 4s
+                if ra:
+                    try:
+                        wait = max(wait, min(int(ra), 60))   # same 60s cap as A3
+                    except (ValueError, TypeError):
+                        pass
+                log("  [%s] HTTP %d%s - transient; retrying the same request in %ds "
+                    "(%d retr%s left for this call). The conversation is unchanged; the "
+                    "rejected attempt delivered nothing to bill for at this door."
+                    % (name, e.code,
+                       (" (Retry-After: %s)" % ra) if ra else "",
+                       wait, retries_left, "y" if retries_left == 1 else "ies"))
+                time.sleep(wait)
+
     try:
         for _round in range(max_rounds + 1):
-            while True:
-                try:
-                    chunk, rch, use, calls, served, _fin = _stream_once(body)
-                    break
-                except urllib.error.HTTPError as e:
-                    if retries_left <= 0 or (e.code != 429 and e.code < 500):
-                        raise
-                    retries_left -= 1
-                    ra = e.headers.get("Retry-After") if hasattr(e, "headers") else None
-                    wait = 2 ** (2 - retries_left)          # 2s, then 4s
-                    if ra:
-                        try:
-                            wait = max(wait, min(int(ra), 60))   # same 60s cap as A3
-                        except (ValueError, TypeError):
-                            pass
-                    log("  [%s] HTTP %d%s - transient; retrying the same request in %ds "
-                        "(%d retr%s left for this review). The conversation is unchanged "
-                        "and the rejected attempt billed nothing."
-                        % (name, e.code,
-                           (" (Retry-After: %s)" % ra) if ra else "",
-                           wait, retries_left, "y" if retries_left == 1 else "ies"))
-                    time.sleep(wait)
+            chunk, rch, use, calls, served, _fin = _stream_with_retry(body)
             rounds_done += 1
             # The FINAL round's finish_reason is the one that ended the answer; a tool round's
             # `tool_calls` value is overwritten by whatever the last generation reports.
@@ -4240,7 +4344,10 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                     # Instead of extending the range (which just shifts the boundary by 1 and
                     # fails the same way if fetches burst on the new last iteration), do the
                     # forced-final round INLINE: no dependence on outer-loop iterations.
-                    chunk_f, rch_f, use_f, _calls_f, served_f, _fin_f = _stream_once(body)
+                    # R74: through the SAME transient retry as every other call - six of twelve
+                    # R73 reviewers independently flagged that a lone 429 here discarded the
+                    # whole paid review, because this call sat outside the A5 loop.
+                    chunk_f, rch_f, use_f, _calls_f, served_f, _fin_f = _stream_with_retry(body)
                     rounds_done += 1
                     if _fin_f:
                         last_finish = _fin_f
@@ -4411,8 +4518,11 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         retry_after = e.headers.get("Retry-After") if hasattr(e, "headers") else None
         if e.code == 429 and retry_after:
             log("  [%s] 429 RATE LIMITED (Retry-After: %s)" % (name, retry_after))
+        # The provider NAME, not a literal: this function serves every OAI-protocol vendor,
+        # and «from OpenRouter» on a mimo-direct failure blamed the wrong party (agy37flash,
+        # R73) - the same instance-for-class mistake the key_env comment above records.
         out = {"channel": name, "ok": False,
-               "error": "HTTP %s from OpenRouter: %s" % (e.code, detail)}
+               "error": "HTTP %s from %s: %s" % (e.code, provider or "provider", detail)}
         if retry_after:
             out["retry_after"] = retry_after
         out.update(_telemetry())
@@ -4782,7 +4892,9 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
     try:
         rq = urllib.request.Request(XAI_RESPONSES_URL,
                                     data=json.dumps(body).encode("utf-8"), headers=headers)
-        with urllib.request.urlopen(rq, timeout=timeout) as resp:
+        # Door-status retry only: once the stream is open, a mid-stream failure may have
+        # billed partial generation and is NOT retried (same split as the OAI loop).
+        with _urlopen_transient_retry(rq, timeout, name) as resp:
             for raw in resp:
                 line = raw.decode("utf-8", "replace").strip()
                 if not line.startswith("data:"):
@@ -5889,7 +6001,15 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
     os.makedirs(workdir, exist_ok=True)
     _write_agy_agent(workdir)
     ndjson = os.path.splitext(outfile)[0] + ".events.ndjson"
+    # AGY_ENV_CONSTRAINT must ride the BRIEF (measured 2/2 from brief, 0/1 from persona - the
+    # position-binding lesson in agy-channel-mechanics), and appending it here lands it AFTER
+    # the marker instruction main() spliced to the very end (orgemini37flash, R73). Re-stating
+    # the marker line after it keeps «last instruction = the marker» true without moving the
+    # constraint out of the position where it demonstrably works.
     brief = _with_system(brief, system) + AGY_ENV_CONSTRAINT
+    if marker:
+        brief += ("\n\nReminder: the very LAST line of your reply must be exactly:\n%s\n"
+                  % marker)
 
     if len(brief) <= AGY_ARGV_LIMIT:
         # Pass as a single argv element; let the runtime quote it, never hand-quote a 14KB string.
@@ -6264,6 +6384,23 @@ _ATT_TEXT_EXT = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml", ".ini"
                  ".html", ".htm", ".xml", ".js", ".ts", ".css", ".rst", ".tex", ".log", ".cfg"}
 
 
+_SECRET_NAME_RE = re.compile(
+    r"(?i)(?:^|[\\/])(?:\.env(?:\.[^\\/]*)?|[^\\/]*\.(?:pem|key|p12|pfx|ppk|jks|keystore)|"
+    r"id_(?:rsa|dsa|ecdsa|ed25519)[^\\/]*|credentials(?:\.json)?)$")
+
+
+def _secret_shaped_name(path):
+    """A NAME that promises key material. Used ONLY for files the content scan already SKIPPED
+    (binary / over the size cap / past the file cap): there the name is the only signal left,
+    and for the secrets class a false refusal is cheaper than a silent hand-off to a refs-mode
+    CLI reviewer. Everywhere else the content scan rules and this must not be consulted -
+    basename-is-not-a-path-check. `.pub` halves of key pairs are public and pass."""
+    p = (path or "")
+    if p.lower().endswith(".pub"):
+        return False
+    return bool(_SECRET_NAME_RE.search(p))
+
+
 def _scan_dir_texts(dirs, max_bytes=2_000_000, max_files=200):
     """(label, text) parts for the secrets/PII scan over attached folders, plus what was SKIPPED.
 
@@ -6309,7 +6446,12 @@ def _scan_dir_texts(dirs, max_bytes=2_000_000, max_files=200):
                     seen += 1
                 elif (os.path.splitext(fn)[1].lower() in _ATT_TEXT_EXT
                         or b"\x00" not in raw[:4096]):
-                    parts.append(("attach-dir:" + p, raw.decode("utf-8", "replace")))
+                    # utf-8-sig, not utf-8 (R73, spark + grokbuild): the one read in the
+                    # payload path that R71's BOM sweep missed. A leading U+FEFF does not
+                    # break the secret regexes (it is not a letter), so this is consistency,
+                    # not a gate hole - but two decoders for one class is how the next
+                    # pattern edit gets tested against only one of them.
+                    parts.append(("attach-dir:" + p, raw.decode("utf-8-sig", "replace")))
                     seen += 1
                 else:
                     skipped.append("%s (binary)" % p)
@@ -6418,11 +6560,11 @@ def main():
     # A prompt instruction, deliberately NOT max_tokens: a token ceiling cuts mid-sentence and
     # starves reasoning models (R43/R47), while an instruction bounds the ANSWER and leaves the
     # thinking at full depth. Advisory by design; the handoff MEASURES who exceeded it.
-    ap.add_argument("--answer-cap", type=int, default=20000, metavar="CHARS",
+    ap.add_argument("--answer-cap", type=int, default=None, metavar="CHARS",
                     help="ask every reviewer to keep its FINAL answer under this many "
-                         "characters (default 20000, roughly 5K tokens; 0 = no length "
-                         "instruction). Enforced by prompt and measured on return, never by "
-                         "max_tokens - depth is not reduced")
+                         "characters (default 20000 for reviews, 0 in --ask mode; 0 = no "
+                         "length instruction). Enforced by prompt and measured on return, "
+                         "never by max_tokens - depth is not reduced")
     # 🔴 SELECTING A CHANNEL AND AUTHORISING ITS BILL ARE TWO DIFFERENT ACTS, and until 2026-08-14
     # they were one. `--only <name>` both chose a default-OFF channel and paid for it, which reads
     # as deliberate when a human types one name and means nothing at all when an agent session
@@ -6533,7 +6675,9 @@ def main():
             if not os.path.isfile(src):
                 log("--ask @%s: file not found" % src)
                 return 2
-            with open(src, encoding="utf-8") as fh:
+            # utf-8-sig: same BOM class as the brief read below - this was the fourth payload
+            # read and the one R71 missed (grokbuild, R73).
+            with open(src, encoding="utf-8-sig") as fh:
                 question = fh.read()
         if a.marker == "REVIEW-COMPLETE":
             a.marker = "ASK-DONE"
@@ -6555,6 +6699,13 @@ def main():
         global _citecheck_reason
         _citecheck_reason = ("--ask is a lookup, not a review - the citation audit is for briefs "
                              "that cite sources. You did NOT pass --no-citecheck.")
+        # 🔴 The cap defaults OFF here (grokbuild, R73): the ask brief used to promise «no
+        # length requirement» while the default review cap appended «keep it under 20000
+        # chars» to the same payload - two contradictory instructions, and which one a model
+        # obeys is a coin toss. An explicit --answer-cap N with --ask is honoured, and then
+        # the no-length sentence is dropped instead of the cap.
+        if a.answer_cap is None:
+            a.answer_cap = 0
         tmp = os.path.join(a.out, "ask-brief.md")
         try:
             os.makedirs(a.out, exist_ok=True)
@@ -6564,8 +6715,10 @@ def main():
                     "Answer directly and completely. If the answer depends on something that "
                     "changes, search the web and give the URL and the date you accessed it. "
                     "If your search finds nothing, write exactly \"my search found no "
-                    "confirmation\" and do NOT conclude the thing does not exist. Do not pad: "
-                    "there is no length requirement here, in either direction.\n" % question)
+                    "confirmation\" and do NOT conclude the thing does not exist.%s\n"
+                    % (question,
+                       "" if a.answer_cap else " Do not pad: there is no length requirement "
+                                              "here, in either direction."))
         except OSError as exc:
             log("--ask: could not write the temporary brief (%s)" % exc)
             return 2
@@ -6679,16 +6832,26 @@ def main():
     # finding, after cutting repetition) is deliberate: a hard cap invites dropping the one
     # finding that mattered, and TRUNCATED-BY-LIMIT makes that drop VISIBLE - the handoff scans
     # for the token and names the channels that declared it.
+    # Review-mode default, resolved late so --ask above can default to 0 (argparse default is
+    # None precisely so the two modes can differ; an explicit --answer-cap wins in both).
+    if a.answer_cap is None:
+        a.answer_cap = 20000
+    # Built as a BLOCK rather than appended to the brief here (R74): on an attachment round the
+    # brief is followed by up to a megabyte of documents, and an instruction buried a megabyte
+    # before the end is one models drop (agy31pro, R73). The splice below lands this block
+    # AFTER the attachments, directly before the marker line - the last words are the ones
+    # models obey, which is the same reasoning the marker splice already encodes.
+    _cap_block = ""
     if a.answer_cap and a.answer_cap > 0:
-        brief += ("\n\n---\nLength discipline for your FINAL answer: keep it under about %d "
-                  "characters (~%d tokens). This bounds the ANSWER, not the work - think, "
-                  "search and verify at full depth, then write the essence: verdicts first, "
-                  "one finding per short paragraph, evidence quotes trimmed to the operative "
-                  "words. If you must exceed the limit to keep a MATERIAL finding, exceed it - "
-                  "but first cut repetition, preamble and restatement; and if something "
-                  "material still had to be dropped, list what was dropped and end that list "
-                  "with the line TRUNCATED-BY-LIMIT.\n"
-                  % (a.answer_cap, a.answer_cap // CHARS_PER_TOKEN))
+        _cap_block = ("\n\n---\nLength discipline for your FINAL answer: keep it under about %d "
+                      "characters (~%d tokens). This bounds the ANSWER, not the work - think, "
+                      "search and verify at full depth, then write the essence: verdicts first, "
+                      "one finding per short paragraph, evidence quotes trimmed to the operative "
+                      "words. If you must exceed the limit to keep a MATERIAL finding, exceed "
+                      "it - but first cut repetition, preamble and restatement; and if something "
+                      "material still had to be dropped, list what was dropped and end that "
+                      "list with the line TRUNCATED-BY-LIMIT.\n"
+                      % (a.answer_cap, a.answer_cap // CHARS_PER_TOKEN))
 
     # Every channel is VERIFIED against the end marker, but until 2026-07-31 nothing ever asked
     # the model to emit one: the brief's author was silently expected to know. A brief written by
@@ -6726,15 +6889,17 @@ def main():
     # `brief_refs` differs ONLY in the attachment section and goes to REFS_KINDS channels.
     # The marker instruction lands at the very end of BOTH, after a split-and-splice: models
     # obey the LAST instruction, and an attachment block after the marker line would bury it.
+    # The answer-cap block rides the same splice (R74): [brief][attachments][cap][marker].
+    _mk = ""
+    if a.marker:
+        _pos = brief.rfind("\n\n---\nWhen the ENTIRE review is finished")
+        if _pos != -1:
+            brief, _mk = brief[:_pos], brief[_pos:]
     if atts or att_dirs:
-        _mk = ""
-        if a.marker:
-            _pos = brief.rfind("\n\n---\nWhen the ENTIRE review is finished")
-            if _pos != -1:
-                brief, _mk = brief[:_pos], brief[_pos:]
-        brief_refs = brief + _attach_refs(atts, att_dirs) + _mk
-        brief = brief + _attach_inline(atts, att_dirs) + _mk
+        brief_refs = brief + _attach_refs(atts, att_dirs) + _cap_block + _mk
+        brief = brief + _attach_inline(atts, att_dirs) + _cap_block + _mk
     else:
+        brief = brief + _cap_block + _mk
         brief_refs = brief
     # The default used to be a single sentence, and it reached only the HTTPS channel. Depth,
     # source discipline and output language were therefore left to whatever each model defaults
@@ -6784,12 +6949,28 @@ def main():
     # file the scan silently skipped would reach a CLI reviewer unscanned, which for the
     # secrets class is the one thing this gate exists to prevent.
     dir_parts, dir_skipped = _scan_dir_texts(att_dirs)
+    # 🔴 R74, five R73 reviewers converged on this hole: a SKIPPED file whose NAME is
+    # secret-shaped (.env, .pem, id_rsa, a keystore) refuses the round outright - that is the
+    # one skip where «warn and proceed» hands a credential file to a CLI reviewer in refs
+    # mode. Everything else keeps the warn-only behaviour below: refusing a round over any
+    # image in a docs folder is the false-positive-in-a-gate class that teaches
+    # override-by-reflex, and a name check on ordinary files is not a content check
+    # (basename-is-not-a-path-check). The name test gates only what is ALREADY outside the
+    # content scan's reach.
+    _key_shaped = [s for s in dir_skipped if _secret_shaped_name(s.split(" (")[0])]
+    if _key_shaped and (atts or att_dirs):
+        log("🔴 SECRET-SHAPED FILE(S) SKIPPED BY THE SCAN inside an attached folder - refusing "
+            "the round, because CLI reviewers in refs mode would read them from disk unscanned:")
+        for s in _key_shaped:
+            log("    %s" % s)
+        log("  Remove them from the folder (or rename the copy) and re-run. There is no "
+            "override for the secrets class.")
+        return 3
     for s in dir_skipped:
         # 🔴 Named as REACHABLE, not merely unscanned: CLI reviewers in refs mode read the
         # folder themselves, so a skipped file is exactly the one place a secret could ride
         # through unseen. agy31pro named the gap the day the feature shipped. Fail-closed was
-        # considered and rejected - refusing a round over any image in a docs folder is the
-        # false-positive-in-a-gate class that teaches override-by-reflex.
+        # considered and rejected for the GENERAL case - see the name-shaped carve-out above.
         log("  [attach-dir] NOT SCANNED for secrets: %s - CLI reviewers in refs mode can "
             "still READ it. If it could hold a key, remove it from the folder or attach the "
             "relevant file with --attach instead." % s)
@@ -6939,6 +7120,9 @@ def main():
     with ThreadPoolExecutor(max_workers=max(4, len(want))) as ex:
         for cname in sorted(want):
             p = (plan or {}).get(cname) or _legacy_slot(cname)
+            # The channel NAME rides on the slot so _record_system keys per channel, not per
+            # display label - labels collide (three "Gemini 3.6 Flash" seats), names cannot.
+            p["_name"] = cname
             kind = p.get("kind")
             outfile = os.path.join(a.out, cname.upper() + ".md")
             workdir = os.path.join(a.out, cname + "-ws")
@@ -7437,6 +7621,11 @@ def main():
         # nobody at the moment it matters.
         if isinstance(_r, dict) and "reading_note" not in _r:
             _r["reading_note"] = _registry_default(_cn, "reading_note", None)
+        # ★ Idea 3 (Igor, 2026-09-01): the mandatory self-read flag rides the same registry
+        # road as the two above - one home, stamped at the same site the R73 live round
+        # proved is the only one that runs in production.
+        if isinstance(_r, dict) and "must_read" not in _r:
+            _r["must_read"] = bool(_registry_default(_cn, "must_read", False))
     handoff = write_handoff(a.out, results, marker=a.marker, brief=a.brief,
                             panel=getattr(a, "panel", None), started=started,
                             answer_cap=a.answer_cap if a.answer_cap and a.answer_cap > 0
@@ -7597,6 +7786,9 @@ def main():
                        "only": a.only, "skip": a.skip, "route": a.route, "sets": a.sets,
                        "brief_chars": len(brief), "strict_pii": a.strict_pii,
                        "ask_mode": ask_mode,
+                       # The cap was invisible in the two artifacts other chats quote
+                       # (grokbuild, R73): HANDOFF metered it, REPORT could not even name it.
+                       "answer_cap": a.answer_cap,
                        # The preset NAME is not what each channel received. See _record_system:
                        # per-channel hints and suffixes make the effective system prompt differ,
                        # and comparing reviews without knowing that is comparing bundles while
