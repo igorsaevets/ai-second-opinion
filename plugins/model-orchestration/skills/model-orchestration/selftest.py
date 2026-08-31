@@ -4868,6 +4868,9 @@ def suite_r72_reading_protocol():
             with open(os.path.join(out, fn), "w", encoding="utf-8") as f:
                 f.write(body)
             results[cn] = {"answer_file": fn, "read_order": ro, "seconds": 1.0}
+        # A standing registry note («NEVER read Nemotron» is the live instance) must surface
+        # UNDER the table, next to the file it advises about - not only in the run tail.
+        results["chan_c"]["reading_note"] = "NEVER read me (fixture note)"
         with contextlib.redirect_stdout(io.StringIO()):
             h = o.write_handoff(out, results, marker=mk, answer_cap=200)
         check(bool(h) and h.get("read_order_files") == ["BBB.md", "AAA.md", "CCC.md"],
@@ -4881,6 +4884,8 @@ def suite_r72_reading_protocol():
               "the protocol section and the ordered resume-prompt line are both in HANDOFF.md")
         check(text.index("`BBB.md`") < text.index("`AAA.md`") < text.index("`CCC.md`"),
               "the printed table itself is in reading order")
+        check("NEVER read me (fixture note)" in text and "(chan_c)" in text,
+              "a registry reading_note surfaces UNDER the handoff table, next to its file")
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

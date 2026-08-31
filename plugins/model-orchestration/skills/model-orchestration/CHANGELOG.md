@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.43.1 — 2026-08-31
+
+* **The reading table's `read` column works in real rounds now.** The first live
+  round printed `?` in every row: the tier was stamped from routing's plan,
+  which carries selected fields only — `read_order` was never among them. A
+  knob that reaches the printout but not the call, caught by the feature's own
+  first live run. Now read from the registry directly (`_registry_default`),
+  the same path `reading_note` uses.
+* **Per-channel `reading_note` from the registry now prints UNDER the
+  reading table**, next to the file it advises about — before, it lived only in
+  the run tail while the reading list stayed silent. Live instance (operator's
+  standing rule): `ornemotron3ultra` — "NEVER read this channel's answer";
+  the channel runs because it is free, not because its answer is consulted.
+  Selftest +1 (801 source / 703 shipped).
+
 ## 1.43.0 — 2026-08-31
 
 The session that orders a panel can now usually read the answers ITSELF — capped

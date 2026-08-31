@@ -1482,7 +1482,7 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
         for _cn, _r in (results or {}).items():
             _af = (_r.get("answer_file") or "").lower() if isinstance(_r, dict) else ""
             if _af:
-                by_file[_af] = (_cn, _r.get("read_order"))
+                by_file[_af] = (_cn, _r.get("read_order"), _r.get("reading_note"))
         files = []
         for fn in sorted(os.listdir(outdir)):
             if not fn.endswith(".md") or fn in skip:
@@ -1507,10 +1507,11 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             except OSError:
                 body = ""
             tail = [ln for ln in body.splitlines() if ln.strip()]
-            cname, r_order = by_file.get(fn.lower(), (None, None))
+            cname, r_order, r_note = by_file.get(fn.lower(), (None, None, None))
             files.append({
                 "file": fn,
                 "channel": cname,
+                "note": r_note,
                 "read_order": r_order if r_order in (1, 2, 3) else 9,
                 # chars, not bytes, for the cap compare: the cap was asked in CHARACTERS and a
                 # Cyrillic answer is ~2 bytes/char in UTF-8, so a byte compare would flag it at
@@ -1563,6 +1564,13 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
                         f"{f['est_tokens']:,}".replace(",", " "),
                         "yes" if f["ends_with_marker"] else
                         ("no — INCOMPLETE, do not parse as a finished review" if marker else "-")))
+        # Standing per-channel reading advice from the registry, printed UNDER the table it
+        # applies to. The file still appears in the table above - the manifest lists what is
+        # on disk, always - but the reader is told, at the moment of choosing, not to open it.
+        for f in fresh:
+            if f.get("note"):
+                L.append("")
+                L.append("⚠ `%s` (%s): %s" % (f["file"], f["channel"] or "-", f["note"]))
         L += ["",
               "**%d answer file(s), %s bytes, ~%s tokens to read all of them** (%d bytes/token, "
               "%s)."
@@ -7416,8 +7424,19 @@ def main():
     # no registry dependency, and a manifest writer that could fail on a broken registry would
     # break the round it describes.
     for _cn, _r in results.items():
+        # 🔴 _registry_default, NOT plan.get(): routing's plan carries selected fields and
+        # read_order is not one of them, so the first live round (R73) printed «?» in every
+        # row of the reading table - the knob was stamped from a dict that never held it.
+        # The R72 selftest missed it because it fed write_handoff hand-built results; the
+        # stamping path only runs in a real round. Same lesson, same fix as reading_note below.
         if isinstance(_r, dict) and "read_order" not in _r:
-            _r["read_order"] = ((plan or {}).get(_cn) or {}).get("read_order")
+            _r["read_order"] = _registry_default(_cn, "read_order", None)
+        # reading_note travels the same road: the registry may carry standing advice about a
+        # channel's answer («NEVER read Nemotron» - Igor, 2026-08-31), and advice that only
+        # prints in the run tail while the READING LIST stays silent is advice that reaches
+        # nobody at the moment it matters.
+        if isinstance(_r, dict) and "reading_note" not in _r:
+            _r["reading_note"] = _registry_default(_cn, "reading_note", None)
     handoff = write_handoff(a.out, results, marker=a.marker, brief=a.brief,
                             panel=getattr(a, "panel", None), started=started,
                             answer_cap=a.answer_cap if a.answer_cap and a.answer_cap > 0
