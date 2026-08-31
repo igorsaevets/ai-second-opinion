@@ -1691,10 +1691,15 @@ def _decorate(plan, reg):
         # function, not the wiring). `read_order`/`reading_note`/`must_read` are deliberately
         # NOT here: those are reader-side fields stamped from the registry at the handoff site
         # (one home) - copying them into the plan too would be a second home that drifts.
+        # 🔴 supported_efforts (R75): the THIRD field found dead at this allow-list in three
+        # consecutive rounds - read_order (R73), fallback_model (R74), now the R43 effort
+        # ladder, which echocheck reads from the PLAN slot. Without the copy its per-channel
+        # arms silently degraded to the ["low","medium","high"] literal R43 existed to kill.
+        # Caught by the R75 suite's derived-candidate test, not by a review.
         for extra in ("reasoning", "max_tokens", "toolsets", "role", "fetch_tool", "tools",
                       "provider", "provider_route", "prompt_suffix", "distribution",
                       "thinking_level", "thinking_levels", "fallback_models",
-                      "fallback_model"):
+                      "fallback_model", "supported_efforts"):
             if ch.get(extra) is not None:
                 p[extra] = ch[extra]
         # Hints are stored ONCE at top level and referenced, because the same 1.5 KB paragraph

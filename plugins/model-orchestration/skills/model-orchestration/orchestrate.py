@@ -3057,10 +3057,17 @@ def _ascii_safe_workdir(workdir, channel_name, tag_prefix):
 
     The fix is the same: mirror the workdir to an ASCII sibling under %TEMP%,
     run the CLI there, and let Python (which uses Windows' wide-path APIs
-    correctly) write the outfile at the caller's original path afterwards. The
-    mirror location is deterministic on an md5 of the original workdir so
-    retries land in the same directory and any files inside survive across
-    invocations.
+    correctly) write the outfile at the caller's original path afterwards.
+
+    The mirror name is deterministic on a sha256 of the original workdir PLUS
+    this process's pid (R75; goog37flash, R73). Deterministic-within-a-process
+    is what retries need - a re-invocation in the same run lands in the same
+    directory. The pid is what CONCURRENT RUNS need: two orchestrate processes
+    pointed at the same --out used to share one mirror, so one run's PROMPT.md
+    could be overwritten mid-flight by the other. The same reviewer's UNASKED
+    half - brief text accumulating in %TEMP% for ever - is answered by the
+    sweep below: siblings older than three days are removed on each use, so
+    the residue is bounded without deleting the dirs a live post-mortem needs.
 
     Extracted 2026-08-20 (R59) after grokbuild reproduced the R37 failure that
     had already been fixed once for agy. Same class, different channel - the
@@ -3073,8 +3080,25 @@ def _ascii_safe_workdir(workdir, channel_name, tag_prefix):
         return workdir
     except UnicodeEncodeError:
         import hashlib
+        import shutil
         safe_root = os.path.join(tempfile.gettempdir(), "orch-%s-ws" % tag_prefix)
         os.makedirs(safe_root, exist_ok=True)
+        swept = 0
+        try:
+            cutoff = time.time() - 3 * 86400
+            for entry in os.listdir(safe_root):
+                full = os.path.join(safe_root, entry)
+                try:
+                    if os.path.isdir(full) and os.path.getmtime(full) < cutoff:
+                        shutil.rmtree(full, ignore_errors=True)
+                        swept += 1
+                except OSError:
+                    continue
+        except OSError:
+            pass
+        if swept:
+            log("  [%s] swept %d stale mirror dir(s) older than 3 days from %s"
+                % (channel_name, swept, safe_root))
         # sha256[:12] not md5[:12] since R59: md5 raises `ValueError: [Beyond FIPS] md5 is not
         # allowed` on Linux/Windows enterprise builds with FIPS mode enabled (measured against
         # a FIPS-Python probe by 3 of 9 panellists). The digest is used as a directory
@@ -3082,7 +3106,7 @@ def _ascii_safe_workdir(workdir, channel_name, tag_prefix):
         # gives 48 bits of entropy either way. Path stays identical shape.
         digest = hashlib.sha256(workdir.encode("utf-8")).hexdigest()[:12]
         tag = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(workdir))[:24] or "ws"
-        mirrored = os.path.join(safe_root, "%s-%s" % (tag, digest))
+        mirrored = os.path.join(safe_root, "%s-%s-p%d" % (tag, digest, os.getpid()))
         log("  [%s] workdir path contains non-ASCII; running in %s so the child "
             "process does not stumble on the non-ASCII characters. The output "
             "file stays at the path you asked for." % (channel_name, mirrored))
@@ -3290,37 +3314,28 @@ def _fetch_host(url):
         return ""
 
 
-def _fetch_guard_host(host):
-    """Return None if the host resolves only to public addresses, else the reason to refuse."""
-    import ipaddress
-    import socket
-    if not host:
-        return "no host in URL"
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror as e:
-        return "DNS failed: %s" % (e,)
-    for info in infos:
-        addr = info[4][0]
-        try:
-            ip = ipaddress.ip_address(addr.split("%")[0])   # strip IPv6 zone index
-        except ValueError:
-            return "unparseable address %r" % addr
-        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
-                or ip.is_reserved or ip.is_unspecified):
-            return ("%s resolves to %s, which is not a public address. This tool reaches the "
-                    "public web only." % (host, ip))
-    return None
-
-
 def _safe_fetch_url(url, timeout=25):
     """Fetch a public web page as text, or return a string explaining why not.
 
     Never raises: a tool call that throws would abort a review that has already been paid for.
     The model is TOLD the failure, in words, and can decide to search again or say it could not
     open the page - which is exactly the behaviour the brief already asks for.
+
+    R75: the resolve-and-refuse check AND the connect are one operation now -
+    citecheck._pinned_request vets every DNS answer and connects to the vetted address itself.
+    The old shape (a _fetch_guard_host check, then urllib opening the URL with its own second
+    resolution) was a time-of-check/time-of-use race three R73 reviewers found independently:
+    a TTL-0 DNS record could answer public to the check and 127.0.0.1 to the connect. One
+    home for that logic, in citecheck, because citecheck must also run standalone.
     """
     import html as _html
+    try:
+        from citecheck import _pinned_request
+    except ImportError:
+        # Fail closed and loud. Falling back to an unpinned urlopen here would silently
+        # reopen the rebinding hole for exactly the installs where it is least visible.
+        return ("REFUSED: citecheck.py is missing beside orchestrate.py, so the pinned fetch "
+                "path is unavailable. The files ship together; restore citecheck.py.")
     seen = 0
     try:
         while True:
@@ -3353,27 +3368,30 @@ def _safe_fetch_url(url, timeout=25):
                 return ("REFUSED: the URL itself contains %s-shaped content. Fetch pages by "
                         "address; never encode brief content, identifiers or credentials into "
                         "a URL." % ", ".join(sorted({h.split(" at ")[0] for h in _sec + _pii})))
-            bad = _fetch_guard_host(parts.hostname)
-            if bad:
-                return "REFUSED: " + bad
-            req = urllib.request.Request(url, headers={
-                "User-Agent": "Mozilla/5.0 (compatible; model-orchestration review harness)",
-                "Accept": "text/html,application/xhtml+xml,text/plain,application/pdf;q=0.8"})
-            opener = urllib.request.build_opener(_NoRedirect())
             try:
-                resp = opener.open(req, timeout=timeout)
+                # Pinned: DNS is resolved once, every answer vetted, and the socket connects
+                # to that exact address (Host/SNI stay on the hostname). Redirects come back
+                # as a status so THIS loop re-guards and re-pins every hop itself.
+                status, hmsg, raw, _pin = _pinned_request(
+                    url, timeout=timeout, body_cap=FETCH_MAX_BYTES,
+                    headers={"User-Agent":
+                             "Mozilla/5.0 (compatible; model-orchestration review harness)",
+                             "Accept": "text/html,application/xhtml+xml,text/plain,"
+                                       "application/pdf;q=0.8"})
+            except ValueError as refuse:
+                return "REFUSED: %s. This tool reaches the public web only." % refuse
             except urllib.error.HTTPError as e:
-                if e.code in (301, 302, 303, 307, 308) and seen < FETCH_MAX_REDIRECTS:
-                    nxt = e.headers.get("Location")
-                    if not nxt:
-                        return "HTTP %s with no Location header." % e.code
-                    url = urllib.parse.urljoin(url, nxt)   # re-guarded at the top of the loop
-                    seen += 1
-                    continue
                 return "HTTP %s fetching %s" % (e.code, url)
-            with resp:
-                ctype = (resp.headers.get("Content-Type") or "").lower()
-                raw = resp.read(FETCH_MAX_BYTES + 1)
+            if status in (301, 302, 303, 307, 308):
+                if seen >= FETCH_MAX_REDIRECTS:
+                    return "HTTP %s fetching %s" % (status, url)
+                nxt = hmsg.get("Location")
+                if not nxt:
+                    return "HTTP %s with no Location header." % status
+                url = urllib.parse.urljoin(url, nxt)   # re-guarded at the top of the loop
+                seen += 1
+                continue
+            ctype = (hmsg.get("Content-Type") or "").lower()
             break
     except Exception as e:
         return "could not fetch %s: %r" % (url, e)
@@ -3394,13 +3412,6 @@ def _safe_fetch_url(url, timeout=25):
         body += "\n\n[TRUNCATED at %d bytes - fetch a more specific URL if you need the rest]" \
                 % FETCH_MAX_BYTES
     return body or "(the page returned no readable text)"
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """Turn redirects into HTTPError so _safe_fetch_url re-guards every hop itself."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
 
 
 # =============================================================================================
@@ -4198,12 +4209,26 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # through _stream_with_retry.
     retries_used = 0
 
+    def _transient_stream_err(err):
+        """True when an SSE error event names a retryable status (429 / 5xx)."""
+        if not isinstance(err, dict):
+            return False
+        for k in ("code", "status"):
+            try:
+                c = int(err.get(k))
+            except (TypeError, ValueError):
+                continue
+            if c == 429 or 500 <= c < 600:
+                return True
+        return False
+
     def _stream_with_retry(b):
-        nonlocal retries_used
+        nonlocal retries_used, in_tot, cached_tot, usd_tot, usd_seen, usd_max_round
         retries_left = 2
         while True:
+            err_base, cite_base = len(stream_error), len(vendor_cites)
             try:
-                return _stream_once(b)
+                out = _stream_once(b)
             except urllib.error.HTTPError as e:
                 if retries_left <= 0 or (e.code != 429 and e.code < 500):
                     raise
@@ -4223,6 +4248,51 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                        (" (Retry-After: %s)" % ra) if ra else "",
                        wait, retries_left, "y" if retries_left == 1 else "ies"))
                 time.sleep(wait)
+                continue
+            # 🔴 R75 (grokbuild, R73): OpenRouter's documented mid-stream failure is HTTP 200
+            # plus an SSE `error` event - the door handler above never sees it, so one such
+            # event used to cost the whole seat. Retried ONLY when the dead stream delivered
+            # NOTHING: no content, no reasoning, no tool call, no vendor citation, and no
+            # completion_tokens in whatever usage arrived. Under that condition a re-send can
+            # double-pay for the INPUT at most (said plainly below) - the moment any completion
+            # token was delivered, a retry could double-bill generation, so it stays fatal.
+            # Deliberately NOT retried either: mid-stream socket errors and timeouts - there
+            # the vendor may still be generating (and billing) server-side, and only its own
+            # error event proves it stopped.
+            chunk, rch, use_, calls_ = out[0], out[1], out[2] or {}, out[3]
+            new_errs = stream_error[err_base:]
+            if (new_errs and retries_left > 0
+                    and not chunk and not rch and not calls_
+                    and len(vendor_cites) == cite_base
+                    and not (use_.get("completion_tokens") or 0)
+                    and any(_transient_stream_err(e) for e in new_errs)):
+                del stream_error[err_base:]
+                # The discarded attempt's INPUT was billed if the vendor said so - fold any
+                # reported usage into the meters rather than dropping it with the attempt
+                # (the spend-vs-report split is the R41 defect, not risked twice).
+                in_tot += use_.get("prompt_tokens") or 0
+                cached_tot += ((use_.get("prompt_tokens_details") or {})
+                               .get("cached_tokens") or 0)
+                _dc = use_.get("cost")
+                if _dc is not None:
+                    try:
+                        _dc = float(_dc)
+                        usd_tot += _dc
+                        usd_max_round = max(usd_max_round, _dc)
+                        usd_seen = True
+                    except (TypeError, ValueError):
+                        pass
+                retries_left -= 1
+                retries_used += 1
+                wait = 2 ** (2 - retries_left)
+                log("  [%s] provider error event mid-stream (HTTP 200) with ZERO completion "
+                    "tokens delivered - retrying the same request in %ds (%d retr%s left for "
+                    "this call). The re-send can re-bill the prompt, never the generation: "
+                    "nothing was generated." % (name, wait, retries_left,
+                                                "y" if retries_left == 1 else "ies"))
+                time.sleep(wait)
+                continue
+            return out
 
     try:
         for _round in range(max_rounds + 1):
@@ -4816,6 +4886,11 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             # tool, which is the first question Igor's «может не настроен поиск?» asks. Same
             # class as R44's two-counters-over-one-event, in the quiet direction.
             "fetches": fetches if fetch_on else None,
+            # R75: the SUCCESS path never carried `retries` - only the failure paths did, via
+            # _telemetry(). A retry that saves the seat is the COMMON case, and it was the
+            # invisible one (the R48 shape: a field most return sites promise, missing from
+            # the one that runs most often). Found by the R75 suite, not by a review.
+            "retries": retries_used or None,
             # D6: `opened_urls` here really was ours, but it shared a name with the vendor-side
             # count on xai and gemini. Same vocabulary now, so the two can never be added up.
             **_grounding(fetched=opened),
@@ -6385,7 +6460,10 @@ _ATT_TEXT_EXT = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml", ".ini"
 
 
 _SECRET_NAME_RE = re.compile(
-    r"(?i)(?:^|[\\/])(?:\.env(?:\.[^\\/]*)?|[^\\/]*\.(?:pem|key|p12|pfx|ppk|jks|keystore)|"
+    # `[^\\/]*\.env`, not `\.env` (R75): the dotfile-only form let `prod.env` / `dev.env` -
+    # the docker-compose env_file convention - walk past a gate written for exactly that
+    # class. `$` plus the mandatory dot keep `envelope.md` and `x.envision` out.
+    r"(?i)(?:^|[\\/])(?:[^\\/]*\.env(?:\.[^\\/]*)?|[^\\/]*\.(?:pem|key|p12|pfx|ppk|jks|keystore)|"
     r"id_(?:rsa|dsa|ecdsa|ed25519)[^\\/]*|credentials(?:\.json)?)$")
 
 
@@ -6458,7 +6536,7 @@ def _scan_dir_texts(dirs, max_bytes=2_000_000, max_files=200):
     return parts, skipped
 
 
-def _attach_inline(atts, att_dirs):
+def _attach_inline(atts, att_dirs, n_vetted=None, n_skipped=None):
     """The attachment section API channels receive: full file text, folders named as absent."""
     out = []
     for i, (p, text) in enumerate(atts, 1):
@@ -6467,13 +6545,18 @@ def _attach_inline(atts, att_dirs):
         # Named as absent rather than silently dropped: a reviewer told about a folder it cannot
         # see would otherwise "read" it from imagination, which is the exact fabrication class
         # the panel exists to catch.
+        counts = ""
+        if n_vetted is not None:
+            counts = (" (host-machine reviewers receive a vetted copy: %d file(s)%s)"
+                      % (n_vetted,
+                         ", %d excluded by the vetting scan" % n_skipped if n_skipped else ""))
         out.append("\n\n---\n\nNOTE: %d supporting folder(s) accompany this brief but are NOT "
-                   "included here - only reviewers running on the host machine can read folders. "
-                   "Do not claim to have read them." % len(att_dirs))
+                   "included here - only reviewers running on the host machine can read "
+                   "folders%s. Do not claim to have read them." % (len(att_dirs), counts))
     return "".join(out)
 
 
-def _attach_refs(atts, att_dirs):
+def _attach_refs(atts, att_dirs, skipped=None):
     """The attachment section CLI channels receive: absolute paths plus the read-only contract.
 
     The rules ride in the BRIEF, not only in a persona slot, because placement is load-bearing
@@ -6484,6 +6567,12 @@ def _attach_refs(atts, att_dirs):
     advertises write/exec tools behind `request-review` - in headless mode an attempt is
     auto-denied and the denial DISCARDS THE RUN, so its guarantee is enforcement by death of
     the turn, not absence of the capability. This text is the instruction layer on top.
+
+    R75: a folder entry may be a (vetted_copy_path, original_path) pair - the path HANDED OUT
+    is the vetted copy, and the original never appears in the payload, not even in the skip
+    manifest (a path in the brief is an invitation to open it, and codex/grok reads are not
+    bounded by cwd). `skipped` names what the vetting excluded, by RELATIVE path only, so the
+    reviewer knows the folder copy is partial instead of hallucinating the missing files.
     """
     lines = ["\n\n---\n\nDOCUMENTS ON DISK - READ THEM YOURSELF\n",
              "You are running on the machine that holds the material under review. Open these "
@@ -6492,8 +6581,22 @@ def _attach_refs(atts, att_dirs):
     for i, (p, text) in enumerate(atts, 1):
         lines.append("- FILE %d: %s  (%d bytes)" % (i, p, len(text.encode("utf-8"))))
     for d in att_dirs:
-        lines.append("- FOLDER: %s  (supporting material - list it, read what the review needs)"
-                     % d)
+        if isinstance(d, tuple):
+            lines.append("- FOLDER: %s  (a vetted copy of the supporting folder %r - list it, "
+                         "read what the review needs)" % (d[0], os.path.basename(d[1])))
+        else:
+            lines.append("- FOLDER: %s  (supporting material - list it, read what the review "
+                         "needs)" % d)
+    if skipped:
+        shown = skipped[:30]
+        lines.append("\nNOT INCLUDED in the folder copies - excluded by the vetting scan. Do "
+                     "not claim to have read these; if one matters, say so and the operator "
+                     "can attach it explicitly:")
+        for s in shown:
+            lines.append("- %s" % s)
+        if len(skipped) > len(shown):
+            lines.append("- ... and %d more (the run log lists them all)"
+                         % (len(skipped) - len(shown)))
     lines.append(
         "\nSTRICT RULES for these locations, non-negotiable:\n"
         "- READ ONLY. Do not modify, create, delete, move or rename ANYTHING there or anywhere "
@@ -6503,6 +6606,47 @@ def _attach_refs(atts, att_dirs):
         "output folder. You write no files anywhere.\n"
         "- If a path does not open, say so plainly and review what you could read.")
     return "\n".join(lines)
+
+
+def _vet_snapshot(att_dirs, dir_parts, snap_root):
+    """Plan the vetted folder copies CLI reviewers receive instead of the original folders.
+
+    R75 (codex, R73, deferred from R74): refs mode used to hand CLI reviewers the ORIGINAL
+    folder path, so every file the scan SKIPPED - oversized, binary, past the file cap -
+    was readable by them unscanned. The R74 name gate closed only the key-shaped corner.
+    Now the reviewers get a copy holding EXACTLY the decoded text the gate scanned, so
+    «vetted» and «reachable» are the same set by construction. The copy is written as the
+    SCANNED TEXT, not the original bytes: copying bytes would re-open a byte-level gap the
+    scan never saw (a secret split by invalid UTF-8 survives decode-with-replace as broken
+    text but survives a byte copy intact).
+
+    Returns (pairs, writes): pairs = [(snapshot_dir, original_dir)] aligned with att_dirs,
+    writes = [(destination_path, text)]. Nothing is written here - main() writes AFTER the
+    gate passes, so a refused round leaves no copy behind.
+    """
+    pairs, writes = [], []
+    for i, d in enumerate(att_dirs, 1):
+        base = re.sub(r"[^A-Za-z0-9._-]", "_",
+                      os.path.basename(d.rstrip("\\/")))[:40] or "dir"
+        pairs.append((os.path.join(snap_root, "%d-%s" % (i, base)), d))
+    for label, text in dir_parts:
+        p = label[len("attach-dir:"):]
+        owners = [(sd, d) for sd, d in pairs if p.startswith(d.rstrip("\\/") + os.sep)]
+        if not owners:
+            continue
+        sd, d = max(owners, key=lambda t: len(t[1]))
+        writes.append((os.path.join(sd, os.path.relpath(p, d)), text))
+    return pairs, writes
+
+
+def _write_vetted_snapshot(pairs, writes):
+    """Write the planned copies. newline='' keeps the scanned text's own line endings."""
+    for sd, _d in pairs:
+        os.makedirs(sd, exist_ok=True)
+    for dest, text in writes:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
 
 
 def main():
@@ -6815,15 +6959,53 @@ def main():
     if atts or att_dirs:
         log("attachments: %d file(s), %d chars total%s"
             % (len(atts), sum(len(t) for _p, t in atts),
-               ("; %d folder(s), by reference" % len(att_dirs)) if att_dirs else ""))
+               ("; %d folder(s), as a vetted copy" % len(att_dirs)) if att_dirs else ""))
         log("  API channels receive the file(s) INLINE%s. CLI channels (codex, agy, grok build) "
             "receive ABSOLUTE PATHS and read from this disk themselves - read-only, no write or "
             "shell tools, and they may consult surrounding material."
-            % ("; folders reach CLI channels only" if att_dirs else ""))
+            % ("; folders reach CLI channels only, as a VETTED COPY of the scanned files"
+               if att_dirs else ""))
         log("  🔴 refs mode TRUSTS the attached material: a hostile document can steer a CLI "
             "reviewer's read tools (grok build's read_file is not bounded by its cwd - "
             "measured). Attach material you authored or trust; send foreign documents inline "
             "in the brief instead.")
+
+    # Attached FOLDERS are scanned file by file HERE, before the payload is assembled, because
+    # the refs section must name the VETTED COPY and its skip manifest, not the original dir
+    # (R75; codex, R73: the original path handed to a CLI reviewer made every skipped file
+    # readable unscanned - the fail-closed copy was designed then and deferred to this round).
+    # Nothing is written yet: the copy lands on disk only after the gate below passes.
+    dir_parts, dir_skipped = _scan_dir_texts(att_dirs)
+    # 🔴 R74, five R73 reviewers converged on this hole: a SKIPPED file whose NAME is
+    # secret-shaped (.env, .pem, id_rsa, a keystore) refuses the round outright. The R75
+    # vetted copy already excludes every skipped file structurally, but the refusal STAYS:
+    # a credential file inside attached material is an operator error worth stopping loudly,
+    # not smoothing over - and the alarm is what stops the NEXT round attaching the same
+    # folder somewhere with no vetting. rsplit, not split: a path may itself contain " ("
+    # («C:\docs (old)\x.env»), and the left split handed the name check a truncated path.
+    _key_shaped = [s for s in dir_skipped if _secret_shaped_name(s.rsplit(" (", 1)[0])]
+    if _key_shaped and (atts or att_dirs):
+        log("🔴 SECRET-SHAPED FILE(S) SKIPPED BY THE SCAN inside an attached folder - refusing "
+            "the round. The vetted copy would exclude them, but a credential file riding in "
+            "review material is an operator error to fix, not to smooth over:")
+        for s in _key_shaped:
+            log("    %s" % s)
+        log("  Remove them from the folder (or rename the copy) and re-run. There is no "
+            "override for the secrets class.")
+        return 3
+    _snap_pairs, _snap_writes = _vet_snapshot(
+        att_dirs, dir_parts, os.path.join(a.out, "attach-vetted"))
+    _skip_manifest = []
+    for s in dir_skipped:
+        pth, _sep, why = s.rpartition(" (")
+        owners = [d for d in att_dirs if pth.startswith(d.rstrip("\\/") + os.sep)]
+        rel = os.path.relpath(pth, max(owners, key=len)) if owners else os.path.basename(pth)
+        _skip_manifest.append("%s (%s" % (rel, why))
+        # Console line keeps the FULL path (the operator needs it); the payload manifest above
+        # carries the relative form only - an absolute path in a brief is an invitation for an
+        # unbounded CLI read tool to open the unvetted original.
+        log("  [attach-dir] excluded from the vetted copy: %s - CLI reviewers cannot read it "
+            "there. If it must be reviewed, attach the file explicitly with --attach." % s)
 
     # The length discipline rides INSIDE the payload, before the marker block, so the final
     # layout keeps the marker last: [brief][cap][attachments][marker]. It bounds the ANSWER and
@@ -6896,8 +7078,11 @@ def main():
         if _pos != -1:
             brief, _mk = brief[:_pos], brief[_pos:]
     if atts or att_dirs:
-        brief_refs = brief + _attach_refs(atts, att_dirs) + _cap_block + _mk
-        brief = brief + _attach_inline(atts, att_dirs) + _cap_block + _mk
+        brief_refs = (brief + _attach_refs(atts, _snap_pairs, _skip_manifest)
+                      + _cap_block + _mk)
+        brief = (brief + _attach_inline(atts, att_dirs, n_vetted=len(_snap_writes),
+                                        n_skipped=len(dir_skipped))
+                 + _cap_block + _mk)
     else:
         brief = brief + _cap_block + _mk
         brief_refs = brief
@@ -6945,35 +7130,10 @@ def main():
         log("  note: --allow-pii is now a no-op - personal identifiers are sent by default and "
             "the gate no longer even lists them. Use --warn-pii or --strict-pii to turn it back on.")
     # Attached FILES are already inside `brief` (inline variant), so the same scan covers them.
-    # Attached FOLDERS are scanned file by file, and every skip is printed by name - a folder
-    # file the scan silently skipped would reach a CLI reviewer unscanned, which for the
-    # secrets class is the one thing this gate exists to prevent.
-    dir_parts, dir_skipped = _scan_dir_texts(att_dirs)
-    # 🔴 R74, five R73 reviewers converged on this hole: a SKIPPED file whose NAME is
-    # secret-shaped (.env, .pem, id_rsa, a keystore) refuses the round outright - that is the
-    # one skip where «warn and proceed» hands a credential file to a CLI reviewer in refs
-    # mode. Everything else keeps the warn-only behaviour below: refusing a round over any
-    # image in a docs folder is the false-positive-in-a-gate class that teaches
-    # override-by-reflex, and a name check on ordinary files is not a content check
-    # (basename-is-not-a-path-check). The name test gates only what is ALREADY outside the
-    # content scan's reach.
-    _key_shaped = [s for s in dir_skipped if _secret_shaped_name(s.split(" (")[0])]
-    if _key_shaped and (atts or att_dirs):
-        log("🔴 SECRET-SHAPED FILE(S) SKIPPED BY THE SCAN inside an attached folder - refusing "
-            "the round, because CLI reviewers in refs mode would read them from disk unscanned:")
-        for s in _key_shaped:
-            log("    %s" % s)
-        log("  Remove them from the folder (or rename the copy) and re-run. There is no "
-            "override for the secrets class.")
-        return 3
-    for s in dir_skipped:
-        # 🔴 Named as REACHABLE, not merely unscanned: CLI reviewers in refs mode read the
-        # folder themselves, so a skipped file is exactly the one place a secret could ride
-        # through unseen. agy31pro named the gap the day the feature shipped. Fail-closed was
-        # considered and rejected for the GENERAL case - see the name-shaped carve-out above.
-        log("  [attach-dir] NOT SCANNED for secrets: %s - CLI reviewers in refs mode can "
-            "still READ it. If it could hold a key, remove it from the folder or attach the "
-            "relevant file with --attach instead." % s)
+    # Attached FOLDERS were scanned into dir_parts BEFORE the payload was assembled (R75: the
+    # refs section names the vetted copy and its skip manifest, so the scan had to move up);
+    # this gate is still the last point at which anything can be stopped for free, and the
+    # vetted copy is written only after it passes.
     gate = pii_gate([("brief", brief), ("system", system)] + dir_parts,
                     strict_pii=a.strict_pii, warn_pii=a.warn_pii)
     if gate:
@@ -7013,6 +7173,15 @@ def main():
     if a.dry_run:
         log("--dry-run: nothing was called")
         return 0
+
+    # The vetted folder copy is written only now: after the gate passed, after --dry-run has
+    # had its free exit (a dry run materialises no payload artifacts - the scan log above
+    # already names every exclusion), and only when a channel that reads by reference is
+    # actually in the round - an API-only round never needs the copy on disk.
+    if att_dirs and any(k in REFS_KINDS for k in kinds.values()):
+        _write_vetted_snapshot(_snap_pairs, _snap_writes)
+        log("  [attach-dir] vetted copy written: %d file(s) under %s (%d excluded)"
+            % (len(_snap_writes), os.path.join(a.out, "attach-vetted"), len(dir_skipped)))
 
     # 🔴🔴 THE ONE-SHOT-WRITE GATE. Three reviewers, independently, found the hole in 1.8.0's own
     # fix: the home settings file survives every update, so a single compromised assistant session
@@ -7131,7 +7300,10 @@ def main():
             # them inline. One variable per channel, chosen by capability, never by name.
             use_refs = bool((atts or att_dirs) and kind in REFS_KINDS)
             cbrief = brief_refs if use_refs else brief
-            att_parents = (sorted({os.path.dirname(pth) for pth, _t in atts} | set(att_dirs))
+            # Folder grants point at the VETTED COPY, never the original dir (R75): granting
+            # the original would hand agy exactly the unscanned files the copy exists to fence.
+            att_parents = (sorted({os.path.dirname(pth) for pth, _t in atts}
+                                  | {sd for sd, _d in _snap_pairs})
                            if use_refs else None)
             if kind == "http":
                 jobs[cname] = ex.submit(call_http_reviewer, cbrief, _system_for(system, p),

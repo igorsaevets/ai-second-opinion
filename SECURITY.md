@@ -87,7 +87,9 @@ monitors that bill with nobody watching. That is why the answer to a permissions
 ## Treat model output as untrusted input
 
 A cited URL is model-generated text. `citecheck.py` refuses to fetch non-public hosts (localhost,
-private address ranges) for exactly that reason.
+private address ranges) for exactly that reason — and since 1.45.0 every such fetch, including
+the model-facing page-fetch tool, connects to the exact address the check vetted (per redirect
+hop, TLS validated against the hostname), so a TTL-0 DNS rebinding answer has nothing to rebind.
 
 More generally: models produce real-looking source references for pages that were never opened and
 sometimes never existed — measured here at 3 dead URLs out of 11, from a channel that had opened

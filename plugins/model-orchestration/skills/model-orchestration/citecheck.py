@@ -22,12 +22,14 @@ correct - as here - but it was not verified, and it must not be reported as if i
 """
 
 import argparse
+import http.client
 import ipaddress
 import json
 import os
 import random
 import re
 import socket
+import ssl
 import sys
 import time
 import urllib.error
@@ -167,30 +169,122 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 _PRIVATE = re.compile(r"^(?:localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|\[?::1\]?$)")
 
 
-def _host_resolves_public(host):
-    """DNS-resolve the host and refuse if ANY answer is non-public.
+def _resolve_public(host, port=None):
+    """getaddrinfo ONCE; refuse unless EVERY answer is public. (addresses, None) or (None, reason).
 
-    R74, three R73 reviewers converged (codex, agy37flash, goog37flash): the string regex
-    above never resolved anything, so `localtest.me`, an attacker DNS record, or a decimal
-    IP (`2130706433` = 127.0.0.1) walked straight past it into urlopen. Same class of check
-    as orchestrate._fetch_guard_host; the remaining TOCTOU (urllib re-resolves at connect)
-    is shared with that fence and documented there - this closes the «never resolved at
-    all» half, not the rebinding half.
-    Returns None if public, else a short reason string.
+    R74 closed the «never resolved at all» half of this fence (a string regex let
+    `localtest.me` and decimal IPs through). R75 closes the other half: the addresses
+    returned here are what _pinned_request actually CONNECTS to, so there is no second
+    resolution for a TTL-0 record to rebind. An address getaddrinfo returns but ipaddress
+    cannot parse is a refusal, not a skip - an unparseable address cannot be vetted, and
+    for a pin «could not check» must never mean «allowed».
     """
     try:
-        infos = socket.getaddrinfo(host, None)
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError as e:
-        return "DNS failed (%s)" % getattr(e, "strerror", e)
+        return None, "DNS failed (%s)" % (getattr(e, "strerror", None) or e)
+    addrs = []
     for info in infos:
+        raw = str(info[4][0]).split("%")[0]     # strip IPv6 zone index
         try:
-            ip = ipaddress.ip_address(str(info[4][0]).split("%")[0])
+            ip = ipaddress.ip_address(raw)
         except ValueError:
-            continue
+            return None, "unparseable address %r" % raw
         if (ip.is_private or ip.is_loopback or ip.is_link_local
                 or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
-            return "resolves to non-public address %s" % ip
-    return None
+            return None, "resolves to non-public address %s" % ip
+        addrs.append(raw)
+    if not addrs:
+        return None, "DNS returned no addresses"
+    return addrs, None
+
+
+def _host_resolves_public(host):
+    """Refusal reason if the host resolves to anything non-public, else None.
+
+    Kept as the name the tests and older call sites know; the resolution itself moved into
+    _resolve_public so that the checker and the pin draw from ONE implementation.
+    """
+    return _resolve_public(host)[1]
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """TLS to a PRE-RESOLVED address; SNI and the certificate check stay on the HOSTNAME.
+
+    http.client is handed the vetted IP, so it has nothing left to resolve; the server
+    still sees the right SNI and the certificate is validated against the original host,
+    not the IP - a pin that broke TLS validation would trade one hole for another.
+    """
+
+    def __init__(self, ip, port, server_hostname, timeout):
+        http.client.HTTPSConnection.__init__(
+            self, ("[%s]" % ip) if ":" in ip else ip, port,
+            timeout=timeout, context=ssl.create_default_context())
+        self._server_hostname = server_hostname
+
+    def connect(self):
+        self.sock = socket.create_connection((self.host, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(self.sock,
+                                              server_hostname=self._server_hostname)
+
+
+def _pinned_conn(scheme, host, ip, port, timeout):
+    """The socket seam, one function so tests can intercept it without touching sockets."""
+    if scheme == "https":
+        return _PinnedHTTPSConnection(ip, port, host, timeout)
+    return http.client.HTTPConnection(("[%s]" % ip) if ":" in ip else ip, port,
+                                      timeout=timeout)
+
+
+def _pinned_request(url, *, method="GET", timeout=20, headers=None, body_cap=1_048_576):
+    """One HTTP(S) exchange over a connection PINNED to a vetted address. Follows nothing.
+
+    THE POINT (R75; codex + goog36flash + orgemini37flash, R73, independently): resolving a
+    hostname to check it and then letting urllib open the URL is a time-of-check/time-of-use
+    race - a TTL-0 DNS record can answer public to the check and 127.0.0.1 or
+    169.254.169.254 to urllib's own second resolution at connect time. Here the socket
+    connects to the exact address that passed the check, so a rebinding answer has nothing
+    left to rebind. Redirects are NOT followed: every caller loops itself and re-enters this
+    function, which re-checks and re-pins each hop. Ambient proxy variables are deliberately
+    not honoured - an SSRF fence that hands the URL to a proxy delegates the one decision it
+    exists to make.
+
+    Returns (status, header_message, body_bytes, pinned_ip); the body is read to at most
+    body_cap+1 bytes so a caller can detect overflow. Raises ValueError for refusals
+    (scheme, credentials-in-URL, DNS, non-public address) and urllib.error.HTTPError for
+    any status >= 400, so existing except-clauses keep their meaning.
+    """
+    s = urlsplit(url)
+    if s.scheme not in ("http", "https"):
+        raise ValueError("scheme %r is not allowed; only http and https" % s.scheme)
+    host = s.hostname
+    if not host:
+        raise ValueError("no host in URL")
+    if s.username or s.password:
+        raise ValueError("credentials in a URL are refused")
+    port = s.port or (443 if s.scheme == "https" else 80)
+    addrs, bad = _resolve_public(host, port)
+    if bad:
+        raise ValueError(bad)
+    pin = addrs[0]
+    conn = _pinned_conn(s.scheme, host, pin, port, timeout)
+    default_port = 443 if s.scheme == "https" else 80
+    hdrs = {"Host": host if port == default_port else "%s:%d" % (host, port),
+            "User-Agent": UA, "Connection": "close"}
+    for k, v in (headers or {}).items():
+        hdrs[k] = v
+    path = (s.path or "/") + (("?" + s.query) if s.query else "")
+    try:
+        # An explicit Host header suppresses http.client's own (which would name the IP).
+        conn.request(method, path, headers=hdrs)
+        resp = conn.getresponse()
+        body = b"" if method == "HEAD" else resp.read(body_cap + 1)
+        status, msg, reason = resp.status, resp.msg, resp.reason
+    finally:
+        conn.close()
+    if status >= 400:
+        raise urllib.error.HTTPError(url, status, reason, msg, None)
+    return status, msg, body, pin
 
 
 def probe_url(u, timeout=20):
@@ -212,10 +306,10 @@ def probe_url(u, timeout=20):
     Only public http(s) hosts are probed. A cited URL is attacker-controlled text as far as this
     process is concerned - a model can emit http://127.0.0.1:8080/admin - so loopback and RFC1918
     targets are refused rather than fetched. R74: refused at EVERY hop, with DNS resolution -
-    the old check matched a regex against the first hostname string only, so a public host
-    redirecting to loopback, a DNS name resolving private, or a decimal-encoded IP sailed
-    through into a default urlopen that follows redirects on its own (codex + agy37flash +
-    goog37flash, R73, independently). Redirects are now followed manually, each hop re-checked.
+    the old check matched a regex against the first hostname string only (codex + agy37flash +
+    goog37flash, R73, independently). R75: the connection itself is PINNED to the vetted
+    address via _pinned_request, closing the check-then-reconnect rebinding race the R74 fix
+    documented as still open. Redirects are followed manually, each hop re-checked and re-pinned.
     """
     try:
         cur = u
@@ -226,16 +320,16 @@ def probe_url(u, timeout=20):
             host = (s.hostname or "").lower()
             if not host or _PRIVATE.match(host):
                 return "SKIPPED", "non-public host" + ("" if cur == u else " after redirect")
-            bad = _host_resolves_public(host)
-            if bad:
-                return "SKIPPED", bad + ("" if cur == u else " (after redirect)")
-            req = urllib.request.Request(cur, method="GET", headers={"User-Agent": UA})
-            op = urllib.request.build_opener(_StopAtRedirect)
             try:
-                with op.open(req, timeout=timeout):
-                    pass
-            except _Redirected as r:
-                cur = urljoin(cur, r.url)      # a relative Location is legal
+                st, hdrs, _body, _ip = _pinned_request(cur, method="GET",
+                                                       timeout=timeout, body_cap=0)
+            except ValueError as refuse:
+                return "SKIPPED", str(refuse) + ("" if cur == u else " (after redirect)")
+            if st in (301, 302, 303, 307, 308):
+                loc = hdrs.get("Location")
+                if not loc:
+                    return "UNKNOWN", "HTTP %d with no Location header" % st
+                cur = urljoin(cur, loc)        # a relative Location is legal
                 continue
             if cur.split("?")[0].rstrip("/") == u.split("?")[0].rstrip("/"):
                 return "LIVE", ""
@@ -252,19 +346,6 @@ def probe_url(u, timeout=20):
 
 
 WRAPPER_MARK = "grounding-api-redirect"
-
-
-class _StopAtRedirect(urllib.request.HTTPRedirectHandler):
-    """Capture the first Location instead of following it."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise _Redirected(newurl)
-
-
-class _Redirected(Exception):
-    def __init__(self, url):
-        Exception.__init__(self, url)
-        self.url = url
 
 
 def resolve_wrapper(u, timeout=15):
@@ -285,16 +366,19 @@ def resolve_wrapper(u, timeout=15):
     citation a human can check and a citation they cannot. The channel that emits them was
     written off as unauditable for two rounds on the strength of a sentence that was true about
     the OTHER question.
+
+    R75: rides _pinned_request like every other model-influenced URL here - the wrapper host
+    is Google's today, but the string arrives in model output and earns no exemption.
     """
     if not u or WRAPPER_MARK not in u:
         return None
-    op = urllib.request.build_opener(_StopAtRedirect)
     try:
-        op.open(urllib.request.Request(u, headers={"User-Agent": UA}), timeout=timeout)
-    except _Redirected as r:
-        return r.url
+        st, hdrs, _body, _ip = _pinned_request(u, timeout=timeout, body_cap=0)
     except Exception:
         return None
+    if st in (301, 302, 303, 307, 308):
+        loc = hdrs.get("Location")
+        return urljoin(u, loc) if loc else None
     return None
 
 

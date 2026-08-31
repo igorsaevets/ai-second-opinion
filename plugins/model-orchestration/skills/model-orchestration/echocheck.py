@@ -196,9 +196,15 @@ def run_arm(cname, tier, fragment, outdir, brief_path, system_path, timeout_s):
     with open(ov, "w", encoding="utf-8") as f:
         json.dump(fragment, f, ensure_ascii=False)
     env = dict(os.environ, MODEL_ORCH_LOCAL=ov, PYTHONIOENCODING="utf-8")
+    # --answer-cap 0: without it the review-mode default (20000 chars) rides into every probe
+    # (R75; grokbuild, R73). The cap paragraph is a constant so it cannot fake a knob, but the
+    # OUTPUT-token fallback meter in verdict() reads verbosity - an instruction about answer
+    # length is exactly the contamination that meter cannot subtract. The instrument sends
+    # the naked probe.
     cmd = [sys.executable, os.path.join(HERE, "orchestrate.py"),
            "--brief", brief_path, "--system", system_path, "--only", cname,
-           "--tier", tier, "--marker", MARKER, "--out", outdir, "--no-citecheck"]
+           "--tier", tier, "--marker", MARKER, "--out", outdir, "--no-citecheck",
+           "--answer-cap", "0"]
     try:
         subprocess.run(cmd, env=env, timeout=timeout_s, capture_output=True)
     except subprocess.TimeoutExpired:
@@ -332,6 +338,28 @@ def main():
                          "NO LADDER - this channel declares no two values to compare"))
             continue
         levels = [int(x) if str(x).lstrip("-").isdigit() else x for x in levels]
+        # 🔴 verdict() reads levels[0] as the LOW arm and levels[1] as the HIGH arm - it has
+        # to read them as SOMETHING, and until R75 that something was silently «the order you
+        # typed them», so `--levels high,low` reported a working knob as INVERTED (agy37flash,
+        # R73). Explicit --levels values are therefore re-ordered: by the channel's own
+        # declared ladder when both values are on it, ascending when both are numeric. When
+        # neither ordering applies (--knob with arbitrary strings) the typed order stands and
+        # is PRINTED as an assumption, because a silent assumption is how the bug got in.
+        if a.levels:
+            given = list(levels)
+            if ladder and all(lv in ladder for lv in levels):
+                levels = [lv for lv in ladder if lv in levels]
+                if len(levels) != 2:      # the same value twice collapses; keep the typed pair
+                    levels = given
+            elif all(isinstance(lv, int) for lv in levels):
+                levels = sorted(levels)
+            if levels != given:
+                print("  %-16s note: --levels re-ordered to low-first: %r (you typed %r)"
+                      % (cname, levels, given))
+            elif not (ladder and all(lv in ladder for lv in given)) \
+                    and not all(isinstance(lv, int) for lv in given):
+                print("  %-16s note: treating %r as the LOW arm and %r as the HIGH arm"
+                      % (cname, levels[0], levels[1]))
         if cost == "expensive" and not a.allow_expensive:
             jobs.append((cname, desc, levels, None, None,
                          "SKIPPED - priced `expensive`; pass --allow-expensive"))

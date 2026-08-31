@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.45.0 — 2026-08-31
+
+The R73 panel's accepted-but-deferred backlog, closed. Three further defects
+were found by this release's own new tests while writing them — listed last.
+
+* **SSRF fetches are PINNED to the vetted address** (codex + goog36flash +
+  orgemini37flash, independently). Checking a hostname and then letting urllib
+  open the URL was a time-of-check/time-of-use race: a TTL-0 DNS record could
+  answer public to the check and 127.0.0.1 to urllib's own second resolution.
+  New `citecheck._pinned_request` resolves once, refuses unless EVERY answer is
+  public, and connects to that exact address — Host header, SNI and the TLS
+  certificate check stay on the original hostname; redirects are not followed
+  but re-entered, so every hop re-checks and re-pins. `_safe_fetch_url` (the
+  model-facing fetch tool), `probe_url` and the grounding-wrapper resolver all
+  ride it; ambient proxy variables are deliberately ignored. One home, in
+  citecheck, because citecheck must run standalone.
+* **`--attach-dir` hands CLI reviewers a VETTED COPY, never the original
+  folder** (codex, R73). The original path made every file the scan skipped —
+  oversized, binary, past the file cap — readable unscanned; the R74 name gate
+  closed only the key-shaped corner. The copy holds exactly the decoded text
+  the gate scanned («vetted» and «reachable» are the same set by construction;
+  byte-copying would smuggle what decode-with-replace hid), is written only
+  after the gate passes and never on `--dry-run`, and the payload now carries a
+  skip manifest by RELATIVE path — the original folder path appears nowhere in
+  it. agy's `--add-dir` grants point at the copy too.
+* **A mid-stream SSE error at ZERO delivered tokens is retried** (grokbuild,
+  R73). OpenRouter's documented mid-stream failure is HTTP 200 plus an SSE
+  `error` event — the door retry never saw it, so one such event cost the whole
+  seat. Retried only when nothing arrived: no content, no reasoning, no tool
+  call, no citation, no completion_tokens — then a re-send can re-bill the
+  prompt, never the generation. Delivered-anything, non-transient codes,
+  socket drops and timeouts stay fatal (the vendor may still be generating
+  server-side). The discarded attempt's reported usage is folded into the
+  meters rather than dropped.
+* **echocheck: `--levels high,low` no longer mints a false INVERTED verdict**
+  (agy37flash): explicit levels are re-ordered by the channel's own declared
+  ladder (ascending when numeric); when neither applies the typed order stands
+  and is printed as an assumption. Probes now run with `--answer-cap 0`
+  (grokbuild): the review-mode default rode into every probe and contaminated
+  the output-token fallback meter.
+* **Workdir mirrors are per-process and swept** (goog37flash): the ASCII
+  mirror under %TEMP% was deterministic across PROCESSES, so two concurrent
+  runs on one workdir could overwrite each other's PROMPT.md mid-flight — the
+  name now carries the pid (retries stay in-process, so they still reuse it),
+  and siblings older than three days are removed on use, bounding the brief
+  text that used to accumulate there for ever.
+* Found by this release's own tests, not by the panel: **`prod.env` /
+  `dev.env` passed the secret-shaped-name gate** (it matched only the dotfile
+  `.env`); **the R43 effort ladder was DEAD in echocheck** — `supported_efforts`
+  was the third registry field lost at routing's `_decorate` allow-list in
+  three rounds (`read_order` R73, `fallback_model` R74), so per-channel arms
+  silently degraded to the `["low","medium","high"]` literal R43 existed to
+  kill; and **`retries` was missing from the success-path record** — a retry
+  that saved the seat was invisible exactly when it worked. All three now
+  pinned by tests.
+
 ## 1.44.0 — 2026-09-01
 
 Everything in this release was bought by R73 — a 13-channel panel sent the

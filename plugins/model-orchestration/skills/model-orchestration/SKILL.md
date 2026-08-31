@@ -123,8 +123,8 @@ are the registry key, upper-cased.
 | `--marker` | literal string the reply must end with; absent ⇒ incomplete |
 | `--out` | output directory. Default `./reviews` |
 | `--system` | preset name or path (§0.2). The no-non-existence rule is appended — end the file with a newline |
-| `--attach` / `--attach-dir` | document / folder beside the brief. CLI channels get the **absolute path** and read it from disk (read-only); API channels get files **inline**, folders named as unreadable. Secrets-scanned either way. 🔴 Refs trust the attachment: only material you authored |
-| `--answer-cap` | ask every reviewer to keep the FINAL answer under N chars (default `20000` ≈ 5K tokens; `0` = off and the `--ask` default — a lookup promises «no length requirement»). Prompt-level at the payload TAIL, after attachments — depth and `max_tokens` untouched; `HANDOFF.md` names who exceeded it or declared `TRUNCATED-BY-LIMIT` |
+| `--attach` / `--attach-dir` | document / folder beside the brief. CLI channels: files by **absolute path**, folders as a **vetted copy** of scanned text (skips listed; original path never sent); API channels: files **inline**, folders named unreadable. 🔴 Refs trust the attachment: only material you authored |
+| `--answer-cap` | ask every reviewer to keep the FINAL answer under N chars (default `20000` ≈ 5K tokens; `0` = off and the `--ask` default). Prompt-level at the payload TAIL, after attachments — depth and `max_tokens` untouched; `HANDOFF.md` names who exceeded it or declared `TRUNCATED-BY-LIMIT` |
 | `--only` | restrict channels. Names, aliases and **group** words all work — vendor families and billing paths; `routing.py` prints every accepted spelling. 🔴 One channel per argument: `--only a b c`, never `--only "a b c"` |
 | `--skip` | the inverse of `--only`; on a clash (`--only <group> --skip <member>`) **skip wins** |
 | `--set` | pin a model: `--set codex=gpt-5.4` |

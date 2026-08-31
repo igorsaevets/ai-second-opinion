@@ -3451,9 +3451,9 @@ def suite_refs_and_meters():
         (sub / "blob.bin").write_bytes(b"\x00\x01\x02" * 100)
         r3 = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
                       "--attach-dir", str(sub)])
-        check(r3.returncode == 0 and "NOT SCANNED for secrets" in blob_of(r3),
-              "a binary in --attach-dir is skipped BY NAME, never silently",
-              "exit=%d" % r3.returncode)
+        check(r3.returncode == 0 and "excluded from the vetted copy" in blob_of(r3),
+              "a binary in --attach-dir is excluded LOUDLY (R75: named as outside the "
+              "vetted copy), round not blocked", "exit=%d" % r3.returncode)
         r4 = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
                       "--attach", str(Path(td) / "nope.md")])
         check(r4.returncode == 2 and "file not found" in blob_of(r4),
@@ -4325,8 +4325,10 @@ def suite_r59_grokbuild_cyrillic_and_recitation():
           "R59: tag_prefix 'grokbuild' produces %TEMP%/orch-grokbuild-ws/ — the helper "
           "parameter is not decorative")
 
-    # Determinism: same input twice must land in the same directory so retries reuse it.
-    # A UUID-based mirror would fail this. Documented in the helper's docstring.
+    # Determinism WITHIN A PROCESS: same input twice must land in the same directory so
+    # retries reuse it. A UUID-based mirror would fail this. R75 added the pid to the name
+    # (concurrent PROCESSES must not share a mirror) - retries stay in-process, so this
+    # property survives; the cross-process half is asserted in suite_r75_backlog.
     m2 = _o._ascii_safe_workdir(p_cyr, "grokbuild", "grokbuild")
     check(m1 == m2,
           "R59: _ascii_safe_workdir is deterministic — retries land in the same directory "
@@ -5052,7 +5054,9 @@ def suite_r74_panel_fixes():
               "unresolvable on Windows - fail-closed either way)", repr((v, why)))
         real_gai = cc.socket.getaddrinfo
         try:
-            cc.socket.getaddrinfo = lambda h, p: [(2, 1, 6, "", ("127.0.0.1", 0))]
+            # **kw: R75's _resolve_public passes type=SOCK_STREAM; a two-positional stub
+            # would die with TypeError and report the wrong failure.
+            cc.socket.getaddrinfo = lambda h, p, **kw: [(2, 1, 6, "", ("127.0.0.1", 0))]
             v2, why2 = cc.probe_url("http://r74-fake-public-host.example/")
             check(v2 == "SKIPPED" and "non-public" in why2,
                   "a hostname RESOLVING to loopback is refused before any connection",
@@ -5192,6 +5196,355 @@ def suite_r74_panel_fixes():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def suite_r75_backlog():
+    """R75. The R73 deferred backlog, closed: pin-IP fetch, vetted attach copy,
+    mid-stream SSE retry at zero delivered tokens, echocheck --levels ordering,
+    workdir pid isolation + sweep.
+    """
+    section("R75. pin-IP fetch · vetted attach copy · SSE retry · echocheck order")
+    import contextlib
+    import http.server
+    import io
+    import threading
+    import time as _time
+    import citecheck as cc
+    import echocheck as e
+    import orchestrate as o
+
+    d = tempfile.mkdtemp(prefix="r75-selftest-")
+    try:
+        # ---- (a) DNS rebinding: the connect goes to the address the CHECK vetted ----------
+        # A TTL-0 attacker answers public to the first resolution and loopback to the second.
+        # The pin means there IS no second resolution to poison.
+        gai_calls = {"n": 0}
+        connected = []
+
+        class _FakeResp:
+            status, reason = 200, "OK"
+            msg = {"Content-Type": "text/plain"}
+
+            def read(self, n=-1):
+                return b"pinned body"
+
+        class _FakeConn:
+            def request(self, *a, **k):
+                pass
+
+            def getresponse(self):
+                return _FakeResp()
+
+            def close(self):
+                pass
+
+        real_gai, real_conn = cc.socket.getaddrinfo, cc._pinned_conn
+        try:
+            def _rebinding_gai(h, p, **kw):
+                gai_calls["n"] += 1
+                ip = "93.184.216.34" if gai_calls["n"] == 1 else "127.0.0.1"
+                return [(2, 1, 6, "", (ip, p or 0))]
+            cc.socket.getaddrinfo = _rebinding_gai
+            cc._pinned_conn = (lambda scheme, host, ip, port, timeout:
+                               connected.append(ip) or _FakeConn())
+            st, _h, body, pin = cc._pinned_request("http://rebind.example/x")
+            check(st == 200 and body == b"pinned body" and gai_calls["n"] == 1,
+                  "R75: one exchange, ONE resolution - no second lookup exists to race",
+                  repr((st, gai_calls["n"])))
+            check(connected == ["93.184.216.34"] and pin == "93.184.216.34",
+                  "R75: the socket connected to the FIRST, vetted address - the rebinding "
+                  "second answer had nothing left to rebind", repr(connected))
+
+            # Control that can fail: private resolution refuses BEFORE the socket seam.
+            connected.clear()
+            cc.socket.getaddrinfo = (lambda h, p, **kw:
+                                     [(2, 1, 6, "", ("10.0.0.5", p or 0))])
+            try:
+                cc._pinned_request("http://internal.example/")
+                check(False, "R75 control: a private-resolving host must raise")
+            except ValueError as ve:
+                check("non-public" in str(ve) and not connected,
+                      "R75 control: private resolution is refused with the socket seam "
+                      "untouched", repr((str(ve)[:60], connected)))
+
+            # A MIXED answer (one public, one private) refuses too - the attacker must not
+            # be able to smuggle a private target in a multi-A response.
+            cc.socket.getaddrinfo = (lambda h, p, **kw:
+                                     [(2, 1, 6, "", ("93.184.216.34", 0)),
+                                      (2, 1, 6, "", ("192.168.1.7", 0))])
+            try:
+                cc._pinned_request("http://mixed.example/")
+                check(False, "R75: a mixed public+private answer must raise")
+            except ValueError as ve:
+                check("non-public" in str(ve),
+                      "R75: one private address in a multi-A answer refuses the whole host")
+
+            # probe_url re-pins EVERY redirect hop: hop 1 -> 302 to a second host, which
+            # resolves private -> SKIPPED «after redirect», with the connect count at 1.
+            connected.clear()
+            hop = {"n": 0}
+
+            class _RedirResp(_FakeResp):
+                status = 302
+                msg = {"Location": "http://second.example/land"}
+
+            class _RedirConn(_FakeConn):
+                def getresponse(self):
+                    return _RedirResp()
+
+            def _hop_gai(h, p, **kw):
+                hop["n"] += 1
+                ip = "93.184.216.34" if h == "rebind.example" else "127.0.0.1"
+                return [(2, 1, 6, "", (ip, p or 0))]
+            cc.socket.getaddrinfo = _hop_gai
+            cc._pinned_conn = (lambda scheme, host, ip, port, timeout:
+                               connected.append(ip) or _RedirConn())
+            v, why = cc.probe_url("http://rebind.example/start")
+            check(v == "SKIPPED" and "after redirect" in why and connected == ["93.184.216.34"],
+                  "R75: a public host 302-ing to a private-resolving one is refused at the "
+                  "hop, having connected only to the vetted first address",
+                  repr((v, why[:60], connected)))
+
+            # _safe_fetch_url rides the same pinned path end to end.
+            connected.clear()
+            gai_calls["n"] = 0
+            cc.socket.getaddrinfo = _rebinding_gai
+            cc._pinned_conn = (lambda scheme, host, ip, port, timeout:
+                               connected.append(ip) or _FakeConn())
+            page = o._safe_fetch_url("http://rebind.example/page")
+            check("pinned body" in page and connected == ["93.184.216.34"],
+                  "R75: orchestrate's fetch_url tool fetches over the pinned connection",
+                  repr((page[:40], connected)))
+        finally:
+            cc.socket.getaddrinfo, cc._pinned_conn = real_gai, real_conn
+
+        # ---- (b) the vetted folder copy ----------------------------------------------------
+        aroot = os.path.join(d, "attach")
+        os.makedirs(os.path.join(aroot, "docs (old)"))
+        with open(os.path.join(aroot, "notes.md"), "w", encoding="utf-8") as f:
+            f.write("clean text for review\n")
+        with open(os.path.join(aroot, "docs (old)", "blob.bin"), "wb") as f:
+            f.write(b"\x00" * 64)
+        parts, skipped = o._scan_dir_texts([aroot])
+        pairs, writes = o._vet_snapshot([aroot], parts, os.path.join(d, "vet"))
+        o._write_vetted_snapshot(pairs, writes)
+        snap = pairs[0][0]
+        check(os.path.isfile(os.path.join(snap, "notes.md")),
+              "R75: the scanned file exists in the vetted copy")
+        check(not os.path.exists(os.path.join(snap, "docs (old)", "blob.bin")),
+              "R75: the SKIPPED file does not exist in the copy - «vetted» and «reachable» "
+              "are the same set by construction")
+        with open(os.path.join(snap, "notes.md"), encoding="utf-8", newline="") as f:
+            check(f.read() == parts[0][1],
+                  "R75: the copy holds EXACTLY the text the gate scanned, byte for byte")
+        refs = o._attach_refs([], pairs, ["docs (old)%sblob.bin (binary)" % os.sep])
+        check(snap in refs and aroot not in refs,
+              "R75: refs hand out the vetted copy; the ORIGINAL folder path appears "
+              "nowhere in the payload")
+        check("NOT INCLUDED" in refs and "blob.bin (binary)" in refs,
+              "R75: the skip manifest names what the copy does not hold, by relative path")
+        refs_str = o._attach_refs([], [aroot], None)
+        check(("- FOLDER: %s" % aroot) in refs_str,
+              "R75 control: a plain-string folder entry still renders as itself")
+
+        # End to end: a secret-shaped SKIPPED name still refuses the round (belt AND braces
+        # - the copy would exclude it, but the operator error stays loud), and the refusal
+        # fires through main() with the R75 reordering in place.
+        er = os.path.join(d, "attach-bad")
+        os.makedirs(er)
+        with open(os.path.join(er, "prod.env"), "w", encoding="utf-8") as f:
+            f.write("x" * 2_100_001)          # oversized -> skipped -> name gate fires
+        bp = os.path.join(d, "brief.md")
+        with open(bp, "w", encoding="utf-8") as f:
+            f.write("R75 synthetic brief. No vendor is called.")
+        real_gate, real_argv = o.pii_gate, sys.argv
+        try:
+            o.pii_gate = lambda parts, **kw: None
+            sys.argv = ["orchestrate.py", "--brief", bp, "--attach-dir", er,
+                        "--marker", "R75-DONE", "--dry-run", "--out", os.path.join(d, "o1")]
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc_bad = o.main()
+            sys.argv = ["orchestrate.py", "--brief", bp, "--attach-dir", aroot,
+                        "--marker", "R75-DONE", "--dry-run", "--out", os.path.join(d, "o2")]
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc_ok = o.main()
+        finally:
+            o.pii_gate, sys.argv = real_gate, real_argv
+        check(rc_bad == 3, "R75: a key-shaped skipped name still refuses the round (rc 3)",
+              "rc=%r" % rc_bad)
+        check(rc_ok == 0, "R75 control: a clean folder passes the same path (rc 0)",
+              "rc=%r" % rc_ok)
+        check(not os.path.exists(os.path.join(d, "o2", "attach-vetted")),
+              "R75: --dry-run materialises NO vetted copy - a dry run writes no payload "
+              "artifacts")
+
+        # ---- (c) mid-stream SSE error at zero delivered tokens is retried ------------------
+        sse_hits = []
+
+        class _SSESeq(http.server.BaseHTTPRequestHandler):
+            scripts = []
+
+            def do_POST(self):
+                n = len(sse_hits)
+                sse_hits.append(self.path)
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                body = self.scripts[min(n, len(self.scripts) - 1)]
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        _err429 = (b'data: {"error": {"code": 429, "message": "mid-stream limit"}}\n\n'
+                   b'data: [DONE]\n\n')
+        _err400 = (b'data: {"error": {"code": 400, "message": "bad request"}}\n\n'
+                   b'data: [DONE]\n\n')
+        _good = (b'data: {"choices": [{"delta": {"content": "Fine.\\nR75-SSE-MARK"}, '
+                 b'"finish_reason": "stop"}], "model": "selftest/echo"}\n\n'
+                 b'data: {"usage": {"prompt_tokens": 10, "completion_tokens": 4}}\n\n'
+                 b'data: [DONE]\n\n')
+        _err_with_text = (b'data: {"choices": [{"delta": {"content": "partial"}}]}\n\n'
+                          b'data: {"error": {"code": 429, "message": "late limit"}}\n\n'
+                          b'data: [DONE]\n\n')
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), _SSESeq)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        url = "http://127.0.0.1:%d/v1/chat/completions" % srv.server_address[1]
+        sleeps = []
+        real_sleep, real_envkey = o.time.sleep, o._env_key
+        o.OAI_PROVIDERS["_r75sse"] = {
+            "key_env": "SELFTEST_NOT_A_KEY", "url": url, "depth": "reasoning",
+            "search": "plugin", "usage_request": None, "label": "r75 sse loopback",
+            "streaming": True,
+        }
+        try:
+            o.time.sleep = lambda s: sleeps.append(s)
+            o._env_key = lambda name: "selftest-dummy"
+
+            def _run(tag):
+                return o.call_oai_reviewer(
+                    BRIEF, "R75-SSE-MARK", os.path.join(d, tag + ".md"),
+                    model="selftest/echo", name="_r75sse", provider="_r75sse",
+                    fetch_tool={"enabled": False}, max_tokens=200, timeout=30)
+            _SSESeq.scripts = [_err429, _good]
+            with contextlib.redirect_stdout(io.StringIO()):
+                res = _run("sse-a")
+            check(res.get("ok") is True and len(sse_hits) == 2 and sleeps == [2],
+                  "R75: an SSE 429 event with ZERO delivered tokens is retried once and "
+                  "the seat survives",
+                  "ok=%r hits=%d sleeps=%r err=%s" % (res.get("ok"), len(sse_hits),
+                                                      sleeps, str(res.get("error"))[:80]))
+            check((res.get("retries") or 0) >= 1,
+                  "R75: the retry is visible in telemetry, not silent")
+
+            sse_hits.clear()
+            sleeps.clear()
+            _SSESeq.scripts = [_err_with_text, _good]
+            with contextlib.redirect_stdout(io.StringIO()):
+                _run("sse-b")
+            check(len(sse_hits) == 1 and not sleeps,
+                  "R75 control: the same error AFTER a content delta is NOT retried - "
+                  "delivered tokens mean a re-send could double-bill generation",
+                  "hits=%d sleeps=%r" % (len(sse_hits), sleeps))
+
+            sse_hits.clear()
+            sleeps.clear()
+            _SSESeq.scripts = [_err400, _good]
+            with contextlib.redirect_stdout(io.StringIO()):
+                _run("sse-c")
+            check(len(sse_hits) == 1 and not sleeps,
+                  "R75 control: a NON-transient error event (400) is not retried even at "
+                  "zero tokens", "hits=%d" % len(sse_hits))
+        finally:
+            o.time.sleep = real_sleep
+            o._env_key = real_envkey
+            o.OAI_PROVIDERS.pop("_r75sse", None)
+            srv.shutdown()
+            srv.server_close()
+
+        # ---- (d) echocheck: --levels order comes from the ladder, not the typing -----------
+        # The candidate is DERIVED, not pinned (R74: tests must state the world) - any
+        # channel knob_for() would give the supported_efforts ladder to, in either world.
+        import routing as _rt
+        reg = _rt.load_registry()
+        cand = next((c for c, ch in reg["channels"].items()
+                     if ch.get("kind") in ("openrouter", "oai")
+                     and isinstance(ch.get("reasoning"), dict)
+                     and len(ch.get("supported_efforts") or []) >= 2), None)
+        check(cand is not None,
+              "R75: at least one openrouter/oai channel declares a 2+ rung "
+              "supported_efforts ladder")
+        if cand:
+            plan75 = _rt.resolve(reg, only=[cand])
+            check((plan75.get(cand) or {}).get("supported_efforts")
+                  == reg["channels"][cand]["supported_efforts"],
+                  "R75: the PLAN carries supported_efforts - the third registry field "
+                  "found dead at _decorate's allow-list in three rounds (read_order R73, "
+                  "fallback_model R74, the R43 ladder now)")
+            lad = reg["channels"][cand]["supported_efforts"]     # highest first (R43)
+            hi, lo = lad[0], lad[-1]
+            real_eargv = sys.argv
+            try:
+                sys.argv = ["echocheck.py", "--only", cand,
+                            "--levels", "%s,%s" % (hi, lo), "--dry-run"]
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = e.main()
+                out = buf.getvalue()
+            finally:
+                sys.argv = real_eargv
+            check(rc == 0 and "re-ordered to low-first" in out,
+                  "R75: --levels typed high-first is re-ordered by the channel's own "
+                  "ladder instead of minting a false INVERTED verdict", out[-200:])
+            check(("%r vs %r" % (lo, hi)) in out,
+                  "R75: the dry-run plan shows the LOW arm first after re-ordering",
+                  out[-200:])
+
+        # run_arm sends the naked probe: --answer-cap 0 is on the child's command line.
+        rec = {}
+        real_subrun = e.subprocess.run
+
+        def _fake_run(cmd, **kw):
+            rec["cmd"] = list(cmd)
+            raise e.subprocess.TimeoutExpired(cmd, 1)
+        try:
+            e.subprocess.run = _fake_run
+            res_arm = e.run_arm("x", "max", {"channels": {}}, d, bp, bp, 5)
+        finally:
+            e.subprocess.run = real_subrun
+        cmdl = rec.get("cmd") or []
+        check("--answer-cap" in cmdl and cmdl[cmdl.index("--answer-cap") + 1] == "0",
+              "R75: echocheck probes run with --answer-cap 0 - the review-mode default "
+              "would contaminate the output-token fallback meter", repr(cmdl[-6:]))
+        check(res_arm.get("error", "").startswith("timed out"),
+              "R75 control: the fake subprocess was actually consulted", repr(res_arm))
+
+        # ---- (e) workdir: pid isolation between processes, sweep of stale mirrors ----------
+        wd = os.path.join(d, "кириллица-ws")
+        with contextlib.redirect_stdout(io.StringIO()):
+            m = o._ascii_safe_workdir(wd, "t", "r75test")
+        check(m.endswith("-p%d" % os.getpid()),
+              "R75: the mirror name carries THIS pid - two orchestrate processes on one "
+              "workdir cannot share a mirror", m)
+        root = os.path.dirname(m)
+        stale = os.path.join(root, "stale-x")
+        fresh = os.path.join(root, "fresh-x")
+        os.makedirs(stale, exist_ok=True)
+        os.makedirs(fresh, exist_ok=True)
+        old = _time.time() - 4 * 86400
+        os.utime(stale, (old, old))
+        with contextlib.redirect_stdout(io.StringIO()):
+            o._ascii_safe_workdir(wd, "t", "r75test")
+        check(not os.path.exists(stale),
+              "R75: a mirror sibling older than 3 days is swept on the next use")
+        check(os.path.exists(fresh),
+              "R75 control: a fresh sibling survives the sweep")
+        shutil.rmtree(root, ignore_errors=True)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -5232,7 +5585,8 @@ def main():
                   suite_r70_transport_retry_and_timeout,
                   suite_r71_bom_payload_and_gate_signature,
                   suite_r72_reading_protocol,
-                  suite_r74_panel_fixes):
+                  suite_r74_panel_fixes,
+                  suite_r75_backlog):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
