@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.42.0 — 2026-08-30
+
+Both changes were harvested by a read-only comparison against a sister project's
+review runner (R71/D1) — one defect travelled in each direction.
+
+* **A BOM no longer rides into the payload.** The brief, a user-authored
+  `--system` file and every `--attach`ed document are now read with `utf-8-sig`.
+  Before: a file saved by Notepad or PowerShell 5 `Out-File` starts with U+FEFF,
+  and a plain `utf-8` read shipped it to every channel as the payload's first
+  character (brief and system) or inline (attachments) — the "BOM poisoning"
+  class the sister project's audit panel named on 2026-08-17 and fixed on its
+  side; our reader had the same hole. On BOM-less files `utf-8-sig` reads
+  byte-identically, so nothing else changes.
+* **`pii_gate`'s flags are keyword-only — a stale positional caller now fails
+  loudly, as the 2026-08-07 inversion always claimed it would.** BREAKING for
+  anyone importing `orchestrate.pii_gate` and passing flags positionally, and
+  deliberately so: the `allow_pii`→`strict_pii` inversion delivered its promised
+  "fails visibly" for one polarity only. A caller passing the old `True`
+  positionally hit a loud refusal, but one passing `False` silently inherited
+  the new send-by-default policy — measured on the sister project's runner,
+  still passing its old flag positionally eleven days after the inversion, its
+  outbound gate flipped from block-by-default to send-by-default with no signal
+  in either tree. Now ANY positional flag dies with a `TypeError` at the gate,
+  before anything is sent. Fix for callers: pass `strict_pii=`/`warn_pii=` by
+  keyword.
+* **New selftest suite (+9 checks).** Functional, through `main(--dry-run)`
+  with the gate monkeypatched as the capture point: fixture files that provably
+  carry a BOM under plain `utf-8` (the control that can fail) must reach the
+  gate with no U+FEFF anywhere — brief, system and inline attachment; and a
+  positional `pii_gate` call must raise `TypeError` while the keyword form
+  still passes clean text. Still zero vendor calls.
+
 ## 1.41.0 — 2026-08-30
 
 * **A 429 no longer kills a whole review on the OpenAI-protocol transport (backlog

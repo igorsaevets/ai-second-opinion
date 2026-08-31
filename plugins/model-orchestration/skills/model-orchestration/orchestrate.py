@@ -1899,7 +1899,7 @@ def openrouter_credits():
         return None
 
 
-def pii_gate(parts, strict_pii=False, warn_pii=False):
+def pii_gate(parts, *, strict_pii=False, warn_pii=False):
     """
     parts: list of (label, text). Returns an exit code to propagate, or 0 to continue.
 
@@ -1924,9 +1924,14 @@ def pii_gate(parts, strict_pii=False, warn_pii=False):
     for three vendors may be permitted silently by policy but never INVISIBLY by accident, and a
     gate whose output is indistinguishable from a gate that crashed is worse than no gate.
 
-    The `strict_pii` argument used to be spelled `allow_pii` and defaulted to blocking; it is
-    inverted rather than renamed in place so that a stale caller passing the old positional value
-    fails visibly instead of silently flipping the policy.
+    The `strict_pii` argument used to be spelled `allow_pii` and defaulted to blocking. The
+    inversion alone made only HALF of the promised "a stale caller fails visibly" true: a caller
+    passing the old True positionally did hit a loud refusal, but one passing False silently
+    inherited the new send-by-default policy. Measured R71 (2026-08-30) on a sister project's
+    review runner: it still passed its old flag positionally eleven days after the inversion, so
+    its outbound gate had flipped from block-by-default to send-by-default with no signal in
+    either tree. The flags are keyword-only since R71: ANY positional caller now dies with a
+    TypeError at the gate, before anything is sent, whichever value it passed.
     """
     secrets, pii = [], []
     for label, text in parts:
@@ -6529,7 +6534,12 @@ def main():
             log("ROUTE ERROR: %s" % e)
             return 2
 
-    with open(a.brief, encoding="utf-8") as f:
+    # utf-8-sig, not utf-8: a hand-made brief saved by Notepad or PowerShell 5 `Out-File` carries
+    # a BOM, and plain utf-8 ships U+FEFF as the payload's FIRST character to every channel - the
+    # "BOM poisoning" class a sister project's audit panel named 2026-08-17; its runner has read
+    # briefs this way since, ours had not (harvested R71). On a BOM-less file utf-8-sig reads
+    # byte-identically to utf-8.
+    with open(a.brief, encoding="utf-8-sig") as f:
         brief = f.read()
 
     # ---- attachments: one document, two delivery modes -------------------------------------
@@ -6540,7 +6550,9 @@ def main():
             log("--attach %s: file not found" % pth)
             return 2
         try:
-            with open(p_abs, encoding="utf-8", errors="replace") as fh:
+            # utf-8-sig: same BOM class as the brief read above - an attached file's BOM would
+            # otherwise ride into the payload as an inline U+FEFF.
+            with open(p_abs, encoding="utf-8-sig", errors="replace") as fh:
                 atts.append((p_abs, fh.read()))
         except OSError as exc:
             log("--attach %s: cannot read (%s)" % (pth, exc))
@@ -6616,7 +6628,10 @@ def main():
     # amplifier that used to be pasted by hand into briefs; it now ships and applies everywhere.
     system = "You are an independent reviewer. You are NOT the author. Find what is wrong."
     try:
-        with open(_resolve_system(a.system or "base-depth"), encoding="utf-8") as f:
+        # utf-8-sig: the system layer rides in FRONT of the brief on CLI channels
+        # (_with_system), so a BOM in a user-authored --system file would again be the
+        # payload's leading character.
+        with open(_resolve_system(a.system or "base-depth"), encoding="utf-8-sig") as f:
             system = f.read()
     except SystemExit:
         if a.system:                      # an explicitly named preset that does not exist is fatal

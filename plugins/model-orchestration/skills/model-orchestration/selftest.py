@@ -4710,6 +4710,91 @@ def suite_r70_transport_retry_and_timeout():
           "; ".join(bare))
 
 
+def suite_r71_bom_payload_and_gate_signature():
+    """R71 (D1 harvest). A BOM dies at the file boundary; the gate refuses positional flags.
+
+    (a) BOM poisoning: a brief, --system file or attachment saved by Notepad or
+        PowerShell 5 `Out-File` starts with U+FEFF, and a plain utf-8 read used
+        to ship it to every vendor as the payload's first character — the class
+        a sister project's audit panel named 2026-08-17; its runner has read
+        briefs with utf-8-sig since, ours had not. Functional, through
+        main(--dry-run): the fixture control proves each file REALLY starts
+        with a BOM under plain utf-8, then the parts captured at pii_gate prove
+        none of it survived into the payload. --dry-run returns after the gate,
+        so nothing is dispatched and no vendor is called.
+
+    (b) pii_gate flags are keyword-only. The 2026-08-07 allow_pii→strict_pii
+        inversion promised "a stale positional caller fails visibly" and
+        delivered it for ONE polarity: True hit a loud refusal, False silently
+        inherited send-by-default (measured R71 on a sister project's runner,
+        still positional eleven days after the inversion). A positional call
+        must now die with TypeError at the gate, before anything is sent.
+    """
+    section("R71. BOM at the payload boundary + gate signature")
+    import orchestrate as o
+
+    d = tempfile.mkdtemp(prefix="orch-r71-")
+    try:
+        bom = "\ufeff"
+        paths = {}
+        for name, body in (("brief", "R71-BRIEF body; nothing here calls a vendor."),
+                           ("system", "R71-SYS reviewer framing from a user file."),
+                           ("attach", "R71-ATT attached document text.")):
+            p = os.path.join(d, name + ".md")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(bom + body)
+            paths[name] = p
+        # The control that can fail: prove the fixtures actually carry a BOM under plain
+        # utf-8 — otherwise every assertion below is vacuously green.
+        with open(paths["brief"], encoding="utf-8") as f:
+            check(f.read().startswith(bom),
+                  "fixture control: a plain utf-8 read DOES see the BOM")
+
+        captured = {}
+
+        def _capture_gate(parts, *, strict_pii=False, warn_pii=False):
+            captured["parts"] = [(label, text) for label, text in parts]
+            return 0
+
+        real_gate, real_argv = o.pii_gate, sys.argv[:]
+        o.pii_gate = _capture_gate
+        try:
+            sys.argv = ["orchestrate.py", "--brief", paths["brief"],
+                        "--system", paths["system"], "--attach", paths["attach"],
+                        "--marker", "R71-DONE-MARK",
+                        "--out", os.path.join(d, "reviews"), "--dry-run"]
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = o.main()
+        finally:
+            o.pii_gate, sys.argv = real_gate, real_argv
+        check(rc == 0, "--dry-run with BOM'd brief/system/attach returns 0", "rc=%r" % rc)
+        parts = captured.get("parts") or []
+        by = dict(parts)
+        check("brief" in by and "system" in by,
+              "the gate saw brief and system parts", str(sorted(by)))
+        check(by.get("brief", "").startswith("R71-BRIEF"),
+              "the brief reaches the gate WITHOUT its BOM as first character")
+        check("R71-ATT" in by.get("brief", ""),
+              "the attachment is inline in the gated brief (so the gate scans it)")
+        check(not by.get("system", "").startswith(bom) and "R71-SYS" in by.get("system", ""),
+              "a user-authored --system file reaches the gate WITHOUT its BOM")
+        joined = "".join(text for _label, text in parts)
+        check(bom not in joined,
+              "no U+FEFF anywhere in the gated payload parts (attachment BOM included)")
+
+        # ---- (b) the signature IS the guard now ------------------------------------------
+        try:
+            o.pii_gate([("brief", "clean text")], True)
+            check(False, "positional strict_pii must raise TypeError", "no exception")
+        except TypeError:
+            check(True, "a positional flag dies loudly at the gate (TypeError)")
+        with contextlib.redirect_stdout(io.StringIO()):
+            kw_ok = o.pii_gate([("brief", "clean text")], strict_pii=True) == 0
+        check(kw_ok, "the keyword form still works and clean text passes strict mode")
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -4747,7 +4832,8 @@ def main():
                   suite_r58_update_check,
                   suite_r59_grokbuild_cyrillic_and_recitation,
                   suite_r60_shipped_docs_and_kit_exclusion,
-                  suite_r70_transport_retry_and_timeout):
+                  suite_r70_transport_retry_and_timeout,
+                  suite_r71_bom_payload_and_gate_signature):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
