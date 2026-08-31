@@ -3833,9 +3833,10 @@ def suite_r56_agy_concurrency_and_permissions():
               "server may take it away, because a wildcard deny cannot be rescued by a more "
               "specific allow (arm S)" % tool)
     check("mcp(playwright/*)" not in deny,
-          "the playwright server is not denied wholesale - the owner's call, 2026-08-20. A "
-          "denial here is free in run terms, which is exactly why it is tempting to add one "
-          "nobody asked for")
+          "the playwright server is not denied wholesale - the owner's call, 2026-08-20, "
+          "re-confirmed knowingly 2026-08-31 after a full risk briefing (CLOSED, not "
+          "pending). A denial here is free in run terms, which is exactly why it is "
+          "tempting to add one nobody asked for")
     check("mcp(jina-mcp-server/show_api_key)" in deny,
           "wildcarding every server pulled the credential-revealing tool into reach, and the SAME "
           "change denies it - a widened allow and its matching deny belong in one commit")

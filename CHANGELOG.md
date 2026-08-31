@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.45.1 — 2026-08-31
+
+* **A marker wrapped in markdown emphasis is a COMPLETE answer** (R77, #358). One
+  channel's whole R76 review was graded UNVERIFIED over `**MARKER**` on the last
+  line — content complete, proven by reading. `_marker_on_last_line` now also
+  accepts the marker with `*`/`_`/`~`/backtick stripped from the line's ENDS;
+  the R67 suffix-confusion property survives (`PREVIEW-DONE` still fails against
+  `REVIEW-DONE` — stripping punctuation from the ends never removes a letter),
+  and the display strip stays consistent by construction, since it applies the
+  same rule.
+* Registry: the codex channel's default model rotated back to `gpt-5.5`
+  (owner's call, 2026-08-31; slug probe-confirmed live before a real round).
+* The recorded owner decision on the playwright MCP server is now marked CLOSED
+  in `patch_agy_permissions.py` — re-confirmed 2026-08-31 after a plain-words
+  briefing of the risk, so future rounds stop reopening it.
+
 ## 1.45.0 — 2026-08-31
 
 The R73 panel's accepted-but-deferred backlog, closed. Three further defects

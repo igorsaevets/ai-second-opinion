@@ -735,7 +735,16 @@ def _marker_on_last_line(text, marker):
     if not marker:
         return True
     lines = text.strip().splitlines()
-    return bool(lines) and lines[-1].strip() == marker
+    if not lines:
+        return False
+    last = lines[-1].strip()
+    # R77 (#358): a marker wrapped in markdown emphasis is a COMPLETE answer wearing bold.
+    # GROK420's whole R76 review was graded UNVERIFIED over `**KROKAI-R76-DONE-01**` - content
+    # complete, adjudicated by reading. Emphasis characters are stripped from the ENDS only,
+    # so the R67 suffix-confusion property survives: `PREVIEW-DONE-R66` still fails equality
+    # against `REVIEW-DONE-R66` because stripping punctuation from its ends never removes the
+    # leading P from a word.
+    return last == marker or last.strip("*_~`") == marker
 
 
 def _strip_marker_tail(text, marker):

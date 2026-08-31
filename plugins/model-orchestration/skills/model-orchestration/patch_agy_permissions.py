@@ -162,13 +162,15 @@ DENY = [
     "mcp(cloakbrowser/cloak_get_cookies)",   # session material, outbound
     "mcp(cloakbrowser/cloak_network_intercept)",
     "mcp(cloakbrowser/cloak_network_continue)",
-    # 🔴 playwright is deliberately NOT here - the owner's call, 2026-08-20, asserted by
-    # selftest (suite R57) in both directions. R74 nearly added `mcp(playwright/*)` on an R73
-    # panel finding that the DOCS promised a browser denial this list never contained; the
-    # recorded owner call wins over the reviewer, so the fix went to the prose (SKILL.md now
-    # names what is actually denied). The finding's substance stands as an open question for
-    # the owner: playwright's persistent profile has held live logins (2026-08-01), and under
-    # `mcp(*)` an unlisted server is reachable.
+    # 🔴 playwright is deliberately NOT here - the owner's call, 2026-08-20, RE-CONFIRMED
+    # 2026-08-31 («Вариант А — оставить как есть и закрываем вопрос») after a full plain-words
+    # briefing of the risk: the profile has held live logins (2026-08-01), a hostile reviewed
+    # document could steer a call, an unlisted server under `mcp(*)` is reachable, and a
+    # DENIED tool fails soft while an UNLISTED one kills the run (R56). Decided knowingly,
+    # twice - the question is CLOSED, not pending. Asserted by selftest (suite R57) in both
+    # directions; R74 nearly added `mcp(playwright/*)` on an R73 panel finding that the DOCS
+    # promised a denial this list never contained - the recorded owner call wins over the
+    # reviewer, so that fix went to the prose (SKILL.md names what is actually denied).
 ]
 
 # The shell rule is separated so --keep-shell can drop exactly it, and so the checker below can
