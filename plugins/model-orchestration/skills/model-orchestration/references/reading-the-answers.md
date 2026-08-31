@@ -59,6 +59,35 @@ The number is a rule of thumb, not a measurement: what matters is the ratio to t
 only the caller can see that. When in doubt, defer — the cost of deferring is one paste, and the
 cost of not deferring is a round nobody can prove was read.
 
+## v2 (R72, 2026-08-31): make «read it yourself, now» the common case
+
+the operator asked for the deferral to become the exception, not the norm, with two levers — his words:
+the orchestrating AI should read the answers **itself** rather than telling a sub-agent to, which
+needs the answers smaller («писать в промте для ИИ моделей, чтобы в финальном ответе они писали
+максимум 20K символов»); and it should read them **starting from the smart models** («Spark 1.2,
+Kimi K3 max, Qwen…»), leaving the Flash-class for «если уже осталось контекстное окно».
+
+Both are mechanism now, not advice:
+
+- **`--answer-cap`** (default **20 000 chars ≈ 5K tokens**, `0` = off) appends a length
+  discipline to the payload: bound the FINAL answer, not the thinking — full depth stays, the
+  essence gets written. Deliberately a prompt instruction and never `max_tokens`: a token
+  ceiling cuts mid-sentence and starves reasoning models (R43/R47). Deliberately with an escape
+  hatch: a reviewer may exceed the cap to keep a MATERIAL finding, and must append
+  `TRUNCATED-BY-LIMIT` if it dropped one to fit. The knob is judged by the meter that comes
+  back: `HANDOFF.md` and the console name every answer over the cap and every declared
+  truncation — re-run just those channels with `--answer-cap 0` when it matters.
+- **`read_order`** (per channel in `channels.json`: 1 frontier reasoners, 2 mid,
+  3 flash-class + measured-weak) sorts the `HANDOFF.md` table, so the table **is** the reading
+  order. Open the 3s only if context room remains. It is advice to the READER only — dispatch
+  never consults it, and no vendor ever sees it.
+- The resume prompt and the run's own tail both now carry the same protocol line, because the
+  strongest placement this project has measured is the instruction at the decision point.
+
+What this changes about the ~40K rule above: with the cap on, a full cheap panel lands around
+10 × 20K chars ≈ 50K tokens *worst case* and usually well under — often readable directly, smart
+tiers first. The deferral rule still applies when it is not.
+
 ## Alternatives considered, and why they were not built
 
 **Have a model summarise the answers.** Rejected. The value of a panel is the *disagreement*
@@ -66,11 +95,12 @@ between independent reviewers; a summariser is a single point of failure that ca
 finding that mattered, and it would be the fourteenth model in a round whose whole point is that
 no single model is trusted. It also costs money to hide information.
 
-**Sub-agents read the files and return findings.** This is what the failing round actually did.
-Sub-agents are legitimate — they read in their own context and return conclusions — but the
-failure was in the *file list*, not in the reading, and a sub-agent inherits no auto-memory, so
-the brief has to carry every critical rule verbatim. Use them WITH `HANDOFF.md`, never with a
-hand-assembled list. **Count the files before you count the tasks.**
+**Sub-agents read the files and return findings.** 🔴 SUPERSEDED as the default by v2 above
+(R72, the operator: the main session reads the answers itself). The measured reasons stand: a sub-agent
+inherits none of the session's context and no auto-memory, costs tens of thousands of tokens to
+spawn, and returns a *summary* where the panel's product is the *disagreement*. It remains the
+fallback for an uncapped giant round that genuinely cannot fit — and then only WITH
+`HANDOFF.md`, never with a hand-assembled list. **Count the files before you count the tasks.**
 
 **A mechanical cross-channel digest** — extract each review's own headings and its bottom-line
 block, so 320 KB becomes ~10 KB with the full text still on disk. Not built, and it is the most

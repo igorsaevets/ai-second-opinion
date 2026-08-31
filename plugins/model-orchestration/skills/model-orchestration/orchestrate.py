@@ -275,7 +275,7 @@ def _read_sse(resp):
 
 
 def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, name="spark",
-                       effort=None, fallback_model=None):
+                       effort=None, fallback_model=None, answer_cap=None):
     """Probe, then the real call, with retries that distinguish network blips from refusals.
 
     `model` comes from the routing plan, i.e. from channels.json. 🔴 Until 2026-08-06 it did not
@@ -385,7 +385,8 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, na
             if sse_err:
                 return {"channel": "http", "ok": False,
                         "error": "endpoint streamed an error frame: %s" % sse_err}
-            res = _verify_http(data, marker, cfg["floor"], time.time() - t0, tier)
+            res = _verify_http(data, marker, cfg["floor"], time.time() - t0, tier,
+                               answer_cap=answer_cap)
             # What was actually sent, carried back so the status line and diagnostics report the
             # run rather than the config. `output_config` is dropped on an SSE api_error retry,
             # so "the effort we asked for" and "the effort that survived" are not the same fact.
@@ -533,7 +534,7 @@ def transport_damage(text):
     return out
 
 
-def _verify_http(data, marker, floor, secs, tier):
+def _verify_http(data, marker, floor, secs, tier, answer_cap=None):
     """The four mandatory checks from SKILL.md 2.7. A call that ran is not a review that happened."""
     blocks = data.get("content", []) or []
     text = "\n\n".join(b.get("text", "") for b in blocks if b.get("type") == "text")
@@ -597,11 +598,21 @@ def _verify_http(data, marker, floor, secs, tier):
     if floor and out_tok and out_tok < floor:
         # Caught by running it: a brief that says "answer in under 250 words" makes a short reply
         # CORRECT, and this check then fires on a perfectly good answer. The floor only means
-        # something when the brief did not cap the length.
-        note.append("output_tokens=%d is below the %d floor for tier '%s'. If the brief asked for a "
-                    "short answer this is expected and fine. If it asked for a full review, the "
-                    "model under-allocated: raise budget_tokens or split into more sub-questions."
-                    % (out_tok, floor, tier))
+        # something when the brief did not cap the length. Since R72 the harness itself caps the
+        # FINAL answer by default (--answer-cap), so when a cap was in force the note must say
+        # so - otherwise it reads as a defect on every obedient run, and a note that fires on
+        # every run is an alarm nobody hears (this file's own crying-wolf lesson).
+        if answer_cap:
+            note.append("output_tokens=%d is below the %d floor for tier '%s' - but an "
+                        "--answer-cap of %d chars (~%d tokens) was in force this run, so a "
+                        "short FINAL answer is what was asked for. Judge by content; use "
+                        "--answer-cap 0 if you want uncapped depth on paper too."
+                        % (out_tok, floor, tier, answer_cap, answer_cap // CHARS_PER_TOKEN))
+        else:
+            note.append("output_tokens=%d is below the %d floor for tier '%s'. If the brief asked "
+                        "for a short answer this is expected and fine. If it asked for a full "
+                        "review, the model under-allocated: raise budget_tokens or split into "
+                        "more sub-questions." % (out_tok, floor, tier))
 
     # 🔴 ON THIS ENDPOINT CACHED INPUT IS DISJOINT FROM `input_tokens`; ON THE OTHER ONE IT IS A
     # SUBSET. Measured 2026-08-07 against the live Messages API with the real 59,408-char round-26
@@ -1419,7 +1430,8 @@ CHARS_PER_TOKEN = 4
 EST_BAND = "measured -13%..+16% against tiktoken o200k_base on 17 real files, EN and RU alike"
 
 
-def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=None):
+def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=None,
+                  answer_cap=None):
     """
     Write HANDOFF.md: what is on disk, what it costs to read, and the prompt that resumes it.
 
@@ -1462,6 +1474,15 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
     try:
         os.makedirs(outdir, exist_ok=True)
         skip = {"REPORT.md", "HANDOFF.md", "BRIEF.md", "PROMPT.md", "agent.md"}
+        # Map each answer file back to its channel record - for the reading ORDER (Igor, R72:
+        # «начинай читать ответы от умных моделей») and for the answer-cap meter. A file no
+        # record claims sorts LAST (order 9): it is already flagged as an orphan below, and an
+        # unknown voice is the wrong place to spend the freshest context.
+        by_file = {}
+        for _cn, _r in (results or {}).items():
+            _af = (_r.get("answer_file") or "").lower() if isinstance(_r, dict) else ""
+            if _af:
+                by_file[_af] = (_cn, _r.get("read_order"))
         files = []
         for fn in sorted(os.listdir(outdir)):
             if not fn.endswith(".md") or fn in skip:
@@ -1486,8 +1507,17 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             except OSError:
                 body = ""
             tail = [ln for ln in body.splitlines() if ln.strip()]
+            cname, r_order = by_file.get(fn.lower(), (None, None))
             files.append({
                 "file": fn,
+                "channel": cname,
+                "read_order": r_order if r_order in (1, 2, 3) else 9,
+                # chars, not bytes, for the cap compare: the cap was asked in CHARACTERS and a
+                # Cyrillic answer is ~2 bytes/char in UTF-8, so a byte compare would flag it at
+                # half the promised length.
+                "chars": len(body),
+                "over_cap": bool(answer_cap) and len(body) > answer_cap,
+                "truncated_note": "TRUNCATED-BY-LIMIT" in body,
                 "bytes": size,
                 "stale": stale,
                 "est_tokens": size // CHARS_PER_TOKEN,
@@ -1498,6 +1528,9 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
                 "harness_banner": body.startswith("> 🔴 **HARNESS WARNING"),
             })
         fresh = [f for f in files if not f["stale"]]
+        # Smartest voices first (R72). Sorting the MANIFEST is the mechanism: the reader walks
+        # the table top-down, so the order the table is printed in IS the reading order.
+        fresh.sort(key=lambda f: (f["read_order"], f["file"]))
         stale_files = [f for f in files if f["stale"]]
         total = sum(f["bytes"] for f in fresh)
         est = total // CHARS_PER_TOKEN
@@ -1520,11 +1553,13 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
              "channel that ran and wrote nothing leaves no trace in a directory. The two "
              "disagreements between those halves are flagged below and are the most useful thing "
              "here." % os.path.abspath(outdir), "",
-             "| answer file | bytes | ~tokens to read | ends with the end marker |",
-             "|---|---:|---:|---|"]
+             "| read | channel | answer file | bytes | ~tokens to read | ends with the end marker |",
+             "|---:|---|---|---:|---:|---|"]
         for f in fresh:
-            L.append("| `%s` | %s | ~%s | %s |"
-                     % (f["file"], f"{f['bytes']:,}".replace(",", " "),
+            L.append("| %s | %s | `%s` | %s | ~%s | %s |"
+                     % (f["read_order"] if f["read_order"] != 9 else "?",
+                        f["channel"] or "-",
+                        f["file"], f"{f['bytes']:,}".replace(",", " "),
                         f"{f['est_tokens']:,}".replace(",", " "),
                         "yes" if f["ends_with_marker"] else
                         ("no — INCOMPLETE, do not parse as a finished review" if marker else "-")))
@@ -1549,6 +1584,34 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
                   "money and produced nothing to read; their cause is in `diagnostics.json` → "
                   "`problems`." % ", ".join("`%s`" % m for m in missing), ""]
 
+        # R72 (Igor, 2026-08-31): the reading protocol, IN the artifact the reader opens first.
+        # The strongest placement this project has measured is the instruction at the decision
+        # point - a rule in a memory file fires by topic, a line in the artifact fires when the
+        # artifact is read.
+        L += ["## Reading order — smartest voices first, and read them YOURSELF",
+              "",
+              "The table above is sorted by `read`: **1** = frontier reasoners — open these "
+              "first; **2** = mid tier; **3** = flash-class and measured-weak voices — open "
+              "them only if context room remains (the tiers are `read_order` in "
+              "`channels.json`; re-tier there as models rotate). Read the answers yourself "
+              "rather than delegating to sub-agents: a sub-agent starts with none of this "
+              "session's context and returns a summary, and the value of a panel is the "
+              "disagreement between full answers.", ""]
+        if answer_cap:
+            over = [f for f in fresh if f["over_cap"]]
+            trunc = [f for f in fresh if f["truncated_note"]]
+            L += ["Answer cap this run: **%d chars** (asked in the brief; advisory, never "
+                  "enforced by max_tokens). %s"
+                  % (answer_cap,
+                     "All fresh answers are within it." if not over else
+                     "Over it: %s." % ", ".join(
+                         "`%s` (%s chars)" % (f["file"], f"{f['chars']:,}".replace(",", " "))
+                         for f in over)), ""]
+            if trunc:
+                L += ["🔴 **Declared dropping material findings to fit (TRUNCATED-BY-LIMIT):** "
+                      "%s. Consider re-running just those channels with `--answer-cap 0`."
+                      % ", ".join("`%s`" % f["file"] for f in trunc), ""]
+
         L += ["## Reading this in a fresh context",
               "",
               "If the session that ordered this round is already large, reading %s tokens of "
@@ -1569,6 +1632,9 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
               "чем, сколько ссылок живых).",
               "Потом прочитай КАЖДЫЙ файл из манифеста — их %d, ~%s токенов. Не собирай список "
               "руками: он в HANDOFF.md." % (len(fresh), f"{est:,}".replace(",", " ")),
+              "Порядок — колонка `read` в таблице HANDOFF.md: сначала 1 (умные), потом 2; "
+              "тройки (flash-класс) — только если остался бюджет контекста. Читай сам, "
+              "суб-агентам чтение не отдавай.",
               "По каждой находке: принял / отклонил с доказательством / в бэклог. "
               "Совпадения между каналами считай отдельно от одиночных мнений.",
               ("Маркер конца ответа: %s. Файл без него на последней строке — неполный."
@@ -1588,11 +1654,23 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             log("  ran but wrote NO answer file: %s" % ", ".join(missing))
         if orphans:
             log("  on disk but claimed by no record: %s" % ", ".join(orphans))
+        if answer_cap:
+            _over = [f["file"] for f in fresh if f["over_cap"]]
+            _trunc = [f["file"] for f in fresh if f["truncated_note"]]
+            log("  answer cap %d chars: %d of %d over it%s%s"
+                % (answer_cap, len(_over), len(fresh),
+                   (" (%s)" % ", ".join(_over)) if _over else "",
+                   ("; declared TRUNCATED-BY-LIMIT: " + ", ".join(_trunc)) if _trunc else ""))
+        log("  Reading order: the HANDOFF.md table is sorted smart-first (read 1 -> 3); read "
+            "the answers yourself, 3s only if context room remains.")
         log("  The manifest and a ready-to-paste resume prompt are in %s"
             % os.path.join(os.path.abspath(outdir), "HANDOFF.md"))
         return {"files": fresh, "total_bytes": total, "est_tokens": est,
                 "orphans": orphans, "ran_without_file": missing,
-                "stale_files": [f["file"] for f in stale_files]}
+                "stale_files": [f["file"] for f in stale_files],
+                "read_order_files": [f["file"] for f in fresh],
+                "over_cap": [f["file"] for f in fresh if f["over_cap"]],
+                "truncated": [f["file"] for f in fresh if f["truncated_note"]]}
     except Exception as exc:                                       # noqa: BLE001
         log("  note: the handoff manifest could not be written (%r). The answers are unaffected; "
             "list %s by hand." % (exc, outdir))
@@ -6327,6 +6405,16 @@ def main():
                          "- API channels are told it exists and that they cannot read it. "
                          "Read-only; text files inside are secrets-scanned (skips are printed "
                          "by name). Repeatable")
+    # Igor, R72 (2026-08-31): the session that ordered a panel should usually read the answers
+    # ITSELF, and what stopped it was sheer volume - so ask every reviewer to write the essence.
+    # A prompt instruction, deliberately NOT max_tokens: a token ceiling cuts mid-sentence and
+    # starves reasoning models (R43/R47), while an instruction bounds the ANSWER and leaves the
+    # thinking at full depth. Advisory by design; the handoff MEASURES who exceeded it.
+    ap.add_argument("--answer-cap", type=int, default=20000, metavar="CHARS",
+                    help="ask every reviewer to keep its FINAL answer under this many "
+                         "characters (default 20000, roughly 5K tokens; 0 = no length "
+                         "instruction). Enforced by prompt and measured on return, never by "
+                         "max_tokens - depth is not reduced")
     # 🔴 SELECTING A CHANNEL AND AUTHORISING ITS BILL ARE TWO DIFFERENT ACTS, and until 2026-08-14
     # they were one. `--only <name>` both chose a default-OFF channel and paid for it, which reads
     # as deliberate when a human types one name and means nothing at all when an agent session
@@ -6575,6 +6663,24 @@ def main():
             "reviewer's read tools (grok build's read_file is not bounded by its cwd - "
             "measured). Attach material you authored or trust; send foreign documents inline "
             "in the brief instead.")
+
+    # The length discipline rides INSIDE the payload, before the marker block, so the final
+    # layout keeps the marker last: [brief][cap][attachments][marker]. It bounds the ANSWER and
+    # explicitly not the work - without that sentence a cap reads as «be quick», which would
+    # silently undo the R43 «мозги на максимум» decree. The escape hatch (exceed for a MATERIAL
+    # finding, after cutting repetition) is deliberate: a hard cap invites dropping the one
+    # finding that mattered, and TRUNCATED-BY-LIMIT makes that drop VISIBLE - the handoff scans
+    # for the token and names the channels that declared it.
+    if a.answer_cap and a.answer_cap > 0:
+        brief += ("\n\n---\nLength discipline for your FINAL answer: keep it under about %d "
+                  "characters (~%d tokens). This bounds the ANSWER, not the work - think, "
+                  "search and verify at full depth, then write the essence: verdicts first, "
+                  "one finding per short paragraph, evidence quotes trimmed to the operative "
+                  "words. If you must exceed the limit to keep a MATERIAL finding, exceed it - "
+                  "but first cut repetition, preamble and restatement; and if something "
+                  "material still had to be dropped, list what was dropped and end that list "
+                  "with the line TRUNCATED-BY-LIMIT.\n"
+                  % (a.answer_cap, a.answer_cap // CHARS_PER_TOKEN))
 
     # Every channel is VERIFIED against the end marker, but until 2026-07-31 nothing ever asked
     # the model to emit one: the brief's author was silently expected to know. A brief written by
@@ -6841,7 +6947,9 @@ def main():
                                         timeout=_seconds(p.get("timeout"), 2400),
                                         model=p.get("model"), name=cname,
                                         effort=p.get("effort"),
-                                        fallback_model=p.get("fallback_model"))
+                                        fallback_model=p.get("fallback_model"),
+                                        answer_cap=a.answer_cap if a.answer_cap
+                                        and a.answer_cap > 0 else None)
             elif kind == "codex":
                 jobs[cname] = ex.submit(call_codex, cbrief, a.marker, workdir, outfile,
                                         model=p.get("model"), effort=p.get("effort"),
@@ -7302,8 +7410,18 @@ def main():
     # harness cannot see the caller's context, so it does not decide - it states the price and
     # hands over a ready-to-send resume prompt. ~4 chars/token is the crude English/Russian
     # mixed-prose ratio; it is labelled an estimate because it is one.
+    # The reading order comes from the registry (channels.json -> read_order), stamped onto the
+    # records here so the manifest can sort files by it - the record is what maps a file back
+    # to a channel. Stamped, not looked up inside write_handoff: that function deliberately has
+    # no registry dependency, and a manifest writer that could fail on a broken registry would
+    # break the round it describes.
+    for _cn, _r in results.items():
+        if isinstance(_r, dict) and "read_order" not in _r:
+            _r["read_order"] = ((plan or {}).get(_cn) or {}).get("read_order")
     handoff = write_handoff(a.out, results, marker=a.marker, brief=a.brief,
-                            panel=getattr(a, "panel", None), started=started)
+                            panel=getattr(a, "panel", None), started=started,
+                            answer_cap=a.answer_cap if a.answer_cap and a.answer_cap > 0
+                            else None)
 
     # 🔴 WHAT DID THIS ROUND COST? Until 2026-08-08 the honest answer was "nobody knows", and the
     # reason was not that the vendors hide it - OpenRouter returns `usage.cost` on a request this

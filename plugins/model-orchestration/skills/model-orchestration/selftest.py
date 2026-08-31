@@ -4795,6 +4795,96 @@ def suite_r71_bom_payload_and_gate_signature():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def suite_r72_reading_protocol():
+    """R72 (Igor). The panel's answers become readable by the session that ordered them.
+
+    (a) --answer-cap plumbing, functionally: with a cap the payload carries the length
+        discipline WITH the exact number; with --answer-cap 0 it carries none. Captured at
+        pii_gate through main(--dry-run) — the same zero-vendor capture point as R71.
+
+    (b) read_order is a REGISTRY census, derived — every channel carries 1, 2 or 3. No
+        assertion pins WHICH tier a channel sits in: that value is Igor's to re-tier as models
+        rotate, and a test that hard-codes it tests the human (the R45 lesson).
+
+    (c) write_handoff sorts by read_order (not alphabetically — the fixture names invert the
+        two orders on purpose), meters the cap in CHARS, flags declared truncations, and
+        carries the reading protocol plus the ordered resume-prompt line.
+    """
+    section("R72. reading protocol: answer cap + smart-first order")
+    import orchestrate as o
+
+    d = tempfile.mkdtemp(prefix="orch-r72-")
+    try:
+        # ---- (a) the cap reaches the payload, and 0 disables it --------------------------
+        bp = os.path.join(d, "brief.md")
+        with open(bp, "w", encoding="utf-8") as f:
+            f.write("R72-BRIEF: no vendor is called by this test.")
+        captured = {}
+
+        def _capture_gate(parts, *, strict_pii=False, warn_pii=False):
+            captured["brief"] = dict(parts).get("brief", "")
+            return 0
+
+        real_gate, real_argv = o.pii_gate, sys.argv[:]
+        o.pii_gate = _capture_gate
+        try:
+            sys.argv = ["orchestrate.py", "--brief", bp, "--marker", "R72-DONE-MARK",
+                        "--out", os.path.join(d, "r1"), "--dry-run",
+                        "--answer-cap", "12321"]
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc1 = o.main()
+            capped = captured.get("brief", "")
+            sys.argv = ["orchestrate.py", "--brief", bp, "--marker", "R72-DONE-MARK",
+                        "--out", os.path.join(d, "r2"), "--dry-run", "--answer-cap", "0"]
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc2 = o.main()
+            uncapped = captured.get("brief", "")
+        finally:
+            o.pii_gate, sys.argv = real_gate, real_argv
+        check(rc1 == 0 and rc2 == 0, "both --dry-run runs return 0", "rc=%r/%r" % (rc1, rc2))
+        check("12321" in capped and "TRUNCATED-BY-LIMIT" in capped,
+              "--answer-cap N puts the length discipline, with N itself, into the gated payload")
+        check("TRUNCATED-BY-LIMIT" not in uncapped and "12321" not in uncapped,
+              "--answer-cap 0 sends no length instruction — the control that can fail")
+
+        # ---- (b) registry census: every channel has a read_order in {1,2,3} --------------
+        reg = json.load(open(os.path.join(HERE, "channels.json"), encoding="utf-8"))
+        bad = sorted(n for n, ch in reg.get("channels", {}).items()
+                     if ch.get("read_order") not in (1, 2, 3))
+        check(not bad,
+              "every registry channel carries read_order 1, 2 or 3 (derived census; no test "
+              "pins WHICH tier — that value is Igor's to re-tier)", ", ".join(bad))
+
+        # ---- (c) the handoff sorts, meters the cap, and states the protocol --------------
+        out = os.path.join(d, "h")
+        os.makedirs(out)
+        mk = "R72-H-MARK"
+        specs = {"BBB.md": ("smart answer.\n" + mk, "chan_b", 1),
+                 "AAA.md": ("mid answer.\n" + mk, "chan_a", 2),
+                 "CCC.md": ("flash answer " + "x" * 300 + "\ndropped: one item\n"
+                            "TRUNCATED-BY-LIMIT\n" + mk, "chan_c", 3)}
+        results = {}
+        for fn, (body, cn, ro) in specs.items():
+            with open(os.path.join(out, fn), "w", encoding="utf-8") as f:
+                f.write(body)
+            results[cn] = {"answer_file": fn, "read_order": ro, "seconds": 1.0}
+        with contextlib.redirect_stdout(io.StringIO()):
+            h = o.write_handoff(out, results, marker=mk, answer_cap=200)
+        check(bool(h) and h.get("read_order_files") == ["BBB.md", "AAA.md", "CCC.md"],
+              "the manifest is sorted smart-first (1, 2, 3), not alphabetically",
+              repr((h or {}).get("read_order_files")))
+        check(h.get("over_cap") == ["CCC.md"] and h.get("truncated") == ["CCC.md"],
+              "the cap meter names the over-cap answer and the declared truncation",
+              repr((h.get("over_cap"), h.get("truncated"))))
+        text = open(os.path.join(out, "HANDOFF.md"), encoding="utf-8").read()
+        check("Reading order — smartest voices first" in text and "колонка `read`" in text,
+              "the protocol section and the ordered resume-prompt line are both in HANDOFF.md")
+        check(text.index("`BBB.md`") < text.index("`AAA.md`") < text.index("`CCC.md`"),
+              "the printed table itself is in reading order")
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -4833,7 +4923,8 @@ def main():
                   suite_r59_grokbuild_cyrillic_and_recitation,
                   suite_r60_shipped_docs_and_kit_exclusion,
                   suite_r70_transport_retry_and_timeout,
-                  suite_r71_bom_payload_and_gate_signature):
+                  suite_r71_bom_payload_and_gate_signature,
+                  suite_r72_reading_protocol):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

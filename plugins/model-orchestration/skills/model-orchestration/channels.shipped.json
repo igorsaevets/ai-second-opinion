@@ -3,6 +3,7 @@
   "_comment_dispatch": "🔴 2026-08-06: that promise was FALSE for anything beyond the four channels that existed when it was written. orchestrate.main() dispatched on literal names (if \"kimi\" in want / if \"http\" in want / ...), so a fifth entry here was silently never launched - the registry looked authoritative and was decorative at the point of use. Dispatch is now driven by `kind`, so a new channel IS a pure edit to this file. `kind` is the only field the code branches on; add one of: http | codex | agy | openrouter | hermes.",
   "_comment_naming": "🔴 2026-08-06 (round 23), the operator: «Названия ты сделал неправильные, они не понятные». A channel name is now REQUIRED to identify the model, because the panel has grown past the point where 'spark' or 'agy' names anything: two Spark checkpoints and two Gemini models run in the same round. The rule that follows from that: ONE CHANNEL = ONE MODEL, and each channel lists only the models it may legally run. `--set agy36flash=gemini-3.1-pro` is now REFUSED by routing rather than silently producing a channel whose name lies about its contents - which is a stronger guarantee than any warning, because it cannot be ignored. 🔴 2026-08-07: THE ONE EXCEPTION IS NOW GONE TOO. spark12cont used to list the non-Contributor checkpoint as a second legal model, and on 2026-08-06 a session in another project ran the whole round on it (`--set spark12cont=muse-spark-1.2`). That was NOT a code defect and no guard failed: the session obeyed an instruction written in THIS FILE, three keys below, which told it to move confidential briefs off the Contributor tier. A registry that carries advice is a registry that gets obeyed - so an escape hatch documented as the right thing to do is not an escape hatch, it is the default. the operator, 2026-08-07: «указать в коде только эту модель: muse-spark-1.2-contributor ... лучше вообще из кода временно удалить модель не contributor». Removed. The ⚠ MODEL OVERRIDDEN printer stays exactly as it was - it is the reason the substitution was visible at all, and the operator found it by reading that line in diagnostics.json.",
   "version": 4,
+  "_read_order_doc": "read_order is the READING order for a landed round, consumed by write_handoff, never by dispatch: 1 = frontier reasoners - open their answers first; 2 = mid tier; 3 = flash-class and measured-weak voices - open only if context room remains (the operator, 2026-08-31: start reading from the smart models - Spark 1.2, Kimi K3, Qwen - and the Flash-class only if context window is left). It is advice to the READER of the answers, is never sent to any vendor, and re-tiering it is a plain edit here as models rotate.",
   "_distribution_doc": "🔴 ONE REGISTRY, TWO AUDIENCES - added 2026-08-08. the operator: «В моем локальном плагине используй api ключи прямые, а для репозитория openrouter», and «Для моего локального используй только прямой от google, orgemini36flash для репозитория оставь». The reason is not preference: on this machine there are direct vendor keys, and a direct key buys capabilities the reseller does not carry (measured the same day - MiMo's own search opens 25 pages, OpenRouter gives it Exa excerpts; xAI's own API has x_search and page-opening web_search, OpenRouter has neither). For anyone INSTALLING the kit the calculus inverts: one OpenRouter key reaches every model, and asking a new user for four vendor accounts is how a tool goes uninstalled.\n\n`distribution` says where a channel is MEANT to run: \"both\" (default when absent), \"local\" (this machine only), \"kit\" (the published distributable only). `enabled` remains what runs HERE and is the only field the dispatcher reads - two fields, one of them advisory, is how a decorative field is born, so selftest asserts they agree: distribution \"local\" requires enabled true here, \"kit\" requires enabled false here. package.py flips `enabled` when it generates the kit and PRINTS every flip; a silent transformation of the file that decides what gets paid for is exactly what this project refuses to ship.",
   "hints": {
     "_doc": "Prompt fragments that belong to SEVERAL channels, stored once and referenced by `fetch_fallback_hint_ref`. A channel may also carry `fetch_fallback_hint` inline. 🔴 SINCE 2026-08-08 THERE IS ONE ACTIVE HINT (`mcp_fallback`), not two - see `_generalised_2026_08_08` below for why. The two-homes trap this key used to warn about is now closed by having ONE key rather than one-per-CLI; the `_why` and `_first_reading` notes below are HISTORY of the superseded design, kept because their measurements still frame what the merged hint is and is not doing.",
@@ -142,6 +143,7 @@
   },
   "channels": {
     "spark11": {
+      "read_order": 1,
       "kind": "http",
       "panel": "standard",
       "vendor": "meta",
@@ -173,6 +175,7 @@
       "notes": "Default for lookups and fact-checks. Content filter is cumulative - probe cheap first. Standard tier: $1.25/M in, $4.25/M out, 1,048,576 ctx (dev.meta.ai/docs/pricing-rate-limits, read 2026-08-06)."
     },
     "spark12cont": {
+      "read_order": 1,
       "kind": "http",
       "panel": "cheap",
       "vendor": "meta",
@@ -218,6 +221,7 @@
       "notes": "Same endpoint, same key, same verification as spark11. Runs as an independent voice, not a replacement. Primary model is Contributor ($0.10/M in); on failure, falls back to Standard ($1.25/M in) — same weights, 30x more RPM. SUPERSEDED 2026-08-30 (R69), measured by execution: `--set spark12cont=muse-spark-1.2` IS accepted - the Standard model has been back in this channel's legal `models` table since R62 itself, so routing allows it and prints ⚠ MODEL OVERRIDDEN in the plan before spend. What stays true: a model OUTSIDE the table is still refused, and the FALLBACK fires only on failure, never by override."
     },
     "orspark12cont": {
+      "read_order": 1,
       "kind": "openrouter",
       "panel": "cheap",
       "vendor": "meta",
@@ -283,6 +287,7 @@
       "notes": "The Spark voice for anyone whose only key is OPENROUTER_API_KEY - the same Contributor checkpoint as spark12cont, reached through the reseller. `--set orspark12cont=meta/muse-spark-1.2` is ACCEPTED like any model listed in `models` and printed as ⚠ MODEL OVERRIDDEN (measured 2026-08-30 on the twin channel); the fallback itself fires only on failure, never by override. When MODEL_API_KEY is absent, --ask resolves to this channel via `ask_default`."
     },
     "codex": {
+      "read_order": 1,
       "kind": "codex",
       "panel": "standard",
       "vendor": "openai",
@@ -331,6 +336,7 @@
       "notes": "Strategic questions and final line-level audits only. Never send it a lookup. Reports no tool telemetry of any kind, so the citation-existence audit is the only instrument that works on it."
     },
     "agy31pro": {
+      "read_order": 1,
       "kind": "agy",
       "panel": "cheap",
       "vendor": "google",
@@ -365,6 +371,7 @@
       "notes": "The DEEP Gemini voice. Reports no tool telemetry in text mode - always run it through stream-json and count the tool calls."
     },
     "agy36flash": {
+      "read_order": 3,
       "kind": "agy",
       "panel": "cheap",
       "vendor": "google",
@@ -399,6 +406,7 @@
       "notes": "The FAST Gemini voice - the operator's reason for adding it is that Gemini answers quickly, so a second opinion from this family costs almost no wall-clock. Unlike 3.1 Pro it does have a 'medium' effort, so the standard tier reaches it unclamped."
     },
     "agy37flash": {
+      "read_order": 3,
       "kind": "agy",
       "panel": "cheap",
       "vendor": "google",
@@ -432,6 +440,7 @@
       "notes": "The newest Gemini flash via Antigravity subscription. Same three-effort ladder as 3.6-flash. Positioned as the FASTEST reviewer in the panel carrying the newest model weights - what its round-to-round disagreement with agy36flash reveals is the model delta, not the transport."
     },
     "kimik3": {
+      "read_order": 1,
       "kind": "openrouter",
       "panel": "standard",
       "vendor": "moonshot",
@@ -513,6 +522,7 @@
       "notes": "The CODE channel: 2.8T-param MoE, 1M context, reasoning=true. Send it diffs, build failures and API-contract questions - the things Spark answers from prose and Codex charges strategic rates for."
     },
     "qwen38max": {
+      "read_order": 1,
       "kind": "openrouter",
       "panel": "standard",
       "vendor": "alibaba",
@@ -587,6 +597,7 @@
       "notes": "The fourth independent family in the panel (Meta, OpenAI, Google, Moonshot, Alibaba). Forced reasoning at xhigh and a 1M context make it a cheap deep reader; like kimi it searches in snippets and must not be asked for a verbatim quotation."
     },
     "orgemini36flash": {
+      "read_order": 3,
       "kind": "openrouter",
       "panel": "cheap",
       "vendor": "google",
@@ -646,6 +657,7 @@
       "notes": "The SAME model as agy36flash, reached the other way. Its whole reason for existing is the comparison: if it matches agy36flash the Antigravity subscription is a billing path, and if it loses the difference is Google's agent harness, which is a thing we could copy. Do not 'simplify' the two into one channel - one channel = one model AND one transport, and collapsing them destroys the only control in the panel."
     },
     "orgemini37flash": {
+      "read_order": 3,
       "kind": "openrouter",
       "panel": "cheap",
       "vendor": "google",
@@ -702,6 +714,7 @@
       "notes": "The newest and cheapest Gemini in the panel - 4x cheaper than orgemini36flash on both directions, and pinned to Vertex Global so the price is deterministic. Its disagreement with orgemini36flash is a model-delta signal on ONE transport; its disagreement with agy37flash is a transport-delta signal on ONE model. See _provider_pinned for why the pin is not optional."
     },
     "goog36flash": {
+      "read_order": 3,
       "kind": "gemini",
       "panel": "cheap",
       "vendor": "google",
@@ -763,6 +776,7 @@
       "notes": "Google's own API, no reseller and no CLI in between. Its edge is auditable grounding: character-span citations plus Google-side retrieval that reaches pages our fetcher is refused. Depth IS adjustable here after all - `generation_config.thinking_level`, medium on strategic and high on deep; the sentence that used to sit in this line saying otherwise is corrected above."
     },
     "goog37flash": {
+      "read_order": 3,
       "kind": "gemini",
       "panel": "cheap",
       "vendor": "google",
@@ -814,6 +828,7 @@
       "notes": "Google's own API for the newest Flash. Its edge is the same as goog36flash - character-span citations plus Google-side retrieval - and its EXTRA edge is that it does not carry the R38c orgemini37flash empty-content class, because there is no harness fetch loop to accumulate. Pair with agy37flash and orgemini37flash for a controlled transport comparison on ONE model."
     },
     "mimo25pro": {
+      "read_order": 2,
       "kind": "oai",
       "panel": "cheap",
       "vendor": "xiaomi",
@@ -864,6 +879,7 @@
       "notes": "1,048,576 context, 131,072 max completion. Cheap, long-context, and it reads pages itself. Thinking must be switched on explicitly - see _thinking_is_off_by_default."
     },
     "grok420": {
+      "read_order": 2,
       "kind": "xai",
       "panel": "cheap",
       "vendor": "xai",
@@ -906,6 +922,7 @@
       "notes": "2,000,000 context. Its edge is auditable grounding plus a self-reported price: span-level citations, a list of pages xAI opened, and the dollar cost of the call. No depth knob - do not add one."
     },
     "ormimo25pro": {
+      "read_order": 2,
       "kind": "openrouter",
       "panel": "cheap",
       "vendor": "xiaomi",
@@ -953,6 +970,7 @@
       "notes": "The kit's MiMo. One OpenRouter key reaches it; no Xiaomi account needed. Search is Exa excerpts here, so treat its quotations as unverified until the citation audit resolves them."
     },
     "orgrok420": {
+      "read_order": 3,
       "kind": "openrouter",
       "panel": "cheap",
       "vendor": "xai",
@@ -1001,6 +1019,7 @@
       "notes": "The kit's Grok. No x_search and no cost telemetry here - those live only on the direct channel - but native search and a 2M context on the one OpenRouter key."
     },
     "ornemotron3ultra": {
+      "read_order": 3,
       "kind": "openrouter",
       "panel": "cheap",
       "vendor": "nvidia",
@@ -1057,6 +1076,7 @@
       "notes": "550B MoE (55B active), hybrid Transformer-Mamba, 1M context, and free. Its seat costs nothing, so the only reason to drop it is wall-clock. Expect provider-side rate limiting."
     },
     "ordeepseekv4pro": {
+      "read_order": 1,
       "kind": "openrouter",
       "panel": "standard",
       "_moved_cheap_to_standard_2026_08_19_R48": "the operator: «Deepseek перепроверь, чтобы работал, только если со скидкой, и перенеси его в дорогую панель.» Both halves were right, and the second half turned out to matter more than the first. WHAT THIS COSTS, stated because it is a real loss: the cheap panel keeps two `role: code` voices (grokbuild, orglm52) and loses the third, so it drops from 14 channels to 13 and from 9 vendor families to 8 - DeepSeek now appears only in `standard` (which includes cheap, so `--panel standard` still runs it). WHAT IT BUYS: this channel was the most expensive per answer in the cheap panel by a wide margin - measured on the R43 AOS panel, $0.7732 of a $3.97 round, and 570 s of a 605 s wall clock; on the R42 panel $0.3653. A 'cheap panel' whose single most expensive member costs more than the next three together is a label that does not describe the thing.",
@@ -1139,6 +1159,7 @@
       "notes": "1.6T MoE (49B active), 1M context, ~$0.35-1.17 per M depending on which of the three allowed hosts serves the call. The cheap panel's CODE voice, the seat kimik3 holds in the standard panel. 🔴 Its agreement with another channel is not corroboration until a quotation has been checked byte-for-byte: the AOS corpus measured kimik3 at 0 of 32 byte-exact quotations because it quoted the BRIEF back rather than the source, and nothing about this vendor makes that failure less likely."
     },
     "grokbuild": {
+      "read_order": 1,
       "kind": "grokcli",
       "panel": "cheap",
       "vendor": "xai",
@@ -1205,6 +1226,7 @@
       "notes": "The subscription Grok voice, free at the margin like agy and codex. Its web_search and web_fetch are ON by default (the flag is --disable-web-search), the vendor runs the loop, and the harness fetches nothing here - so its grounding is its own claim and only the citation-existence audit can test it."
     },
     "orglm53": {
+      "read_order": 2,
       "kind": "openrouter",
       "panel": "standard",
       "vendor": "zai",

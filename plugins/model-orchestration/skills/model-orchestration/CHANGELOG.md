@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.43.0 — 2026-08-31
+
+The session that orders a panel can now usually read the answers ITSELF — capped
+in size and served smartest-first — instead of deferring them to a fresh context
+or a sub-agent (the operator's two asks, R72).
+
+* **`--answer-cap` (default 20 000 chars ≈ 5K tokens; `0` = off).** Every
+  reviewer is asked, in the payload, to keep its FINAL answer under the cap —
+  and explicitly told this bounds the answer, not the work: thinking, searching
+  and verification stay at full depth; the essence gets written. Deliberately a
+  prompt instruction and never `max_tokens` (a token ceiling cuts mid-sentence
+  and starves reasoning models), and deliberately with an escape hatch: exceed
+  for a MATERIAL finding, and declare `TRUNCATED-BY-LIMIT` if something material
+  was dropped to fit. The knob is judged by the meter that comes back: the
+  console and `HANDOFF.md` name every answer over the cap (measured in CHARS,
+  not bytes — a Cyrillic answer is ~2 bytes/char) and every declared truncation,
+  with the advice to re-run just those channels uncapped. The below-floor note
+  is cap-aware: a short final answer under an active cap no longer reads as
+  under-allocation.
+* **`read_order` — read the smart voices first.** Every channel in
+  `channels.json` now carries a reading tier (1 = frontier reasoners, 2 = mid,
+  3 = flash-class and measured-weak). `HANDOFF.md`'s table is SORTED by it — the
+  table is the reading order — with the channel named per file, and both the
+  handoff and the resume prompt now carry the protocol: read the answers
+  yourself, in order, and open the 3s only if context room remains; do not
+  delegate the reading to sub-agents (they inherit no context and return a
+  summary where the panel's product is the disagreement). The tier is advice to
+  the READER only: dispatch never consults it and no vendor ever sees it.
+* **New selftest suite (+8 checks).** The cap text with the exact N must reach
+  the gated payload and `--answer-cap 0` must remove it (the control that can
+  fail); a derived registry census requires `read_order` ∈ {1,2,3} on every
+  channel without pinning which tier — that value is the operator's to re-tier;
+  and a synthetic handoff must sort 1→2→3 against alphabetically-inverted file
+  names, flag the over-cap and truncated answer, and carry the protocol lines.
+
 ## 1.42.0 — 2026-08-30
 
 Both changes were harvested by a read-only comparison against a sister project's

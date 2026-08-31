@@ -86,14 +86,13 @@ truncated. Detail lives beside it in `references/` (paths relative to this skill
 | `reading-the-answers.md` | **a round landed** — the manifest, the read cost, when to defer to a fresh context |
 | `when-it-breaks.md` | **anything failed** — symptom → cause → fix, and the status fields that lie |
 | `systems.md` | the `--system` presets in full, and why the legal one omits a clause |
-| `../KIT-README.md` + `package.py` | giving this to another machine: `package.py --out <dir>` regenerates the distributable from here, so no second copy can drift |
+| `../KIT-README.md` + `package.py` | giving this to another machine — `package.py --out <dir>` regenerates the kit; no second copy to drift |
 
 
 ## 0. Just run it
 
 
-From **any** chat, **any** project, **any** working directory. Use the absolute path — the script
-does not live in your project folder:
+From **any** chat, project or working directory — use the absolute path:
 
 ```powershell
 python "<SKILL_DIR>\orchestrate.py" `
@@ -123,6 +122,7 @@ is one OpenRouter key to the same models. `--dry-run` shows which is which.
 | `--out` | output directory. Default `./reviews` |
 | `--system` | preset name or path (§0.2). The harness **appends the no-non-existence rule** to whatever you pass — end the file with a newline or that sentence collides with your last word |
 | `--attach` / `--attach-dir` | document / folder beside the brief. CLI channels get the **absolute path** and read it from disk (read-only); API channels get files **inline**, folders named as unreadable. Secrets-scanned either way. 🔴 Refs trust the attachment: only material you authored |
+| `--answer-cap` | ask every reviewer to keep the FINAL answer under N chars (default `20000` ≈ 5K tokens; `0` = off). Prompt-level, measured on return — depth and `max_tokens` untouched; `HANDOFF.md` names who exceeded it or declared `TRUNCATED-BY-LIMIT` |
 | `--only` | restrict channels. Names, aliases and **group** words all work — a vendor family (`gemini`, `grok`, `spark`) or a billing path (`agy`, `openrouter`, `direct`); `routing.py` prints every accepted spelling. 🔴 One channel per argument: `--only a b c`, never `--only "a b c"` |
 | `--skip` | the inverse of `--only` |
 | `--set` | pin a model without editing anything: `--set codex=gpt-5.4` |
@@ -154,13 +154,10 @@ model or channel is a `channels.json` edit only. Checking costs nothing: `--dry-
 ### 0.2 System presets — one line each, detail in `references/systems.md`
 
 `--system <preset|path>` frames the reviewer. Two presets: **`base-depth`** (the default — the
-maximum-depth amplifier, applied when `--system` is omitted) and **`legal-research`** (any legal
-/ immigration / regulatory brief — read `references/legal-briefs.md` **before** writing it). All
-presets force English output.
-
-⚠️ **They are not interchangeable.** `base-depth` asks for "unofficial, grey routes alongside the
-official one"; `legal-research` deliberately omits that clause, because in a regulated domain it
-reads as *suggest a way around the rule* — which is what gets a brief refused. Do not merge them.
+maximum-depth amplifier) and **`legal-research`** (any legal / immigration / regulatory brief —
+read `references/legal-briefs.md` **before** writing it). All presets force English output.
+⚠️ Not interchangeable and never merged — the legal one deliberately omits a clause; the why is
+in `references/systems.md`.
 
 **Timing**: most channels 1–4 min; **Codex 8–35 min** sets the wall-clock (`--panel cheap` is
 far faster). Run rounds in the background; sanity-check with `--ask` (~20 s).
@@ -170,8 +167,7 @@ far faster). Run rounds in the background; sanity-check with `--ask` (~20 s).
 ## 1. What is on this machine — ask, do not assume
 
 
-**Never pin a version here.** Both CLIs moved inside one week; a document asserting a version
-reads as current long after it stops being true. Ask instead:
+**Never pin a version here** — both CLIs moved inside one week. Ask instead:
 
 ```powershell
 python "<SKILL_DIR>\doctor.py"
@@ -187,7 +183,7 @@ stable and worth knowing:
 | HTTPS endpoint / model | `https://api.meta.ai/v1`; the model comes from `channels.json` and the **registry wins over `MODEL_NAME`** — one process-wide variable cannot address one of two channels on one endpoint. Docs: `dev.meta.ai/docs` (public; the login wall is the console, not the docs) |
 | Codex CLI | resolved via `CODEX_BIN` → PATH → known install dirs |
 | Antigravity CLI | `agy`, **not on PATH** on Windows; resolved via `AGY_BIN` → PATH → `%LOCALAPPDATA%\agy\bin\agy.exe` |
-| agy models | one model per channel, base slug plus `--effort`. **Not** `gemini-3.1-pro-high` — a suffixed slug plus a disagreeing `--effort` is exit 1 in 3 s (`references/channels.md` §6.3). Channel count: ask `routing.py`, never this table |
+| agy models | one model per channel, base slug plus `--effort`. **Not** `gemini-3.1-pro-high` — a suffixed slug plus a disagreeing `--effort` is exit 1 in 3 s (`references/channels.md` §6.3) |
 | Grok Build CLI | `grok`, **not on PATH**; `GROK_BIN` → PATH → `%USERPROFILE%\.grok\bin`. Subscription session, no key. Reads `CLAUDE.md` from its cwd upward → neutral cwd. 🔴 **One denied tool discards the whole turn**, and `--tools` does not bound the MCP gateway. Flags in `channels.json` |
 | harness | `orchestrate.py`, standard library only, no `pip install`, Python 3.8+ |
 
@@ -218,8 +214,8 @@ repeated, not corroboration.
 **`--tier` parses and chooses nothing.** One tier, `max`; `strategic`/`deep` are aliases so old
 commands work. `quick` is still an argparse error. Resolved depth is printed per channel.
 
-**The floor is waived when your brief caps the length.** "Under 250 words" makes a short reply
-correct — the floor only means "under-allocated" when the brief did not ask for brevity.
+**A below-floor note names its cause.** With the default `--answer-cap` a short FINAL answer is
+what was asked for; "under-allocated" only means something with the cap off and no brevity ask.
 Streaming is automatic above a 32,000 budget — why, in `references/channels.md`.
 
 **Your own settings go in `~/.claude/model-orchestration.local.json`, never in `channels.json`** —
@@ -272,8 +268,7 @@ anything from source. Three that decide what you do next:
   fields the plan prints at the top.
 - 🔴 **The LAUNCH is refused with «Auto mode could not evaluate this action»**: the permission
   classifier returned no verdict — not a decision about your command. **Retry the identical
-  command**, never a rewritten one. Measured, with the rule, in `~/.claude/CLAUDE.md` (there, not
-  here: every project needs it and this file is loaded in almost none of them).
+  command**, never a rewritten one. Measured; the rule lives in `~/.claude/CLAUDE.md`.
 
 ---
 
@@ -294,15 +289,17 @@ independence: R49 had three channels agree on a Cyrillic token ratio that one me
 One shape recurs: the highest-value finding was **not an answer to a question that was asked**. It
 arrived under "what are we missing". Always include that question.
 
-🔴 **`HANDOFF.md` is the reading list — a `listdir`, never built by hand — and it prices the read
-in tokens. Over ~40K tokens with a session already large: do NOT read them this turn.** Report the
-telemetry, hand the operator its resume prompt, let a fresh context read after `/compact`.
-Detail: `references/reading-the-answers.md`.
+🔴 **`HANDOFF.md` is the reading list — a `listdir`, never built by hand — priced in tokens and
+sorted smart-first** (`read` 1 = frontier reasoners, 3 = flash-class and measured-weak; tiers in
+`channels.json → read_order`). **Read the answers YOURSELF in that order — never via sub-agents;
+open the 3s only if context room remains.** With the default `--answer-cap` the full read is
+usually direct-readable. Over ~40K tokens with a session already large: do NOT read them this
+turn — report the telemetry, hand the operator the resume prompt, let a fresh context read after
+`/compact`. Detail: `references/reading-the-answers.md`.
 
 ---
 
 ## 11. Relationship to the other skill
 
 `second-opinion-consult` holds the **policy**; **this skill is the only home for the mechanics** —
-the copy that used to live there went stale in four places without looking stale. This file alone
-is enough to run a round.
+the copy there went stale in four places without looking stale. This file alone runs a round.
