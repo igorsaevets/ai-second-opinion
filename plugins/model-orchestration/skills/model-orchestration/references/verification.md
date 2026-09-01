@@ -63,6 +63,15 @@ reliability.** Take the argument seriously; verify every section number, docket 
 before it enters your document. The check is nearly free when the primary source is already local —
 which is the strongest practical argument for downloading sources instead of linking them.
 
+### Neighbour sentences from a channel are material, not verification
+
+Demanding the sentence before and after each load-bearing quotation (`references/briefs.md`)
+makes fabrication easier for YOU to catch — three consecutive sentences are one grep against the
+source. It does not make fabrication harder for the channel: in one measured run a channel
+fabricated the quotation, both neighbour sentences and the `[OPENED]` tag on top, all internally
+consistent. Grade returned neighbours exactly like the quotation itself — grep them against the
+primary source before anything downstream quotes them.
+
 ### A `sonnet` sub-agent can beat a mid-tier channel at fact-finding
 
 Same round: asked for the status of four things (litigation, a promised policy alert, three form

@@ -5546,6 +5546,52 @@ def suite_r75_backlog():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def suite_r78_agents_md():
+    """R78. AGENTS.md + the CLAUDE.md bridge ship, and commands state their cwd.
+
+    A four-CLI-reviewer panel on the built tree agreed unanimously on one defect: the first
+    runnable commands in AGENTS.md assumed the repository root as cwd while every script lives
+    in the skill subtree - a cold agent's very first step was a FileNotFoundError. Separately,
+    Claude Code reads CLAUDE.md, not AGENTS.md (its memory docs, opened live 2026-08-31,
+    recommend a one-line @AGENTS.md import as the bridge; backticked @paths are documented as
+    literal text, i.e. a silent no-op). These pins hold the fixed state in the SOURCE layout;
+    an installed tree has neither file and skips.
+    """
+    section("R78. AGENTS.md + CLAUDE.md bridge (source kit/)")
+    kit = HERE / "kit"
+    agents = kit / "AGENTS.md"
+    if not agents.exists():
+        check(True, "R78: no source kit/AGENTS.md here - an installed tree, nothing to pin "
+              "(the files under test exist only in the source layout)")
+        return
+    at = agents.read_text(encoding="utf-8")
+    check("cd plugins/model-orchestration/skills/model-orchestration" in at,
+          "R78: AGENTS.md states the working directory its commands run from - the one "
+          "defect all four panel reviewers found independently (bare `python routing.py` "
+          "from the repo root is a FileNotFoundError)")
+    check("SKILL_DIR" in at and ".../" not in at,
+          "R78: the map table resolves paths via SKILL_DIR - no `.../` ellipsis path an "
+          "agent's file tools would take literally")
+    bridge = kit / "claude-md"
+    check(bridge.exists(), "R78: the CLAUDE.md bridge source file kit/claude-md exists")
+    if bridge.exists():
+        bt = bridge.read_text(encoding="utf-8")
+        check("@AGENTS.md" in [ln.strip() for ln in bt.splitlines()],
+              "R78: the bridge holds the one-line @AGENTS.md import on its own line")
+        check("`@AGENTS.md`" not in bt,
+              "R78: the import is not wrapped in backticks - backticked, it is literal "
+              "text and the bridge silently imports nothing")
+    pkg = HERE / "package.py"
+    if pkg.exists():
+        ps = pkg.read_text(encoding="utf-8")
+        check('"claude-md": "CLAUDE.md"' in ps,
+              "R78: KIT_RENAME maps claude-md -> CLAUDE.md (stored under a neutral name so "
+              "the author's own sessions do not discover a live nested CLAUDE.md, same "
+              "reason as gitignore)")
+        check(not (kit / "CLAUDE.md").exists(),
+              "R78 control: no live CLAUDE.md sits in the source kit/ directory itself")
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -5587,7 +5633,8 @@ def main():
                   suite_r71_bom_payload_and_gate_signature,
                   suite_r72_reading_protocol,
                   suite_r74_panel_fixes,
-                  suite_r75_backlog):
+                  suite_r75_backlog,
+                  suite_r78_agents_md):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

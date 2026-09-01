@@ -13,16 +13,18 @@ and the copy that is only read has no error signal at all. So there is exactly o
 fact, and the distributable is generated rather than forked.
 
 **What to do instead:** open an issue describing the behaviour, or send a PR against the
-repository-root documents (`README.md`, `TECHNICAL.md`, `INSTALL.md`, `TROUBLESHOOTING.md`,
-`SECURITY.md`) *and say in the PR that the change also needs to land upstream in the skill.*
+repository-root documents (`README.md`, `AGENTS.md`, `TECHNICAL.md`, `INSTALL.md`,
+`TROUBLESHOOTING.md`, `SECURITY.md`) *and say in the PR that the change also needs to land
+upstream in the skill.*
 
 ## Before you propose a change
 
 ```
-python selftest.py
+python plugins/model-orchestration/skills/model-orchestration/selftest.py
 ```
 
-About fifty behavioural checks, costing nothing and contacting no vendor. It covers the three
+The suite prints its own count — do not trust any number a document states for it. It costs
+nothing and contacts no vendor, and it covers the three
 properties the tool actually promises: partial installs degrade instead of crashing, channel
 selection is obeyed exactly, and nothing secret-shaped can reach a console, a log or a diagnostics
 file.

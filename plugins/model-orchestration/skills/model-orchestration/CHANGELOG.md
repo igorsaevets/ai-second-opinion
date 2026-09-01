@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.46.0 — 2026-08-31
+
+* **`AGENTS.md` at the repository root** — standing instructions for AI agents
+  (Claude Code, Codex, Cursor and the like) that are handed this repository:
+  the two override rules (never touch the user's keys; never state channel
+  facts from prose — ask `routing.py` / `doctor.py` / `--dry-run`), the
+  operating discipline, and a map of which document to read before which
+  action. It deliberately holds no channel list, no counts and no versions:
+  every mutable fact stays with the tools that print it.
+* The reviewer presets now define the provenance vocabulary they already
+  relied on — `[OPENED]` / `[SNIPPET]` / `[MEMORY]`, with "an untagged claim
+  reads as `[MEMORY]`" — and "I do not know" asks for working form: what is
+  unknown, what source or check would establish it, what you did instead.
+* `references/briefs.md` grew four brief-building rules, each measured on a
+  real round: demand the neighbour sentences and a page/section number for
+  every load-bearing quotation (a checking tool on YOUR side — a channel has
+  fabricated the quote, both neighbours and the tag in one answer); the WHY
+  of anti-anchoring (channel agreement measures the brief, not the source)
+  with the planted-claim practice recorded BEFORE sending; an "already
+  decided by the owner" block for repeat rounds; and a closing "weakest
+  point / what would change your conclusion" field — reviewers answer it
+  more honestly than a direct confidence question.
+* `references/briefs.md`: a code-review subsection — ask "which input
+  returns a wrong result SILENTLY", put intent in the brief (anchoring works
+  the other way round for code; docstrings are the author's claims, not
+  facts), and name the environment (encodings, CRLF, NBSP).
+* `references/verification.md`: neighbour sentences returned by a channel
+  are graded like the quotation itself — grep them against the source; they
+  are material, not verification.
+* **`CLAUDE.md` at the repository root — one line, `@AGENTS.md`.** Claude
+  Code reads `CLAUDE.md`, not `AGENTS.md`; its own memory documentation
+  (opened live this release) states exactly that and recommends exactly this
+  bridge, so without it the assistant this README names first would never
+  load the new file. Other agents keep reading `AGENTS.md`; nothing is
+  duplicated.
+* This change set was itself panel-reviewed before shipping — four CLI
+  reviewers on the built tree; the planted false claim was refuted 4/4 with
+  the exact quotation. Folded in from the adjudication: commands in
+  `AGENTS.md` state their working directory instead of assuming the
+  repository root (all four reviewers, independently); a "run a review" row
+  and resolvable paths in its map; the no-auto-retry rule names its actor
+  (the harness's own bounded re-runs are not yours); `CONTRIBUTING.md` lists
+  `AGENTS.md` as a legal PR target, path-qualifies its selftest command and
+  stops asserting the suite's count in prose; `briefs.md` lost its
+  channel-capability prose (the run's own summary is the living source),
+  scoped the web-search demand away from attached and proprietary material,
+  widened quotation locators beyond page numbers, and let a reviewer flag
+  post-dated facts against a recorded owner decision without reopening it.
+
 ## 1.45.1 — 2026-08-31
 
 * **A marker wrapped in markdown emphasis is a COMPLETE answer** (R77, #358). One

@@ -11,7 +11,8 @@
 или просто их выдумали.
 
 [English version](README.md) · [Техническое описание](TECHNICAL.md) ·
-[Установка](INSTALL.md) · [Если что-то сломалось](TROUBLESHOOTING.md)
+[Установка](INSTALL.md) · [Если что-то сломалось](TROUBLESHOOTING.md) ·
+[Для ИИ-агентов](AGENTS.md)
 
 ---
 
