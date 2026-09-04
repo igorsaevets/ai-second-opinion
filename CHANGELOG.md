@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.49.0 — 2026-09-04
+
+* **Reasoning budget raised to 90K** for `ormimo25pro` and `orgrok420` (was 48K).
+  Both models lack an effort ladder (`supported_efforts: null`), so an explicit
+  token budget is the only depth control. At 90K the answer room is 41K tokens
+  (131072 - 90000), enough for a full review. The old 48K was the retired `deep`
+  tier's formula, never re-evaluated after the tier collapse. Neither vendor
+  imposes a cap below 128K through OpenRouter, so 90K sits well within limits.
+
 ## 1.48.0 — 2026-09-04
 
 * **Panel cascade for same-model transports.** When several channels carry the
