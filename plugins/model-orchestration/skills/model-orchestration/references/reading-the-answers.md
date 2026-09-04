@@ -16,8 +16,9 @@ brief. The panel then returns more text than that session has room to think abou
 
 **What it looks like when it happens.** Round 46 of the AOS project: an 18-channel panel, $3.97
 spent, 17 answers on disk. Three of them — GROKBUILD 199 738 B, SPARK12CONT 66 955 B, SPARK11
-40 782 B, **317 KB, including the largest and most expensive answer of the round** — were never
-opened by anyone. The round then reported "18 launches, 17 answers"; both numbers were wrong. No
+40 782 B, **307 475 B total, including the largest and most expensive answer of the round** — were
+never opened by anyone. The round then reported "18 launches, 17 answers"; both numbers were wrong
+(the round had 24 launches and 22 answers). No
 refusal, no error, no warning. Just three files nobody read and a summary that did not know they
 existed.
 

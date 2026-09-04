@@ -3818,7 +3818,10 @@ def suite_r56_agy_concurrency_and_permissions():
     check("_agy_stagger()" in src and "def _agy_stagger" in src,
           "the agy launch is spaced by _agy_stagger() - concurrent starts corrupt a shared MCP "
           "tool-schema cache and the loser's run is discarded before its first token")
-    i_call, i_run = src.find("waited = _agy_stagger()"), src.find("p, secs = _run(cmd, timeout=3600")
+    i_call = src.find("waited = _agy_stagger()")
+    i_run = src.find("p, secs = _run_agy(cmd, timeout=3600")
+    if i_run < 0:
+        i_run = src.find("p, secs = _run(cmd, timeout=3600")
     check(0 < i_call < i_run,
           "the stagger is taken BEFORE the subprocess starts, not after it - the race is in the "
           "first seconds of startup",
@@ -4129,7 +4132,7 @@ def suite_r55_child_env_and_first_error():
     # `_agy_env` existing proves nothing; what matters is that the agy subprocess is launched
     # with it. Assert the dispatched call, not the helper.
     agy_call = [ln for ln in src.splitlines()
-                if "_run(cmd" in ln and "stdout_path=ndjson" in ln]
+                if ("_run(cmd" in ln or "_run_agy(cmd" in ln) and "stdout_path=ndjson" in ln]
     check(len(agy_call) == 1 and "env=_posix_child_env()" in agy_call[0],
           "the agy subprocess is launched WITH _posix_child_env() - without it grep_search "
           "cannot resolve its binary from a PowerShell parent, and the model's fallback for a "
@@ -4143,7 +4146,7 @@ def suite_r55_child_env_and_first_error():
     # of these calls. A checker that reads one line while the fact spans several is the same
     # shape as the bug this suite exists for, committed inside the test for it.
     cli_launches = []
-    for m in re.finditer(r"(?:p, secs = _run\(cmd|p = subprocess\.run\(cmd)", src):
+    for m in re.finditer(r"(?:p, secs = _run(?:_agy)?\(cmd|p = subprocess\.run\(cmd)", src):
         depth, i = 0, m.end() - len("cmd")
         while i < len(src):
             if src[i] == "(":

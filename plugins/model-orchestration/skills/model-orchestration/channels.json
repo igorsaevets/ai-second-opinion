@@ -1015,7 +1015,8 @@
       },
       "fetch_tool": {
         "enabled": true,
-        "max_calls": 11
+        "max_calls": 5,
+        "_max_calls_was_11": "reduced from 11 to 5 (R80 panel test): 9/11 fetches produced 211K input tokens (eCFR Part 245 alone = 183KB = 45K tok, re-sent every round). Model ran out of answer room and dropped the marker. 5 fetches is enough for the key regulations (USCIS PM is 403'd anyway) without reaching the token-bomb pages."
       },
       "models": {
         "xiaomi/mimo-v2.5-pro": {

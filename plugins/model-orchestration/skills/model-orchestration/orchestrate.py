@@ -6178,6 +6178,110 @@ def _agy_stagger():
     return wait
 
 
+def _run_agy(cmd, timeout=3600, cwd=None, stdout_path=None, env=None):
+    """Like _run(), but detects agy stream completion and kills the zombie process.
+
+    agy CLI >=1.1.x never exits after the conversation stream completes: it stays
+    alive on periodic loadCodeAssist heartbeats (~5 min interval), so _run()'s
+    subprocess.run() blocks for the full timeout on a run that finished minutes ago.
+
+    Measured R80 panel test (2026-09-04): model finished in ~6 min, process alive
+    40+ min until manually killed.  The ``result`` event in the stream-json output
+    is the completion signal — once it appears in the events file, the model's
+    answer is on disk and the process can be terminated.
+
+    Returns the same ``(result, seconds)`` pair as _run().  Raises FileNotFoundError
+    and subprocess.TimeoutExpired in the same situations _run() does.
+    """
+    _POLL = 5
+    _GRACE = 3
+
+    t0 = time.time()
+    stderr_path = (stdout_path + ".stderr.tmp") if stdout_path else None
+    out_f = open(stdout_path, "w", encoding="utf-8") if stdout_path else None
+    err_f = open(stderr_path, "w", encoding="utf-8") if stderr_path else None
+    try:
+        p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                             stdout=out_f or subprocess.PIPE,
+                             stderr=err_f or subprocess.PIPE,
+                             cwd=cwd, env=env)
+    except FileNotFoundError:
+        if out_f:
+            out_f.close()
+        if err_f:
+            err_f.close()
+        raise
+    # Close the parent's handles; the child holds its own duplicates of the fds.
+    if out_f:
+        out_f.close()
+    if err_f:
+        err_f.close()
+
+    result_seen = None
+    zombie_killed = False
+    try:
+        while p.poll() is None:
+            if time.time() - t0 > timeout:
+                p.kill()
+                p.wait()
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            if stdout_path and result_seen is None:
+                try:
+                    with open(stdout_path, "r", encoding="utf-8",
+                              errors="replace") as rf:
+                        for ln in rf:
+                            if '"event":"result"' in ln or '"event": "result"' in ln:
+                                result_seen = time.time()
+                                break
+                except OSError:
+                    pass
+            if result_seen is not None and time.time() - result_seen >= _GRACE:
+                p.terminate()
+                try:
+                    p.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+                    p.wait()
+                zombie_killed = True
+                break
+            time.sleep(_POLL)
+    finally:
+        if p.poll() is None:
+            p.kill()
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+
+    stderr = ""
+    if stderr_path:
+        try:
+            with open(stderr_path, "r", encoding="utf-8", errors="replace") as f:
+                stderr = f.read()
+        except OSError:
+            pass
+        try:
+            os.unlink(stderr_path)
+        except OSError:
+            pass
+    elif p.stderr:
+        stderr = p.stderr.read()
+
+    secs = time.time() - t0
+    if zombie_killed:
+        log("  [agy] stream completed (result event at +%.0fs), zombie terminated at "
+            "+%.0fs (saved ~%.0fs of idle wait)"
+            % (result_seen - t0, secs, timeout - secs))
+
+    class _R:
+        __slots__ = ("returncode", "stderr", "stdout")
+    r = _R()
+    r.returncode = p.returncode
+    r.stderr = stderr
+    r.stdout = ""
+    return r, secs
+
+
 def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeout="25m",
               system=None, add_dirs=None):
     """
@@ -6301,7 +6405,10 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
         # env: see posix_tools_dir() - without it this channel's grep_search tool cannot
         # resolve its binary when Python was launched from PowerShell, and the model's
         # fallback for a broken grep is a shell command, which is denied and fatal.
-        p, secs = _run(cmd, timeout=3600, cwd=workdir, stdout_path=ndjson, env=_posix_child_env())
+        # _run_agy (not _run): detects stream completion via the result event in the
+        # events file and kills the zombie process.  See _run_agy's docstring for the
+        # measurement that prompted this (R80 panel test, 2026-09-04).
+        p, secs = _run_agy(cmd, timeout=3600, cwd=workdir, stdout_path=ndjson, env=_posix_child_env())
     except FileNotFoundError:
         return {"channel": "agy", "ok": False,
                 "error": "binary not found (it is NOT on PATH): " + binary}

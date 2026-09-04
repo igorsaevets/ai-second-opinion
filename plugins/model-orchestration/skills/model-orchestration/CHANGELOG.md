@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.50.0 — 2026-09-04
+
+* **agy CLI zombie fix.** The agy binary stays alive on periodic heartbeats
+  after the Gemini stream completes (`loadCodeAssist` every ~5 min, process
+  never exits). `_run_agy()` replaces the blocking `_run()` for agy channels:
+  spawns via `Popen`, polls `events.ndjson` for the stream-completion `result`
+  event, and terminates the zombie after a 3-second grace period. Measured:
+  agy38flash wall clock drops from ~17 min to ~6 min (actual model work).
+* **ormimo25pro fetch budget** reduced from 11 to 5 (`fetch_tool.max_calls` in
+  `channels.json`). At 11 the model fetched a 183 KB regulation page, bloating
+  input to 211K tokens with no marker. At 5 it gets the key sources (eCFR + FR
+  search) and answers with marker.
+* `references/reading-the-answers.md`: fixed the AOS R46 total from "317 KB"
+  to 307 475 B (the correct sum of the three named files).
+* `references/verification.md`: eight reader-side verification patterns from
+  the R78 harvest — refusal counting, same-family agreement, completeness void,
+  reverse implication, verbatim-but-irrelevant, stale-session provenance, and
+  zero-URL fabrication.
+
 ## 1.49.0 — 2026-09-04
 
 * **Reasoning budget raised to 90K** for `ormimo25pro` and `orgrok420` (was 48K).

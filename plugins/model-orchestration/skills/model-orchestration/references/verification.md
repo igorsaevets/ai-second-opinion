@@ -195,4 +195,37 @@ earlier as its "most sharp" disagreement. **Channels do not remember their prior
 recommendation touches something a channel previously rejected, quote its own earlier words back at
 it in the brief — or catch the contradiction at integration time.
 
+### Reader-side patterns — what to notice before analysing content
+
+These are grading shortcuts, each paid for by a measured incident in one project's panel history.
+Apply them when reading answers, before the substance.
+
+1. **Count explicit "I don't remember exactly" refusals per channel** before analysing content.
+   A channel with zero refusals and three fabrications is more dangerous than one with thirteen
+   refusals — the latter knows what it does not know. (Measured: 4 Gemini channels, 0 refusals,
+   3 fabrications out of 4 answers; AGY31PRO — also Gemini — 13 refusals, 0 fabrications.)
+2. **When channels disagree about the text of one provision**, check first whether they quoted
+   different paragraphs of the same source (a regulation's enumeration vs. its narrative paragraph
+   are both real), then whether one fabricated. The order matters: jumping to fabrication loses the
+   finding that the source has two faces.
+3. **Verbatim identical text from channels of the same model family is shared training data, not
+   independent confirmation.** Four Gemini channels returned the same fabricated quotation word for
+   word. Channel agreement that tracks a model boundary measures the training set, not the source.
+4. **A reviewer's finding about the completeness of material it was not given is void by
+   construction.** A channel that says "the packet does not cite X" when the packet cites X five
+   times has not read the packet — grade the rest of its findings accordingly.
+5. **Absence of a decision's name from the regulation does not mean the decision is silent about
+   the regulation.** Check the decision's own footnotes — a precedent that interprets a regulation
+   cites the regulation in a footnote, not by having its name appear in the regulation's text.
+6. **A verbatim-correct quotation that does not support the thesis it was cited for** is a reader
+   catch, not a tool catch. `krokai` will return VERIFIED on the quotation because it IS in the
+   source. Whether the quotation proves what the reviewer claims it proves is your job.
+7. **"[OPENED] during this run" vs. a previous session's search cache.** A channel citing results
+   from a prior session — identifiable by "searches were performed in a previous session" or stale
+   timestamps — has a de facto `[MEMORY]` provenance, not `[OPENED]`. Treat its dated claims as
+   leads, not as confirmations.
+8. **A real document number + N different "verbatim" texts from N channels + zero URLs means nobody
+   opened the document.** Do not include such quotes in downstream artifacts — a real number
+   decorating a fabricated text is harder to catch than a fabricated number.
+
 ---
