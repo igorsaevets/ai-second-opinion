@@ -642,6 +642,7 @@ def suite_dispatch():
         "o.call_gemini_direct = stub('gemini')\n"
         "o.call_hermes = stub('hermes')\n"
         "o.call_grokcli = stub('grokcli')\n"
+        "o.call_opencode = stub('opencode')\n"
         # 🔴 THE STUBS MUST REPLACE SOMETHING THAT EXISTS. Found while renaming
         # call_openrouter_reviewer -> call_oai_reviewer on 2026-08-08: `o.old_name = stub(...)`
         # does not fail on a name the module no longer has, it CREATES it. The dispatcher then
@@ -650,7 +651,7 @@ def suite_dispatch():
         # no test. Asserted BEFORE assignment would need a different structure; asserted here it
         # still fires on the next rename, which is what matters.
         "for _n in ('call_http_reviewer','call_codex','call_agy','call_oai_reviewer',\n"
-        "           'call_xai_responses','call_gemini_direct','call_hermes'):\n"
+        "           'call_xai_responses','call_gemini_direct','call_hermes','call_opencode'):\n"
         "    assert callable(getattr(o, _n, None)), 'stub target missing: ' + _n\n"
         "t = tempfile.mkdtemp(prefix='orchdisp-')\n"
         "b = os.path.join(t, 'b.md')\n"
@@ -834,7 +835,7 @@ def suite_dispatch():
         "    def boom(*a, **k): raise RuntimeError('simulated wrapper crash')\n"
         "    o.call_http_reviewer = ok; o.call_codex = ok; o.call_oai_reviewer = ok\n"
         "    o.call_hermes = ok; o.call_gemini_direct = ok; o.call_xai_responses = ok\n"
-        "    o.call_grokcli = ok\n"
+        "    o.call_grokcli = ok; o.call_opencode = ok\n"
         "    o.call_agy = boom\n"
         "    t = tempfile.mkdtemp(); b = os.path.join(t, 'b.md')\n"
         "    open(b, 'w', encoding='utf-8').write('hi\\nREVIEW-COMPLETE\\n')\n"
@@ -1374,6 +1375,8 @@ def suite_tiers_and_grounding():
           "doctor derives its CLI checks from the registry, not from literal names")
     check("except FileNotFoundError" in o_src.split("def call_grokcli", 1)[1].split("\ndef ", 1)[0],
           "the grok CLI channel degrades on a missing binary instead of raising")
+    check("except FileNotFoundError" in o_src.split("def call_opencode", 1)[1].split("\ndef ", 1)[0],
+          "the opencode CLI channel degrades on a missing binary instead of raising")
 
     # --- the MCP fallback hint is wired, and reaches the prompt ----------------------------
     ch = reg["channels"]["codex"]
@@ -1413,7 +1416,7 @@ def suite_tiers_and_grounding():
     # affect any finding» to «Remember this and keep it in mind. No answer to this note is
     # required». A future edit reverting to the old suppression wording must fail red here.
     import orchestrate as _orch
-    for name in ("spark12cont", "ornemotron3ultra"):
+    for name in ("spark13cont", "ornemotron3ultra"):
         ch = reg["channels"][name]
         if not (ch.get("prompt_suffix") or {}).get("enabled"):
             continue
@@ -1646,10 +1649,10 @@ def suite_settings_and_upgrade():
 
     # --- --ask's extra channels are DERIVED, not listed ------------------------------------
     import orchestrate as o
-    free = o._free_extras("spark12cont")
+    free = o._free_extras("spark13cont")
     declared = [c for c, ch in pristine["channels"].items()
                 if not c.startswith("_") and ch.get("enabled", True) and ch.get("cost") == "free"]
-    check(sorted(free) == sorted(x for x in declared if x != "spark12cont"),
+    check(sorted(free) == sorted(x for x in declared if x != "spark13cont"),
           "--ask's free channels come from the registry, not a list in the code",
           "derived=%s declared=%s" % (free, declared))
     check(o._free_extras("nosuchchannel__") is not None,
@@ -1667,30 +1670,39 @@ def suite_settings_and_upgrade():
     for _c in (ad or []):
         check(_c in pristine["channels"],
               "ask_default entry %r is a real CHANNEL name (not a group or an alias)" % _c)
-    _synth = {"ask_default": ["spark12cont", "orspark12cont"],
-              "channels": {"spark12cont": {"kind": "http", "enabled": True},
-                           "orspark12cont": {"kind": "openrouter", "provider": "openrouter",
+    _synth = {"ask_default": ["ocspark13free", "spark13cont", "orspark13cont"],
+              "channels": {"ocspark13free": {"kind": "opencode", "enabled": True},
+                           "spark13cont": {"kind": "http", "enabled": True},
+                           "orspark13cont": {"kind": "openrouter", "provider": "openrouter",
                                              "enabled": True}}}
-    check(o._pick_ask_channel(_synth, lambda ch: ch.get("kind") != "http") == "orspark12cont",
-          "--ask default falls to the OR twin when only OPENROUTER_API_KEY is present")
-    check(o._pick_ask_channel(_synth, lambda ch: True) == "spark12cont",
-          "--ask default stays spark12cont when its key is present (order keeps the 08-08 rule)")
-    check(o._pick_ask_channel(_synth, lambda ch: False) == "spark12cont",
+    check(o._pick_ask_channel(_synth, lambda ch: True) == "ocspark13free",
+          "--ask default is ocspark13free when the opencode CLI is installed (R80-И5)")
+    check(o._pick_ask_channel(_synth, lambda ch: ch.get("kind") != "opencode") == "spark13cont",
+          "--ask falls to spark13cont when opencode binary is absent")
+    check(o._pick_ask_channel(_synth, lambda ch: ch.get("kind") not in ("opencode", "http"))
+          == "orspark13cont",
+          "--ask falls to orspark13cont when both opencode and MODEL_API_KEY are absent")
+    check(o._pick_ask_channel(_synth, lambda ch: False) == "ocspark13free",
           "no key at all -> the first candidate runs and its preflight explains what is missing")
-    _synth2 = {"ask_default": ["spark12cont", "orspark12cont"],
-               "channels": {"spark12cont": {"kind": "http", "enabled": True},
-                            "orspark12cont": {"kind": "openrouter", "enabled": False}}}
-    check(o._pick_ask_channel(_synth2, lambda ch: ch.get("kind") != "http") == "spark12cont",
-          "a DISABLED candidate is never resolved to, even when its key is the one present")
-    check(o._pick_ask_channel({}, lambda ch: True) == "spark12cont",
+    _synth2 = {"ask_default": ["ocspark13free", "spark13cont", "orspark13cont"],
+               "channels": {"ocspark13free": {"kind": "opencode", "enabled": False},
+                            "spark13cont": {"kind": "http", "enabled": True},
+                            "orspark13cont": {"kind": "openrouter", "enabled": False}}}
+    check(o._pick_ask_channel(_synth2, lambda ch: True) == "spark13cont",
+          "a DISABLED candidate is never resolved to, even when its binary is present")
+    check(o._pick_ask_channel({}, lambda ch: True) == "spark13cont",
           "an empty registry still resolves - same never-raises stance as _free_extras")
-    # The shipped registry itself, layout-aware: locally orspark12cont is distribution=kit
-    # (enabled false), in the built kit package.py flips it on. Derive the expectation from
-    # the file under test rather than hard-coding either layout.
-    _ors = pristine["channels"].get("orspark12cont") or {}
-    _expect = "orspark12cont" if _ors.get("enabled") else "spark12cont"
-    check(o._pick_ask_channel(pristine, lambda ch: ch.get("kind") != "http") == _expect,
-          "the shipped registry resolves per its own enabled flags", "expected " + _expect)
+    # The shipped registry itself, layout-aware: ocspark13free is always enabled;
+    # orspark13cont is distribution=kit (enabled false locally). Derive the expectation
+    # from the file under test rather than hard-coding either layout.
+    _oc = pristine["channels"].get("ocspark13free") or {}
+    _ors = pristine["channels"].get("orspark13cont") or {}
+    # With predicate rejecting both opencode and http kinds (simulating no binary, no META key):
+    _expect_no_oc_http = "orspark13cont" if _ors.get("enabled") else "ocspark13free"
+    check(o._pick_ask_channel(pristine, lambda ch: ch.get("kind") not in ("opencode", "http"))
+          == _expect_no_oc_http,
+          "shipped registry: when both opencode and http are skipped, OR twin is the fallback",
+          "expected " + _expect_no_oc_http)
     # Key-readiness: the predicate reads the right env var per kind; CLI kinds need none.
     _saved_env = o._env_key
     try:
@@ -1701,13 +1713,17 @@ def suite_settings_and_upgrade():
               "http kind requires MODEL_API_KEY - absent here, so not ready")
         check(o._channel_key_ready({"kind": "codex"}) is True,
               "subscription CLI kinds are always 'ready' - their gate is a binary, not a key")
+        _oc_ready = o._channel_key_ready({"kind": "opencode"})
+        check(isinstance(_oc_ready, bool),
+              "opencode kind checks the BINARY, not a key (returns bool)",
+              "got %r" % _oc_ready)
     finally:
         o._env_key = _saved_env
     # The argparse default must be None so 'not passed' is detectable at resolution time.
     _src_o = Path(HERE, "orchestrate.py").read_text(encoding="utf-8")
     check('ap.add_argument("--ask-channel", default=None' in _src_o,
           "--ask-channel argparse default is None (the real default is resolved, not a literal)")
-    check('default="spark12cont"' not in _src_o,
+    check('default="spark13cont"' not in _src_o,
           "the old literal --ask-channel default is gone from orchestrate.py")
 
     # --- the plugin-cache rescue: the one update path upgrade.py is never on ---------------
@@ -2585,8 +2601,8 @@ def suite_spend_guard():
     check(".endswith(marker)" not in src_all and ".endswith(a.marker)" not in src_all,
           "R68 census: no raw marker-endswith anywhere in orchestrate.py")
     check(src_all.count("def _marker_on_last_line(") == 1 and
-          src_all.count("not _marker_on_last_line(") == 9,
-          "R68 census: 8 verification sites + 1 use inside _strip_marker_tail, one def",
+          src_all.count("not _marker_on_last_line(") == 10,
+          "R68 census: 9 verification sites + 1 use inside _strip_marker_tail, one def",
           "def=%d not_calls=%d" % (src_all.count("def _marker_on_last_line("),
                                    src_all.count("not _marker_on_last_line(")))
     check(src_all.count("_strip_marker_tail(") == 3,
@@ -2821,9 +2837,9 @@ def suite_panels():
     # fourth channel arrived in 2026-08.
     DICTATED_CHEAP = {
         "ordeepseekv4pro", "grok420", "orgrok420",
-        "agy31pro", "agy36flash", "agy37flash",
-        "goog36flash", "goog37flash", "orgemini36flash", "orgemini37flash",
-        "mimo25pro", "ormimo25pro", "ornemotron3ultra", "spark12cont",
+        "agy31pro", "agy36flash", "agy38flash",
+        "goog36flash", "goog37flash", "orgemini36flash", "orgemini38flash",
+        "mimo25pro", "ormimo25pro", "ornemotron3ultra", "spark13cont",
     }
     # 🔴 THE DICTATED SET IS AN ANCHOR AND MUST NEVER SHRINK SILENTLY; growth is a SEPARATE,
     # NAMED list. Equating the two was right while the roster was frozen, and wrong the first
@@ -2901,12 +2917,23 @@ def suite_panels():
          "Igor: moved to standard panel. Solo run failed — model burned all 11 fetches on "
          "irrelevant content (Python docs, 124K chars) and generation timed out (exit 255). "
          "At $1.40/M input it belongs in standard, not cheap. Still runs on --panel standard."),
-        ("R69 2026-08-30", "ADD", "orspark12cont",
+        ("R69 2026-08-30", "ADD", "orspark13cont",
          "Igor's R69 scenario: a first-time kit user with ONLY an OPENROUTER_API_KEY had no "
-         "Spark voice at all. Same Contributor checkpoint as spark12cont (already in "
+         "Spark voice at all. Same Contributor checkpoint as spark13cont (already in "
          "DICTATED_CHEAP), same $0.10/M price, reached through the reseller. Kit-distribution, "
          "so locally it carries enabled:false — panel membership and enablement are different "
-         "questions (the grokbuild precedent above)."),
+         "questions (the grokbuild precedent above). 🔴 R80: channel renamed from orspark12cont "
+         "to orspark13cont (Spark 1.3 upgrade); event updated in place."),
+        # R80: agy37flash→agy38flash and orgemini37flash→orgemini38flash are RENAMES (same panel
+        # slot, model upgraded 3.7→3.8). spark12cont→spark13cont likewise renamed in
+        # DICTATED_CHEAP. orspark12cont→orspark13cont renamed in the R69 ADD event above.
+        # Not ADD/REMOVE events because neither left nor entered
+        # the cheap panel; DICTATED_CHEAP was updated in place to carry the new key names.
+        ("R80 2026-09-04", "ADD", "ocspark13free",
+         "Igor R80-И5: free Spark 1.3 Contributor via opencode CLI. No API key needed — "
+         "opencode/ prefix models are free. Same Spark 1.3 weights as spark13cont (already "
+         "in DICTATED_CHEAP). Primary in ask_default when the opencode CLI is installed; "
+         "fallback to paid spark13cont/orspark13cont. distribution: both."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -4933,14 +4960,14 @@ def suite_r74_panel_fixes():
     reg = r.load_registry(overlay=False)
 
     # ---- (a) fallback_model is IN the plan ------------------------------------------------
-    # only=[...] so the check holds in BOTH worlds: the kit ships spark12cont disabled
+    # only=[...] so the check holds in BOTH worlds: the kit ships spark13cont disabled
     # (distribution: local) and --only is the documented resurrection path.
-    plan = r.resolve(reg, only=["spark12cont"])
-    want_fb = (reg["channels"].get("spark12cont") or {}).get("fallback_model")
+    plan = r.resolve(reg, only=["spark13cont"])
+    want_fb = (reg["channels"].get("spark13cont") or {}).get("fallback_model")
     check(bool(want_fb), "the registry still declares the Spark HTTP fallback (precondition)")
-    check(plan.get("spark12cont", {}).get("fallback_model") == want_fb,
+    check(plan.get("spark13cont", {}).get("fallback_model") == want_fb,
           "the PLAN carries fallback_model - the dispatcher reads p.get(), so this wiring is "
-          "the feature", repr(plan.get("spark12cont", {}).get("fallback_model")))
+          "the feature", repr(plan.get("spark13cont", {}).get("fallback_model")))
 
     # ---- (b) --skip beats a group --only --------------------------------------------------
     # apply_flags directly, not resolve(): the ORDERING of the two flags is the unit under

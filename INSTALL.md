@@ -307,12 +307,14 @@ assistant makes for you.
 **You need at least one channel** — the tool runs whatever is available and tells you exactly what
 it skipped and why. A missing key or a missing CLI is a normal, non-fatal condition, not an error.
 
-**One key gets you most of the panel.** `OPENROUTER_API_KEY` alone reaches most of the model
-families here — including a Spark voice, `orspark12cont` — which is enough for the disagreement
-this tool exists to produce. Everything else is optional.
+**No key at all gets you `--ask`.** The opencode CLI runs a **free** Spark 1.3 voice with no API
+key and no account — `npm install -g opencode-ai` and you are done. For a full review panel,
+`OPENROUTER_API_KEY` alone reaches most of the model families here, which is enough for the
+disagreement this tool exists to produce. Everything else is optional.
 
 | what it needs | what that unlocks | cost |
 |---|---|---|
+| the opencode CLI (`npm install -g opencode-ai`) | `ocspark13free` — the **free** Spark 1.3 voice, and the default `--ask` channel | **free** |
 | `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, a Muse Spark voice and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
 | `MODEL_API_KEY` | the two Spark voices | metered API |
 | the Codex CLI, signed in | `codex` | your existing subscription |
@@ -399,9 +401,9 @@ export MODEL_API_KEY="<your key>"
 
 To point at a different endpoint, also set `MODEL_API_BASE`.
 
-**No Meta key?** The same Spark checkpoint is reachable with `OPENROUTER_API_KEY` alone, through
-the `orspark12cont` channel — see the OpenRouter section below. When `MODEL_API_KEY` is absent,
-`--ask` switches to it by itself.
+**No Meta key?** `--ask` works without one. The default chain is: `ocspark13free` (opencode CLI,
+free, no key) → `spark13cont` (this key) → `orspark13cont` (OpenRouter key). If the opencode CLI
+is installed, `--ask` uses it first and never needs `MODEL_API_KEY` at all.
 
 ### Google — `GEMINI_API_KEY`
 
@@ -438,7 +440,7 @@ illustration, not a schema.**
 ### OpenRouter — `OPENROUTER_API_KEY`
 
 One key serves **every channel that routes through OpenRouter** — the largest part of the panel,
-including `orspark12cont`, the Spark voice for anyone without a `MODEL_API_KEY`. Do not count
+including `orspark13cont`, the Spark voice for anyone without a `MODEL_API_KEY`. Do not count
 those channels from this file; `python routing.py` prints the live list and spends nothing.
 
 **No account yet?** Register at **openrouter.ai** (an email address or a Google/GitHub sign-in
@@ -462,11 +464,11 @@ export OPENROUTER_API_KEY="<your key>"
 > the provider on the same account. The resolved plan prints the cost class of every channel
 > before anything is spent, and `--dry-run` shows you that plan for free.
 
-> `orspark12cont` runs Meta's *Contributor* tier through OpenRouter — discounted because the
+> `orspark13cont` runs Meta's *Contributor* tier through OpenRouter — discounted because the
 > vendor may train on what you send (see [PRIVACY.md](PRIVACY.md)) — with an automatic fallback
 > to the Standard, non-training tier if the Contributor endpoint fails for your account. When
-> `MODEL_API_KEY` is absent, `--ask` picks this channel by itself: the choice comes from
-> `ask_default` in `channels.json` and is printed when it fires.
+> neither the opencode CLI nor `MODEL_API_KEY` is present, `--ask` falls through to this channel:
+> the choice comes from `ask_default` in `channels.json` and is printed when it fires.
 
 ### Checking it worked — without printing anything secret
 
@@ -480,6 +482,30 @@ certain a key is really gone after rotating it, that length is what changes.
 > **Never `echo` the variable to check it.** See [SECURITY.md](SECURITY.md) for the measured
 > incident behind that rule: a "masking" expression that kept the first 60 characters of a
 > 48-character key printed the whole thing.
+
+### opencode CLI (free Spark 1.3)
+
+**Requires Node.js** (v18 or newer). If `npm` is not on your PATH, install Node.js from
+[nodejs.org](https://nodejs.org/) first — tick "Add to PATH" on Windows; on macOS `brew install
+node`; on Linux use your package manager.
+
+```
+npm install -g opencode-ai
+opencode --version
+```
+
+No key, no account, no sign-in — the `opencode/` prefix models are free. This installs the
+opencode CLI from [opencode.ai](https://opencode.ai/), which hosts free access to Meta's Muse
+Spark 1.3 Contributor checkpoint among others.
+
+**This is the default `--ask` channel** (`ocspark13free`). When the opencode CLI is installed,
+`--ask` uses it first — ahead of `spark13cont` (needs `MODEL_API_KEY`) and `orspark13cont`
+(needs `OPENROUTER_API_KEY`). A machine with none of the three has no `--ask` channel, which is
+reported and skipped, not fatal.
+
+If the CLI is absent, the other two work the same as before — you only lose the free default.
+`doctor.py` reports whether the CLI is found and where. If yours is installed in an unusual
+location, set `OPENCODE_BIN` to the full path.
 
 ### Codex CLI
 

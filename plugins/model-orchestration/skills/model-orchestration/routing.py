@@ -1550,6 +1550,11 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                 p["_tier_note"] = ("timeout %s only - effort stays %s, pinned in this channel's "
                                    "own block because the subscription has no cheaper setting "
                                    "worth having" % (p["timeout"], p.get("effort")))
+            elif p.get("kind") == "opencode":
+                p["timeout"] = t.get("opencode_timeout", p.get("timeout") or 120)
+                p["_tier_note"] = ("timeout %s only - effort stays %s (--variant flag), "
+                                   "free model via opencode CLI, no API key"
+                                   % (p["timeout"], p.get("effort") or "default"))
             elif p.get("kind") == "grokcli":
                 # Same shape as codex: a subscription CLI whose depth is pinned in its own block
                 # at the top of the vendor's ladder, so the tier contributes wall-clock only.
@@ -1796,6 +1801,10 @@ def _web_line(p):
                 "--disable-web-search, so access here is opt-OUT, not opt-in. The vendor runs the "
                 "loop and opens the pages, so this channel's grounding is its own claim and the "
                 "harness fetches nothing to check it against")
+    if kind == "opencode":
+        return ("web: opencode CLI's built-in agent tools - the free model runs through "
+                "opencode's infrastructure which may include search. The harness does not "
+                "control which tools the agent uses; grounding is the agent's own claim")
     return None
 
 

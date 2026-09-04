@@ -1186,6 +1186,7 @@ CLI_BINARIES = (
     ("agy", "AGY_BIN", "agy"),
     ("hermes", "HERMES_BIN", "hermes.exe"),
     ("grokcli", "GROK_BIN", "grok.exe"),
+    ("opencode", "OPENCODE_BIN", "opencode"),
 )
 CLI_ENV_VARS = " / ".join(env for _, env, _ in CLI_BINARIES)
 
@@ -3148,6 +3149,98 @@ def neutral_cwd():
     scratch = os.path.join(tempfile.gettempdir(), "orchestrate-neutral-cwd")
     os.makedirs(scratch, exist_ok=True)
     return scratch
+
+
+def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
+                  timeout=2400, name="ocspark13free"):
+    """opencode CLI (opencode.ai) — free Spark 1.3 Contributor, no API key needed.
+
+    Measured 2026-09-04: `opencode run` reads stdin and BLOCKS FOREVER if stdin is open but
+    empty. The brief is piped through stdin (subprocess.run with input=text_in), which writes
+    the content and closes the pipe — solving both the hang bug and the 32KB Windows
+    command-line limit in one mechanism: the positional `message` argument is never used.
+
+    🔴 `-f` (file attach) DOES NOT WORK for the prompt: it is a yargs array flag that consumes
+    subsequent positional arguments as additional file paths. A positional message after `-f`
+    is interpreted as a file path, not as text. Measured 2026-09-04: `Error: File not found:
+    Follow the instructions in the attached document.`
+
+    JSON output is NDJSON (one JSON object per line):
+      step_start  — session metadata
+      text        — part.text is the model's response text
+      step_finish — part.tokens (input/output/reasoning/cache.read/cache.write) + part.cost
+
+    The --variant flag maps to reasoning effort (high/max/minimal). Free Spark 1.3 consumed
+    ~19K input tokens on a trivial prompt (agent framework overhead), cost=0 for free models.
+    """
+    binary = opencode_bin()
+    text_in = ((system.strip() + "\n\n---\n\n") if system else "") + brief
+
+    cmd = [binary, "run",
+           "-m", model or "opencode/muse-spark-1.3-contributor-free",
+           "--format", "json"]
+    if effort:
+        cmd += ["--variant", effort]
+
+    log("  [%s] opencode CLI, free model, no API key; brief via stdin (%d chars), variant=%s"
+        % (name, len(text_in), effort or "default"))
+    t0 = time.time()
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                           input=text_in,
+                           timeout=_seconds(timeout, 2400))
+    except FileNotFoundError:
+        return {"channel": name, "ok": False, "error": "binary not found: " + binary}
+    except subprocess.TimeoutExpired:
+        return {"channel": name, "ok": False, "text": "",
+                "seconds": round(time.time() - t0, 1),
+                "error": "TIMEOUT after %s" % (timeout or "2400s"), "model": model,
+                "warnings": ["TIMEOUT"], "notes": []}
+
+    secs = time.time() - t0
+    raw = (p.stdout or "").strip()
+    warn, note = [], []
+    text = ""
+    tokens = {}
+    cost = None
+
+    for line in raw.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        otype = obj.get("type")
+        part = obj.get("part") or {}
+        if otype == "text":
+            text += part.get("text") or ""
+        elif otype == "step_finish":
+            tokens = part.get("tokens") or {}
+            cost = part.get("cost")
+
+    if p.returncode != 0 and not text:
+        warn.append("EXIT %d: %s" % (p.returncode, (p.stderr or raw or "")[:300]))
+    if text:
+        with open(outfile, "w", encoding="utf-8") as f:
+            f.write(text)
+    if marker and not _marker_on_last_line(text, marker):
+        warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
+    if not text.strip() and not warn:
+        warn.append("EMPTY OUTPUT despite exit 0")
+    record_refusal(refusal_check(text, marker), warn, note)
+
+    cache = tokens.get("cache") or {}
+    return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
+            "bytes": len(text.encode("utf-8")), "exit": p.returncode,
+            "model": model, "effort": effort,
+            "in_tokens": tokens.get("input"),
+            "out_tokens": tokens.get("output"),
+            "reasoning_tokens": tokens.get("reasoning"),
+            "cached_in_tokens": cache.get("read"),
+            "usd": cost if cost and cost > 0 else None,
+            "warnings": warn, "notes": note}
 
 
 def call_hermes(brief, marker, outfile, model=None, toolsets=None, system=None, timeout=2400):
@@ -5337,6 +5430,18 @@ def agy_bin():
     ])
 
 
+def opencode_bin():
+    """opencode CLI (opencode.ai) — npm install -g opencode-ai.
+
+    Free Spark 1.3 Contributor needs no API key (the opencode/ model prefix is free).
+    Installed via npm globally; on Windows the binary is opencode.cmd in the npm dir.
+    """
+    return _resolve_bin("OPENCODE_BIN", "opencode", [
+        os.path.join(os.environ.get("APPDATA", ""), "npm", "opencode.cmd"),
+        os.path.join(os.environ.get("APPDATA", ""), "npm", "opencode"),
+    ])
+
+
 # The other half of CLI_BINARIES: kind -> the function that finds that binary. Split from the
 # tuple only because the resolvers carry per-platform search paths and have to be defined after
 # _resolve_bin. selftest asserts the two halves have identical keys, which is what stops the
@@ -5346,6 +5451,7 @@ CLI_RESOLVERS = {
     "agy": agy_bin,
     "hermes": hermes_bin,
     "grokcli": grok_bin,
+    "opencode": opencode_bin,
 }
 
 
@@ -5354,7 +5460,7 @@ CLI_RESOLVERS = {
 # same five literals, so a kind unknown to one was unknown to the other, and a misspelled kind
 # produced neither a preflight warning nor a result, only a log line that scrolls away.
 KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "hermes",
-               "grokcli")
+               "grokcli", "opencode")
 
 # The kinds that run ON THIS MACHINE and can therefore read an attached document from disk
 # instead of receiving it inline (--attach / --attach-dir). Igor, R46: «CLI агентам не отправлять
@@ -5369,21 +5475,22 @@ REFS_KINDS = ("codex", "agy", "grokcli")
 # spellings and the current registry names are here: this table is consulted exactly when the
 # registry is unreadable, which is the one moment a name cannot be looked up.
 _LEGACY_KINDS = {"http": "http", "spark": "http", "spark11": "http", "spark12": "http",
-                 "spark12cont": "http",
+                 "spark12cont": "http", "spark13cont": "http",
                  "codex": "codex",
                  "agy": "agy", "gemini": "agy", "agy31pro": "agy", "agy36flash": "agy",
-                 "agy37flash": "agy",
+                 "agy37flash": "agy", "agy38flash": "agy",
                  "kimi": "openrouter", "qwen": "openrouter",
                  "kimik3": "openrouter", "qwen38max": "openrouter",
-                 "orgemini36flash": "openrouter", "orgemini37flash": "openrouter",
+                 "orgemini36flash": "openrouter", "orgemini37flash": "openrouter", "orgemini38flash": "openrouter",
                  "ormimo25pro": "openrouter",
                  "orgrok420": "openrouter", "ornemotron3ultra": "openrouter",
                  "ordeepseekv4pro": "openrouter", "orglm53": "openrouter",
                  "orgpt56terrapro": "openrouter", "orgpt56solpro": "openrouter",
                  "orgpt56lunapro": "openrouter", "orspark12cont": "openrouter",
+                 "orspark13cont": "openrouter",
                  "goog36flash": "gemini", "goog37flash": "gemini",
                  "mimo25pro": "oai", "grok420": "xai", "grokbuild": "grokcli",
-                 "hermes": "hermes"}
+                 "hermes": "hermes", "ocspark13free": "opencode"}
 
 
 def _legacy_slot(cname):
@@ -5549,6 +5656,11 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
                    "agy runs in will be mirrored to an ASCII path under %%TEMP%%; your "
                    "outfile still lands at the path you asked for. This is safe - it is here "
                    "so you know why %%TEMP%% shows up in agy's own log lines." % p)
+    for c in sorted(by_kind.get("opencode", [])):
+        b = opencode_bin()
+        if os.path.isfile(b) or shutil.which(b):
+            yield ("%s: opencode CLI present (%s); free model, no API key needed"
+                   % (c, b))
 
 
 def _write_agy_agent(workdir):
@@ -6419,6 +6531,9 @@ def _channel_key_ready(ch):
         return bool(_env_key("GEMINI_API_KEY"))
     if kind == "xai":
         return bool(_env_key("XAI_API_KEY"))
+    if kind == "opencode":
+        b = opencode_bin()
+        return bool(os.path.isfile(b) or shutil.which(b))
     return True                                          # codex / agy / grokcli / hermes
 
 
@@ -6446,7 +6561,7 @@ def _pick_ask_channel(reg, key_ready):
             return cname
     if live:
         return live[0]
-    return order[0] if order else "spark12cont"
+    return order[0] if order else "spark13cont"
 
 
 def _ask_default_channel():
@@ -6457,7 +6572,7 @@ def _ask_default_channel():
         import routing
         reg = routing.load_registry()
     except Exception:                                    # noqa: BLE001 - see _free_extras
-        return "spark12cont"
+        return "spark13cont"
     return _pick_ask_channel(reg, _channel_key_ready)
 
 
@@ -7163,7 +7278,7 @@ def main():
         alias = {"spark": "spark11", "http": "spark11", "gemini": "agy31pro",
                  "kimi": "kimik3", "qwen": "qwen38max"}
         want = {alias.get(c, c) for c in
-                (a.only or ["spark11", "spark12cont", "codex", "agy31pro", "agy36flash",
+                (a.only or ["spark11", "spark13cont", "codex", "agy31pro", "agy36flash",
                             "kimik3", "qwen38max"])}
     if not want:
         log("every channel is disabled - nothing to run")
@@ -7383,6 +7498,12 @@ def main():
                                         name=cname, thinking_level=p.get("thinking_level"),
                                         tools=p.get("tools"), max_tokens=p.get("max_tokens"),
                                         timeout=_seconds(p.get("timeout"), 2400))
+            elif kind == "opencode":
+                jobs[cname] = ex.submit(call_opencode, cbrief, a.marker, outfile,
+                                        model=p.get("model"), effort=p.get("effort"),
+                                        system=_system_for(system, p),
+                                        timeout=_seconds(p.get("timeout"), 2400),
+                                        name=cname)
             else:
                 # Named in the registry, unknown to the code. A log line is NOT enough: a log
                 # line scrolls, and every downstream consumer - the "N/M channels returned"

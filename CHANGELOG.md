@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.47.0 — 2026-09-04
+
+* **Muse Spark 1.3 Contributor** replaces the 1.2 tier in both channels:
+  `spark12cont` → `spark13cont` (direct Meta API) and `orspark12cont` →
+  `orspark13cont` (OpenRouter). The old names still work as aliases. Pricing,
+  rate limits and data terms are unchanged; Meta describes the new checkpoint as
+  "tuned for agentic workflows with improved coding over 1.2".
+* **Gemini 3.8 Flash** replaces 3.7 for the `agy` and OpenRouter channels:
+  `agy37flash` → `agy38flash` and `orgemini37flash` → `orgemini38flash`. Old
+  names remain as aliases. Pricing is identical at all tiers. The Google-direct
+  channel (`goog37flash`) stays on 3.7 because the Interactions API changed its
+  request format for 3.8 — that is a code change, deferred.
+* **New channel: `ocspark13free`** — free Muse Spark 1.3 Contributor through the
+  opencode CLI (`npm install -g opencode-ai`). No API key and no account needed.
+  It is now the **default `--ask` channel**, ahead of `spark13cont` and
+  `orspark13cont` in the fallback chain. Contributor data terms apply (the
+  vendor may train on prompts and completions).
+* `INSTALL.md`: opencode CLI section (Node.js prerequisite, install command,
+  `OPENCODE_BIN` override, `doctor.py` checks); the `--ask` fallback chain
+  described in both the Spark and OpenRouter sections.
+* `README.md`, `README.ru.md`: cost table and data-terms paragraph updated (four
+  contributor-tier channels, not three); example output updated to current
+  channel names.
+* `PRIVACY.md`: updated to four contributor channels.
+* Fix: `ocspark13free` effort ladder was `[high, max, minimal]` instead of
+  `[max, high, minimal]` — the declared effort `max` was not at the top of
+  its own ladder, causing a selftest failure.
+
 ## 1.46.0 — 2026-08-31
 
 * **`AGENTS.md` at the repository root** — standing instructions for AI agents

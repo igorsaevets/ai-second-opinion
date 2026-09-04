@@ -80,10 +80,10 @@ You write the question in a plain text file, then run one command. A few minutes
 
 ```
 [spark11]     OK  155s  model=Muse Spark 1.1 [muse-spark-1.1]
-[spark12cont] OK  279s  model=Muse Spark 1.2 Contributor
+[spark13cont] OK  279s  model=Muse Spark 1.3 Contributor
 [codex]       OK  407s  model=GPT-5.4    32 sources cited, 1 dead (deliberate check - correct)
 [agy31pro]    OK   44s  model=Gemini 3.1 Pro    11 cited, only 2 actually opened  <- PROBLEM
-[agy36flash]  OK   25s  model=Gemini 3.6 Flash
+[agy38flash]  OK   25s  model=Gemini 3.8 Flash
 [kimik3]      OK  185s  model=Kimi K3     4 cited, 1 opened
 [qwen38max]   OK  814s  model=Qwen3.8 Max 7 cited, 5 opened
 6/7 channels returned a verified review.
@@ -112,6 +112,7 @@ Several accounts, none of which this tool provides — but **one of them gets yo
 
 | What you need | What it unlocks | Rough cost |
 |---|---|---|
+| **The opencode CLI** (`npm install -g opencode-ai`) | `ocspark13free` — the **free** Muse Spark 1.3 voice, and the **default `--ask` channel** | **Free** — no key, no account |
 | **`OPENROUTER_API_KEY`** | The biggest group in one account: Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, **a Muse Spark voice** and **a free NVIDIA Nemotron** — one signup | Metered per token, **plus per web search**. The Nemotron model itself is free |
 | **`MODEL_API_KEY`** | The two Spark voices | Metered per use |
 | **A paid OpenAI plan with Codex** | `codex` | Subscription, weekly limit |
@@ -127,13 +128,14 @@ it has changed most weeks. `python routing.py` prints the live list and spends n
 prose copy of that list in this repository has been wrong within days of being written — including,
 at one point, two different numbers four lines apart in this very file.)
 
-**Three channels are cheap because of their data terms, not despite them.** `spark12cont` and
-`orspark12cont` run the same discounted *Contributor* tier — directly and through OpenRouter
-respectively — and `ornemotron3ultra` runs a *free* tier; on all three, the vendor may use
-prompts and completions for training. That is the trade being made, it is stated in
-[PRIVACY.md](PRIVACY.md) with each vendor named, and the tool prints each channel's data policy in
-the plan **before** it spends anything. If a brief should not be trained on, drop those channels
-for that run: `--skip spark12cont orspark12cont ornemotron3ultra`.
+**Four channels are cheap because of their data terms, not despite them.** `ocspark13free`,
+`spark13cont` and `orspark13cont` run the same Muse Spark 1.3 *Contributor* tier — through
+opencode, directly and through OpenRouter respectively — and `ornemotron3ultra` runs a *free*
+tier; on all four, the vendor may use prompts and completions for training. That is the trade
+being made, it is stated in [PRIVACY.md](PRIVACY.md) with each vendor named, and the tool prints
+each channel's data policy in the plan **before** it spends anything. If a brief should not be
+trained on, drop those channels for that run:
+`--skip ocspark13free spark13cont orspark13cont ornemotron3ultra`.
 
 Nothing else in this file will tell you when to avoid a channel, and that is deliberate. An
 earlier version carried a loud warning here and in the registry, and it was obeyed twice in ways
@@ -299,7 +301,7 @@ else in it, so this is now one line: the registry is the roadmap.)
 | **Report a security problem** | [Report a vulnerability privately](https://github.com/igorsaevets/ai-second-opinion/security/advisories/new) — please do *not* open a public issue first. See [SECURITY.md](SECURITY.md) |
 | **Collaboration, consulting, or anything commercial** | [LinkedIn](https://www.linkedin.com/in/igorsaevets/) · [Facebook](https://facebook.com/igorsaevets) · [GitHub](https://github.com/igorsaevets) |
 
-Maintained by **Igor Saevets** ([@igorsaevets](https://github.com/igorsaevets)), Los Angeles.
+Maintained by **the operator Saevets** ([@igorsaevets](https://github.com/igorsaevets)), Los Angeles.
 
 There is deliberately **no contact email in this repository.** A public address in a public repo is
 harvested within days, and the address on the commits here is GitHub's no-reply relay, which has no

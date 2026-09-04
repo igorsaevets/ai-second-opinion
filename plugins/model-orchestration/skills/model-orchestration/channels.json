@@ -17,13 +17,14 @@
   "groups": {
     "_doc": "A word a human types that means SEVERAL channels. Without these, splitting agy into two channels would have broken `--only agy` and «не используй gemini» with 'unknown channel' - the exact defect that made `--only http` unusable for weeks in 2026-07. A group is expanded by routing before anything else runs, so every flag and every free-text route accepts it. Group names and their aliases share one namespace with channel and model aliases, and a collision is refused at load time.",
     "spark": {
-      "label": "all Spark voices, on both transports",
+      "label": "all Spark voices, on all transports",
       "channels": [
         "spark11",
-        "spark12cont",
-        "orspark12cont"
+        "spark13cont",
+        "orspark13cont",
+        "ocspark13free"
       ],
-      "_membership_updated_2026_08_30": "orspark12cont added in R69 - the same Contributor checkpoint through OpenRouter, for kit users who hold no MODEL_API_KEY. From this moment `spark` names the MODEL FAMILY across transports, exactly as `gemini` (2026-08-07) and `grok` (2026-08-08) already do, and «не используй spark» must drop all three. `label` renamed from «both» to «all» in the same edit - the agy group's 2026-08-13 lesson verbatim: a group's label has to describe its actual contents.",
+      "_membership_updated_2026_08_30": "orspark12cont added in R69 (RENAMED to orspark13cont R80, Spark 1.3 upgrade) - the same Contributor checkpoint through OpenRouter, for kit users who hold no MODEL_API_KEY. From this moment `spark` names the MODEL FAMILY across transports, exactly as `gemini` (2026-08-07) and `grok` (2026-08-08) already do, and «не используй spark» must drop all three. `label` renamed from «both» to «all» in the same edit - the agy group's 2026-08-13 lesson verbatim: a group's label has to describe its actual contents.",
       "aliases": [
         "spark",
         "спарк",
@@ -37,10 +38,10 @@
       "channels": [
         "agy31pro",
         "agy36flash",
-        "agy37flash"
+        "agy38flash"
       ],
       "_lost_the_gemini_aliases_2026_08_07": "🔴 This group used to answer to `gemini` / `джемини` / `гемини`, and on 2026-08-07 that became a lie the moment a Gemini arrived on a different transport. «не используй gemini» would have dropped two of three Gemini channels and left the third running - the failure mode where a word keeps working, keeps printing a plan, and silently means less than it used to. The vendor words now belong to the `gemini` group below, which is the family; `agy` stays the TRANSPORT. Same disease as `_model_was_decorative` and the dispatch literals: a name that used to describe the thing and no longer does.",
-      "_membership_updated_2026_08_13": "agy37flash added round 36. `label` renamed from «both» to «all» because there are three now - the same rot as calling `agy` a synonym for `gemini` once a second transport arrived. A group's label has to describe its actual contents.",
+      "_membership_updated_2026_08_13": "agy37flash added round 36; UPGRADED to agy38flash R80 (2026-09-03). `label` renamed from «both» to «all» because there are three now - the same rot as calling `agy` a synonym for `gemini` once a second transport arrived. A group's label has to describe its actual contents.",
       "aliases": [
         "agy",
         "antigravity",
@@ -53,14 +54,14 @@
       "channels": [
         "agy31pro",
         "agy36flash",
-        "agy37flash",
+        "agy38flash",
         "orgemini36flash",
-        "orgemini37flash",
+        "orgemini38flash",
         "goog36flash",
         "goog37flash"
       ],
       "_added": "2026-08-07 with orgemini36flash. A human who says «gemini» means the MODEL FAMILY, not the billing path - and after this round the family spans a subscription CLI and a metered API. Two words are needed and they are not synonyms: `gemini` = every transport, `agy` = the ones that spend the Antigravity subscription, `openrouter` = the ones that spend the OpenRouter key. Overlapping groups are fine, a group whose name misdescribes its contents is not.",
-      "_membership_updated_2026_08_13": "agy37flash and orgemini37flash added round 36. Six channels then - three via the agy CLI (3.1 pro, 3.6 flash, 3.7 flash), two via OpenRouter (3.6 flash, 3.7 flash), one via Google directly (3.6 flash). SEE ALSO _membership_updated_2026_08_14 below.",
+      "_membership_updated_2026_08_13": "agy37flash and orgemini37flash added round 36; UPGRADED to agy38flash and orgemini38flash R80 (2026-09-03). Six channels then - three via the agy CLI (3.1 pro, 3.6 flash, 3.7→3.8 flash), two via OpenRouter (3.6 flash, 3.7→3.8 flash), one via Google directly (3.6 flash). SEE ALSO _membership_updated_2026_08_14 below.",
       "_membership_updated_2026_08_14": "goog37flash added round 39. SEVEN channels now, and this is the moment 3.7-flash gains parity with 3.6-flash: three transports each (agy CLI, OpenRouter, Google direct). The reason for adding it is not symmetry - it is that orgemini37flash live-failed in R38c with the vendor-side agentic-loop empty-content class the harness cannot fix (measured 3 runs: 2 empty at 208K/284K accumulated prompt tokens, 1 with content but 4 fabricated URLs). goog37flash sidesteps that class entirely by using Google's own url_context/google_search retrieval instead of the harness fetch_url loop - no token accumulation, no loop-inside-vendor. Confirmed live 2026-08-14 by the R39 probe: a Claude Code version question was answered correctly (2.1.231) with two google_search calls and a real citation in a single 111-char response, marker present.",
       "🔴🔴_SIX_GEMINI_SEATS_IS_A_DECISION_AND_HERE_IS_ITS_OWNERS_REASONING": "R43. Two reviewers in the round-42 panel filed «transport deduplication inside a panel» as a defect, and the R42 backlog carried it as an open item on the grounds that a panel's product is DISAGREEMENT and six seats of one vendor are one opinion repeated. the operator answered it directly, and the answer is economic rather than aesthetic - it is recorded here verbatim because it is exactly the kind of premise an outside reviewer cannot see and will therefore keep re-filing:\n\n«у меня подписка через agy и он вообще не тратит токены. Поэтому через него пропускаем все модели подряд, включая 3.1 Pro. А 3.1 Pro по openrouter и напрямую тратил много денег. 3.7 Flash сейчас на скидках, поэтому его везде используем.»\n\nSo: (1) the three `agy*` seats are FREE at the margin - a flat subscription, no per-token charge - which is why every Gemini model runs through that transport including 3.1 Pro, the most expensive model in the family. Adding an agy seat costs wall-clock and nothing else. (2) 3.1 Pro exists ONLY on agy for that reason: it was expensive through OpenRouter and through Google's own API, so it has no `orgemini31pro` or `goog31pro` twin and must not acquire one. (3) 3.7 Flash is on vendor discount right now, which is why it is the model that appears on ALL THREE transports (agy37flash, orgemini37flash, goog37flash) rather than one.\n\n🔴 WHAT THIS DOES NOT DISMISS. The vendor-concentration measurement stands and the plan still prints it: cheap = 6 of 11 seats Google. The point is that the concentration is PAID FOR at three different prices, and the seats that make it look worst are the ones that cost nothing. It also does not dismiss the finding that convergence between them is weak evidence - six Geminis agreeing is still one opinion repeated, and a reader should weight it that way. The correct response to that is to read agreement across VENDORS, not to delete free seats. 🔴 AND THE DISCOUNT IS A DATED FACT: «3.7 Flash сейчас на скидках» is true on 2026-08-15 and will stop being true without notice. If the price moves, the argument for three 3.7-Flash transports moves with it - that is a reason to re-read this note, not to trust it.",
       "aliases": [
@@ -77,15 +78,15 @@
         "kimik3",
         "qwen38max",
         "orgemini36flash",
-        "orgemini37flash",
+        "orgemini38flash",
         "ormimo25pro",
         "orgrok420",
         "ornemotron3ultra",
         "ordeepseekv4pro",
         "orglm53",
-        "orspark12cont"
+        "orspark13cont"
       ],
-      "_membership_updated_2026_08_30": "R69: orspark12cont added - TWELVE channels. It spends the same OPENROUTER_API_KEY as the rest, so both properties this group exists for now cover it: «--skip openrouter» excludes it, and one runaway member's 403 takes it down with the others.",
+      "_membership_updated_2026_08_30": "R69: orspark12cont added (RENAMED to orspark13cont R80, Spark 1.3 upgrade) - TWELVE channels. It spends the same OPENROUTER_API_KEY as the rest, so both properties this group exists for now cover it: «--skip openrouter» excludes it, and one runaway member's 403 takes it down with the others.",
       "aliases": [
         "openrouter",
         "опенроутер",
@@ -147,7 +148,8 @@
       "kind": "http",
       "panel": "standard",
       "vendor": "meta",
-      "enabled": true,
+      "enabled": false,
+      "_disabled_r80": "R80 (2026-09-04), the operator: «spark11 - отключаем». Superseded by spark13cont (same transport, newer model, cheaper tier).",
       "label": "Spark11",
       "cost": "cheap",
       "model": "muse-spark-1.1",
@@ -174,7 +176,7 @@
       ],
       "notes": "Default for lookups and fact-checks. Content filter is cumulative - probe cheap first. Standard tier: $1.25/M in, $4.25/M out, 1,048,576 ctx (dev.meta.ai/docs/pricing-rate-limits, read 2026-08-06)."
     },
-    "spark12cont": {
+    "spark13cont": {
       "read_order": 1,
       "must_read": true,
       "_must_read_doc": "★ Idea 3 (the operator, 2026-09-01): «читать ИИ самому самую умную, если запустил standart панель. А в cheap panel читать самому Spark». The ordering session reads THIS channel's answer ITSELF, whatever the context pressure - never delegated to a sub-agent, never dropped for room. One flag satisfies both halves of the instruction because this channel sits in BOTH panels and is the measured-strongest voice in each. Consumed by write_handoff only (sorts the ★ row first within its tier and prints the mandatory-minimum rule); never sent to any vendor; move the flag here as models rotate.",
@@ -182,10 +184,11 @@
       "panel": "cheap",
       "vendor": "meta",
       "enabled": true,
-      "label": "Spark12Cont",
+      "label": "Spark13Cont",
       "cost": "cheap",
-      "model": "muse-spark-1.2-contributor",
-      "fallback_model": "muse-spark-1.2",
+      "model": "muse-spark-1.3-contributor",
+      "fallback_model": "muse-spark-1.3",
+      "_upgraded_r80": "R80 (2026-09-04): spark12cont → spark13cont. Model: muse-spark-1.2-contributor → muse-spark-1.3-contributor. Fallback: muse-spark-1.2 → muse-spark-1.3. Price IDENTICAL: $0.10/M in, $0.20/M out (Contributor); fallback $1.25/$4.25 (Standard). Verified LIVE 2026-09-03. Old name preserved as alias.",
       "_fallback_added": "2026-08-22 R62, the operator: «Если запускаем standart panel и Spark 1.2 Cont не сработал (проверить ответ), то на fallback поставить дорогой Spark 1.2.» Implemented as a HARNESS-LEVEL retry in call_http_reviewer: same endpoint, same key, only the model changes. Content-filter failures are NOT retried - same payload to the same vendor's filter gives the same result. Rate limits (429) and server errors ARE retried: Contributor has 100 RPM / 3M TPM, Standard has 3000 RPM / 4M TPM (measured from dev.meta.ai/docs/pricing-rate-limits, 2026-08-22). 🔴 SUPERSEDED 2026-08-30 (R69), measured by execution: --set spark12cont=muse-spark-1.2 IS ACCEPTED by routing - re-listing the Standard model in `models` (which this same R62 change did) made it legal again, and this sentence was never re-checked against that. The run is loud, not silent: [RUN] with «⚠ MODEL OVERRIDDEN» in the plan. The fallback MECHANISM still fires ONLY on a failure of the primary model, never by override. Diagnostics report `fallback_used: true` and `primary_model` when it fires. Cost: $0.10/M -> $1.25/M input, $0.20/M -> $4.25/M output - a 12.5x/21x price increase, which is why it is a fallback and not a default.",
       "_added": "2026-08-06, the operator: «добавь новый muse-spark-1.2-contributor параллельно с spark 1.1». PARALLEL is the requirement, not a replacement - one channel runs one model per round, so a second voice needs a second entry. This is the first channel added purely by editing this file, and it is therefore also the test of the dispatch fix above.",
       "_renamed": "2026-08-06 (round 23) from `spark12`, the operator: «spark12 в Spark12Cont - что бы если кто-то использует не muse-spark-1.2-contributor мы визуально это увидели». The name carries the TIER, which is the thing that matters and the thing a bare version number hides. Lower case on disk because the name is also a filesystem path component and Windows would collide `Spark12Cont.md` with `spark12cont.md`; the display label keeps the operator's capitalisation.",
@@ -194,35 +197,39 @@
       "_the_warning_was_removed_2026_08_08": "🔴 THIS ENTRY USED TO CARRY A LOUD DO-NOT-SEND WARNING AND IT WAS ACTING AS A DEFAULT. the operator, 2026-08-08: «spark12cont убери всякие комментарии, что на нем обучаются, ИИ боится и не использует его». Twice-observed and both failures were caused by the prose, not prevented by it: one session obeyed the advice literally and silently ran the whole round on a DIFFERENT model, and a later one dropped the channel with --skip. So the warning did not protect a payload, it removed a reviewer. This registry already learnt the general form of that on 2026-08-07 - «A REGISTRY THAT CARRIES ADVICE GETS OBEYED», and a documented escape hatch IS the default - and then left the biggest piece of advice in the file sitting in this very entry. What replaces it: the fact lives in `_tier` above and in PRIVACY.md, stated once, neutrally, where it informs rather than instructs. What is DELIBERATELY NOT reintroduced: any sentence telling a caller when to avoid this channel. The lever for a confidential brief is `--skip spark12cont`, it is documented in SKILL.md where levers belong, and the human choosing to spend money is the one who should be reading it.",
       "_locked_to_contributor": "2026-08-07, the operator: «указать в коде только эту модель: muse-spark-1.2-contributor», «лучше вообще из кода временно удалить модель не contributor». TEMPORARY BY HIS OWN WORD - restoring is one object, pasted back into `models` below, and nothing else changes because every guard reads this table rather than a literal: {\"muse-spark-1.2\": {\"label\": \"Muse Spark 1.2\", \"data_policy\": \"Standard tier, same weights as the Contributor id, ~12x the input price.\", \"aliases\": [\"muse-spark-1.2\", \"spark 1.2\", \"спарк 1.2\"]}}. Rejected alternative: a separate `spark12std` channel carrying the Standard checkpoint - that is the removed model under a new name, which is what «удалить» excludes, and it would re-open the substitution path one alias away.",
       "models": {
-        "muse-spark-1.2-contributor": {
-          "label": "Muse Spark 1.2 Contributor",
+        "muse-spark-1.3-contributor": {
+          "label": "Muse Spark 1.3 Contributor",
           "data_policy": "Contributor tier - discounted pricing, Meta's Contributor data terms apply. See PRIVACY.md.",
           "aliases": [
-            "muse-spark-1.2-contributor",
-            "spark 1.2 contributor",
-            "1.2-contributor",
+            "muse-spark-1.3-contributor",
+            "spark 1.3 contributor",
+            "1.3-contributor",
             "контрибьютор"
           ]
         },
-        "muse-spark-1.2": {
-          "label": "Muse Spark 1.2 (Standard fallback)",
+        "muse-spark-1.3": {
+          "label": "Muse Spark 1.3 (Standard fallback)",
           "data_policy": "Standard tier - prompts and completions are NOT used for training.",
           "aliases": [
-            "muse-spark-1.2",
-            "spark 1.2",
-            "спарк 1.2"
+            "muse-spark-1.3",
+            "spark 1.3",
+            "спарк 1.3"
           ]
         }
       },
       "aliases": [
+        "spark13cont",
         "spark12cont",
+        "spark13",
         "spark12",
+        "спарк13",
         "спарк12",
+        "http13",
         "http12"
       ],
-      "notes": "Same endpoint, same key, same verification as spark11. Runs as an independent voice, not a replacement. Primary model is Contributor ($0.10/M in); on failure, falls back to Standard ($1.25/M in) — same weights, 30x more RPM. SUPERSEDED 2026-08-30 (R69), measured by execution: `--set spark12cont=muse-spark-1.2` IS accepted - the Standard model has been back in this channel's legal `models` table since R62 itself, so routing allows it and prints ⚠ MODEL OVERRIDDEN in the plan before spend. What stays true: a model OUTSIDE the table is still refused, and the FALLBACK fires only on failure, never by override."
+      "notes": "Same endpoint, same key, same verification as spark11. Runs as an independent voice, not a replacement. Primary model is Contributor ($0.10/M in); on failure, falls back to Standard ($1.25/M in) — same weights, 30x more RPM. R80 (2026-09-04): upgraded from muse-spark-1.2-contributor to muse-spark-1.3-contributor. Meta docs: 1.3 is 'tuned for agentic workflows with improved coding over 1.2'. Price identical at all tiers."
     },
-    "orspark12cont": {
+    "orspark13cont": {
       "read_order": 1,
       "kind": "openrouter",
       "panel": "cheap",
@@ -231,12 +238,13 @@
       "enabled": true,
       "distribution": "kit",
       "_distribution": "🔴 KIT ONLY since 2026-08-30 (R69). Locally this machine holds a direct MODEL_API_KEY, and spark12cont is the same model at the same Contributor price without the reseller in the path - running both would pay two vendors for one voice, which INSTALL.md itself tells users not to do. In the kit the calculus inverts, and this channel is the whole point of R69: a first-time user who holds ONLY an OPENROUTER_API_KEY had NO Spark voice at all, and the --ask default (spark12cont) pointed the one-shot path at the one channel they cannot run. package.py flips `enabled` on build and prints the flip.",
-      "label": "OR Spark 1.2 Cont",
+      "label": "OR Spark 1.3 Cont",
       "cost": "metered",
-      "model": "meta/muse-spark-1.2-contributor",
+      "model": "meta/muse-spark-1.3-contributor",
       "fallback_models": [
-        "meta/muse-spark-1.2"
+        "meta/muse-spark-1.3"
       ],
+      "_upgraded_r80": "R80 (2026-09-04): orspark12cont → orspark13cont. Model: meta/muse-spark-1.2-contributor → meta/muse-spark-1.3-contributor. Fallback: meta/muse-spark-1.2 → meta/muse-spark-1.3. Price IDENTICAL: $0.10/M in, $0.20/M out (Contributor); $2.50/1K web search (OR: $0.0025/search). Verified LIVE 2026-09-03. Old name preserved as alias.",
       "_added": "2026-08-30 (R69), the operator: «пользователь установит первый раз наш репозиторий. Напрямую meta ключа у него нет, а только openrouter. У него будет модель от openrouter: openrouter.ai/meta/muse-spark-1.2-contributor с fallback на openrouter.ai/meta/muse-spark-1.2». Catalogue read LIVE the same day (GET /api/v1/models, 396 models): $0.10/M in, $0.20/M out, ctx 1,048,576, top_provider.max_completion_tokens 943,718, web_search $0.0025/search, reasoning {mandatory: true, supported_efforts: [xhigh, high, medium, low, minimal], default_effort: medium}. 🔴 default_effort is MEDIUM - the R44 lesson verbatim (a gateway defaults BELOW its own top), which is why reasoning.effort xhigh is pinned explicitly below. NO prompt_suffix on purpose, although the other two training-tier channels carry one: package.py strips prompt_suffix from the kit, and locally this channel is disabled - a suffix here would be config no build could ever send. 🟢 EXECUTED, same day, from the built kit tree with the real key: --ask probe answered in 25.5s, `model_served: meta/muse-spark-1.2-contributor` (the CONTRIBUTOR endpoint itself - the R42 unreachable-slug risk did not materialize on this account; fallback_used None), reasoning_tokens 3815 of out 3830 at effort xhigh, provider-reported cost $0.001021, marker verified and stripped. The channel is tested, not merely configured.",
       "_fallback": "Same failure-only shape as orglm52's R54 free->paid chain, reusing the `models` array mechanism call_oai_reviewer already has - NOT a second hand-rolled retry. Contributor and Standard are the SAME weights at 12.5x/21x different prices, so the fallback fires only on a real failure of the primary (429, downtime, or an account for which the Contributor endpoint is unreachable - the R42 class where a catalogue slug is a hypothesis until one call returns). Deliberately NO provider_route and NO allow_fallbacks:false - measured R54: that flag stops the model chain after a dispatched failure, which is exactly the failure the chain exists for. `model_served` in diagnostics.json records which tier answered; the plan prints the chain before anything is spent.",
       "reasoning": {
@@ -266,27 +274,67 @@
         "max_calls": 11
       },
       "models": {
-        "meta/muse-spark-1.2-contributor": {
-          "label": "Muse Spark 1.2 Contributor (via OpenRouter)",
+        "meta/muse-spark-1.3-contributor": {
+          "label": "Muse Spark 1.3 Contributor (via OpenRouter)",
           "data_policy": "Contributor tier THROUGH OpenRouter: the payload passes OpenRouter (their privacy policy applies) and lands on Meta's Contributor data terms - discounted because the vendor may train on what you send. See PRIVACY.md.",
           "aliases": [
-            "meta/muse-spark-1.2-contributor"
+            "meta/muse-spark-1.3-contributor"
           ]
         },
-        "meta/muse-spark-1.2": {
-          "label": "Muse Spark 1.2 (Standard fallback, via OpenRouter)",
+        "meta/muse-spark-1.3": {
+          "label": "Muse Spark 1.3 (Standard fallback, via OpenRouter)",
           "data_policy": "Standard tier through OpenRouter - prompts and completions are NOT used for training. 12.5x the Contributor input price; fires only when the primary fails.",
           "aliases": [
-            "meta/muse-spark-1.2"
+            "meta/muse-spark-1.3"
           ]
         }
       },
       "aliases": [
+        "orspark13cont",
         "orspark12cont",
         "orspark",
         "орспарк"
       ],
-      "notes": "The Spark voice for anyone whose only key is OPENROUTER_API_KEY - the same Contributor checkpoint as spark12cont, reached through the reseller. `--set orspark12cont=meta/muse-spark-1.2` is ACCEPTED like any model listed in `models` and printed as ⚠ MODEL OVERRIDDEN (measured 2026-08-30 on the twin channel); the fallback itself fires only on failure, never by override. When MODEL_API_KEY is absent, --ask resolves to this channel via `ask_default`."
+      "notes": "The Spark voice for anyone whose only key is OPENROUTER_API_KEY - the same Contributor checkpoint as spark13cont, reached through the reseller. R80 (2026-09-04): upgraded from muse-spark-1.2-contributor to muse-spark-1.3-contributor. Meta docs: 1.3 is 'tuned for agentic workflows with improved coding over 1.2'. Price identical. When MODEL_API_KEY is absent, --ask resolves to this channel via `ask_default`."
+    },
+    "ocspark13free": {
+      "read_order": 1,
+      "kind": "opencode",
+      "panel": "cheap",
+      "vendor": "meta",
+      "enabled": true,
+      "distribution": "both",
+      "label": "OC Spark 1.3 Free",
+      "cost": "free",
+      "_added_r80": "R80 И5 (2026-09-04), the operator: «добавь канал opencode cli с моделью spark 1.3 contributor Free. Именно бесплатная модель. И поставить ее как основную вместо прямой api и вместо openrouter spark. Но fallback сделать не free на тех каналах.» Free Spark 1.3 Contributor via opencode CLI (opencode.ai). No API key needed — opencode/ prefix models are free. Same Spark 1.3 weights as spark13cont and orspark13cont. Primary in ask_default; fallback to the paid channels. Data policy: Contributor terms (Meta trains on what you send) PLUS opencode's own terms (the free tier routes through opencode's infrastructure). opencode CLI must be installed: npm install -g opencode-ai.",
+      "model": "opencode/muse-spark-1.3-contributor-free",
+      "effort": "max",
+      "_effort": "opencode --variant flag. the operator 2026-09-04: «ставь максимально доступный reasoning effort - max». Free Spark 1.3 supports high/max/minimal.",
+      "supported_efforts": [
+        "max",
+        "high",
+        "minimal"
+      ],
+      "timeout": 120,
+      "_timeout": "opencode CLI has no built-in timeout — caller-side via subprocess.run. 120s for a free model is generous; the CLI blocks synchronously once stdin is closed.",
+      "models": {
+        "opencode/muse-spark-1.3-contributor-free": {
+          "label": "Muse Spark 1.3 Contributor Free (via opencode)",
+          "data_policy": "Contributor tier through opencode's free relay: the payload passes opencode's infrastructure (their terms apply) and lands on Meta's Contributor data terms. Free at point of use — no API key, no billing.",
+          "aliases": [
+            "opencode/muse-spark-1.3-contributor-free",
+            "oc spark 1.3 free",
+            "opencode spark free"
+          ]
+        }
+      },
+      "aliases": [
+        "ocspark13free",
+        "ocspark",
+        "opencode",
+        "opencode_spark"
+      ],
+      "notes": "Free Spark 1.3 Contributor via opencode CLI. No API key needed. Primary --ask channel — if the CLI is installed, this fires before the paid spark13cont/orspark13cont. Same model weights, zero cost. Brief piped through stdin (solves both the hang bug and the 32KB cmdline limit). LIVE TESTED 2026-09-04: --ask '2+2' answered '4' in 9.2s, effort=max, marker verified, exit=0."
     },
     "codex": {
       "read_order": 1,
@@ -383,7 +431,8 @@
       "kind": "agy",
       "panel": "cheap",
       "vendor": "google",
-      "enabled": true,
+      "enabled": false,
+      "_disabled_r80": "R80 (2026-09-04), the operator: «agy36flash и orgemini36flash отключаем для всех». Superseded by agy38flash (same transport, newer model).",
       "label": "agy 3.6 Flash",
       "cost": "mid",
       "model": "gemini-3.6-flash",
@@ -413,25 +462,26 @@
       ],
       "notes": "The FAST Gemini voice - the operator's reason for adding it is that Gemini answers quickly, so a second opinion from this family costs almost no wall-clock. Unlike 3.1 Pro it does have a 'medium' effort, so the standard tier reaches it unclamped."
     },
-    "agy37flash": {
+    "agy38flash": {
       "read_order": 3,
       "kind": "agy",
       "panel": "cheap",
       "vendor": "google",
       "enabled": true,
-      "label": "agy 3.7 Flash",
+      "label": "agy 3.8 Flash",
       "cost": "mid",
-      "model": "gemini-3.7-flash",
+      "model": "gemini-3.8-flash",
       "agent": "deep-researcher",
-      "_added": "2026-08-13 (round 36), the operator: «Добавь еще одну модель параллельно: agy 3.7 Flash High и через openrouter 3.7 Flash High через провайдера google-vertex/global». Third Gemini through the Antigravity subscription CLI, joining agy31pro (deep) and agy36flash (fast). VERIFIED against `agy models`: three suffixed forms exist - gemini-3.7-flash-high/medium/low - and the base slug `gemini-3.7-flash` composes with --effort exactly as 3.6-flash does. Same pattern as agy36flash, deliberately: adding one channel and everything ELSE unchanged is the only way to isolate what the new model changes.",
+      "_added": "2026-08-13 (round 36) as agy37flash (gemini-3.7-flash). Third Gemini through the Antigravity subscription CLI.",
+      "_upgraded_r80": "2026-09-03: gemini-3.7-flash → gemini-3.8-flash. VERIFIED against `agy models`: gemini-3.8-flash-{high,medium,low} exist and compose with --effort. Same efforts ladder [low,medium,high], same subscription cost (flat rate). Google describes 3.8 as «most intelligent Flash model with significant gains across software engineering, agentic tasks, and multi-step reasoning». Pricing UNCHANGED on OpenRouter (identical per-tier across all 6 endpoints). Channel renamed agy37flash→agy38flash; old name preserved as alias.",
       "_one_model_per_call": "See agy36flash._one_model_per_call. The agy CLI runs ONE model per invocation, so a third Gemini voice needs a third channel entry.",
       "fetch_fallback_hint_ref": "mcp_fallback",
       "models": {
-        "gemini-3.7-flash": {
-          "label": "Gemini 3.7 Flash",
+        "gemini-3.8-flash": {
+          "label": "Gemini 3.8 Flash",
           "aliases": [
-            "gemini-3.7-flash",
-            "3.7 flash"
+            "gemini-3.8-flash",
+            "3.8 flash"
           ],
           "efforts": [
             "low",
@@ -441,11 +491,14 @@
         }
       },
       "aliases": [
+        "agy38flash",
+        "agy38",
+        "аджи38",
         "agy37flash",
         "agy37",
         "аджи37"
       ],
-      "notes": "The newest Gemini flash via Antigravity subscription. Same three-effort ladder as 3.6-flash. Positioned as the FASTEST reviewer in the panel carrying the newest model weights - what its round-to-round disagreement with agy36flash reveals is the model delta, not the transport."
+      "notes": "Gemini 3.8 Flash via Antigravity subscription (upgraded from 3.7 in R80). Same three-effort ladder as 3.6/3.7. Google's most intelligent Flash model - significant gains in SE, agentic tasks, multi-step reasoning. Its disagreement with agy36flash reveals the model delta, not the transport."
     },
     "kimik3": {
       "read_order": 1,
@@ -610,8 +663,9 @@
       "panel": "cheap",
       "vendor": "google",
       "provider": "openrouter",
-      "enabled": true,
-      "distribution": "kit",
+      "enabled": false,
+      "_disabled_r80": "R80 (2026-09-04), the operator: «agy36flash и orgemini36flash отключаем для всех». Superseded by orgemini38flash (same transport, newer model). Distribution changed from kit to both so package.py does not re-enable it.",
+      "distribution": "both",
       "_distribution": "🔴 KIT ONLY since 2026-08-08, the operator: «Для моего локального используй только прямой от google, orgemini36flash для репозитория оставь». Locally it is redundant AND worse: goog36flash reaches the same model through Google's own retrieval, which opened a USCIS page this harness is 403'd on. In the kit it is the opposite - it is the ONLY Gemini a new user can reach with the one OpenRouter key they already needed for kimi and qwen. Note what this costs and why it is accepted: the round-26 agy-vs-OpenRouter transport experiment no longer runs by default here, because its control arm is now off. It is one `--only gemini` away when that comparison is wanted again.",
       "label": "OR Gemini 3.6 Flash",
       "cost": "metered",
@@ -664,7 +718,7 @@
       ],
       "notes": "The SAME model as agy36flash, reached the other way. Its whole reason for existing is the comparison: if it matches agy36flash the Antigravity subscription is a billing path, and if it loses the difference is Google's agent harness, which is a thing we could copy. Do not 'simplify' the two into one channel - one channel = one model AND one transport, and collapsing them destroys the only control in the panel."
     },
-    "orgemini37flash": {
+    "orgemini38flash": {
       "read_order": 3,
       "kind": "openrouter",
       "panel": "cheap",
@@ -672,24 +726,25 @@
       "provider": "openrouter",
       "enabled": true,
       "distribution": "both",
-      "label": "OR Gemini 3.7 Flash",
-      "_LIVE_MEASURED_EMPTY_OUTPUT_2026_08_14": "🔴🔴 THE R38 LIVE RUN the operator ASKED FOR (his instinct was right - the OpenRouter logs showed no prior call for this channel because there had never been one) FAILED. Two runs on the same 2 744-char brief with the harness's fetch loop: run 1 (effort=high, 7 fetches, 208 345 prompt tokens) returned 0 chars of content, 1 296 chars of reasoning, no end marker; run 2 (effort=medium, 7 fetches, 283 811 prompt tokens) failed IDENTICALLY even when explicitly told «fetch budget reached, answer from what you have». A third run made only 2 fetches (70 313 prompt tokens) and DID produce 850 output tokens, but cited 4 URLs of which 2 returned 404 and 2 were MOVED - the model fabricated citations. Failure signature is identical to the R29 grok420 pattern recorded in [[r36-two-more-geminis-and-provider-route]] (reasoning present, content absent, no error event, no marker), and by [[r36]]'s own logic (a stream that ends inside the agentic loop without emitting a message item) it is a vendor behaviour, not a harness config bug. So the channel is documented as observed, NOT fixed by cutting its fetch budget - that would be a guess based on one working data point (2 fetches) that also fabricated URLs. the operator to decide the next move; two obvious choices are `enabled: false` (opt-in like orgpt56terrapro) and dropping fetch_tool.max_calls to 3-4, and neither is applied unilaterally because both trade something. Third round in a row where THIS class - the vendor's agentic loop returns reasoning-only, no content, no error - was measured and not fixable from the harness (kimik3 2026-08-03, grok420 R36, orgemini37flash R38).",
-      "_probe_negative_control": "The bare model without tools does return content: probed same day with just «Reply with exactly three words, then the token DONE-X1» and no plugins - it produced 18-24 chars of content across three effort levels (none/medium/high), all ending with the marker. So the model itself works. What fails is the loop: 7 fetches accumulate ~200K prompt tokens (every round re-sends everything), and past that ceiling gemini-3.7-flash on this transport starts emitting only reasoning. The R38 sibling orgpt56terrapro tolerates 400K+ prompt tokens on the same brief without this behaviour - so the ceiling is model-specific, not transport-specific.",
+      "label": "OR Gemini 3.8 Flash",
+      "_LIVE_MEASURED_EMPTY_OUTPUT_2026_08_14_ON_37": "🔴🔴 HISTORY: measured on gemini-3.7-flash, may or may not reproduce on 3.8. THE R38 LIVE RUN the operator ASKED FOR (his instinct was right - the OpenRouter logs showed no prior call for this channel because there had never been one) FAILED. Two runs on the same 2 744-char brief with the harness's fetch loop: run 1 (effort=high, 7 fetches, 208 345 prompt tokens) returned 0 chars of content, 1 296 chars of reasoning, no end marker; run 2 (effort=medium, 7 fetches, 283 811 prompt tokens) failed IDENTICALLY even when explicitly told «fetch budget reached, answer from what you have». A third run made only 2 fetches (70 313 prompt tokens) and DID produce 850 output tokens, but cited 4 URLs of which 2 returned 404 and 2 were MOVED - the model fabricated citations. Failure signature is identical to the R29 grok420 pattern recorded in [[r36-two-more-geminis-and-provider-route]] (reasoning present, content absent, no error event, no marker), and by [[r36]]'s own logic (a stream that ends inside the agentic loop without emitting a message item) it is a vendor behaviour, not a harness config bug. So the channel is documented as observed, NOT fixed by cutting its fetch budget - that would be a guess based on one working data point (2 fetches) that also fabricated URLs. the operator to decide the next move; two obvious choices are `enabled: false` (opt-in like orgpt56terrapro) and dropping fetch_tool.max_calls to 3-4, and neither is applied unilaterally because both trade something. Third round in a row where THIS class - the vendor's agentic loop returns reasoning-only, no content, no error - was measured and not fixable from the harness (kimik3 2026-08-03, grok420 R36, orgemini37flash R38).",
+      "_probe_negative_control_on_37": "HISTORY (measured on gemini-3.7-flash R38, may not reproduce on 3.8): The bare model without tools does return content: probed same day with just «Reply with exactly three words, then the token DONE-X1» and no plugins - it produced 18-24 chars of content across three effort levels (none/medium/high), all ending with the marker. So the model itself works. What fails is the loop: 7 fetches accumulate ~200K prompt tokens, and past that ceiling gemini-3.7-flash on this transport starts emitting only reasoning.",
       "cost": "metered",
-      "model": "google/gemini-3.7-flash",
+      "model": "google/gemini-3.8-flash",
       "role": "analysis",
-      "_added": "2026-08-13 (round 36), the operator: «через openrouter 3.7 Flash High через провайдера google-vertex/global», with the exact endpoint URL openrouter.ai/google/gemini-3.7-flash?endpoint=e28074f6-26f6-4ba2-adf9-0bb807bc970e. Different reasoning from orgemini36flash's distribution split: there is no goog37flash on this machine (the operator did not add one), so this is the ONLY OpenRouter route to Gemini 3.7 Flash for both audiences - local and kit - and distribution is `both` rather than `kit`.",
-      "_provider_pinned": "🔴 EXPLICIT PROVIDER PIN to google-vertex/global via `provider_route` below. Without the pin OpenRouter picks across SIX endpoints for this model - three Vertex Global tiers (flex $0.1875/$0.9375 per M, normal $0.375/$1.875, priority $0.675/$3.375) and three AI Studio tiers ($0.375/$1.875 flex, $0.75/$3.75 normal, $1.35/$6.75 priority). Cheapest is 18x under the most expensive; a plan cannot honestly print what a run will cost when the endpoint is chosen at request time. The pin also fixes the DATA POLICY: Vertex Global's terms say prompts are not used for model training, AI Studio's terms are different, and a channel whose data policy varies per-request is a policy nobody agreed to. the operator's URL pointed at the normal Vertex Global tier (endpoint UUID e28074f6-26f6-4ba2-adf9-0bb807bc970e); kept as-is. Adding flex/priority variants later would be additional channels rather than --set overrides, because --set has no way to change a provider block.",
+      "_added": "2026-08-13 (round 36) as orgemini37flash (google/gemini-3.7-flash), pinned to google-vertex/global.",
+      "_upgraded_r80": "2026-09-03: google/gemini-3.7-flash → google/gemini-3.8-flash. VERIFIED LIVE against OpenRouter endpoints API: google/gemini-3.8-flash has 6 endpoints (flex/standard/priority × Vertex/AI Studio), pricing IDENTICAL to 3.7 at every tier. provider_route google-vertex/global WORKS for 3.8 (probed 2026-09-03, effort=high accepted). Reasoning config identical: mandatory=true, efforts [high,medium,low], default medium. Channel renamed orgemini37flash→orgemini38flash; old name preserved as alias.",
+      "_provider_pinned": "🔴 EXPLICIT PROVIDER PIN to google-vertex/global (standard tier) via `provider_route` below. Six endpoints exist for this model (flex/standard/priority × Vertex/AI Studio). The pin fixes both PRICE ($0.75/$3.75) and DATA POLICY (Vertex Global: prompts not used for training). 🔴 R80: flex/batch routing belongs to a SEPARATE script (from the Batch Review project), not to this channel's provider_route — this channel stays on standard tier for live synchronous use.",
       "provider_route": {
         "only": [
           "google-vertex/global"
         ]
       },
-      "_catalogue": "READ FROM LIVE CATALOGUE 2026-08-13 at api.openrouter.ai/v1/models: `google/gemini-3.7-flash` context_length 1,048,576, top_provider.max_completion_tokens 65,536. At the pinned endpoint google-vertex/global: $0.000000375/token prompt = $0.375/M, $0.000001875/token completion = $1.875/M. 🔴 THIS IS FOUR TIMES CHEAPER THAN 3.6-flash ($1.50 in / $7.50 out) - a newer flash undercutting the older one is unusual and worth recording so nobody 'corrects' the pricing here to match neighbouring channels. supported_parameters includes reasoning, reasoning_effort, tools, tool_choice, structured_outputs. reasoning_config: mandatory=true, default_enabled=true, supported_efforts=[high, medium, low], default_effort=medium.",
+      "_catalogue": "RE-READ FROM LIVE CATALOGUE 2026-09-03 at api.openrouter.ai/v1/models: `google/gemini-3.8-flash` context_length 1,048,576, top_provider.max_completion_tokens 65,536. Pinned endpoint google-vertex/global: $0.00000075/token prompt = $0.75/M, $0.00000375/token completion = $3.75/M (with discount 0.5 active = 50% off, so effective may be half). Six endpoints total: flex ($0.375/$1.875), standard ($0.75/$3.75), priority ($1.35/$6.75), each on Vertex Global and AI Studio. Pricing IDENTICAL to 3.7 Flash at every tier — no model-specific price change. supported_parameters includes reasoning, reasoning_effort, tools, tool_choice, structured_outputs. reasoning_config: mandatory=true, default_enabled=true, supported_efforts=[high, medium, low], default_effort=medium.",
       "reasoning": {
         "effort": "high"
       },
-      "_effort_ladder_has_no_minimal": "🔴 UNLIKE 3.6-flash which supports [high, medium, low, MINIMAL], this model has NO minimal effort. Setting effort=minimal here would be a paid 400. `high` is both this channel's ceiling and, deliberately, the same effort orgemini36flash uses - which keeps the two 3.x-flash OpenRouter channels matched on depth, so their disagreement is model-vs-model rather than depth-vs-depth. Reasoning cannot be disabled (mandatory=true), so this is a forced-depth reviewer.",
+      "_effort_ladder_has_no_minimal": "🔴 UNLIKE 3.6-flash which supports [high, medium, low, MINIMAL], this model (3.8 Flash, same as 3.7) has NO minimal effort. Setting effort=minimal here would be a paid 400. `high` is both this channel's ceiling and, deliberately, the same effort orgemini36flash uses - which keeps the 3.x-flash OpenRouter channels matched on depth, so their disagreement is model-vs-model rather than depth-vs-depth. Reasoning cannot be disabled (mandatory=true), so this is a forced-depth reviewer.",
       "max_tokens": 65536,
       "_max_tokens_same_as_neighbours": "65536 = this model's own `top_provider.max_completion_tokens`, raised from 60000 in R43 for the reason spelled out in orgemini36flash._max_tokens_is_this_models_own_ceiling: max_tokens is the TOTAL of reasoning and answer, so holding it under the vendor's cap reserves nothing and only shrinks the room.",
       "web": {
@@ -704,22 +759,25 @@
         "_added": "Same wiring, same SSRF fence, same per-CALL budget as orgemini36flash - read the notes on kimik3.fetch_tool. Kept ON alongside native search: the vendor decides WHICH page, we OPEN and PROVE it. `n_grounded` is a list on this channel."
       },
       "models": {
-        "google/gemini-3.7-flash": {
-          "label": "Gemini 3.7 Flash (OpenRouter)",
+        "google/gemini-3.8-flash": {
+          "label": "Gemini 3.8 Flash (OpenRouter)",
           "data_policy": "Metered API through OpenRouter, PINNED to google-vertex/global. Vertex Global data policy applies (enterprise-grade: prompts not used for Google's model training). This is materially different from AI Studio's terms, which is why the endpoint is pinned rather than allowed to route. See also _data_controls_not_wired at the end of this file for OpenRouter-side controls that are documented but not yet enabled here.",
           "aliases": [
-            "google/gemini-3.7-flash",
-            "or gemini 3.7",
-            "3.7 flash api"
+            "google/gemini-3.8-flash",
+            "or gemini 3.8",
+            "3.8 flash api"
           ]
         }
       },
       "aliases": [
+        "orgemini38flash",
+        "orgemini38",
+        "оргемини38",
         "orgemini37flash",
         "orgemini37",
         "оргемини37"
       ],
-      "notes": "The newest and cheapest Gemini in the panel - 4x cheaper than orgemini36flash on both directions, and pinned to Vertex Global so the price is deterministic. Its disagreement with orgemini36flash is a model-delta signal on ONE transport; its disagreement with agy37flash is a transport-delta signal on ONE model. See _provider_pinned for why the pin is not optional."
+      "notes": "Gemini 3.8 Flash via OpenRouter (upgraded from 3.7 in R80). Pinned to Vertex Global standard tier ($0.75/$3.75). Flex/batch routing is handled by a separate Batch Review script, not by this channel."
     },
     "goog36flash": {
       "read_order": 3,
@@ -1066,7 +1124,7 @@
       "models": {
         "nvidia/nemotron-3-ultra-550b-a55b:free": {
           "label": "Nemotron 3 Ultra 550B (free)",
-          "data_policy": "FREE tier on OpenRouter - the account's prompt-training setting must be enabled for free models to serve, so prompts may be used for training. Same posture as the Contributor tier on spark12cont.",
+          "data_policy": "FREE tier on OpenRouter - the account's prompt-training setting must be enabled for free models to serve, so prompts may be used for training. Same posture as the Contributor tier on spark13cont.",
           "aliases": [
             "nvidia/nemotron-3-ultra-550b-a55b:free",
             "nemotron-3-ultra",
@@ -1173,13 +1231,13 @@
       "vendor": "xai",
       "enabled": true,
       "🔴🔴_WHY_THIS_WAS_OFF_FOR_ONE_ROUND_AND_WHAT_ACTUALLY_BROKE_IT": "ON since 2026-08-16 (R45). It shipped OFF for exactly one round and the note here listed four arms proving «the flags were never the cause». 🔴 THAT CONCLUSION WAS WRONG AND SO WERE THE TWO THEORIES THAT FOLLOWED IT. `--no-plan` (the agent is literally called grok-build-plan) changed nothing; `--system-prompt-override` replacing the software-engineering-CLI persona changed nothing. All three explanations were guesses about a mechanism nobody had observed, because `--output-format json` shows only the final stopReason.\n\nWHAT IT ACTUALLY WAS, read off `--output-format streaming-messages-json` in one run: a tool_result with is_error=true and the text «User cancelled the execution for tool `web_fetch`». ONE DENIED TOOL DISCARDS THE ENTIRE TURN - the same failure the agy channel has documented since 2026-07-31, on a different binary. Two denials had to be cleared:\n  (1) web_fetch on any host outside x.ai. Isolated with one variable: same mode, same tool, dontAsk + docs.z.ai -> cancelled, dontAsk + docs.x.ai -> end_turn. That is why R44's short smoke test «worked» - it only ever fetched xAI's own docs - while every review failed, since reviewing means reading other vendors' pages.\n  (2) `use_tool`, the MCP gateway, reached for after SEVENTEEN successful fetches.\n\n🔴 THE GRANT IS SPELLED DIFFERENTLY FROM THE ALLOWLIST AND THE WRONG SPELLING IS SILENT: `--allow WebFetch` works, `--allow web_fetch` is accepted and grants nothing, while `--tools` wants the snake_case `web_fetch`. Same tool, two conventions, no error either way.\n\nRELEASE CONDITION MET, which is why this is on: 2026-08-16, the same 13.6 KB brief that produced 158 bytes in R44 returned **31 178 bytes**, `stopReason: end_turn`, `subtype: success`, marker on the last line, ZERO denied tools, 26 page fetches and 14 turns in 433 s. Its first working answer also found a real false positive in this harness's own transport_damage() check.\n\n🔴 SECURITY, TIGHTENED IN THE SAME CHANGE: read_file/list_dir/grep are no longer granted. R44 granted them believing the neutral `--cwd` made them harmless; measured on 2026-08-16, read_file served a file from `~/.grok/skills/` with that cwd in force. --cwd bounds where the agent STARTS, not what read_file can OPEN, and this channel's whole input is an untrusted brief. `search_tool`/`use_tool` are removed rather than granted for the same reason - `--tools` does not bound them, and this machine's MCP set includes a metered scraper and a git host with a write-capable token.",
-      "label": "Grok Build 4.6",
+      "label": "Grok Build 4.5",
       "cost": "subscription",
-      "model": "grok-4.6",
-      "effort": "xhigh",
+      "model": "grok-4.5",
+      "_model_changed_r80": "R80 (2026-09-04), the operator: «grokbuild - по дефолту ставим Grok 4.5, а не Grok 4.6. Если пользователь скажет использовать Grok 4.6, тогда его используем.» Override: --set grokbuild=grok-4.6. Note: grok-4.5 has NO xhigh (its max is high); grok-4.6 has xhigh. A --set override to 4.6 runs at effort high (this channel's setting), not xhigh.",
+      "effort": "high",
       "role": "code",
       "supported_efforts": [
-        "xhigh",
         "high",
         "medium",
         "low"
@@ -1301,14 +1359,15 @@
     }
   },
   "_models_removed_from_agy": "claude-sonnet-4-6, claude-opus-4-6-thinking and gemini-3.1-pro-low are deliberately absent from both agy channels (the operator, 2026-07-31): routing a Claude model through agy spends the Gemini weekly subscription on a model already reachable directly, and Pro Low is the shallow variant this channel exists to avoid. 🔴 This note lives at TOP LEVEL and not inside `channels`, and that is not cosmetic: every other object in this file takes `_`-prefixed prose keys, so putting one inside `channels` is the natural habit - and there it would be iterated AS A CHANNEL. Written there first, in this very edit. routing.py now skips `_`-prefixed keys inside `channels` (the declared convention) and refuses any other non-object entry by name, so the trap costs a clear error instead of a confusing one.",
-  "_data_controls_not_wired": "🔴 STILL NOT WIRED, BUT NO LONGER A GUESS — and the key keeps its old name on purpose: five `data_policy` strings above point at it by name, and renaming the target of a pointer is how a cross-reference dies quietly. This entry used to say the two OpenRouter data controls were «KNOWN AND DELIBERATELY NOT IMPLEMENTED», on the reasoning that «a knob nobody has exercised looks exactly like a free change until the day it silently drops a channel». That reasoning was right and the remedy was to exercise it, which took six cheap calls. RESULTS, all judged by whether a completion came back AND by which provider served it: `provider.data_collection:\"deny\"` is FREE on 5 of 6 - kimik3, qwen38max, orgemini36flash, ormimo25pro, orgrok420 all answer normally - and DROPS ornemotron3ultra with `404 No endpoints found matching your data policy (Free model training)`, which is logically necessary: the free tier's price IS the training grant. `provider.zdr:true` is free on 4 of 6 and additionally DROPS qwen38max (`404 ... (Zero data retention)`). 🔴 THE CONTROL IS NOT A FILTER, IT IS A RE-ROUTE: kimik3 moved from provider Chutes to Modal and ormimo25pro from Xiaomi to Novita. So «deny» trades a known company for a different one with a better stated policy, which is a real change and not a free one. STILL NOT WIRED, and now that is a decision with numbers behind it: the operator's standing scope (2026-08-03) is that only keys, passwords and .env are critical and «остальное не критично», so the upside is small by his own rule while the provider swap is a genuine unknown. One line in call_oai_reviewer turns it on if that ever changes. Independent of all this: briefs sent through these channels reach a metered third party under its default retention terms, and spark12cont and ornemotron3ultra are materially different because their discount IS the training grant.",
+  "_data_controls_not_wired": "🔴 STILL NOT WIRED, BUT NO LONGER A GUESS — and the key keeps its old name on purpose: five `data_policy` strings above point at it by name, and renaming the target of a pointer is how a cross-reference dies quietly. This entry used to say the two OpenRouter data controls were «KNOWN AND DELIBERATELY NOT IMPLEMENTED», on the reasoning that «a knob nobody has exercised looks exactly like a free change until the day it silently drops a channel». That reasoning was right and the remedy was to exercise it, which took six cheap calls. RESULTS, all judged by whether a completion came back AND by which provider served it: `provider.data_collection:\"deny\"` is FREE on 5 of 6 - kimik3, qwen38max, orgemini36flash, ormimo25pro, orgrok420 all answer normally - and DROPS ornemotron3ultra with `404 No endpoints found matching your data policy (Free model training)`, which is logically necessary: the free tier's price IS the training grant. `provider.zdr:true` is free on 4 of 6 and additionally DROPS qwen38max (`404 ... (Zero data retention)`). 🔴 THE CONTROL IS NOT A FILTER, IT IS A RE-ROUTE: kimik3 moved from provider Chutes to Modal and ormimo25pro from Xiaomi to Novita. So «deny» trades a known company for a different one with a better stated policy, which is a real change and not a free one. STILL NOT WIRED, and now that is a decision with numbers behind it: the operator's standing scope (2026-08-03) is that only keys, passwords and .env are critical and «остальное не критично», so the upside is small by his own rule while the provider swap is a genuine unknown. One line in call_oai_reviewer turns it on if that ever changes. Independent of all this: briefs sent through these channels reach a metered third party under its default retention terms, and spark13cont and ornemotron3ultra are materially different because their discount IS the training grant.",
   "_panels_doc": "🔴 A PANEL IS WHO IS IN THE ROOM. A TIER IS HOW DEEP EACH OF THEM GOES. Added 2026-08-15 (round 42), the operator: «Давай теперь разделим оркестр[ацию] на дешевую и стандартную», with the membership he dictated verbatim - «В дешевую добавь: deepseek, Grok, Agy, google и openrouter 3.6 и 3.7 Flash, mimo, nemotron, spark12cont Muse Spark 1.2 Contributor». Everything he did not name stays standard-only: spark11, codex, kimik3, qwen38max, orgpt56terrapro. The two axes are deliberately orthogonal and both print in the plan - `--panel cheap --tier deep` is a legal and sensible combination (few reviewers, each thinking hard), and so is `--panel standard --tier strategic`.\n\n🔴 THE LADDER IS NESTED, NOT A PARTITION: `standard` INCLUDES every cheap channel. «Стандартная» has to mean «what normally runs», and what normally runs is every enabled channel - so `--panel standard` is bit-for-bit the behaviour that shipped before this key existed, and the default is unchanged. A disjoint reading would have produced a four-channel «standard» panel with no Gemini voice at all, which nobody would ever want: the cheap voices cost nothing extra once you are already paying for the expensive ones.\n\n🔴 A PANEL IS NOT A GROUP, AND THE DIFFERENCE IS RESURRECTION. `--only <group>` deliberately overrides `enabled: false` - that is the documented opt-in path. A panel must NOT: it filters DOWN to channels that are already enabled and never turns one on. Implementing `cheap` as a group instead would have been a one-line registry edit and would have been wrong in a way nothing would have caught, because `enabled` is exactly what package.py flips per `distribution`: `--only cheap` in the kit would have resurrected mimo25pro, grok420 and goog36/37flash - four channels whose direct vendor keys a kit user does not have - and here it would have resurrected their OpenRouter twins, paying twice for the same voice. Same word, opposite semantics; they cannot share a mechanism.\n\n🔴 THE NAME `standard` WAS A TIER UNTIL 2026-08-08 AND IS NOT ONE NOW. the operator removed the `quick` and `standard` TIERS that day, and `--tier standard` is still an argparse error naming strategic|deep. The word returning as a PANEL is not that tier coming back - different flag, different axis. Recorded here because the retired name appears in `_tiers_doc` above and a reader meeting both would otherwise be entitled to think one of them is stale.",
   "_panels_hidden_cost_doc": "🔴 THE THING THE CHEAP PANEL COSTS IS VENDOR DIVERSITY, NOT DEPTH - and it is invisible if you only read the price. Counted on this machine 2026-08-15: of the 11 cheap channels enabled here, SIX are Gemini (agy31pro, agy36flash, agy37flash, goog36flash, goog37flash, orgemini37flash). In the generated kit it is five of ten. A panel's whole product is disagreement between independent voices, and six seats sharing one vendor's training data are not six independent voices on a question where that vendor is systematically wrong - they will agree with each other and the convergence will read as corroboration. What `standard` actually buys, therefore, is not «more expensive», it is four more VENDORS: OpenAI (codex), Moonshot (kimik3), Alibaba (qwen38max) and Meta's Standard tier (spark11). The plan prints the vendor breakdown of whatever set resolves, so this is checkable at run time rather than trusted from this paragraph.",
   "default_panel": "cheap",
   "_default_panel_is_cheap_SINCE_2026_08_16": "Flipped 2026-08-16 (R45) on the operator's instruction «Дефолт сделай на дешевые», after being offered and declined in R42 and R44. WHAT THE OLD NOTE FEARED, kept because it names the real cost: a cheaper default silently removes codex, kimik3, qwen38max and spark11 from every round launched with no flag - including legal rounds in another project, where the loss is four VENDORS on a question with a filing deadline. A default that quietly spends more is a bug; a default that quietly reviews LESS is also a bug, and the second is harder to notice.\n\nWHY IT IS SAFE TO TAKE NOW, and this is a property of the code rather than a promise: the plan printer is SYMMETRIC. It already prints «--panel standard would ALSO run: codex, kimik3, qwen38max, spark11» on every cheap run, by name, from the same `gain`/`lose` computation that used to print the drop list on standard runs. So the loss the old note called invisible is printed before anything is spent, on every single round, and a reader who wants the four vendors back is told the exact flag. Verified by reading routing.py's panel block, not assumed from the fact that a feature with that name exists.\n\n🔴 WHAT STILL BITES, said plainly: this changes the default for OTHER PROJECTS' scripts too, and a script that passed no --panel now gets 4 vendors fewer without being edited. The mitigation is the printed line, not a guarantee - if a caller pipes the plan to a file nobody reads, the loss is silent again. Pass `--panel standard` explicitly in anything whose value depends on vendor breadth.",
   "ask_default": [
-    "spark12cont",
-    "orspark12cont"
+    "ocspark13free",
+    "spark13cont",
+    "orspark13cont"
   ],
   "_ask_default_doc": "Added 2026-08-30 (R69). The order --ask resolves its channel when --ask-channel is not passed: the FIRST entry that is enabled AND whose transport key is actually present in the environment wins; if none has a key, the first enabled entry runs and its preflight explains what is missing. Until R69 the default was the argparse literal `spark12cont`, which for a kit user holding only an OPENROUTER_API_KEY pointed the one-shot path at the one channel they cannot run - degradation was graceful, but the default was wrong for exactly the user the kit exists for. the operator's 2026-08-08 instruction «--ask по умолчанию идёт на spark12cont - оставляем на нем» is preserved by the ORDER: spark12cont is first, so any machine with a MODEL_API_KEY behaves exactly as before. Names here must be CHANNEL names - not groups, not aliases - and selftest enforces that.",
   "panels": {
