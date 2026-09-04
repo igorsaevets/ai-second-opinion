@@ -5649,6 +5649,50 @@ def suite_r78_agents_md():
               "R78 control: no live CLAUDE.md sits in the source kit/ directory itself")
 
 
+def suite_r80_agy_result_detection():
+    """R80. The result-event detector in _run_agy must use json.loads, not substring matching.
+
+    Found unanimously by 6/6 channels of the R80 v1.50.0 cheap panel (2026-09-04): the old
+    ``'"event":"result"' in ln`` fires on any line whose TEXT contains that literal — a model
+    whose output mentions JSON events, a log line quoting the protocol, or an agy diagnostic
+    that echoes the event envelope. A false positive here terminates the process early, losing
+    the real answer.
+
+    _parse_agy_stream() already uses json.loads (line ~5827 at time of writing). The polling
+    loop in _run_agy must do the same, and both must key on ev.get("event") == "result".
+    """
+    section("R80. agy result-event detection: json.loads, not substring")
+    src = open(os.path.join(HERE, "orchestrate.py"), encoding="utf-8").read()
+
+    # 1 — the substring match must be GONE from _run_agy
+    i_fn = src.find("def _run_agy(")
+    i_fn_end = src.find("\ndef ", i_fn + 1)
+    body = src[i_fn:i_fn_end] if i_fn_end > 0 else src[i_fn:]
+    check("""'"event":"result"' in """ not in body,
+          "the substring match is removed from _run_agy - it fires on any line whose TEXT "
+          "contains the literal, which includes model output discussing JSON events. 6/6 "
+          "panel channels found this unanimously (R80 v1.50.0 test)")
+    check("""'"event": "result"' in """ not in body,
+          "the spaced variant of the substring match is also removed")
+
+    # 2 — json.loads must be present in _run_agy, keyed on .get("event")
+    check("json.loads(" in body,
+          "_run_agy detects the result event by parsing each line as JSON, consistent with "
+          "_parse_agy_stream which already does this")
+    check('.get("event")' in body or "ev.get('event')" in body,
+          "_run_agy reads the event field via .get(), not by substring — the discriminator is "
+          "the parsed dict key, not a text pattern")
+
+    # 3 — _parse_agy_stream still uses the correct pattern (consistency)
+    i_parse = src.find("def _parse_agy_stream(")
+    i_parse_end = src.find("\ndef ", i_parse + 1)
+    parse_body = src[i_parse:i_parse_end] if i_parse_end > 0 else src[i_parse:]
+    check("json.loads(line)" in parse_body or "json.loads(ln)" in parse_body,
+          "_parse_agy_stream still uses json.loads — the two parsers must agree on method")
+    check('kind == "result"' in parse_body,
+          "_parse_agy_stream still keys on the parsed event field, not substring")
+
+
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -5691,7 +5735,8 @@ def main():
                   suite_r72_reading_protocol,
                   suite_r74_panel_fixes,
                   suite_r75_backlog,
-                  suite_r78_agents_md):
+                  suite_r78_agents_md,
+                  suite_r80_agy_result_detection):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

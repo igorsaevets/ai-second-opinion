@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.51.0 — 2026-09-04
+
+* **agy result-event detection uses `json.loads` instead of substring matching.**
+  The zombie detector in `_run_agy()` used `'"event":"result"' in ln` — a
+  substring test that fires on any line whose *text* contains the literal,
+  including model output discussing the JSON protocol. Found unanimously by
+  6/6 channels of the R80 cheap panel. Now parses each line as JSON and checks
+  `ev.get("event") == "result"`, consistent with `_parse_agy_stream()`.
+
 ## 1.50.0 — 2026-09-04
 
 * **agy CLI zombie fix.** The agy binary stays alive on periodic heartbeats

@@ -6230,7 +6230,14 @@ def _run_agy(cmd, timeout=3600, cwd=None, stdout_path=None, env=None):
                     with open(stdout_path, "r", encoding="utf-8",
                               errors="replace") as rf:
                         for ln in rf:
-                            if '"event":"result"' in ln or '"event": "result"' in ln:
+                            ln = ln.strip()
+                            if not ln.startswith("{"):
+                                continue
+                            try:
+                                ev = json.loads(ln)
+                            except (json.JSONDecodeError, ValueError):
+                                continue
+                            if isinstance(ev, dict) and ev.get("event") == "result":
                                 result_seen = time.time()
                                 break
                 except OSError:
