@@ -6576,6 +6576,41 @@ def _ask_default_channel():
     return _pick_ask_channel(reg, _channel_key_ready)
 
 
+def _apply_cascade(plan, reg):
+    """
+    For each cascade group in the registry, keep only the first member whose
+    transport is ready on this machine. The rest are disabled for this run.
+
+    The panel runs independent VOICES in parallel; three transports to one model
+    are not three voices. Igor 2026-09-04: 'незачем у одних и тех же моделей
+    спрашивать'. The cascade order is defined in channels.json `_cascade_groups`,
+    cheapest/free transport first, and mirrors the --ask chain for Spark.
+    """
+    groups = reg.get("_cascade_groups") or []
+    notes = []
+    for group in groups:
+        if not isinstance(group, list) or len(group) < 2:
+            continue
+        members = [c for c in group if c in plan and plan[c]["enabled"]]
+        if len(members) <= 1:
+            continue
+        chans = reg.get("channels") or {}
+        winner = None
+        for c in members:
+            if _channel_key_ready(chans.get(c) or {}):
+                winner = c
+                break
+        if winner is None:
+            winner = members[0]
+        skipped = [c for c in members if c != winner]
+        for c in skipped:
+            plan[c]["enabled"] = False
+            plan[c]["why"].append("cascade: %s is ready and takes priority (same model)" % winner)
+        notes.append("%s selected; %s skipped (same model, different transport)"
+                     % (winner, ", ".join(skipped)))
+    return plan, notes
+
+
 # Extensions treated as scannable text inside --attach-dir. Anything else is sniffed for a NUL
 # byte and skipped as binary - LOUDLY, because a folder file the secrets scan silently skipped
 # is a folder file that reaches a CLI reviewer unscanned.

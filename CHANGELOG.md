@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.48.0 — 2026-09-04
+
+* **Panel cascade for same-model transports.** When several channels carry the
+  same model through different transports (e.g. Spark 1.3 via opencode, direct
+  Meta API, and OpenRouter), only the first **ready** one runs; the rest are
+  skipped. Order: cheapest/free transport first. This removes duplicate voices
+  from the panel — three transports to one model are not three opinions.
+  Configured in `_cascade_groups` in `channels.json`; applies to Spark 1.3
+  (3 transports → 1) and Gemini 3.8 Flash (2 transports → 1). The cheap panel
+  goes from 10 channels to 8 distinct voices. `--only` overrides the cascade.
+
 ## 1.47.0 — 2026-09-04
 
 * **Muse Spark 1.3 Contributor** replaces the 1.2 tier in both channels:

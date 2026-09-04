@@ -299,6 +299,19 @@ def suite_routing():
         raise AssertionError("no group answers to %r - this test names a word the registry lost"
                              % word)
 
+    def cascaded(enabled_set):
+        """Apply _cascade_groups: for each group, keep only the first enabled member."""
+        result = set(enabled_set)
+        for group in _RAW.get("_cascade_groups") or []:
+            if not isinstance(group, list):
+                continue
+            members = [c for c in group if c in result]
+            if len(members) <= 1:
+                continue
+            for c in members[1:]:
+                result.discard(c)
+        return result
+
     def group_members_all(word):
         """Every member the group NAMES, enabled or not - for the non-resurrection assertion."""
         for g, v in _groups_raw.items():
@@ -352,21 +365,21 @@ def suite_routing():
         (["--only", "spark11", "codex"], {"spark11", "codex"}, "--only with two channels"),
         # The group cases. Each expands to SEVERAL channels from one word.
         (["--only", "agy"], group_of("agy"), "--only agy (GROUP -> the subscription transport)"),
-        (["--only", "gemini"], group_of("gemini"), "--only gemini (GROUP -> the model family)"),
-        (["--only", "spark"], group_of("spark"), "--only spark (GROUP -> both Spark)"),
-        (["--skip", "spark"], without(*group_of("spark")), "--skip spark (GROUP)"),
-        (["--skip", "codex", "agy"], without("codex", *group_of("agy")),
+        (["--only", "gemini"], cascaded(group_of("gemini")), "--only gemini (GROUP -> the model family)"),
+        (["--only", "spark"], cascaded(group_of("spark")), "--only spark (GROUP -> both Spark)"),
+        (["--skip", "spark"], cascaded(without(*group_of("spark"))), "--skip spark (GROUP)"),
+        (["--skip", "codex", "agy"], cascaded(without("codex", *group_of("agy"))),
          "--skip codex + agy group"),
         (["--route", "только spark11"], {"spark11"}, "route: только spark11"),
-        (["--route", "не используй codex"], without("codex"), "route: RU negation"),
+        (["--route", "не используй codex"], cascaded(without("codex")), "route: RU negation"),
         # The negative half of the ADD rule: no additive marker => the default set, unchanged.
-        (["--route", "не используй gemini"], without(*group_of("gemini")),
+        (["--route", "не используй gemini"], cascaded(without(*group_of("gemini"))),
          "route: a plain negation still leaves the opt-in channel OFF"),
-        (["--route", "кроме gemini"], without(*group_of("gemini")), "route: кроме gemini (GROUP)"),
-        (["--route", "не используй spark"], without(*GROUPS["spark"]),
+        (["--route", "кроме gemini"], cascaded(without(*group_of("gemini"))), "route: кроме gemini (GROUP)"),
+        (["--route", "не используй spark"], cascaded(without(*GROUPS["spark"])),
          "route: RU negation of a GROUP"),
         (["--route", "only codex"], {"codex"}, "route: EN only"),
-        ([], ALL, "no flags: every enabled channel runs"),
+        ([], cascaded(ALL), "no flags: every enabled channel runs"),
     ]
     if "orgpt56terrapro" in EXISTS:
         # 🔴 OPT-IN CHANNELS, round 38. Naming a default-OFF channel in prose must SELECT it -
@@ -670,8 +683,13 @@ def suite_dispatch():
         # without it, flipping default_panel makes this compare 17 against 13 and call correct
         # code broken.
         "_inc = set(reg['panels'][reg['default_panel']]['includes'])\n"
-        "en = sorted(c for c, ch in reg['channels'].items()\n"
-        "            if ch.get('enabled', True) and ch.get('panel') in _inc)\n"
+        "_en = set(c for c, ch in reg['channels'].items()\n"
+        "         if ch.get('enabled', True) and ch.get('panel') in _inc)\n"
+        "for _cg in reg.get('_cascade_groups') or []:\n"
+        "    _m = [c for c in _cg if c in _en]\n"
+        "    if len(_m) > 1:\n"
+        "        for _c in _m[1:]: _en.discard(_c)\n"
+        "en = sorted(_en)\n"
         "print('RESULT=' + json.dumps({'enabled': en, 'launched': S, 'deep': D}))\n"
     )
     pf = Path(tempfile.gettempdir()) / "orch_selftest_dispatch.py"
@@ -722,10 +740,16 @@ def suite_dispatch():
         # standard-only - went red for not appearing in a run they were never part of.
         _reg_raw = json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))
         _inc = set(_reg_raw["panels"][_reg_raw["default_panel"]]["includes"])
-        webbed = [c for c, ch in _reg_raw["channels"].items()
-                  if not c.startswith("_") and ch.get("enabled", True)
-                  and ch.get("panel") in _inc
-                  and (ch.get("web") or {}).get("enabled")]
+        _panel_en = {c for c, ch in _reg_raw["channels"].items()
+                     if not c.startswith("_") and ch.get("enabled", True)
+                     and ch.get("panel") in _inc}
+        for _cg in _reg_raw.get("_cascade_groups") or []:
+            _cm = [c for c in _cg if c in _panel_en]
+            if len(_cm) > 1:
+                for _cc in _cm[1:]:
+                    _panel_en.discard(_cc)
+        webbed = [c for c in _panel_en
+                  if (_reg_raw["channels"].get(c) or {}).get("web", {}).get("enabled")]
         for c in webbed:
             check(any(r["name"] == c and r["web"] for r in launched),
                   "the registry's web setting reached the %s call" % c)
@@ -745,10 +769,8 @@ def suite_dispatch():
         # the reason the comment above already gives. Third instance of class-fix-misses-a-member
         # found in this round, and the first one inside the test file: tests are code and rot the
         # same way. The registry is also read once now instead of three times in ten lines.
-        pinned = [c for c, ch in _reg_raw["channels"].items()
-                  if not c.startswith("_") and ch.get("enabled", True)
-                  and ch.get("panel") in _inc
-                  and ch.get("provider_route")]
+        pinned = [c for c in _panel_en
+                  if (_reg_raw["channels"].get(c) or {}).get("provider_route")]
         for c in pinned:
             row = next((r for r in launched if r["name"] == c), None)
             check(bool(row and row.get("provider_route")),
@@ -3174,8 +3196,13 @@ def suite_panels():
     check(route_err("дешевая панель, без грокк"),
           "a marker with no channel behind it is refused even after a panel word")
     p = _r.resolve(_r.load_registry(), route="запусти на дешевой")
-    check(sum(1 for v in p.values() if v["enabled"]) == len(
-        [c for c in _r.panel_members(reg, "cheap") if CH[c].get("enabled", True)]),
+    _panel_expect = {c for c in _r.panel_members(reg, "cheap") if CH[c].get("enabled", True)}
+    for _cg in (reg.get("_cascade_groups") or []):
+        _cm = [c for c in _cg if c in _panel_expect]
+        if len(_cm) > 1:
+            for _cc in _cm[1:]:
+                _panel_expect.discard(_cc)
+    check(sum(1 for v in p.values() if v["enabled"]) == len(_panel_expect),
         "filler after a panel word is NOT an error - «запусти на дешевой» resolves")
     check(route_err("дешевая", panel="standard"),
           "route and --panel disagreeing about the panel is a hard stop")

@@ -1369,6 +1369,18 @@
     "spark13cont",
     "orspark13cont"
   ],
+  "_cascade_groups": [
+    [
+      "ocspark13free",
+      "spark13cont",
+      "orspark13cont"
+    ],
+    [
+      "agy38flash",
+      "orgemini38flash"
+    ]
+  ],
+  "_cascade_groups_doc": "Panel cascade: when several channels carry the SAME model through different transports, only the first READY one runs; the rest are skipped. Order matters - cheapest/free first. The panel runs independent VOICES in parallel; paying three transports for one voice is waste, not breadth. Added 2026-09-04 (the operator: 'незачем у одних и тех же моделей спрашивать').",
   "_ask_default_doc": "Added 2026-08-30 (R69). The order --ask resolves its channel when --ask-channel is not passed: the FIRST entry that is enabled AND whose transport key is actually present in the environment wins; if none has a key, the first enabled entry runs and its preflight explains what is missing. Until R69 the default was the argparse literal `spark12cont`, which for a kit user holding only an OPENROUTER_API_KEY pointed the one-shot path at the one channel they cannot run - degradation was graceful, but the default was wrong for exactly the user the kit exists for. the operator's 2026-08-08 instruction «--ask по умолчанию идёт на spark12cont - оставляем на нем» is preserved by the ORDER: spark12cont is first, so any machine with a MODEL_API_KEY behaves exactly as before. Names here must be CHANNEL names - not groups, not aliases - and selftest enforces that.",
   "panels": {
     "cheap": {

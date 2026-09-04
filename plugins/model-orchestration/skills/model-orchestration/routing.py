@@ -1433,6 +1433,26 @@ def apply_panel(plan, reg, panel):
     return plan
 
 
+def _apply_cascade(plan, reg):
+    """
+    For each cascade group, keep only the first enabled member; disable the rest.
+
+    Three transports to one model are not three voices — they are one voice with
+    fallback. The order in each group is cheapest/free first, mirroring --ask.
+    """
+    for group in reg.get("_cascade_groups") or []:
+        if not isinstance(group, list) or len(group) < 2:
+            continue
+        members = [c for c in group if c in plan and plan[c]["enabled"]]
+        if len(members) <= 1:
+            continue
+        winner = members[0]
+        for c in members[1:]:
+            plan[c]["enabled"] = False
+            plan[c]["why"].append("cascade: %s takes priority (same model)" % winner)
+    return plan
+
+
 def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=None):
     plan = initial_plan(reg)
     # Computed BEFORE anything expands a group, and kept for the explicit_only gate below. The
@@ -1515,6 +1535,7 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
     # than inside apply_flags/apply_route so that adding a THIRD selection path later cannot
     # reopen the hole - the gate does not care which path enabled the channel.
     plan = apply_explicit_only(plan, reg, named_directly)
+    plan = _apply_cascade(plan, reg)
 
     # 🔴 DECORATE BEFORE APPLYING THE TIER, not after. The tier now SCALES per-channel values
     # (`reasoning.max_tokens`, `fetch_tool.max_calls`) and OVERRIDES one (`thinking_level`), and
