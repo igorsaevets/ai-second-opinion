@@ -5764,6 +5764,7 @@ def suite_r82_premium_bundle():
     # time and flex_lane _load()s probe_flex_web + prices, so this is also the
     # bundle's internal-wiring check.
     import importlib.util as _ilu
+    _prem_mods: dict = {}
     for mod in ("batch_transport", "salvage_json", "prices", "batch_one",
                 "probe_flex_web", "poll_loop", "flex_lane",
                 "aggregate_findings", "premium_panel"):
@@ -5771,9 +5772,27 @@ def suite_r82_premium_bundle():
             spec = _ilu.spec_from_file_location("prem_" + mod, str(prem / (mod + ".py")))
             m = _ilu.module_from_spec(spec)
             spec.loader.exec_module(m)
+            _prem_mods[mod] = m
             check(True, f"premium/{mod}.py loads")
         except BaseException as exc:                              # noqa: BLE001
             check(False, f"premium/{mod}.py loads", repr(exc)[:100])
+
+    # The OpenAI meter reads BOTH result shapes. The submit path supports two
+    # endpoints (responses/chat) and each bills under different usage keys;
+    # a meter reading one shape priced the R82 smoke's chat lane at $0.0 over
+    # 1,335 real tokens while the parsed item carried the true counts.
+    _b1 = _prem_mods.get("batch_one")
+    if _b1 is not None:
+        check(_b1._openai_tokens(
+                  {"prompt_tokens": 437, "completion_tokens": 898,
+                   "prompt_tokens_details": {"cached_tokens": 3}}) == (437, 898, 3),
+              "openai meter reads the CHAT usage shape (R82 smoke: $0.0 over real tokens)")
+        check(_b1._openai_tokens(
+                  {"input_tokens": 100, "output_tokens": 50,
+                   "input_tokens_details": {"cached_tokens": 7}}) == (100, 50, 7),
+              "openai meter reads the RESPONSES usage shape")
+        check(_b1._openai_tokens({}) == (0, 0, 0),
+              "openai meter on empty usage stays (0, 0, 0), never a KeyError")
 
     # prices mechanics on a SYNTHETIC snapshot. NEVER assert that the LIVE
     # snapshot resolves: the sol-pro batch promo carries _valid_through

@@ -266,6 +266,20 @@ def poll_or(a, rundir: pathlib.Path) -> int:
     return _finish(rundir, a.tag, text, usage, meter)
 
 
+def _openai_tokens(usage: dict) -> tuple[int, int, int]:
+    """Both OpenAI result shapes, one meter. /v1/responses bills input_/
+    output_tokens; /v1/chat/completions bills prompt_/completion_tokens. The
+    submit path supports both endpoints, so the meter must read both shapes —
+    reading only the responses shape priced the R82 smoke's chat lane at $0.0
+    over 1,335 real tokens (the parsed item carried the counts; the lane meter
+    read a field the endpoint never sends)."""
+    in_tok = usage.get("input_tokens") or usage.get("prompt_tokens") or 0
+    out_tok = usage.get("output_tokens") or usage.get("completion_tokens") or 0
+    details = (usage.get("input_tokens_details")
+               or usage.get("prompt_tokens_details") or {})
+    return int(in_tok), int(out_tok), int(details.get("cached_tokens", 0) or 0)
+
+
 def poll_openai(a, rundir: pathlib.Path) -> int:
     key = _key("OPENAI_API_KEY")
     created = json.loads((rundir / f"{a.tag}.create.json").read_text(encoding="utf-8"))
@@ -300,9 +314,7 @@ def poll_openai(a, rundir: pathlib.Path) -> int:
         if t:
             text, usage = t, u
     pricing = PR.openai_direct(a.model, "batch")
-    in_tok = usage.get("input_tokens", 0)
-    out_tok = usage.get("output_tokens", 0)
-    cached = (usage.get("input_tokens_details", {}) or {}).get("cached_tokens", 0)
+    in_tok, out_tok, cached = _openai_tokens(usage)
     meter = {"cost_meter": None,
              "cost_arith": round(pricing.cost(in_tok, out_tok, cached), 6),
              "prompt_tokens": in_tok, "completion_tokens": out_tok,

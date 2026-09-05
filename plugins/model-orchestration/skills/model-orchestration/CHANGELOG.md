@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.58.1 — 2026-09-05
+
+* **Fix: the OpenAI batch lane's meter read a usage shape the pinned endpoint
+  never sends — and priced the panel's first live run at $0.0 over 1,335 real
+  tokens.** `batch_one.py --lane openai` submits to `/v1/chat/completions`
+  (the `chat` endpoint is pinned for gpt-5.5), whose results bill under
+  `prompt_tokens`/`completion_tokens`; the meter read only the `/v1/responses`
+  keys (`input_tokens`/`output_tokens`), so the lane-level `cost_arith` came
+  out $0.0 while the parsed item's own `_usage` carried the true counts.
+  Found by the first paid smoke of the assembled panel (R82: three batch
+  transports, one brief; the other two lanes metered correctly — OR by its
+  real `usage.cost` meter, Google by arithmetic). The meter now normalises
+  both shapes in one helper (`_openai_tokens`), and the selftest pins the
+  chat shape, the responses shape and the empty-usage control.
+
 ## 1.58.0 — 2026-09-05
 
 * **Premium panel complete: the dispatcher (`premium_panel.py`) and the report
