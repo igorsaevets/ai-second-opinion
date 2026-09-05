@@ -1826,6 +1826,10 @@ def _web_line(p):
         return ("web: opencode CLI's built-in agent tools - the free model runs through "
                 "opencode's infrastructure which may include search. The harness does not "
                 "control which tools the agent uses; grounding is the agent's own claim")
+    if kind == "claudecli":
+        return ("web: Claude Code CLI's built-in tools and MCP servers (WebSearch, WebFetch, "
+                "Read, and any user-configured MCP). The harness does not restrict tools; "
+                "grounding is the agent's own claim")
     return None
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.52.0 — 2026-09-04
+
+* **New channel: Claude Code CLI (`cclopus46`, kind `claudecli`).**
+  Claude Opus 4.6 with 1M context window via the `claude` CLI, with automatic
+  fallback to Opus 4.7. Subscription-only — uses the logged-in user's Claude
+  subscription, no API key needed. Disabled by default; enable with
+  `--only cclopus46` or by setting `enabled: true` in `channels.json`.
+  Measured: `--model claude-opus-4-6[1m]` gives `contextWindow: 1,000,000`
+  in the JSON output (vs 200K without the `[1m]` suffix). `--output-format json`
+  returns a single JSON object with `result`, `total_cost_usd`, `usage` —
+  simplest parsing of all CLI channels. Runs from `neutral_cwd()` so no
+  project CLAUDE.md leaks into the review. No tool restrictions (the operator: the
+  model chooses its own tools).
+
 ## 1.51.0 — 2026-09-04
 
 * **agy result-event detection uses `json.loads` instead of substring matching.**

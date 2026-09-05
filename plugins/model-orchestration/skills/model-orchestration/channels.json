@@ -336,6 +336,56 @@
       ],
       "notes": "Free Spark 1.3 Contributor via opencode CLI. No API key needed. Primary --ask channel — if the CLI is installed, this fires before the paid spark13cont/orspark13cont. Same model weights, zero cost. Brief piped through stdin (solves both the hang bug and the 32KB cmdline limit). LIVE TESTED 2026-09-04: --ask '2+2' answered '4' in 9.2s, effort=max, marker verified, exit=0."
     },
+    "cclopus46": {
+      "read_order": 1,
+      "kind": "claudecli",
+      "panel": "standard",
+      "vendor": "anthropic",
+      "enabled": false,
+      "_added": "2026-09-04, the operator: «добавим Claude code cli и модели opus 4.6 Max [1M] и fallback Opus 4.7 Max. По дефолту отключен. Нам нужно, что если добавят наш kit в codex, agy, ... То что бы их тоже можно было вызывать.» Subscription-only (no API key); --bare KILLS subscription auth (measured: 'Not logged in' error). No --allowedTools restriction (the operator: «не ограничивай инструменты, пусть сам какие хочет использует»).",
+      "label": "CCL Opus 4.6 [1M]",
+      "cost": "expensive",
+      "model": "claude-opus-4-6[1m]",
+      "fallback_model": "claude-opus-4-7",
+      "_fallback": "CLI-level fallback via --fallback-model flag. The CLI itself handles the retry when the primary model is overloaded or unavailable. claude-opus-4-7 also has 1M context by default.",
+      "effort": "max",
+      "_effort": "the operator: «ставь максимально доступный reasoning effort». Claude Code CLI supports: low, medium, high, xhigh, max. max is the highest.",
+      "distribution": "both",
+      "_distribution": "Works for anyone who has Claude Code CLI installed (npm install -g @anthropic-ai/claude-code) and is logged in with a subscription. No API key needed.",
+      "_subscription": "Runs on the user's Claude SUBSCRIPTION through the CLI, not on a metered API key. Never offer an API-key path (--bare) — it kills subscription auth. the operator 2026-09-04: «claude code использовать только по подписке, не по api».",
+      "_context_window": "MEASURED 2026-09-04: --model claude-opus-4-6[1m] gives contextWindow: 1,000,000 in the JSON output. Without [1m] suffix, contextWindow: 200,000. The [1m] suffix IS a valid model name component, confirmed by modelUsage in the output.",
+      "_cost_measured": "MEASURED 2026-09-04: claude-opus-4-6[1m] list price ~$0.74/call, claude-opus-4-7 ~$1.00/call. Mostly cache_creation_input_tokens from the CLI's system context (~71K-99K tokens). Covered by subscription.",
+      "_no_bare": "--bare disables OAuth/keychain auth, requiring ANTHROPIC_API_KEY instead. MEASURED: returns is_error:true, result:'Not logged in · Please run /login'. Since this channel is subscription-only, --bare is never used. The global ~/.claude/CLAUDE.md loads, but it goes to Anthropic's own API — no cross-vendor leak concern.",
+      "_neutral_cwd": "Runs from neutral_cwd() to prevent loading any project's CLAUDE.md. The reviewer must be independent. Same pattern as codex (-C workdir), grokbuild (--cwd), agy (neutral workspace).",
+      "models": {
+        "claude-opus-4-6[1m]": {
+          "label": "Claude Opus 4.6 [1M]",
+          "data_policy": "Anthropic's own model via subscription. Standard terms apply.",
+          "aliases": [
+            "claude-opus-4-6[1m]",
+            "opus 4.6",
+            "opus 4.6 1m"
+          ]
+        },
+        "claude-opus-4-7": {
+          "label": "Claude Opus 4.7 (fallback)",
+          "data_policy": "Anthropic's own model via subscription. Standard terms apply.",
+          "aliases": [
+            "claude-opus-4-7",
+            "opus 4.7"
+          ]
+        }
+      },
+      "aliases": [
+        "cclopus46",
+        "ccl",
+        "claudecli",
+        "claudecode",
+        "клод46",
+        "клодкод"
+      ],
+      "notes": "Claude Opus 4.6 with 1M context window via Claude Code CLI. Subscription auth only — no API key needed but the user must be logged in (claude auth login). Fallback to Opus 4.7 handled by the CLI. Disabled by default — enable with --only cclopus46 or by setting enabled:true."
+    },
     "codex": {
       "read_order": 1,
       "kind": "codex",

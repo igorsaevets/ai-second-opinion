@@ -1187,6 +1187,7 @@ CLI_BINARIES = (
     ("hermes", "HERMES_BIN", "hermes.exe"),
     ("grokcli", "GROK_BIN", "grok.exe"),
     ("opencode", "OPENCODE_BIN", "opencode"),
+    ("claudecli", "CLAUDECLI_BIN", "claude"),
 )
 CLI_ENV_VARS = " / ".join(env for _, env, _ in CLI_BINARIES)
 
@@ -3239,6 +3240,134 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
             "out_tokens": tokens.get("output"),
             "reasoning_tokens": tokens.get("reasoning"),
             "cached_in_tokens": cache.get("read"),
+            "usd": cost if cost and cost > 0 else None,
+            "warnings": warn, "notes": note}
+
+
+def call_claudecli(brief, marker, outfile, model=None, effort=None, system=None,
+                   fallback_model=None, timeout=2400, name="cclopus46"):
+    """Claude Code CLI (Anthropic) — subscription-only, no API key.
+
+    Measured 2026-09-04 on claude 2.1.250:
+      - `--model claude-opus-4-6[1m]` gives 1M context (contextWindow: 1,000,000 in JSON)
+      - `--model claude-opus-4-6` gives 200K context (contextWindow: 200,000)
+      - `--model claude-opus-4-7` gives 1M context, ~$1.00 list price per call
+      - `--bare` KILLS subscription auth ("Not logged in") — never use it here
+      - `--output-format json` returns ONE JSON object (not NDJSON), simplest of all CLIs
+      - `--fallback-model` is a CLI-level flag, automatic fallback handled by the CLI itself
+      - `--system-prompt` works alongside subscription auth
+      - `--no-session-persistence` prevents disk clutter
+      - `--max-turns 1` confirmed working (num_turns: 1 in output)
+
+    The brief goes through stdin (same pattern as opencode/codex). No --allowedTools restriction
+    (Igor 2026-09-04: «не ограничивай инструменты, пусть сам какие хочет использует»).
+
+    Cwd is neutral_cwd() to prevent loading any project's CLAUDE.md — the reviewer must be
+    independent. Global ~/.claude/CLAUDE.md WILL load, but it goes to Anthropic's own API
+    (same vendor), so there is no cross-vendor leak concern.
+
+    JSON output fields used:
+      result           — the model's text answer
+      total_cost_usd   — list-price cost (subscription covers it)
+      is_error         — boolean
+      terminal_reason  — "completed" / "api_error" / ...
+      num_turns        — how many turns the model took
+      usage            — input_tokens, output_tokens, cache_*, thinking_tokens
+      modelUsage       — per-model breakdown with contextWindow
+    """
+    binary = claudecli_bin()
+    text_in = ((system.strip() + "\n\n---\n\n") if system else "") + brief
+
+    cmd = [binary, "-p",
+           "--model", model or "claude-opus-4-6[1m]",
+           "--output-format", "json",
+           "--max-turns", "1",
+           "--no-session-persistence"]
+    if effort:
+        cmd += ["--effort", effort]
+    if fallback_model:
+        cmd += ["--fallback-model", fallback_model]
+
+    cwd = neutral_cwd()
+
+    log("  [%s] Claude Code CLI, subscription auth; brief via stdin (%d chars), effort=%s, "
+        "fallback=%s"
+        % (name, len(text_in), effort or "default", fallback_model or "none"))
+    t0 = time.time()
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                           input=text_in, cwd=cwd,
+                           timeout=_seconds(timeout, 2400))
+    except FileNotFoundError:
+        return {"channel": name, "ok": False, "error": "binary not found: " + binary}
+    except subprocess.TimeoutExpired:
+        return {"channel": name, "ok": False, "text": "",
+                "seconds": round(time.time() - t0, 1),
+                "error": "TIMEOUT after %s" % (timeout or "2400s"), "model": model,
+                "warnings": ["TIMEOUT"], "notes": []}
+
+    secs = time.time() - t0
+    raw = (p.stdout or "").strip()
+    warn, note = [], []
+    text = ""
+    tokens_in = None
+    tokens_out = None
+    tokens_reasoning = None
+    tokens_cached = None
+    cost = None
+    model_served = model
+
+    try:
+        obj = json.loads(raw)
+    except (ValueError, TypeError):
+        obj = {}
+        if p.returncode != 0:
+            warn.append("EXIT %d, non-JSON stdout: %s" % (p.returncode, raw[:300]))
+
+    if obj:
+        text = obj.get("result") or ""
+        cost = obj.get("total_cost_usd")
+        is_err = obj.get("is_error", False)
+        terminal = obj.get("terminal_reason", "")
+        num_turns = obj.get("num_turns")
+
+        usage = obj.get("usage") or {}
+        tokens_in = usage.get("input_tokens")
+        tokens_out = usage.get("output_tokens")
+        tokens_cached = usage.get("cache_read_input_tokens")
+        details = usage.get("output_tokens_details") or {}
+        tokens_reasoning = details.get("thinking_tokens")
+
+        mu = obj.get("modelUsage") or {}
+        if mu:
+            first_model = next(iter(mu), None)
+            if first_model:
+                model_served = first_model
+
+        if is_err:
+            err_msg = text or terminal or "is_error=true"
+            warn.append("CLAUDE CLI ERROR: %s" % err_msg[:300])
+        if terminal and terminal not in ("completed",):
+            note.append("terminal_reason=%s" % terminal)
+        if num_turns and num_turns > 1:
+            note.append("num_turns=%d" % num_turns)
+
+    if text:
+        with open(outfile, "w", encoding="utf-8") as f:
+            f.write(text)
+    if marker and not _marker_on_last_line(text, marker):
+        warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
+    if not text.strip() and not warn:
+        warn.append("EMPTY OUTPUT despite exit %d" % p.returncode)
+    record_refusal(refusal_check(text, marker), warn, note)
+
+    return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
+            "bytes": len(text.encode("utf-8")), "exit": p.returncode,
+            "model": model_served, "effort": effort,
+            "in_tokens": tokens_in,
+            "out_tokens": tokens_out,
+            "reasoning_tokens": tokens_reasoning,
+            "cached_in_tokens": tokens_cached,
             "usd": cost if cost and cost > 0 else None,
             "warnings": warn, "notes": note}
 
@@ -5442,6 +5571,21 @@ def opencode_bin():
     ])
 
 
+def claudecli_bin():
+    """Claude Code CLI (Anthropic) — npm install -g @anthropic-ai/claude-code.
+
+    Uses the logged-in subscription (OAuth/keychain), NOT an API key. --bare kills
+    subscription auth, so it is never used here. Installed via npm globally; on Windows
+    the binary is claude.ps1 (or claude.cmd) in the npm dir.
+    """
+    return _resolve_bin("CLAUDECLI_BIN", "claude", [
+        os.path.join(os.environ.get("APPDATA", ""), "npm", "claude.ps1"),
+        os.path.join(os.environ.get("APPDATA", ""), "npm", "claude.cmd"),
+        os.path.join(os.environ.get("APPDATA", ""), "npm", "claude"),
+        "/usr/local/bin/claude", "/opt/homebrew/bin/claude",
+    ])
+
+
 # The other half of CLI_BINARIES: kind -> the function that finds that binary. Split from the
 # tuple only because the resolvers carry per-platform search paths and have to be defined after
 # _resolve_bin. selftest asserts the two halves have identical keys, which is what stops the
@@ -5452,6 +5596,7 @@ CLI_RESOLVERS = {
     "hermes": hermes_bin,
     "grokcli": grok_bin,
     "opencode": opencode_bin,
+    "claudecli": claudecli_bin,
 }
 
 
@@ -5460,7 +5605,7 @@ CLI_RESOLVERS = {
 # same five literals, so a kind unknown to one was unknown to the other, and a misspelled kind
 # produced neither a preflight warning nor a result, only a log line that scrolls away.
 KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "hermes",
-               "grokcli", "opencode")
+               "grokcli", "opencode", "claudecli")
 
 # The kinds that run ON THIS MACHINE and can therefore read an attached document from disk
 # instead of receiving it inline (--attach / --attach-dir). Igor, R46: «CLI агентам не отправлять
@@ -5468,7 +5613,7 @@ KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "he
 # `hermes` is deliberately absent: its toolset grant is `web` only, so handing it a path would
 # name a capability it does not have - the model would report OUR gap as its own failure.
 # API kinds are structurally absent: a remote endpoint cannot open this disk.
-REFS_KINDS = ("codex", "agy", "grokcli")
+REFS_KINDS = ("codex", "agy", "grokcli", "claudecli")
 
 # The degraded path only. When channels.json cannot be loaded there is no `kind` field to read,
 # so these are the names the harness has used, mapped to what they were. Both the historical
@@ -5490,7 +5635,8 @@ _LEGACY_KINDS = {"http": "http", "spark": "http", "spark11": "http", "spark12": 
                  "orspark13cont": "openrouter",
                  "goog36flash": "gemini", "goog37flash": "gemini",
                  "mimo25pro": "oai", "grok420": "xai", "grokbuild": "grokcli",
-                 "hermes": "hermes", "ocspark13free": "opencode"}
+                 "hermes": "hermes", "ocspark13free": "opencode",
+                 "cclopus46": "claudecli"}
 
 
 def _legacy_slot(cname):
@@ -5661,6 +5807,14 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
         if os.path.isfile(b) or shutil.which(b):
             yield ("%s: opencode CLI present (%s); free model, no API key needed"
                    % (c, b))
+    for c in sorted(by_kind.get("claudecli", [])):
+        b = claudecli_bin()
+        if os.path.isfile(b) or shutil.which(b):
+            yield ("%s: Claude Code CLI present (%s); subscription auth, no API key"
+                   % (c, b))
+        else:
+            yield ("%s: Claude Code CLI NOT FOUND. Install: npm install -g "
+                   "@anthropic-ai/claude-code" % c)
 
 
 def _write_agy_agent(workdir):
@@ -6647,6 +6801,9 @@ def _channel_key_ready(ch):
         return bool(_env_key("XAI_API_KEY"))
     if kind == "opencode":
         b = opencode_bin()
+        return bool(os.path.isfile(b) or shutil.which(b))
+    if kind == "claudecli":
+        b = claudecli_bin()
         return bool(os.path.isfile(b) or shutil.which(b))
     return True                                          # codex / agy / grokcli / hermes
 
@@ -7651,6 +7808,13 @@ def main():
                 jobs[cname] = ex.submit(call_opencode, cbrief, a.marker, outfile,
                                         model=p.get("model"), effort=p.get("effort"),
                                         system=_system_for(system, p),
+                                        timeout=_seconds(p.get("timeout"), 2400),
+                                        name=cname)
+            elif kind == "claudecli":
+                jobs[cname] = ex.submit(call_claudecli, cbrief, a.marker, outfile,
+                                        model=p.get("model"), effort=p.get("effort"),
+                                        system=_system_for(system, p),
+                                        fallback_model=p.get("fallback_model"),
                                         timeout=_seconds(p.get("timeout"), 2400),
                                         name=cname)
             else:

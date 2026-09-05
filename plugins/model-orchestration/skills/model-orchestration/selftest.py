@@ -3034,9 +3034,10 @@ def suite_panels():
         fb = ch.get("fallback_model")
         if not fb:
             continue
-        check(ch.get("kind") == "http",
-              "%s: fallback_model is only meaningful for kind:http channels (Meta API); "
-              "OpenRouter channels use fallback_models (plural) which the vendor handles"
+        check(ch.get("kind") in ("http", "claudecli"),
+              "%s: fallback_model is only meaningful for kind:http (Meta API harness-level "
+              "retry) and kind:claudecli (CLI --fallback-model flag); OpenRouter channels "
+              "use fallback_models (plural) which the vendor handles"
               % cname, "kind=%s" % ch.get("kind"))
         check(fb in (ch.get("models") or {}),
               "%s: fallback_model %r must be in the channel's `models` table so it has a "
