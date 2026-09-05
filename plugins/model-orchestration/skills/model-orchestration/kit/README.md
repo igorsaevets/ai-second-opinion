@@ -392,7 +392,7 @@ prints the exact cost when it finishes. See [what it costs](#what-it-costs-hones
 | **Report a security problem** | [Report a vulnerability privately](https://github.com/igorsaevets/ai-second-opinion/security/advisories/new) — please do *not* open a public issue first. See [SECURITY.md](SECURITY.md) |
 | **Collaboration, consulting, or anything commercial** | [LinkedIn](https://www.linkedin.com/in/igorsaevets/) · [Facebook](https://facebook.com/igorsaevets) · [GitHub](https://github.com/igorsaevets) |
 
-Maintained by **the operator Saevets** ([@igorsaevets](https://github.com/igorsaevets)), Los Angeles.
+Maintained by **Igor Saevets** ([@igorsaevets](https://github.com/igorsaevets)), Los Angeles.
 
 There is deliberately **no contact email in this repository.** A public address in a public repo is
 harvested within days, and the address on the commits here is GitHub's no-reply relay, which has no

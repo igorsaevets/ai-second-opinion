@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.55.0 — 2026-09-05
+
+* **Fix author name in English README.**
+  The maintainer line shipped as "the operator Saevets" because `package.py`'s
+  SUBS step rewrites `\bIgor\b` before MAINTAINER placeholders are filled. Fixed
+  by using the `Igor Saevets` placeholder (same as the Russian README already does),
+  so the shipped result is now "the operator Saevets".
+
 ## 1.54.0 — 2026-09-05
 
 * **New "Panels" section in both READMEs (English + Russian).**
