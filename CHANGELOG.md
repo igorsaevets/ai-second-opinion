@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.53.0 — 2026-09-04
+
+* **README SEO/GEO rewrite (English + Russian).**
+  Intro paragraph now names all model families (GPT, Claude, Gemini, Grok,
+  DeepSeek, Qwen, Kimi, Muse Spark, NVIDIA Nemotron) for search engine and
+  generative engine discoverability. Added integration line (Claude Code plugin,
+  Cursor, Windsurf). Added Claude Code CLI and Grok CLI to the cost table.
+  Added AI/ML engineer row to the audience table. New "What this is not" bullets
+  position against ChatGPT/Perplexity and benchmarks. New FAQ section with five
+  Q&A pairs optimised for AI search engines. Russian README updated to match.
+  "Three" → "panel/several" throughout both versions to reflect the current
+  channel count. GitHub description and topics updated to 20/20.
+
 ## 1.52.0 — 2026-09-04
 
 * **New channel: Claude Code CLI (`cclopus46`, kind `claudecli`).**

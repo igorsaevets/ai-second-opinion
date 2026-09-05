@@ -6,9 +6,14 @@
 
 **One AI agreeing with you proves nothing. Three of them arguing is worth reading.**
 
-Send the same document to three different top-tier AI models at once. Get back what each one
-found, where they contradict each other — and a mechanical check of whether they actually did
-the research or quietly made it up.
+Send the same document to a **panel of independent AI models** — GPT, Claude, Gemini, Grok,
+DeepSeek, Qwen, Kimi, Muse Spark, NVIDIA Nemotron and more — at once. Get back what each one
+found, where they contradict each other, and a mechanical check that catches **AI
+hallucinations**: fabricated citations, invented sources, and quiet refusals.
+
+Install as a [Claude Code plugin](#install), run standalone from any terminal, or hand the repo
+to your AI coding assistant (Claude Code, Cursor, Windsurf — anything with shell access).
+Pure Python, zero dependencies, MIT license.
 
 [Русская версия](README.ru.md) · [How it works, in technical detail](TECHNICAL.md) ·
 [Install](INSTALL.md) · [When something breaks](TROUBLESHOOTING.md) ·
@@ -36,8 +41,8 @@ That answer is nearly worthless, for three reasons most people never check:
 
 ## What this does instead
 
-- **Three independent models, same document, at the same time.** They do not see each other's
-  answers, so agreement means something and disagreement means more.
+- **A panel of independent models, same document, at the same time.** They do not see each
+  other's answers, so agreement means something and disagreement means more.
 - **It shows you the disagreement.** That is the actual product. Two models calling a claim fine
   and one calling it fatal is the most useful thing you will read all week.
 - **It checks the receipts.** Every source link each model cites is opened and reported as
@@ -59,6 +64,7 @@ That answer is nearly worthless, for three reasons most people never check:
 | **Product manager** | Review a spec or PRD for holes, check competitive claims you are about to publish, stress-test a launch plan's assumptions. |
 | **C-level / operations** | Verify claims in a vendor proposal or a consultant's report. Check that a regulation you are relying on is still current and says what someone told you it says. |
 | **Legal / compliance** | Verify that every citation in a research memo resolves to a real document that actually says what the memo claims. This is source-verification work, done properly and at speed. See the note below. |
+| **AI / ML engineer** | Compare model behaviour on the same prompt across vendors. See which models ground their answers in real sources and which ones fabricate citations. Evaluate before you ship. |
 | **Anyone writing something that matters** | Get the objections in private, before they arrive in public. |
 
 ### A note for legal teams
@@ -116,7 +122,9 @@ Several accounts, none of which this tool provides — but **one of them gets yo
 | **`OPENROUTER_API_KEY`** | The biggest group in one account: Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, **a Muse Spark voice** and **a free NVIDIA Nemotron** — one signup | Metered per token, **plus per web search**. The Nemotron model itself is free |
 | **`MODEL_API_KEY`** | The two Spark voices | Metered per use |
 | **A paid OpenAI plan with Codex** | `codex` | Subscription, weekly limit |
-| **An eligible Google account** | The two `agy` Gemini channels | Subscription, with limits |
+| **An eligible Google account** | The Gemini channels via `agy` (Antigravity CLI) | Subscription, with limits |
+| **Claude Code CLI** (`claude`) | Claude Opus — off by default | Subscription |
+| **Grok CLI** (`grokbuild`) | Grok 4.5 with live web search | Free during beta |
 | *Optional:* `GEMINI_API_KEY`, `XAI_API_KEY`, `MIMO_API_KEY` | The same Gemini, Grok and MiMo models through the **vendors' own** APIs, which buys real extra capability — see INSTALL.md. Off by default | Metered, free tiers vary |
 
 **You do not need them all, and you should not start with them all.** Missing a key or a CLI is a
@@ -281,15 +289,50 @@ else in it, so this is now one line: the registry is the roadmap.)
 
 ## What this is not
 
+- **Not ChatGPT, not Perplexity, not a single-model tool.** Those give you one answer from one
+  model — fast and useful, but with one set of blind spots you cannot see. This gives you
+  several answers from models that do not see each other, plus a mechanical audit of their work.
+  The disagreement between independent reviewers is the product.
 - **Not a fact database.** It reads the live web through the models' own search tools. It can be
-  wrong, which is exactly why it shows you three answers instead of one.
+  wrong, which is exactly why it shows you several answers instead of one.
 - **Not a replacement for an expert.** It is very good at finding what an expert should look at.
-- **Not "deep research" mode.** Those are separate, separately-billed products at both vendors and
-  are not reachable from a normal subscription. This runs the models at maximum depth with a
-  source-discipline instruction, which is the same shape — with the advantage that you get three
-  of them and an audit of the citations, which no deep-research product gives you.
+- **Not "deep research" mode.** Those are separate, separately-billed products at several vendors
+  and are not reachable from a normal subscription. This runs every model at its maximum depth
+  with a source-discipline instruction — the same shape, but with multiple independent answers
+  and an audit of every citation, which no deep-research product gives you.
+- **Not a benchmark or eval harness.** Benchmarks measure models against known answers. This puts
+  models to work on *your* question, where no answer key exists — and lets their disagreement
+  tell you what a benchmark never could.
 - **Not automatic.** You still read the disagreement and decide. The tool's job is to make sure
   you are deciding with the objections in front of you.
+
+## Frequently asked questions
+
+**Why not just ask ChatGPT / Claude / Gemini directly?**<br>
+A single model has a single set of blind spots, and nothing in its answer tells you which parts
+are weak. A panel of independent models — each blind to the others' answers — surfaces
+disagreements that one model alone will never show you. Two models saying a claim is fine and
+one calling it fatal is the most useful signal you will find.
+
+**How is this different from Perplexity or AI search?**<br>
+Perplexity gives you one synthesised answer with sources. This gives you several independent
+answers, shows you where they contradict each other, and then mechanically checks whether the
+sources each model cited actually exist and were actually opened. The disagreement and the audit
+are what you are paying for.
+
+**Can I use this from Cursor / Windsurf / another coding tool?**<br>
+Yes. It is plain Python with no dependencies. Any tool with shell access can run it. There is
+also a one-command Claude Code plugin install — see [Install](#install).
+
+**Does this work with OpenRouter models?**<br>
+Yes. OpenRouter is the biggest single-account group: one API key unlocks Kimi, Qwen, Gemini,
+MiMo, Grok, GLM, DeepSeek, Muse Spark and NVIDIA Nemotron. Start with that and add direct
+vendor access later for the models that benefit from it.
+
+**Is this expensive?**<br>
+One channel is free (Muse Spark 1.3 via opencode). The default cheap panel runs on subscriptions
+and free/metered accounts, not premium APIs. A full run typically costs under $2 — and the tool
+prints the exact cost when it finishes. See [what it costs](#what-it-costs-honestly).
 
 ## Found a bug? Want a feature? Want to work together?
 
