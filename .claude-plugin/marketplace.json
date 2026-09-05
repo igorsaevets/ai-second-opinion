@@ -9,7 +9,7 @@
       "name": "model-orchestration",
       "source": "./plugins/model-orchestration",
       "description": "Run one brief past three external reviewer models in parallel (Spark over HTTPS, Codex CLI, Antigravity/Gemini CLI) and verify each one actually did the work.",
-      "version": "1.56.0"
+      "version": "1.57.0"
     }
   ]
 }

@@ -5734,11 +5734,12 @@ def suite_r80_agy_result_detection():
 
 # =================================================================================================
 def suite_r82_premium_bundle():
-    section("R82. Premium panel bundle: the offline core ships and behaves")
+    section("R82. Premium panel bundle: offline core + live lane ship and behave")
 
     prem = HERE / "premium"
     for f in ("batch_transport.py", "prices.py", "batch_one.py",
-              "salvage_json.py", "models_snapshot.json"):
+              "salvage_json.py", "models_snapshot.json",
+              "flex_lane.py", "probe_flex_web.py", "poll_loop.py"):
         check((prem / f).is_file(), f"premium/{f} exists in the source tree")
 
     # package.py must ship the bundle - and BOTH halves are load-bearing. The R82
@@ -5757,9 +5758,11 @@ def suite_r82_premium_bundle():
               "the COPY_DIRS loop has a .py branch (an .md-only loop ships premium empty)")
 
     # Every bundle module LOADS. batch_one _load()s its three siblings at import
-    # time, so this is also the bundle's internal-wiring check.
+    # time and flex_lane _load()s probe_flex_web + prices, so this is also the
+    # bundle's internal-wiring check.
     import importlib.util as _ilu
-    for mod in ("batch_transport", "salvage_json", "prices", "batch_one"):
+    for mod in ("batch_transport", "salvage_json", "prices", "batch_one",
+                "probe_flex_web", "poll_loop", "flex_lane"):
         try:
             spec = _ilu.spec_from_file_location("prem_" + mod, str(prem / (mod + ".py")))
             m = _ilu.module_from_spec(spec)
@@ -5911,6 +5914,122 @@ def suite_r82_premium_bundle():
               "batch_one --mode build runs offline from a bare bundle copy",
               "exit=%s" % p.returncode)
         check("est. $" in b, "...and prints the worst-case arithmetic")
+
+    # ---- R82-И3: the live lane (flex_lane + probe_flex_web + poll_loop) -------
+
+    # The kit is domain-neutral: the probe question was neutralised at port time
+    # (a USCIS form-edition question became a python.org release question - the
+    # same treatment SMOKE_BRIEF gets in И4). Sweep EVERY bundle .py so a future
+    # file cannot re-import the source project's case domain silently.
+    for py in sorted(prem.glob("*.py")):
+        low = py.read_text(encoding="utf-8").lower()
+        bad = [m for m in ("uscis", "i-485", "i-140") if m in low]
+        check(not bad, f"premium/{py.name} carries no case-domain markers",
+              "found %s" % bad)
+
+    # The two extractors flex_lane imports, pinned offline on synthetic shapes.
+    spec = _ilu.spec_from_file_location("prem_pfw", str(prem / "probe_flex_web.py"))
+    PFWX = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(PFWX)
+    t, qs, us = PFWX.extract_openai({
+        "output": [
+            {"type": "web_search_call", "action": {"query": "q1"}},
+            {"type": "message", "content": [
+                {"type": "output_text", "text": "hello "},
+                {"type": "output_text", "text": "world"}]}],
+        "usage": {"input_tokens": 7}})
+    check(t == "hello world" and qs == ["q1"] and us.get("input_tokens") == 7,
+          "extract_openai joins message parts and collects web_search queries")
+    t, qs, us = PFWX.extract_openrouter({
+        "choices": [{"message": {"content": "ans", "annotations": [
+            {"type": "url_citation",
+             "url_citation": {"url": "https://x.invalid/p"}}]}}],
+        "usage": {"cost": 0.01}})
+    check(t == "ans" and qs == ["https://x.invalid/p"] and us.get("cost") == 0.01,
+          "extract_openrouter reads choices[0] text and url_citation annotations")
+    check(PFWX.extract_openrouter({}) == ("", [], {}),
+          "extract_openrouter on an empty response returns empties, not a KeyError")
+
+    # flex_lane: every REFUSING path exits 2 BEFORE any network call, naming its
+    # reason. Env is built explicitly both ways - keys POPPED for the no-key pin,
+    # a placeholder SET for the reserve pin - never inherited from the runner
+    # (Igor's machine has the keys; CI has none; the pin must not care).
+    fl = str(prem / "flex_lane.py")
+    m_openai = next(iter(live.get("openai_direct", {}).get("models", {})), "")
+    with tempfile.TemporaryDirectory() as td:
+        tp = Path(td)
+        ok_brief = tp / "b.md"
+        ok_brief.write_text("x" * 300, encoding="utf-8")
+
+        p = subprocess.run([PY, fl, "--path", "openai", "--model", m_openai,
+                            "--brief", str(tp / "missing.md"),
+                            "--rundir", str(tp / "r")],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env)
+        check(p.returncode == 2 and "does not exist" in blob_of(p),
+              "flex_lane REFUSES a missing brief (exit 2)",
+              "exit=%s" % p.returncode)
+
+        (tp / "tiny.md").write_text("short", encoding="utf-8")
+        p = subprocess.run([PY, fl, "--path", "openai", "--model", m_openai,
+                            "--brief", str(tp / "tiny.md"),
+                            "--rundir", str(tp / "r")],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env)
+        check(p.returncode == 2 and "200-char floor" in blob_of(p),
+              "flex_lane REFUSES a sub-200-char brief (the R09 empty-input class)")
+
+        p = subprocess.run([PY, fl, "--path", "openai", "--model", m_openai,
+                            "--brief", str(ok_brief), "--rundir", str(tp / "r")],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env)
+        b = blob_of(p)
+        check(p.returncode == 2 and "API key" in b,
+              "flex_lane without OPENAI_API_KEY REFUSES (exit 2)",
+              "exit=%s" % p.returncode)
+        check("Traceback" not in b, "...with no traceback on the no-key path")
+
+        p = subprocess.run([PY, fl, "--path", "or", "--model", "no/such-model",
+                            "--brief", str(ok_brief), "--rundir", str(tp / "r")],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env)
+        check(p.returncode == 2 and "not in models_snapshot.json" in blob_of(p),
+              "flex_lane OR path REFUSES a model absent from the snapshot")
+
+        env_k = dict(env)
+        env_k["OPENAI_API_KEY"] = "present-but-not-a-key-for-this-refusal-test"
+        p = subprocess.run([PY, fl, "--path", "openai", "--model", m_openai,
+                            "--brief", str(ok_brief), "--rundir", str(tp / "r"),
+                            "--web", "on", "--max-output", "10000"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env_k)
+        check(p.returncode == 2 and "floor is 25,000" in blob_of(p),
+              "flex_lane REFUSES web with a sub-25K output reserve (Probe C burn)")
+
+    # poll_loop: the exit contract is the wrapped poller's own 0/1 passed
+    # through, 3 on giving up while still running, and its single REFUSING
+    # (a sleep cap above the 11 s politeness rule) = 2. --max-minutes 0 makes
+    # the give-up deterministic: the deadline is already past at the first check.
+    pl = str(prem / "poll_loop.py")
+    exit_cmd = '"' + PY + '" -c "import sys; sys.exit({})"'
+    for code, label in ((0, "done"), (1, "failed")):
+        p = subprocess.run([PY, pl, "--cmd", exit_cmd.format(code),
+                            "--max-minutes", "0"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env)
+        check(p.returncode == code,
+              "poll_loop passes through the poller's exit %d (%s)" % (code, label),
+              "exit=%s" % p.returncode)
+    p = subprocess.run([PY, pl, "--cmd", exit_cmd.format(3), "--max-minutes", "0"],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=60, env=env)
+    check(p.returncode == 3 and "still RUNNING" in blob_of(p),
+          "poll_loop gives up at the deadline with exit 3, saying the job survives")
+    p = subprocess.run([PY, pl, "--cmd", exit_cmd.format(0), "--max-sleep", "12"],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=60, env=env)
+    check(p.returncode == 2 and "11 s project cap" in blob_of(p),
+          "poll_loop REFUSES a sleep cap above the 11 s politeness rule (exit 2)")
 
 
 # =================================================================================================

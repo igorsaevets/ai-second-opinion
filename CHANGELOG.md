@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.57.0 — 2026-09-05
+
+* **Premium panel, live lane: `flex_lane.py`, `probe_flex_web.py`,
+  `poll_loop.py` join the `premium/` bundle.**
+  `flex_lane.py` runs ONE synchronous Flex-tier call — the only tier that
+  accepts web tools (every vendor's *batch* endpoint rejects or sandboxes
+  them) — and carries the source project's measured guards verbatim: it
+  REFUSES to run web with less than a 25K-token output reserve (Probe C spent
+  8,000 tokens of headroom entirely on reasoning and produced no text, still
+  billed), prints a billed-vs-expected verdict off the OpenRouter `usage.cost`
+  meter (Probe D: the vendor echoed `flex` and billed STANDARD — echo and
+  HTTP 200 prove nothing), caps web fetches via `max_tool_calls` (16 uncapped
+  fetches once billed $1.13 of input), and uses urllib so NOTHING auto-retries
+  a billable error. `probe_flex_web.py` is the ~$0.02–0.05 diagnostic that
+  closes "does flex accept web tools" before a full lane is bought;
+  `poll_loop.py` re-invokes any `batch_one.py --mode poll` until it stops
+  returning exit 3, with a randomised sleep capped at 11 s. Every REFUSING
+  path and the 0/1/3 poll contract are pinned in the selftest — offline, no
+  key touches the network. One port-time neutralisation, named: the probe's
+  hardcoded question (a USCIS form-edition lookup from the source project)
+  became a python.org release lookup — this kit is domain-neutral, and the
+  selftest now sweeps every bundle `.py` for case-domain markers.
+
 ## 1.56.0 — 2026-09-05
 
 * **New: premium panel, offline core (`premium/` bundle).**

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """ONE arbitrary item through a TRUE batch lane: OR / OpenAI-direct / Google-direct.
 
-The lens harnesses (heavy_batch.py, google_batch.py) fan N case-review lenses
-over one corpus and hard-wire the USCIS-officer SYSTEM prompt, the lens schema
-and a 20K-char corpus floor. A premium-panel seat is the opposite shape — ONE
+The source project's lens harnesses (heavy_batch.py, google_batch.py — not
+shipped here) fan N case-review lenses over one corpus and hard-wire a fixed
+officer-persona SYSTEM prompt, the lens schema and a 20K-char corpus floor. A premium-panel seat is the opposite shape — ONE
 brief, arbitrary system text, arbitrary schema — and forcing it through the
 lens scripts would silently prepend the officer persona to, say, a pricing
 review. Hence this runner: the generic single-item primitive the dispatcher
