@@ -659,6 +659,29 @@ def _check_panels(reg):
     reg["_panel_defaulted"] = defaulted
 
 
+# R82. `premium` is a RESERVED panel name, never a registry panel: the premium seats
+# (OpenAI/Google true-batch + OpenAI Flex with web) live in a separate script by the
+# operator's verbatim architecture call - «весь код из batch скриптов не интегрировать
+# в твой единый файл, а в твоем файле просто добавить, что есть скрипт» (2026-09-02).
+# Batch mechanics never enter this monolith or its registry; the name is special-cased
+# at the TOP of resolve() so both CLIs answer with the pointer instead of «unknown
+# panel», and selftest pins that no registry panel may ever shadow it.
+PREMIUM_PANEL_NAME = "premium"
+
+
+def premium_pointer():
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "premium", "premium_panel.py")
+    return (
+        "--panel premium is not a channel panel in this registry - the premium panel is a "
+        "SEPARATE script with its own gates (call plan on disk, secrets/PII scan, per-lane "
+        "discount check, pre-submit ceiling):\n"
+        "    python \"%s\" --mode dry --plan PLAN.md --brief BRIEF.md --rundir runs/premium\n"
+        "Start with --mode dry (builds everything, bills nothing), then smoke/submit/poll/"
+        "collect. Lane-to-key table: the kit README's «Premium» section; with only an "
+        "OPENROUTER_API_KEY, run it with --only solpro." % p)
+
+
 def panel_members(reg, name):
     """The channel names a panel admits, by the `includes` ladder. Raises on an unknown name."""
     panels = reg.get("panels") or {}
@@ -1454,6 +1477,10 @@ def _apply_cascade(plan, reg):
 
 
 def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=None):
+    # Before anything else: the reserved name points OUTSIDE this registry, so its
+    # answer must not depend on what the registry contains (or whether it has panels).
+    if panel == PREMIUM_PANEL_NAME:
+        raise RouteError(premium_pointer())
     plan = initial_plan(reg)
     # Computed BEFORE anything expands a group, and kept for the explicit_only gate below. The
     # route is re-scanned there rather than passed through, because extract_panel is about to
@@ -2147,11 +2174,15 @@ def main():
                     help="depth per channel. Since 2026-08-15 there is exactly ONE tier and it "
                          "is the ceiling; strategic|deep still parse as aliases of it. Choices "
                          "and the default both come from the registry")
+    _pc = _cli_choices(DEFAULT_REGISTRY, "panels")
+    # `premium` is offered only when the registry itself was readable: with a corrupt
+    # registry _cli_choices returns None so the loader's RouteError stays the answer.
     ap.add_argument("--panel", default=None,
-                    choices=_cli_choices(DEFAULT_REGISTRY, "panels"),
+                    choices=(_pc + [PREMIUM_PANEL_NAME]) if _pc else None,
                     help="which reviewers are in the room. Orthogonal to --tier, which is how "
                          "deep each of them goes. Filters DOWN only: unlike --only it never "
-                         "enables a channel the registry has off")
+                         "enables a channel the registry has off. `premium` prints a pointer "
+                         "to the separate premium/premium_panel.py batch+flex script")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--accept-settings", action="store_true",
                     help="accept the transport-affecting changes your settings file makes. Needed "

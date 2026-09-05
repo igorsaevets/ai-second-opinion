@@ -470,6 +470,15 @@ export OPENROUTER_API_KEY="<your key>"
 > neither the opencode CLI nor `MODEL_API_KEY` is present, `--ask` falls through to this channel:
 > the choice comes from `ask_default` in `channels.json` and is printed when it fires.
 
+### The premium batch panel — same keys, one more
+
+The optional premium panel (`premium/premium_panel.py` — see the README's «Premium» section) is
+a separate script and reuses the keys above: `OPENROUTER_API_KEY` for its `solpro` lane and
+`GEMINI_API_KEY` for its two Google batch lanes. Its two OpenAI lanes need **`OPENAI_API_KEY`**,
+which nothing else in this kit uses — set it the same way as the others, only if you want those
+lanes. A missing key refuses loudly on its own lane and the rest still run; with only an
+OpenRouter key, run it with `--only solpro`.
+
 ### Checking it worked — without printing anything secret
 
 ```

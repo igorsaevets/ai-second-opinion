@@ -61,6 +61,7 @@ documents that hold the detail. It deliberately holds no channel list, no counts
 | you are about to | read first |
 |---|---|
 | run a review round | `SKILL_DIR/SKILL.md` — the one file that runs a round end to end; its first section is the command |
+| run the premium batch panel | the README's «Premium» section — a separate script (`SKILL_DIR/premium/premium_panel.py`); always `--mode dry` first, it bills nothing |
 | install or update | [INSTALL.md](INSTALL.md) — for a non-plugin update run `SKILL_DIR/upgrade.py`, never a hand copy (a plugin install updates itself) |
 | write a brief for a round | `SKILL_DIR/references/briefs.md` |
 | write a legal / regulatory brief | `SKILL_DIR/references/legal-briefs.md` — a refusal there is a framing bug; read this BEFORE writing, not after the refusal |

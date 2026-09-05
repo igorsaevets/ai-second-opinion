@@ -3451,8 +3451,10 @@ def suite_panels():
                   top, seats, "present" if "🔴 Where those agree" in text else "absent"))
 
     # ---- the flag reaches the CLI --------------------------------------------------------------
-    check(sorted(_o.load_panels()) == sorted(PANELS),
-          "orchestrate.load_panels() derives --panel's choices from the registry",
+    check(sorted(_o.load_panels()) == sorted(list(PANELS) + ["premium"]),
+          "orchestrate.load_panels() derives --panel's choices from the registry, "
+          "plus the reserved `premium` pointer (R82: answered by routing.resolve, "
+          "never a registry panel)",
           repr(_o.load_panels()))
     h = _sp.run([PY, str(HERE / "orchestrate.py"), "--help"], capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=120).stdout or ""
@@ -5734,12 +5736,13 @@ def suite_r80_agy_result_detection():
 
 # =================================================================================================
 def suite_r82_premium_bundle():
-    section("R82. Premium panel bundle: offline core + live lane ship and behave")
+    section("R82. Premium panel bundle: offline core + live lane + dispatcher")
 
     prem = HERE / "premium"
     for f in ("batch_transport.py", "prices.py", "batch_one.py",
               "salvage_json.py", "models_snapshot.json",
-              "flex_lane.py", "probe_flex_web.py", "poll_loop.py"):
+              "flex_lane.py", "probe_flex_web.py", "poll_loop.py",
+              "premium_panel.py", "aggregate_findings.py"):
         check((prem / f).is_file(), f"premium/{f} exists in the source tree")
 
     # package.py must ship the bundle - and BOTH halves are load-bearing. The R82
@@ -5762,7 +5765,8 @@ def suite_r82_premium_bundle():
     # bundle's internal-wiring check.
     import importlib.util as _ilu
     for mod in ("batch_transport", "salvage_json", "prices", "batch_one",
-                "probe_flex_web", "poll_loop", "flex_lane"):
+                "probe_flex_web", "poll_loop", "flex_lane",
+                "aggregate_findings", "premium_panel"):
         try:
             spec = _ilu.spec_from_file_location("prem_" + mod, str(prem / (mod + ".py")))
             m = _ilu.module_from_spec(spec)
@@ -6030,6 +6034,182 @@ def suite_r82_premium_bundle():
                        errors="replace", timeout=60, env=env)
     check(p.returncode == 2 and "11 s project cap" in blob_of(p),
           "poll_loop REFUSES a sleep cap above the 11 s politeness rule (exit 2)")
+
+    # ---- R82-И4: the dispatcher (premium_panel) + the report (aggregate) ------
+
+    # Every REFUSING pin below is calendar-safe BY ROUTE, not by luck: the plan/
+    # brief/secrets gates all fire before the per-lane discount walk, so none of
+    # them ever consults the live snapshot's promo dates (the sol-pro batch promo
+    # expires 2026-11-21 and prices.py refuses past it BY DESIGN).
+    pp = str(prem / "premium_panel.py")
+    with tempfile.TemporaryDirectory() as td:
+        tp = Path(td)
+        plan_f = tp / "plan.md"
+        plan_f.write_text("lane, model, est cost - the call plan", encoding="utf-8")
+        ok_brief = tp / "b.md"
+        ok_brief.write_text("x" * 600, encoding="utf-8")
+
+        p = subprocess.run([PY, pp, "--mode", "dry",
+                            "--plan", str(tp / "no-plan.md"),
+                            "--brief", str(ok_brief), "--rundir", str(tp / "r")],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env)
+        check(p.returncode == 2 and "call plan" in blob_of(p),
+              "premium_panel REFUSES without a call-plan file on disk (exit 2)",
+              "exit=%s" % p.returncode)
+
+        p = subprocess.run([PY, pp, "--mode", "dry", "--plan", str(plan_f),
+                            "--rundir", str(tp / "r")],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env)
+        check(p.returncode == 2 and "--brief is required" in blob_of(p),
+              "premium_panel REFUSES dry mode without a brief")
+
+        (tp / "tiny.md").write_text("x" * 100, encoding="utf-8")
+        p = subprocess.run([PY, pp, "--mode", "dry", "--plan", str(plan_f),
+                            "--brief", str(tp / "tiny.md"),
+                            "--rundir", str(tp / "r")],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env)
+        check(p.returncode == 2 and "(<500)" in blob_of(p),
+              "premium_panel REFUSES a sub-500-char brief (bills N lanes for nothing)")
+
+        p = subprocess.run([PY, pp, "--mode", "dry", "--plan", str(plan_f),
+                            "--brief", str(ok_brief), "--rundir", str(tp / "r"),
+                            "--only", "no-such-lane"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env)
+        check(p.returncode == 2 and "matched no lane" in blob_of(p),
+              "premium_panel REFUSES an --only that matches no lane")
+
+        # The secrets gate: fixture assembled by concatenation so the labelled
+        # shape never sits in THIS source; the refusal names the KIND, never the
+        # value, and fires BEFORE the per-lane walk (no lane line printed).
+        sec_brief = tp / "s.md"
+        sec_brief.write_text("x" * 600 + "\n" + "pass" + "word = " + "q" * 24,
+                             encoding="utf-8")
+        p = subprocess.run([PY, pp, "--mode", "dry", "--plan", str(plan_f),
+                            "--brief", str(sec_brief), "--rundir", str(tp / "r")],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env)
+        b = blob_of(p)
+        check(p.returncode == 2 and "secret-shaped" in b and "labelled_secret" in b,
+              "premium_panel REFUSES a secret-shaped brief on ALL lanes (exit 2)",
+              "exit=%s" % p.returncode)
+        check("q" * 24 not in b, "...naming the KIND and never the value")
+        check("worst-case" not in b,
+              "...and it fires BEFORE the per-lane walk (no snapshot lookup involved)")
+
+    # Function-level: every SECRET pattern has a firing probe DERIVED from the
+    # table (doctor's doctrine: a newly added pattern fails until probed), plus
+    # a control that plain prose about keys and tokens does not fire.
+    spec = _ilu.spec_from_file_location("prem_pp", str(prem / "premium_panel.py"))
+    PPX = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(PPX)
+    probes = {"private_key_block": "-----BEGIN RSA PRIVATE " + "KEY-----",
+              "bearer_token": "Authorization: bearer " + "t0" * 15,
+              "labelled_secret": "api_" + "key = " + "v" * 16}
+    for kind, _rx in PPX.SECRET_PATTERNS:
+        check(kind in probes, "secret pattern %r has a probe line" % kind)
+        check(kind in PPX.secrets_scan(probes.get(kind, "")),
+              "secrets_scan fires on the %s probe" % kind)
+    check(PPX.secrets_scan("prose about a token budget and the api key design") == [],
+          "secrets_scan control: the bare words do not fire without a value")
+    check(any(h.startswith("a_number") for h in
+              PPX.pii_scan("case A-123456789 in the record", "")),
+          "pii_scan fires on an A-number shape")
+    check(PPX.pii_scan("no identifiers in this text", "") == [],
+          "pii_scan control: clean text scans clean")
+    try:
+        PPX.pii_scan("x", str(prem / "no-such-needles.txt"))
+        check(False, "a missing --pii-needles file REFUSES")
+    except SystemExit as exc:
+        check("REFUSING" in str(exc),
+              "a missing --pii-needles file REFUSES (a missing list scans nothing)")
+
+    # aggregate_findings --lane (panel mode): meter labelled METER, arithmetic
+    # labelled arithmetic, truncation surfaced, verbatim duplicates the only
+    # mechanical convergence, and a missing lane failing LOUDLY.
+    agf = str(prem / "aggregate_findings.py")
+    with tempfile.TemporaryDirectory() as td:
+        tp = Path(td)
+        lane_a = {"parsed": [{"verdict": "va", "findings": [
+                      {"severity": "minor", "claim": "the same finding text",
+                       "where": "wa", "why": "ya", "fix": "fa", "sources": ["s"]}]}],
+                  "failures": [],
+                  "meter": {"prompt_tokens": 10, "completion_tokens": 5,
+                            "cost_meter": 0.01}}
+        lane_b = {"parsed": [{"verdict": "vb", "_truncated": True, "findings": [
+                      {"severity": "serious", "claim": "the same finding text",
+                       "where": "wb", "why": "yb", "fix": "fb"}]}],
+                  "failures": [{"custom_id": "item-x", "json_error": "boom"}],
+                  "meter": {"cost_arith": 0.02}}
+        (tp / "a.json").write_text(json.dumps(lane_a), encoding="utf-8")
+        (tp / "b.json").write_text(json.dumps(lane_b), encoding="utf-8")
+        rep = tp / "REPORT.md"
+        p = subprocess.run([PY, agf, "--out", str(rep), "--title", "T",
+                            "--lane", "a=%s" % (tp / "a.json"),
+                            "--lane", "CANARY-b=%s" % (tp / "b.json")],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env)
+        check(p.returncode == 0 and rep.is_file(),
+              "aggregate --lane writes the panel report (exit 0)",
+              "exit=%s" % p.returncode)
+        rt = rep.read_text(encoding="utf-8")
+        check("METER" in rt and "arithmetic" in rt,
+              "the report labels a vendor meter METER and a price-list figure arithmetic")
+        check("TRUNCATED" in rt,
+              "a _truncated answer is flagged, never read as complete")
+        check("word-for-word" in rt and "a-01" in rt and "CANARY-b-01" in rt,
+              "verbatim duplicates across lanes are the only mechanical convergence")
+        check("item-x" in rt, "an unparsed item is listed by custom_id")
+        p = subprocess.run([PY, agf, "--out", str(rep), "--lane",
+                            "ghost=%s" % (tp / "ghost.json")],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env)
+        check(p.returncode != 0 and "fail loudly" in blob_of(p),
+              "a missing lane file fails LOUDLY, never as an absence of findings")
+
+    # The reserved --panel name: both CLIs answer `premium` with the pointer, and
+    # the registry may never define a panel that would shadow the special-case.
+    p = subprocess.run([PY, str(Path(HERE) / "routing.py"), "--panel", "premium"],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=60, env=env)
+    b = blob_of(p)
+    check(p.returncode == 2 and "premium_panel.py" in b and "ROUTE ERROR" in b,
+          "routing.py --panel premium prints the pointer and stops (exit 2)",
+          "exit=%s" % p.returncode)
+    check("--only solpro" in b,
+          "...and the pointer names the one lane an OpenRouter-only user can run")
+    reg_panels = json.loads(
+        (Path(HERE) / "channels.json").read_text(encoding="utf-8")).get("panels") or {}
+    check("premium" not in reg_panels,
+          "`premium` stays a reserved pointer - a registry panel would shadow it")
+    p = subprocess.run([PY, str(Path(HERE) / "orchestrate.py"), "--help"],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=120, env=env)
+    check(p.returncode == 0 and "premium" in blob_of(p),
+          "orchestrate --help mentions the premium pointer (the monolith's one mention)")
+
+    # Docs carry the third panel: SOURCE tree only, gated on the same world
+    # detector as the package.py checks above - the built tree ships a PARTIAL
+    # kit/ (README.md travels, README.ru.md does not), so guarding on one
+    # kit/ file and reading five others is the guard-on-one-branch class.
+    kd = Path(HERE) / "kit"
+    if pkg_path.is_file():
+        check("premium_panel.py" in (kd / "README.md").read_text(encoding="utf-8")
+              and "--only solpro" in (kd / "README.md").read_text(encoding="utf-8"),
+              "kit README documents the premium script and the OR-only lane")
+        check("premium_panel.py" in (kd / "README.ru.md").read_text(encoding="utf-8"),
+              "kit README.ru documents the premium script")
+        check("premium" in (kd / "PRIVACY.md").read_text(encoding="utf-8"),
+              "kit PRIVACY.md describes the premium data flows")
+        for doc in ("INSTALL.md", "TECHNICAL.md", "AGENTS.md"):
+            check("premium" in (kd / doc).read_text(encoding="utf-8"),
+                  "kit %s mentions the premium bundle" % doc)
+    sk_text = Path(HERE, "SKILL.md").read_text(encoding="utf-8")
+    check("premium_panel.py" in sk_text,
+          "SKILL.md carries the premium pointer line")
 
 
 # =================================================================================================

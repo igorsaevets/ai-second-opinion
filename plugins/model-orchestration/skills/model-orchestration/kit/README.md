@@ -139,6 +139,41 @@ Everything in cheap, plus heavier voices:
 | **GLM** | Zhipu AI | OpenRouter | Per token |
 | **Claude** | Anthropic | Claude Code CLI (`claude`) | **Subscription** (off by default) |
 
+### The premium panel — a separate script, not a `--panel` value
+
+True-batch and Flex lanes for the heaviest models at their discounted prices. Batch jobs work
+nothing like the synchronous channels above, so this deliberately ships as its **own script**
+rather than more channels: `premium/premium_panel.py`, with its own gates — a call-plan file on
+disk before anything is paid, a secrets scan on every lane with **no override**, a per-lane
+discount check (refuses when the discount is gone unless you say `--allow-nodiscount`), a PII
+scan on the broker lane, and a pre-submit cost ceiling (a batch cannot be aborted mid-flight,
+so the ceiling is enforced before submit or not at all).
+
+```
+python premium/premium_panel.py --mode dry --plan PLAN.md --brief BRIEF.md --rundir runs/premium
+```
+
+`--mode dry` builds everything and bills nothing. Then `smoke` (a tiny public-fact brief through
+the same code path), `submit`, `poll`, `collect`. `--panel premium` on the main tool prints a
+pointer here.
+
+| lane | model | transport | key required | role |
+|---|---|---|---|---|
+| `solpro` | GPT-5.6 Sol Pro | OpenRouter batch (broker) | `OPENROUTER_API_KEY` | vote |
+| `gpt55` | GPT-5.5 | OpenAI batch | `OPENAI_API_KEY` | vote |
+| `gemini31` | Gemini 3.1 Pro | Google batch | `GEMINI_API_KEY` | vote |
+| `flash` | Gemini 3.7 Flash | Google batch | `GEMINI_API_KEY` | **canary** — reported in its own section, never counted into convergence |
+| `live54` | GPT-5.4 + web search | OpenAI Flex, synchronous | `OPENAI_API_KEY` | vote — the one live-web seat |
+
+**With only an `OPENROUTER_API_KEY`, one lane of five is reachable: run `--only solpro`.** A
+missing key refuses loudly per lane, and `--mode collect` aggregates what exists — the report
+shows the hole rather than papering over it.
+
+Prices resolve from `premium/models_snapshot.json` (capture dates inside; a price past its
+validity date refuses rather than inventing a number). Maturity, stated honestly: each lane's
+transport was measured against its vendor individually; the assembled five-seat panel has not
+yet run a paid round. Smoke first.
+
 ### Targeting specific channels
 
 ```

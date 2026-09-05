@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.58.0 — 2026-09-05
+
+* **Premium panel complete: the dispatcher (`premium_panel.py`) and the report
+  (`aggregate_findings.py`) join `premium/`, with the docs to run it.**
+  `premium_panel.py` is a thin dispatcher over the per-lane runners — by the
+  operator's verbatim architecture call, batch mechanics never enter
+  `orchestrate.py`, which now only mentions that the script exists. Five lanes
+  (`solpro`/`gpt55`/`gemini31`/`flash`-canary/`live54`), one brief × N models;
+  gates in order, all before any network call: a call-plan file on disk, a
+  structural **secrets scan on EVERY lane with no override** (private-key
+  block, bearer, labelled secret — the same absoluteness as `orchestrate.py`,
+  so PRIVACY.md's «blocked outright» stays true of both paths), the per-lane
+  discount check, a PII scan that REFUSES the broker lane, and a pre-submit
+  `--ceiling` on worst-case arithmetic (a batch cannot be aborted mid-flight).
+  `aggregate_findings.py` ships verbatim: mechanical merge only, meter
+  labelled METER and price-list arithmetic labelled arithmetic, truncation
+  surfaced, verbatim duplicates as the only machine-computed convergence.
+  Port-time neutralisation, named: the smoke brief (a USCIS-forms question in
+  the source project) became an HTTP-methods question — the kit is
+  domain-neutral, and the bundle-wide case-domain sweep now covers both files.
+
+* **`--panel premium` answers with a pointer instead of «unknown panel».**
+  `premium` is a RESERVED panel name in `routing.py`: both CLIs
+  (`routing.py`, `orchestrate.py`) accept it and answer with the exact
+  command to run the separate script, before any registry lookup — so the
+  answer does not depend on the registry's state. The selftest pins that no
+  registry panel may ever shadow the reserved name.
+
+* **Docs: the third panel table.** README + README.ru gain the premium
+  section with the lane→key table (with only an `OPENROUTER_API_KEY`, one
+  lane of five is reachable — `--only solpro`); PRIVACY.md states the premium
+  data flows separately (batch submission is storage: OpenRouter keeps batch
+  files 30 days; Google grounding carries its own 30-day retention and is off
+  by default here); INSTALL.md names `OPENAI_API_KEY` as the one key nothing
+  else in the kit uses; TECHNICAL.md, AGENTS.md and SKILL.md carry pointer
+  lines. Honest maturity note kept in both READMEs: lanes were measured
+  individually; the assembled five-seat panel has not yet run a paid round.
+
 ## 1.57.0 — 2026-09-05
 
 * **Premium panel, live lane: `flex_lane.py`, `probe_flex_web.py`,

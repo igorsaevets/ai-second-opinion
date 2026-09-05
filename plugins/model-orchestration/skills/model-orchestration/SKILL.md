@@ -26,7 +26,6 @@ prerequisite, prints the live version of each CLI, and its last line is the exac
 | `install.ps1` / `install.sh` | `~/.claude/skills/model-orchestration` |
 
 Everything here is empirical: each rule exists because it failed at least once, on a real run.
-Nothing was inherited from a vendor's documentation without being reproduced.
 
 ---
 
@@ -88,11 +87,10 @@ truncated. Detail lives beside it in `references/` (paths relative to this skill
 | `reading-the-answers.md` | **a round landed** — the manifest, the read cost, when to defer to a fresh context |
 | `when-it-breaks.md` | **anything failed** — symptom → cause → fix, and the status fields that lie |
 | `systems.md` | the `--system` presets in full, and why the legal one omits a clause |
-| `../KIT-README.md` + `package.py` | giving this to another machine — `package.py --out <dir>` regenerates the kit; no second copy to drift |
+| `../KIT-README.md` + `package.py` | giving this to another machine — `package.py --out <dir>` regenerates the kit |
 
 
 ## 0. Just run it
-
 
 From **any** chat, project or working directory — use the absolute path:
 
@@ -168,7 +166,6 @@ far faster). Run rounds in the background; sanity-check with `--ask` (~20 s).
 
 ## 1. What is on this machine — ask, do not assume
 
-
 **Never pin a version here** — both CLIs moved inside one week. Ask instead:
 
 ```powershell
@@ -203,8 +200,11 @@ at the ceiling its own vendor accepts, in every mode: **only the number of model
 
 | `--panel` | who runs |
 |---|---|
-| **`cheap`** (default since 2026-08-16) | free, subscription and low-rate channels — all **except** spark11, codex, kimik3, qwen38max and the rationed opt-in channel where the registry has one. *«запусти дешевые»* |
+| **`cheap`** (default since 2026-08-16) | free, subscription and low-rate channels — all **except** spark11, codex, kimik3 and qwen38max. *«запусти дешевые»* |
 | **`standard`** | every enabled channel. *«запусти все»*, *«стандартная панель»* |
+
+**Premium (true-batch + Flex) is a separate script, not a panel**: `premium/premium_panel.py`;
+`--panel premium` prints it; lane→key table: kit README.
 
 🔴 **Neither a panel nor a GROUP enables anything.** `--only openrouter`, *«только грок»* run only
 the members already on. **Naming a channel is the one way to start one that ships off** —
@@ -232,7 +232,6 @@ refuses. Rules and errors: `references/when-it-breaks.md`. Updating: `python upg
 ---
 
 ## 3. Verify the answer is real — the whole point
-
 
 A call that ran is not a review that happened. The harness prints all of this.
 
@@ -274,7 +273,6 @@ anything from source. Three that decide what you do next:
 ---
 
 ## 10. Report back — always
-
 
 🔴 **Name every channel WITH its model and depth** — `codex (gpt-5.4 @ xhigh)`, never a bare name
 (the operator, R46: «не просто Codex, а Codex5.4Xhigh»). Per channel: seconds, in/out tokens, **tool/fetch

@@ -68,6 +68,30 @@ be trained on, drop them for that run:
 
 Assume retention on those tiers is permanent.
 
+## The premium batch panel (`premium/`)
+
+The optional premium panel is a **separate script** (`premium/premium_panel.py`) and its flows
+deserve their own statement, because batch submission is storage, not just transmission:
+
+- `solpro` sends the composed brief to **OpenRouter (a reseller), which forwards it to the
+  model's owner** as a batch job. OpenRouter's batch pipeline keeps the job file in cloud object
+  storage for **30 days** regardless of other account settings (vendor fact recorded in
+  `premium/models_snapshot.json`, with its capture date).
+- `gpt55` and `live54` send it to **OpenAI** directly (batch and Flex respectively).
+- `gemini31` and `flash` send it to **Google** directly (batch). Web grounding is **off by
+  default** on these lanes; Google's terms attach a specific **30-day retention** to grounding —
+  if you enable a lane's `search`, that retention applies to what you sent (terms captured
+  2026-08-19, noted in the snapshot).
+- The **secrets rule is the same as the main tool's and just as absolute**: a private-key block,
+  bearer token or labelled secret anywhere in the brief stops the run on **every** lane, with no
+  override at any setting.
+- The **PII scan on the broker lane is stricter than the main tool's**: structural identifiers
+  (ID numbers, SSN-shaped, receipt-shaped, email, phone) **refuse** the OpenRouter lane rather
+  than warn — identifiers never go to a reseller. Direct-vendor lanes follow the main tool's
+  philosophy: read what you send.
+- Nothing is submitted without a call-plan file on disk and an explicit `--ceiling`;
+  `--mode dry` transmits nothing to anyone.
+
 ## What is blocked from leaving, and what merely warns
 
 Two mechanisms, deliberately unequal:

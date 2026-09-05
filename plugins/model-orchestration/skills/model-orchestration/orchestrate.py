@@ -139,7 +139,14 @@ def load_panels():
         p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "channels.json")
         with open(p, encoding="utf-8") as fh:
             d = json.load(fh).get("panels")
-        return sorted(k for k in d if not k.startswith("_")) if isinstance(d, dict) else []
+        names = sorted(k for k in d if not k.startswith("_")) if isinstance(d, dict) else []
+        # R82: `premium` is a reserved POINTER, not a registry panel. The premium
+        # batch/flex seats live in the separate premium/premium_panel.py script (the
+        # operator's architecture call: batch mechanics stay out of this monolith,
+        # which only mentions that the script exists). routing.resolve answers the
+        # flag with the pointer text; offered only when the registry was readable,
+        # same reasoning as the docstring above.
+        return names + ["premium"] if names else names
     except Exception:                                     # noqa: BLE001
         return []
 
@@ -7173,7 +7180,9 @@ def main():
                          "--only it never enables a channel the registry has off, because "
                          "`enabled` is what distinguishes this install from the published kit. "
                          "Default comes from `default_panel` in channels.json; the plan always "
-                         "prints what the other panel would add or drop, by name."
+                         "prints what the other panel would add or drop, by name. `premium` "
+                         "prints a pointer to the separate premium/premium_panel.py script "
+                         "(true-batch + flex lanes, its own gates)."
                          % ("|".join(_panels) or "none defined"))
     ap.add_argument("--marker", default="REVIEW-COMPLETE",
                     help="literal string the model must end with; absence means incomplete")

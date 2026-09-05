@@ -45,6 +45,9 @@ channels.shipped.json     reference copy of the registry, so edits to it are nam
                           write permission as the file it describes - see §5b)
 references/*.md           detail read on demand
 systems/*.md              system-prompt presets
+premium/*.py + *.json     the premium batch/flex panel - a SEPARATE dispatcher on purpose
+                          (batch mechanics never enter orchestrate.py; --panel premium prints
+                          the pointer; premium/premium_panel.py --mode dry is the free start)
 ```
 
 Everything above is REPLACED by an update. Your own configuration is therefore not in it — see §5b.
