@@ -1,0 +1,284 @@
+{
+  "_rule": "No slug, endpoint, price or limit enters the harness except from this file. A price copied from prose is a hypothesis; a price here carries the date it was captured and the URL it came from. Prices rot - re-capture before trusting one older than a few weeks.",
+  "_captured": "2026-08-18",
+  "_source": "https://ai.google.dev/gemini-api/docs/pricing read via jina read_url on 2026-08-18; https://ai.google.dev/api/caching for the cachedContents REST surface; https://ai.google.dev/gemini-api/docs/batch-api for the 50% batch statement",
+  "_kit_scrub": "This copy ships with the ai-second-opinion kit. On 2026-09-05 the author's account-state blocks (spend cap, month-to-date spend, billing-console lag observations, account tier) and case-material annotations were removed from it; every price, limit, endpoint and capture date is unchanged from the source project's snapshot. The _rule above still applies: re-capture before trusting a price older than a few weeks.",
+
+  "google_direct": {
+    "endpoint_base": "https://generativelanguage.googleapis.com/v1beta",
+    "auth_header": "x-goog-api-key",
+    "env_var": "GEMINI_API_KEY",
+    "_cost_meter": "NONE in the API. Google returns token counts and no cost field. Every dollar figure on this lane is ARITHMETIC against the table below, and must be labelled as such. Validated 2026-08-18 against OpenRouter's real meter on an identical 12-item shape: arithmetic $0.286123 vs metered $0.287121, 0.35% apart.",
+
+    "_spend_cap_note": "Check YOUR OWN AI Studio -> Spend page before a large run: a spend cap, when set, is the only EXTERNAL brake on irreversible batch spend, its counter lags (~10 min per AI Studio's own warning, so it can be overshot), and nothing in the API surfaces it. The source project's account-state readings were removed from this copy — they describe the author's account, not yours.",
+
+    "_MEASURED_LIMITS_2026_08_19": {
+      "_source": "GET /v1beta/models/gemini-3.7-flash on a dated run — not copied from prose",
+      "inputTokenLimit": 1048576,
+      "outputTokenLimit": 65536,
+      "model_version_string": "3.7-flash-08-2026",
+      "supportedGenerationMethods": ["generateContent", "countTokens", "createCachedContent", "batchGenerateContent"],
+      "_why_it_matters": "createCachedContent and batchGenerateContent appear on the SAME model, which is the capability-level confirmation of the composition measured empirically on 2026-08-18.",
+      "_countTokens_is_free": "POST /v1beta/models/{m}:countTokens. Use it as the pre-submit gate; a chars/3.5 estimate was measured wrong by up to 1.9x on real material."
+    },
+
+    "_billing_console_lag_note": "Neither AI Studio nor GCP billing can confirm a SAME-DAY run: AI Studio Spend warns 'Cost information may take up to 24 hours to update' and settled SKU reports lag similarly. Do not conclude 'wrong key/project' from a same-day gap. Also: the pricing page states free-tier content IS used to improve the vendor's products and paid-tier content is NOT — confirm your own tier in AI Studio before sending anything sensitive.",
+
+    "_terms_and_sku_facts": {
+      "_RETENTION_VERIFIED_2026_08_19": {
+        "_source": "https://ai.google.dev/gemini-api/terms read via jina read_url, 2026-08-19 — Google's OWN terms, not a third party's description of them",
+        "_paid_definition": "Gemini API counts as a Paid Service ONLY when the call goes through a Cloud Project with an active billing account — confirm your own project's tier in AI Studio; the retention statements below apply to Paid Services.",
+        "no_training": "VERBATIM: 'Google doesn't use your prompts (including associated system instructions, cached content, and files such as images, videos, or documents) or responses to improve our products'. Note that CACHED CONTENT is named explicitly, which covers the explicit-caching design.",
+        "processor_status": "Prompts and responses are processed 'in accordance with the Data Processing Addendum for Products Where Google is a Data Processor' — i.e. processor, not controller.",
+        "logging": "VERBATIM: 'For Paid Services, Google logs prompts and responses for a limited period of time, solely for detecting and preventing violations of the Prohibited Use Policy... and any required legal or regulatory disclosures.' NO NUMBER OF DAYS IS GIVEN.",
+        "🔴_CORRECTION": "The '55 days' figure recorded elsewhere in this file came from OPENROUTER's documentation describing which Google backend it routes to — NOT from Google. Google's own terms state no such number. Treat 55 days as unverified hearsay about the direct lane.",
+        "grounding_is_different": "Grounding with Google Search and Grounding with Google Maps each store prompts, context and output for THIRTY (30) DAYS for debugging and testing. That is a specified, longer retention attached to a feature — the standing project rule that grounding/search features carry their own retention is confirmed. This project uses neither."
+      },
+      "_sku_taxonomy_CONFIRMED": {
+        "_finding": "Input, output and CACHED INPUT are separate billing lines per model. This confirms the caching design assumption directly.",
+        "gemini_3_7_flash_input": "01FB-5D61-EA5A  'Generate content input token count gemini 3.7 flash text'",
+        "gemini_3_7_flash_output": "2156-A528-227F  'Generate content output token count gemini 3.7 flash text'",
+        "gemini_3_7_flash_cached_input": "43CF-1C24-D5F0  'Generate content cached input token count gemini 3.7 flash text'"
+      },
+      "_NOT_established": [
+        "Whether the cached rate stacks with the batch 50% discount remains open — Google returns no cost field, so only a billing console can settle it."
+      ]
+    },
+
+    "models": {
+      "gemini-3.7-flash": {
+        "_verified_by": "returned 200 on smoke, T1, T2, ablation and cache probe, 2026-08-18",
+        "context_window_tokens_observed": 228240,
+        "_context_note": "228,240 is the largest input MEASURED through this project, not the model ceiling. A canary planted at 36.7% depth of that payload was recovered, so the middle is genuinely read at that size.",
+        "thinking_budget_max": 24576,
+
+        "price_per_1m_usd": {
+          "_captured": "2026-09-02, THREE independent panel channels opened the page live (spark browser.open, agy scrapling stealthy_fetch — Russian locale, grokbuild) and agree verbatim",
+          "_valid_through": "2026-12-31",
+          "_note": "Prices DOUBLED between the 2026-08-18 capture and 2026-09-02, keeping the dual-dated structure: the 2027 column doubled again. Google changed the current price mid-promise once already — re-capture before any large run.",
+          "input_standard": 0.75,
+          "output_standard_incl_thinking": 3.75,
+          "input_batch": 0.375,
+          "output_batch_incl_thinking": 1.875,
+          "input_flex": 0.375,
+          "output_flex_incl_thinking": 1.875,
+          "cached_input": 0.075,
+          "_cached_confidence": "cached 0.075 from a summarised fetch only; the three live openers quoted in/out/batch/flex but not the cached row — re-verify before relying on it",
+          "cache_storage_per_1m_tokens_per_hour": 0.50
+        },
+
+        "price_per_1m_usd_from_2027_01_01": {
+          "input_standard": 1.50,
+          "output_standard_incl_thinking": 7.50,
+          "input_batch": 0.75,
+          "output_batch_incl_thinking": 3.75
+        },
+
+        "_price_recheck_2026_09_02": "CHRONICLE OF A DOUBLE FLIP — read this before trusting any single reader on this page. (1) 2026-09-02 morning: WebFetch + one reviewer said prices doubled → CRITICAL alarm. (2) Same day: jina read_url x3 returned '$0.375 through December 31, 2026. $0.75 starting January 1, 2027' and the alarm was 'refuted' as summariser collapse. (3) Same day, cheap panel: THREE channels opened the page live and read Standard $0.75->$1.50, Batch $0.375->$0.75. The jina passages were REAL page text but were the BATCH rows — extractive passages arrive without section headings, the reranker returns whichever rows match the question, and attributing them to 'Standard' by table order was the error. RULE: a heading-less extractive passage cannot be attributed to a row label; for load-bearing prices require two independent TRANSPORTS reading the LABELLED row, and prefer a machine-readable reseller catalogue as tie-breaker (OR retailed 0.75 sync all along).",
+
+        "grounding_google_search": {
+          "_captured": "2026-09-02, jina read_url of the pricing page",
+          "free_requests_per_month": 5000,
+          "_free_note": "shared across ALL Gemini 3.x models",
+          "price_per_1000_requests_after_free": 14.00,
+          "_retention_note": "grounding carries its own 30-day retention (Google terms, captured 2026-08-19)"
+        }
+      },
+
+      "gemini-3.1-pro-preview": {
+        "_captured": "2026-09-02",
+        "_metadata_source": "GET /v1beta/models/gemini-3.1-pro-preview with key, same turn — not prose",
+        "version_string": "3.1-pro-preview-01-2026",
+        "inputTokenLimit": 1048576,
+        "outputTokenLimit": 65536,
+        "supportedGenerationMethods": ["generateContent", "countTokens", "createCachedContent", "batchGenerateContent"],
+        "thinking": true,
+        "thinking_budget_max": null,
+        "_thinking_budget_note": "NOT exposed by the models endpoint; docs value not yet captured on a dated read — capture before the first paid call on this model (ceiling rule: depth always at the model's max)",
+        "price_per_1m_usd": {
+          "_source": "jina read_url of pricing page 2026-09-02, section 'Gemini 3.1 Pro Preview'; labels corrected same day",
+          "_captured": "2026-09-02",
+          "_label_correction_2026_09_02": "The first capture named the $1/$6 row 'standard'. NOW.md and the memory topic (both written off the panel's live page reads) record std $2/$12 and batch=flex $1/$6 (<=200k) / $2/$9 (>200k), and the 50% arithmetic is self-consistent ($1/$6 = half of $2/$12; $2/$9 = half of $4/$18). So $1/$6 and $2/$9 are the BATCH/FLEX rows; relabelled in place per project rule. Standard >200k ($4/$18) is DERIVED by 2x, not captured — marked below.",
+          "input_batch_le_200k": 1.00,
+          "output_batch_incl_thinking_le_200k": 6.00,
+          "input_batch_gt_200k": 2.00,
+          "output_batch_gt_200k": 9.00,
+          "input_standard_le_200k": 2.00,
+          "output_standard_incl_thinking_le_200k": 12.00,
+          "input_standard_gt_200k_DERIVED": 4.00,
+          "output_standard_gt_200k_DERIVED": 18.00,
+          "_derived_note": "standard >200k rows are 2x the batch rows by the documented 50% relation, not a page read — re-capture before quoting them anywhere",
+          "cached_input_le_200k": 0.20,
+          "cache_storage_per_1m_tokens_per_hour": 4.50,
+          "_gt_200k_note": "captured 2026-09-02: panel channel opened the page live — '$1.00, prompts <= 200k / $2.00, prompts > 200k' in, '$6.00 / $9.00' out; BATCH and FLEX rows identical",
+          "_flex_note": "Flex supported for this model per ai.google.dev/gemini-api/docs/flex-inference (supported-models table, opened live by two panel channels 2026-09-02), same price as batch"
+        },
+        "_cache_warning": "cache storage $4.50/M/hr is 9x flash — do not cache this model casually",
+        "_search_in_batch": "googleSearch inside batch: documented-supported, NOT yet measured here; googleSearch + cachedContent = measured FAIL code 3 (R10) — never combine"
+      }
+    },
+
+    "tiers": {
+      "_the_axis": "Price is NOT the axis. Batch and Flex carry the IDENTICAL 50% discount. The choice is sheddable-and-fast versus guaranteed-and-slower.",
+      "standard": {"discount": 0.0, "sync": true},
+      "flex": {
+        "discount": 0.50, "sync": true, "target": "1-15 min",
+        "sheddable": true,
+        "_measured": "2026-08-18 R06: 2 of 12 items shed HTTP 503 and a whole single-item job died after 7 retries. Needs backoff+jitter and a fallback lane."
+      },
+      "batch": {
+        "discount": 0.50, "sync": false, "target": "24 h",
+        "sheddable": false,
+        "_measured": "2026-08-18 R07: 1 item 75 s, 12 items ~4.5 min, 4 heavy items ~2.5 min. The 24 h figure is a CEILING, not a latency. Zero 503 across 4 runs. 12/12 and 4/4 valid JSON.",
+        "endpoint": "POST /v1beta/models/{model}:batchGenerateContent",
+        "poll": "GET /v1beta/batches/{id}",
+        "_state_names": "BATCH_STATE_RUNNING / BATCH_STATE_SUCCEEDED. NOT the JOB_STATE_* the docs summary gives - measured 2026-08-18.",
+        "_results_path": "response.inlinedResponses.inlinedResponses (DOUBLE nested)",
+        "inline_payload_cap_bytes": 20971520,
+        "input_file_cap_bytes": 2147483648,
+        "job_expiry_hours": 48
+      }
+    },
+
+    "context_caching": {
+      "_status": "EXPLICIT caching VERIFIED WORKING 2026-08-18, and it COMPOSES WITH BATCH.",
+      "_supersedes": "The project's earlier rule 'a shared prefix buys nothing inside a batch' was measured on IMPLICIT caching and remains true for implicit. Explicit caching is a different mechanism and does work.",
+      "create": "POST /v1beta/cachedContents",
+      "get": "GET /v1beta/cachedContents/{id}",
+      "list": "GET /v1beta/cachedContents",
+      "delete": "DELETE /v1beta/cachedContents/{id}",
+      "reference_field": "cachedContent",
+      "_reference_field_note": "Top-level on GenerateContentRequest, value 'cachedContents/{id}'. Works BOTH on :generateContent and inside a batch item's `request` object. Verified by a returned cachedContentTokenCount, not by an HTTP 200.",
+      "usage_field": "usageMetadata.cachedContentTokenCount",
+      "min_tokens_gemini_3_7_flash": 1024,
+      "_min_tokens_correction": "4096 was the original capture; R09 measured a 1,024-token explicit cache ACCEPTED (2026-08-20). Superseded in place per project rule.",
+      "required_create_fields": ["model as 'models/{slug}'"],
+      "expiration": "ttl like '600s', or expireTime RFC3339",
+      "_measured_2026_08_18": {
+        "corpus_chars": 328469,
+        "cached_tokens": 93442,
+        "prompt_tokens_per_call": 93750,
+        "cache_hit_fraction": 0.9967,
+        "create_wall_s": 1.0,
+        "sync_call_wall_s": 10.93,
+        "batch_2_items": "both items returned cachedContentTokenCount 93442",
+        "fidelity": "cached-prefix output reproduced the same fatal finding as the inline-prefix run on the same lens"
+      },
+      "_the_trap": "Storage bills $0.50 per 1M tokens PER HOUR. A 93,442-token cache costs $0.0467/hour to hold - leave one up for a day and it costs more than the batch it was meant to cheapen. CREATE, USE, DELETE. Always delete in a finally block; the TTL is only a backstop for when the delete itself fails.",
+      "_unverifiable_from_here": "Whether the cached rate STACKS with the batch 50% discount is NOT determinable from this side, because Google returns no cost field. Cached input is $0.0375/M against batch input $0.1875/M either way, so the saving is real; only its exact size is open. Confirm in the Google billing console."
+    }
+  },
+
+  "openrouter": {
+    "endpoint_batches": "https://openrouter.ai/api/beta/batches",
+    "endpoint_field": "/v1/chat/completions",
+    "_endpoint_note": "NOT /api/v1/... inside the `endpoint` field - that 400s.",
+    "env_var": "OPENROUTER_API_KEY",
+    "_cost_meter": "REAL. `usage.cost` on the batch poll. This is the only lane in the project with a genuine meter.",
+    "models": {
+      "google/gemini-3.7-flash:batch": {
+        "_verified_by": "R04, R05, R07 all returned 200 and billed",
+        "_measured_2026_08_18": "12 items, 1,125,133 in / 81,236 out, metered $0.287121",
+        "_json_defect": "8.3% of items return invalid JSON (a lone backslash before a non-escape). Measured in R04 and again in R07 - same failure, different corpus. tools/salvage_json.py recovers 12/12 via escape-lone-backslash. Wire it in as routine, not as rescue.",
+        "_retention": "OpenRouter keeps batch JSONL in GCS for 30 days regardless of ZDR. `provider.zdr: true` forces Vertex (zero retention) over AI Studio (55 days) for the inference itself."
+      },
+      "google/gemini-3.7-flash": {
+        "_captured": "2026-09-02, GET /api/v1/models (live catalogue, no key needed)",
+        "prompt_per_1m": 0.75, "completion_per_1m": 3.75, "internal_reasoning_per_1m": 3.75,
+        "input_cache_read_per_1m": 0.075, "web_search_per_query": 0.014,
+        "batch_variant": {
+          "slug": "google/gemini-3.7-flash:batch",
+          "prompt_per_1m": 0.1875, "completion_per_1m": 0.9375, "internal_reasoning_per_1m": 0.9375,
+          "input_cache_read_per_1m": 0.01875,
+          "_captured": "2026-09-02 availability matrix + 2026-08-16 catalogue diff (docs/batch-api-verified-2026-08-16.md section 2); R04/R05/R07 billed at these rates on the real meter",
+          "_lag_note": "currently 2x CHEAPER than Google's own post-repricing batch ($0.375/$1.875) — a catalogue lag in the buyer's favour; do NOT budget on it holding"
+        },
+        "_divergence": "CORRECTED by the panel 2026-09-02: OR sync 0.75/3.75 is PARITY with Google's current standard (which doubled between 08-18 and 09-02), not a markup. The real gap runs the other way: OR :batch $0.1875/$0.9375 is 2x CHEAPER than Google's own batch $0.375/$1.875 — a lag in the buyer's favour; do not budget on it holding.",
+        "_params_note": "sync keeps temperature/top_p/seed/stop; :batch drops all four (re-confirmed on the live catalogue 2026-09-02)"
+      },
+      "openai/gpt-5.6-sol-pro": {
+        "_captured": "2026-09-02, GET /api/v1/models",
+        "prompt_per_1m": 2.00, "completion_per_1m": 10.00, "input_cache_read_per_1m": 0.20,
+        "web_search_per_query": 0.01,
+        "batch_variant": {"slug": "openai/gpt-5.6-sol-pro:batch", "prompt_per_1m": 1.00, "completion_per_1m": 5.00, "discount": 0.5, "_valid_through": "2026-11-21", "_valid_through_note": "promo language 'at least through 2026-11-21' captured 2026-09-02 — prices.py refuses past this date until re-captured"},
+        "flex": null,
+        "flex_reason": "REFUTED BY METER (Probe D 2026-08-23, raw JSON re-read 2026-09-02): service_tier:'flex' accepted and ECHOED in the response, but usage.cost_details shows the prompt billed at standard rates to the cent (289,555 uncached x $2/M + 1,236,776 cached x $0.2/M + 123,560 cache-write x $0.5/M = $0.888245; flex would be ~$0.44). No :flex entry in the live catalogue; the :flex web page and /endpoints API resolve ANY suffix (terra:flex == terra byte-identical) and prove nothing."
+      },
+      "openai/gpt-5.5": {
+        "_captured": "2026-09-02, GET /api/v1/models",
+        "prompt_per_1m": 5.00, "completion_per_1m": 30.00, "input_cache_read_per_1m": 0.50,
+        "web_search_per_query": 0.01,
+        "batch_variant": {"slug": "openai/gpt-5.5:batch", "prompt_per_1m": 2.50, "completion_per_1m": 15.00, "discount": 0.5},
+        "flex": null,
+        "flex_reason": "no :flex in the catalogue; same suffix-tolerance caveat as sol-pro"
+      },
+      "openai/gpt-5.4": {
+        "_captured": "2026-09-02, GET /api/v1/models",
+        "prompt_per_1m": 2.50, "completion_per_1m": 15.00, "input_cache_read_per_1m": 0.25,
+        "web_search_per_query": 0.01,
+        "batch_variant": {"slug": "openai/gpt-5.4:batch", "prompt_per_1m": 1.25, "completion_per_1m": 7.50, "discount": 0.5},
+        "flex": null,
+        "flex_reason": "no :flex in the catalogue"
+      }
+    },
+    "_flex_finding_2026_09_02": "REFINED BY THE PANEL same day. (1) The /models catalogue has ZERO :flex slugs — true. (2) BUT /api/v1/models/{id}/endpoints carries PROVIDER TAGS with flex prices: 'openai/flex' $1/$5 on sol-pro, $1.25/$7.5 on gpt-5.4, $2.5/$15 on gpt-5.5; 'google-ai-studio/flex' $0.375/$1.875 on flash (grokbuild opened all four, 2026-09-02). So the discount PATH exists as endpoint tags, not slug variants — a safeguard checking slug suffixes would refuse a working discount. (3) Per OR service-tiers docs: service_tier:'flex' restricts routing to flex endpoints; capacity-miss ERRORS (no fallback); an EMPTY flex pool routes 'normally at standard rates' silently — the documented mechanism behind Probe D billing standard. FIX: pin provider.only to the flex-tagged endpoint AND verify by usage.cost meter; echo and HTTP 200 prove nothing. Probe D (08-23) remains the last METER on this path and it read standard.",
+    "_web_fee_note": "Web fees are per-query, identical on sync and :batch (batch discounts tokens, never search — docs/batch-api-verified-2026-08-16.md section 2). Fetched-content tokens additionally bill as INPUT at model rates: one web question on sol-pro metered $1.13 when 16 fetches pushed prompt_tokens to 1,526,331 (Probe D)."
+  },
+
+  "openai_direct": {
+    "_captured": "2026-09-02",
+    "endpoint_responses": "https://api.openai.com/v1/responses",
+    "env_var": "OPENAI_API_KEY",
+    "batch_tier": {
+      "_evidence": "R03 smoke 2026-08-16 ran the FULL lifecycle and the raw bodies are on disk: runs/2026-08-16-smoke/{submit.py,openai.create.json,openai.poll.json}. gpt-5.4 via /v1/responses inside batch completed and billed (427 in / 1137 out, reasoning 1034).",
+      "upload": "POST https://api.openai.com/v1/files  (multipart form: purpose=batch, file=<jsonl>)",
+      "create": "POST https://api.openai.com/v1/batches  {input_file_id, endpoint, completion_window:'24h'}",
+      "poll": "GET https://api.openai.com/v1/batches/{id}  -> status in validating|in_progress|finalizing|completed|failed|expired|cancelled; usage totals on the batch object",
+      "results": "GET https://api.openai.com/v1/files/{output_file_id}/content  -> JSONL, one line per item: {custom_id, response:{status_code, body:<endpoint response object>}}",
+      "completion_window": "24h is the ONLY value (docs/batch-api-verified-2026-08-16.md C8)",
+      "pricing": "50% of standard per the same doc (C3); no separate price table captured — arithmetic uses standard x 0.5",
+      "endpoints_verified": {"/v1/responses": "R03 on gpt-5.4", "/v1/chat/completions": "documented, not yet run from here"},
+      "_gpt55_endpoint_note": "gpt-5.5 model page lists 'Chat Completions + Batch' support; /v1/responses inside batch for 5.5 is UNVERIFIED — the smoke pins /v1/chat/completions for lane 2 until measured",
+      "_expiry_billing": "on expiry 'developers will be charged for any completed work' — partial completion still bills",
+      "_zdr": "ZDR explicitly does NOT apply to Batch (C5) — per-lane PII policy applies"
+    },
+    "_cost_meter": "NONE in the API response (token counts only). Every dollar figure on this lane is ARITHMETIC against the table below; the billing dashboard settles next-day.",
+    "web_search_fee": "USD 10.00 per 1000 calls PLUS search-content tokens billed as input at model rates (pricing page 2026-09-02, summarised fetch). The content tokens, not the per-call fee, are the cost driver.",
+    "flex_tier": {
+      "_source": "flex-processing guide fetched 2026-09-02 (summarised)",
+      "pricing": "Batch API rates (50% of standard); prompt-cache discounts stack on top",
+      "timeout_advice": "raise client timeout to 15 min; SDK retries 408 twice; on 429 fall back to standard tier",
+      "supported_models_page_lists": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano", "o3", "o4-mini"],
+      "_conflict_RESOLVED_2026_09_02": "The earlier 'pricing table omits 5.4/5.5 from flex' was THIS session's summarised-fetch artifact. Panel channel grokbuild OPENED the pricing page and read the Flex table listing gpt-5.5 $2.50/$15 and gpt-5.4 $1.25/$7.50 (= batch rates); two more channels corroborate via the per-model pages ('...for the full session for standard, batch, and flex' on BOTH models) and the gpt-5.4 launch post ('Batch and Flex pricing are available at half the standard API rate'). So flex is DOCUMENTED for both. CAVEAT on echo: OpenAI's own reference says the response service_tier 'may be different from the value set in the parameter' — the echo is the tier actually used but is not a bill; Probe C never published a meter. The gold-standard check remains a small flex call reconciled against the billing dashboard next day."
+    },
+    "models": {
+      "gpt-5.4": {
+        "prompt_per_1m": 2.50, "completion_per_1m": 15.00,
+        "_source": "pricing page 2026-09-02 (summarised fetch); OR catalogue lists identical passthrough numbers",
+        "flex_applied_evidence": "Probe C response echo, 2026-08-23",
+        "_probe_c_trap": "Probe C returned status 'incomplete': max_output_tokens 8000 was consumed entirely by 8,000 reasoning tokens across 25 web_search_calls and NO message text was produced. Output headroom must sit at the model ceiling, never a small cap."
+      },
+      "gpt-5.5": {
+        "prompt_per_1m": 5.00, "completion_per_1m": 30.00, "cached_input_per_1m": 0.50,
+        "context_in": 1050000, "context_out": 128000,
+        "reasoning_efforts": ["none", "low", "medium", "high", "xhigh"],
+        "_source": "developers.openai.com/api/docs/models/gpt-5.5 fetched 2026-09-02 + pricing page 2026-09-02",
+        "flex_applied_evidence": null
+      }
+    }
+  },
+
+  "premium_panel_lane_availability_2026_09_02": {
+    "_rule": "A lane may be submitted only if its tier row here says available true with dated evidence, or the operator passes --allow-nodiscount and the tool prints that the discount is absent. Evidence ranking: METER (a bill that came back) > opened labelled page > machine catalogue > response echo (OpenAI documents the echo 'may be different from the value set in the parameter') > HTTP 200. Panel-corrected 2026-09-02.",
+    "or_sol_pro_flex":   {"available": "endpoint-tag", "price": "1.00/5.00", "evidence": "'openai/flex' tag on /endpoints (grokbuild opened 2026-09-02). BUT the only meter (Probe D 08-23) billed STANDARD — an empty/skipped flex pool silently standard-routes per OR docs. Use provider.only pin to the flex tag AND verify usage.cost before trusting"},
+    "or_flash_flex":     {"available": "endpoint-tag", "price": "0.375/1.875", "evidence": "'google-ai-studio/flex' tag on /endpoints (grokbuild opened 2026-09-02); never metered from here; Google DIRECT flex is the same price without the broker"},
+    "or_sol_pro_batch":  {"available": true,  "discount": 0.5, "web": false, "evidence": "catalogue 2026-09-02 + R10 runs billed. Sol promo pricing 'at least through 2026-11-21' — earlier valid-through than the Google year-end guard"},
+    "or_flash_batch":    {"available": true,  "price": "0.1875/0.9375", "web": false, "evidence": "catalogue 2026-09-02; currently 2x CHEAPER than Google's own batch (lag in buyer's favour); web plugin rejected, measured R10; drops temperature/top_p/seed/stop"},
+    "or_gpt55_batch":    {"available": true,  "discount": 0.5, "web": false, "evidence": "catalogue 2026-09-02, never called from here"},
+    "openai_gpt54_flex": {"available": true,  "discount": 0.5, "web": true,  "evidence": "Flex pricing table opened by panel (grokbuild) lists $1.25/$7.50; launch post 'half the standard API rate'; Probe C echo agrees; NO METER yet — reconcile the first real call against the billing dashboard"},
+    "openai_gpt55_flex": {"available": true,  "discount": 0.5, "web": true,  "evidence": "Flex pricing table opened by panel lists $2.50/$15; model page says 'standard, batch, and flex'; never called — smoke + next-day dashboard reconcile before a full lane"},
+    "google_pro_preview_batch": {"available": true, "discount": 0.5, "price": "1/6 le200k, 2/9 gt200k", "web": "googleSearch in batch DOCUMENTED with example (panel opened batch-api page); unmeasured here; NEVER with cache (FAIL code 3, R10); NEVER with response_schema (controlled generation unsupported with google_search) — prompt-level JSON only", "evidence": "models endpoint 2026-09-02 + pricing page opened by panel"},
+    "google_pro_preview_flex": {"available": true, "discount": 0.5, "evidence": "flex-inference supported-models table includes 3.1 Pro Preview (two channels opened 2026-09-02); sheddable, no auto-upgrade"},
+    "google_flash_flex": {"available": true,  "price": "0.375/1.875", "web": "unmeasured with googleSearch", "evidence": "serviceTier flex billed-consistent R06; price = half of the DOUBLED standard"}
+  }
+}

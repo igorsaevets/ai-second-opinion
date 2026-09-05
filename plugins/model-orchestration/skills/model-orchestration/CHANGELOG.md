@@ -1,5 +1,72 @@
 # Changelog
 
+## 1.56.0 — 2026-09-05
+
+* **New: premium panel, offline core (`premium/` bundle).**
+  First slice of the third panel — true-batch lanes at the vendors' documented
+  ~50% batch discount. Ships `premium/` as a self-contained bundle, ported from
+  the author's batch-review project (github.com/igorsaevets/second-opinion-batch)
+  under the standing directive that batch mechanics stay OUT of `orchestrate.py`:
+  `batch_one.py` (ONE item through an OpenRouter / OpenAI-direct / Google-direct
+  true-batch lane: build / submit / poll; submit is irreversible spend and is
+  never auto-retried), `batch_transport.py` (the wire functions, verbatim from
+  the source harnesses with provenance SHAs in the header), `prices.py` +
+  `models_snapshot.json` (every dollar figure resolves from the snapshot;
+  valid-through and staleness guards REFUSE rotten prices; the shipped snapshot
+  is scrubbed of the author's account state and case annotations), and
+  `salvage_json.py` (repairs batch items whose JSON did not parse, so a paid
+  batch is not bought twice). Offline in this release: `--mode build` prints
+  rates and worst-case arithmetic with no key; submit/poll refuse in one line
+  when the lane's key is absent. Honest status carried over from the source
+  project: the panel has not yet run end-to-end on live money — transports were
+  measured individually there. The dispatcher (`premium_panel.py`), the flex
+  lane and the README/PRIVACY documentation arrive in the next releases.
+
+* **`package.py`: COPY_DIRS loop ships `.py`/`.json`, not only `.md`.**
+  Listing `premium` in `COPY_DIRS` alone would have shipped it as an EMPTY
+  directory — the dir loop copied `.md` files only, and every content check
+  stays green on a file that is absent. `.py` inside copied dirs now travels
+  byte-for-byte (same policy as COPY_FILES: code is never regex-rewritten),
+  `.md`/`.json` go through the substitution table.
+
+* **The selftest's world detector was a stale artifact, and deleting it woke
+  eight releases of blind drift — all repaired this release.**
+  `kit_tree = isfile(VERSION)` decides which assertions run, and a stale
+  untracked `VERSION` file (1.48.0) had sat in the SOURCE tree since ~v1.48
+  against the build's own rule ("shipped trees are stamped; working copies are
+  identified by git") — so the source tested itself as a shipped install and
+  every working-copy sentinel was silently skipped while v1.47–v1.55 legitimately
+  re-organised the registry (transport cascades, model rotations, the expensive
+  OpenAI seats deleted outright). Deleting the artifact turned the drift loud.
+  Repairs, each following the registry's own recorded doctrine:
+  `PUBLISH_EXCLUDE_CHANNELS` emptied (both entries named channels that no longer
+  exist — a stale exclusion reads as protection and protects nothing) and the
+  matching source-side `_kit_excluded_channels` annotation removed (the design
+  says the dev tree does not carry it); `orgpt56lunapro`'s ledger line carries a
+  dated RETIRED prefix (the churn guard forbids a second REMOVE, so a retirement
+  after a demotion was unsayable — the R48 asymmetry one level up, resolved by
+  the R80 edit-in-place precedent); the rationed-seat sentinels (OPT_IN,
+  explicit_only, requires_ack non-empty demands) are retired WITH their carrier —
+  the sol-pro seat now lives outside the registry as the premium bundle's
+  or-batch lane, and one future rationed channel re-arms every assertion; the
+  distribution check's working-tree half no longer asserts `enabled` (that is
+  the owner's live setting, which the selftest's own doctrine forbids reading
+  expectations from) while the shipped-tree wallet-protecting half stays; the
+  R68 marker-verification census is bumped 10 → 11 (`call_claudecli`, v1.52.0,
+  verifies by the shared rule; its commit forgot the census update the census
+  exists to force).
+
+* **Selftest: `suite_r82_premium_bundle` (+~35 checks).**
+  Presence and load of every bundle module; package.py ships-the-bundle pins
+  (both halves: the COPY_DIRS entry AND the `.py` branch of the loop); prices
+  mechanics on a SYNTHETIC snapshot — tier switching at 200k, valid-through
+  refusal with the date named, `allow_stale` override warns, missing model
+  refuses, no-batch-variant lane says НЕТ СКИДКИ; the LIVE snapshot gets
+  structural pins only (a "live snapshot resolves" assert would be a calendar
+  bomb: the sol-pro promo gate fires after 2026-11-21 BY DESIGN); batch_one
+  with no key REFUSES naming the variable, no traceback, all six read sites
+  through `_key()`; `--mode build` runs offline from a bare copy of the bundle.
+
 ## 1.55.0 — 2026-09-05
 
 * **Fix author name in English README.**

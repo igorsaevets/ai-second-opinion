@@ -23,3 +23,13 @@ ignore = [
     # when hard-wrapped.
     "E501",
 ]
+
+[lint.per-file-ignores]
+# premium/ is a VENDORED bundle: its functions travel verbatim from the batch-review source
+# project (provenance SHAs in batch_transport.py), and so does that project's formatting.
+# E702 is its semicolon-joined meter-accumulator style; rewriting vendored lines to satisfy
+# a cosmetic rule is exactly the churn the philosophy note above forbids, and it would break
+# the byte-level provenance the bundle's header promises. Real-defect rules (F-class) still apply.
+# `**/` because the same config checks two layouts: premium/ at the source root, and
+# plugins/.../skills/.../premium/ in the built kit tree (a bare `premium/*.py` matched only one).
+"**/premium/*.py" = ["E702"]

@@ -181,16 +181,31 @@ def suite_routing():
     # shape as the `distribution` field it is guarding: an expectation with no way to tell which
     # world it is in. The tree says which world it is in - a shipped tree carries VERSION.
     kit_tree = os.path.isfile(os.path.join(HERE, "VERSION"))
+    # 🔴 R82 (2026-09-05): THE WORKING-TREE HALF OF THIS CHECK IS RETIRED, and the story is
+    # worth its length. A stale untracked VERSION file (1.48.0) sat in the source tree from
+    # ~v1.48, so `kit_tree` above said "shipped" and every working-copy assertion in this file
+    # was SKIPPED for eight releases - the world detector was the artifact another check said
+    # must not exist. Deleting the artifact woke this check against a registry the R80 rounds
+    # had legitimately re-organised (transport cascades: or-doubles armed as primaries, direct
+    # seats benched - grok420 parked after its R41 runaway, orgemini36flash's metadata updated
+    # kit->both while five siblings were not). The old model "local => enabled locally" bakes
+    # in "the author always wants every key-channel on", which stopped being true, and in the
+    # working copy `enabled` is the OWNER'S LIVE SETTING - the very thing main() says a
+    # selftest must not read expectations from. What survives: unknown distribution values are
+    # flagged in both trees, and the SHIPPED tree still asserts the wallet-protecting halves
+    # (local ships OFF, kit ships ON - those are package.py's own build transform, not a
+    # user setting).
     bad = []
     for c, v in sorted(_CHANS.items()):
         d = v.get("distribution", "both")
         on = v.get("enabled", True)
-        want_on = {"both": None, "local": not kit_tree, "kit": kit_tree}.get(d, "?")
-        if want_on == "?":
+        if d not in ("both", "local", "kit"):
             bad.append("%s: unknown distribution %r" % (c, d))
-        elif want_on is not None and on != want_on:
-            bad.append("%s: distribution=%s but enabled=%s in %s tree"
-                       % (c, d, on, "a shipped" if kit_tree else "the working"))
+            continue
+        want_on = {"both": None, "local": False, "kit": True}[d] if kit_tree else None
+        if want_on is not None and on != want_on:
+            bad.append("%s: distribution=%s but enabled=%s in a shipped tree"
+                       % (c, d, on))
     check(not bad, "every channel's `distribution` agrees with the `enabled` for THIS tree",
           "; ".join(bad))
 
@@ -208,8 +223,15 @@ def suite_routing():
     # here is not WHICH model sits in the seat, it is that SOMETHING rationed exists and stays off.
     # The rename made all three of this round's failures loud, which is the behaviour that was
     # wanted - a conditional `if "orgpt56terrapro" in _CHANS` would have skipped silently instead.
-    OPT_IN = {"orgpt56solpro": "rationed: predecessor measured ~$1.80/review and this model costs "
-                               "25% more per token; strategic questions only"}
+    # 🔴 R82 (2026-09-05): THE DICT IS EMPTY BECAUSE THE RATIONED SEAT LEFT THE REGISTRY, not
+    # because the policy died. `orgpt56solpro` (and its Luna sibling) were deleted from
+    # channels.json outright during the v1.47-v1.55 wave - absence, the strongest rung of the
+    # R47 ladder, applied at the source - and the sol-pro seat now lives OUTSIDE this registry
+    # entirely, as the or-batch lane of the premium bundle (premium/, R82, Igor's own
+    # direction), where its rationing is the prices.py valid-through gate, the worst-case-vs-
+    # ceiling arithmetic and an explicit submit. The loop below is kept: one entry re-arms
+    # every assertion the moment a rationed channel exists in this registry again.
+    OPT_IN = {}
     for c, why in sorted(OPT_IN.items()):
         if kit_tree:
             # 🔴 R47, Igor: «Terra Pro модель в репозитории вообще давай отключим (или удалим),
@@ -2492,18 +2514,17 @@ def suite_spend_guard():
     reg = _json.load(open(os.path.join(HERE, "channels.json"), encoding="utf-8"))
     guarded = {c: ch for c, ch in reg["channels"].items()
                if not c.startswith("_") and (ch.get("spend_guard") or {}).get("requires_ack")}
-    # 🔴 R47: the ONLY requires_ack channel is deleted from the shipped registry, so in a kit
-    # tree this sentinel would demand a channel that is absent by design. There the honest
-    # assertion is that the MECHANISM still ships (the code path exists for a hand-added
-    # channel), which the source-string check below covers; the working copy keeps the strong
-    # form so the policy cannot be silently dropped where it is meant to live.
-    if os.path.isfile(os.path.join(HERE, "VERSION")):
-        check("requires_ack" in open(os.path.join(HERE, "orchestrate.py"),
-                                     encoding="utf-8").read(),
-              "the ack-gate mechanism still ships even though no shipped channel uses it")
-    else:
-        check(guarded, "at least one channel declares spend_guard.requires_ack",
-              ", ".join(guarded) or "none")
+    # 🔴 R47: the ONLY requires_ack channel was deleted from the shipped registry, so in a kit
+    # tree this sentinel would demand a channel that is absent by design.
+    # 🔴 R82 (2026-09-05): the working copy no longer carries one either - the rationed seat
+    # left channels.json entirely for the premium bundle (see the OPT_IN note in
+    # suite_degradation for the whole story), so the "strong form" lost its carrier in BOTH
+    # trees. What remains true and checkable everywhere is that the MECHANISM still exists
+    # for the next hand-added channel; the per-channel invariants below re-arm automatically
+    # the moment any channel declares spend_guard.requires_ack again.
+    check("requires_ack" in open(os.path.join(HERE, "orchestrate.py"),
+                                 encoding="utf-8").read(),
+          "the ack-gate mechanism still exists even while no channel uses it")
     for cname, ch in guarded.items():
         check(ch.get("enabled") is False,
               "%s: requires_ack implies default-off (an ack gate on an on-by-default channel "
@@ -2622,9 +2643,12 @@ def suite_spend_guard():
     src_all = inspect.getsource(o)
     check(".endswith(marker)" not in src_all and ".endswith(a.marker)" not in src_all,
           "R68 census: no raw marker-endswith anywhere in orchestrate.py")
+    # R82 bump 10 -> 11: call_claudecli (v1.52.0) verifies by the shared rule -
+    # a LEGITIMATE new site whose commit forgot the census update this comment
+    # demands. Verified by mapping every occurrence to its function before bumping.
     check(src_all.count("def _marker_on_last_line(") == 1 and
-          src_all.count("not _marker_on_last_line(") == 10,
-          "R68 census: 9 verification sites + 1 use inside _strip_marker_tail, one def",
+          src_all.count("not _marker_on_last_line(") == 11,
+          "R68 census: 10 verification sites + 1 use inside _strip_marker_tail, one def",
           "def=%d not_calls=%d" % (src_all.count("def _marker_on_last_line("),
                                    src_all.count("not _marker_on_last_line(")))
     check(src_all.count("_strip_marker_tail(") == 3,
@@ -2727,10 +2751,11 @@ def suite_max_depth_and_explicit_only():
     # 🔴 R47: the only explicit_only channel is deleted from the shipped registry (see the
     # requires_ack sentinel above - same reasoning). In a kit tree the checks below run
     # vacuously over an empty set, which is CORRECT there: the property they guard has no
-    # carrier. The working copy keeps the strong sentinel.
-    if not os.path.isfile(os.path.join(HERE, "VERSION")):
-        check(bool(expl), "at least one channel is declared explicit_only",
-              "otherwise every check below passes vacuously")
+    # carrier.
+    # 🔴 R82 (2026-09-05): the working copy lost its carrier too - the rationed seat moved
+    # out of channels.json into the premium bundle (OPT_IN note in suite_degradation has the
+    # story). The non-empty sentinel is retired WITH its carrier; the derivation checks below
+    # run over whatever set exists and re-arm on the first future explicit_only channel.
 
     def enabled(**kw):
         """The channels a selection starts. A RouteError counts as «started nothing».
@@ -2923,7 +2948,12 @@ def suite_panels():
          "the price agreed: $0.20/M in, $1.20/M out, read live - a TENTH of its Sol Pro sibling. "
          "TEMPORARY by his own word; the channel's `_temporary` key says what ends the trial."),
         ("R55 2026-08-19", "REMOVE", "orgpt56lunapro",
-         "Igor by name: «Luna pro перенеси из cheap panel в standart». The R54 trial returned a "
+         "RETIRED as of R82 2026-09-05 - the channel was deleted from channels.json outright "
+         "during the v1.47-v1.55 wave, so per this fold's own vocabulary it is gone for good, "
+         "not moved rooms. (Prefix added in place per the R80 rename precedent: the churn "
+         "guard forbids a second REMOVE, so a retirement AFTER a demotion is only sayable "
+         "here - the R48 asymmetry one level up.) The original R55 decision, verbatim: Igor "
+         "by name: «Luna pro перенеси из cheap panel в standart». The R54 trial returned a "
          "NO: 604 s and $0.8629 in its first real round - the last channel to return and the "
          "highest single-channel spend of fourteen, on the CHEAPEST metered rate card in the "
          "registry. That pair is the finding: A RATE IS NOT A BILL, so `cost` and `panel` are "
@@ -3647,7 +3677,12 @@ def suite_r47_causes():
         _chans54 = {k: v for k, v in _reg54["channels"].items() if not k.startswith("_")}
         rationed = {c for c, v in _chans54.items() if v.get("explicit_only")}
         check(bool(excl), "package.py declares PUBLISH_EXCLUDE_CHANNELS at all")
-        check(rationed and rationed <= shipped_excl,
+        # R82: `rationed and ...` demanded a NON-EMPTY explicit_only set, which turned red
+        # the day the expensive seats were deleted from the registry outright - absence,
+        # the strongest rung of the very ladder this check cites. The invariant derives
+        # cleanly either way: every explicit_only channel (zero or more) must be excluded.
+        # A future explicit_only channel that is not excluded still goes red here.
+        check(rationed <= shipped_excl,
               "every explicit_only channel is DELETED from the shipped registry (R47: employees "
               "walked every lock rung on purpose - absence is the only lock that survives naming)",
               "explicit_only=%s excluded=%s missing=%s"
@@ -4592,7 +4627,10 @@ def suite_r60_shipped_docs_and_kit_exclusion():
             if shipped_ch.is_file():
                 reg = json.loads(shipped_ch.read_text(encoding="utf-8"))
                 excl = reg.get("_kit_excluded_channels")
-                check(isinstance(excl, list) and len(excl) >= 1,
+                # R82: `len >= 1` dropped - distinguishing 'held back' from 'drift' needs the
+                # KEY to exist, not the list to be non-empty, and the list emptied for real
+                # when the last excluded channels were deleted from the source registry.
+                check(isinstance(excl, list),
                       "R60: shipped channels.json declares _kit_excluded_channels - a list, so "
                       "the shipped selftest can distinguish 'held back' from 'drift'",
                       "value=%r" % excl)
@@ -5694,6 +5732,188 @@ def suite_r80_agy_result_detection():
           "_parse_agy_stream still keys on the parsed event field, not substring")
 
 
+# =================================================================================================
+def suite_r82_premium_bundle():
+    section("R82. Premium panel bundle: the offline core ships and behaves")
+
+    prem = HERE / "premium"
+    for f in ("batch_transport.py", "prices.py", "batch_one.py",
+              "salvage_json.py", "models_snapshot.json"):
+        check((prem / f).is_file(), f"premium/{f} exists in the source tree")
+
+    # package.py must ship the bundle - and BOTH halves are load-bearing. The R82
+    # study planned only the COPY_DIRS entry; the dir loop copied .md ONLY, so that
+    # entry alone ships premium/ as an EMPTY directory with every text check green.
+    # is_file() guard because package.py itself is NOT shipped: the first run of
+    # this suite raised FileNotFoundError inside the R60 shipped-layout selftest -
+    # the exact guard the sibling check at "upgrade.py is in COPY_FILES" carries,
+    # not carried here. Source-side pins run on the source tree only.
+    pkg_path = HERE / "package.py"
+    if pkg_path.is_file():
+        pkg = pkg_path.read_text(encoding="utf-8")
+        dirs_slice = pkg.split("COPY_DIRS", 1)[1].split("]", 1)[0]
+        check('"premium"' in dirs_slice, 'package.py lists "premium" in COPY_DIRS')
+        check('name.endswith(".py")' in pkg.split("for d in COPY_DIRS", 1)[1][:1500],
+              "the COPY_DIRS loop has a .py branch (an .md-only loop ships premium empty)")
+
+    # Every bundle module LOADS. batch_one _load()s its three siblings at import
+    # time, so this is also the bundle's internal-wiring check.
+    import importlib.util as _ilu
+    for mod in ("batch_transport", "salvage_json", "prices", "batch_one"):
+        try:
+            spec = _ilu.spec_from_file_location("prem_" + mod, str(prem / (mod + ".py")))
+            m = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            check(True, f"premium/{mod}.py loads")
+        except BaseException as exc:                              # noqa: BLE001
+            check(False, f"premium/{mod}.py loads", repr(exc)[:100])
+
+    # prices mechanics on a SYNTHETIC snapshot. NEVER assert that the LIVE
+    # snapshot resolves: the sol-pro batch promo carries _valid_through
+    # 2026-11-21 and prices.py refuses past it BY DESIGN - a live-data assert
+    # is a calendar bomb that goes red the day the guard does its job.
+    fixture = {
+        "_captured": "2026-01-01",
+        "google_direct": {"models": {
+            "tiered-pro": {"price_per_1m_usd": {
+                "_captured": "2199-01-01",
+                "input_batch_le_200k": 1.0, "output_batch_incl_thinking_le_200k": 6.0,
+                "input_batch_gt_200k": 2.0, "output_batch_gt_200k": 9.0,
+                "cached_input_le_200k": 0.2}},
+            "flat-flash": {"price_per_1m_usd": {
+                "_captured": "2199-01-01",
+                "input_batch": 0.375, "output_batch_incl_thinking": 1.875,
+                "cached_input": 0.075}},
+            "expired-model": {"price_per_1m_usd": {
+                "_captured": "2020-01-01", "_valid_through": "2020-06-30",
+                "input_batch": 1.0, "output_batch_incl_thinking": 1.0}}}},
+        "openrouter": {"models": {
+            "vendor/with-batch": {"prompt_per_1m": 2.0, "completion_per_1m": 10.0,
+                                  "batch_variant": {"slug": "vendor/with-batch:batch",
+                                                    "prompt_per_1m": 1.0,
+                                                    "completion_per_1m": 5.0}},
+            "vendor/no-batch": {"prompt_per_1m": 2.0, "completion_per_1m": 10.0}}},
+        "openai_direct": {"_captured": "2199-01-01",
+                          "models": {"m-5": {"prompt_per_1m": 5.0,
+                                             "completion_per_1m": 30.0}},
+                          "batch_tier": {"upload": "POST https://x.invalid/v1/files"}},
+    }
+    with tempfile.TemporaryDirectory() as td:
+        snap = Path(td) / "models_snapshot.json"
+        snap.write_text(json.dumps(fixture), encoding="utf-8")
+        spec = _ilu.spec_from_file_location("prem_prices_fx", str(prem / "prices.py"))
+        PRX = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(PRX)
+        PRX.SNAPSHOT = snap
+        PRX._cache = None
+
+        pro = PRX.google_batch("tiered-pro")
+        lo, hi = pro.cost(150_000, 10_000), pro.cost(250_000, 10_000)
+        check(abs(lo - 0.21) < 1e-9, "tier arithmetic, low: 150k+10k = $0.2100",
+              "got %.4f" % lo)
+        check(abs(hi - 0.59) < 1e-9, "tier arithmetic, high: 250k+10k = $0.5900",
+              "got %.4f" % hi)
+        cached = pro.cost(100_000, 0, cached_tokens=50_000)
+        check(abs(cached - 0.06) < 1e-9,
+              "cached tokens bill at the CACHED rate (the 2.4x-overstatement class)",
+              "got %.4f" % cached)
+
+        try:
+            PRX.google_batch("expired-model")
+            check(False, "valid_through in the past REFUSES")
+        except SystemExit as exc:
+            check("REFUSING" in str(exc) and "2020-06-30" in str(exc),
+                  "valid_through in the past REFUSES with the date named")
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            p2 = PRX.google_batch("expired-model", allow_stale=True)
+        check(p2.in_per_m == 1.0, "allow_stale=True proceeds on explicit override")
+        check("WARNING" in buf.getvalue(), "...and still warns on stderr")
+
+        try:
+            PRX.google_batch("no-such-model")
+            check(False, "a model absent from the snapshot REFUSES")
+        except SystemExit as exc:
+            check("REFUSING" in str(exc), "a model absent from the snapshot REFUSES")
+
+        ob = PRX.or_batch("vendor/with-batch:batch")
+        check(ob.in_per_m == 1.0 and ob.discount,
+              "or_batch resolves the :batch variant at the discounted rate")
+        nb = PRX.or_batch("vendor/no-batch")
+        check(nb.discount is False and "НЕТ СКИДКИ" in nb.discount_reason,
+              "a lane with no batch_variant says НЕТ СКИДКИ instead of inventing one")
+        od = PRX.openai_direct("m-5", "batch")
+        std = PRX.openai_direct("m-5", "standard")
+        check(od.in_per_m == 2.5 and od.discount and std.in_per_m == 5.0
+              and not std.discount,
+              "openai_direct: batch = 50% and flagged; standard = 100% and not")
+        ep = PRX.endpoint("openai_direct.batch_tier.upload")
+        check(ep.split()[1] == "https://x.invalid/v1/files",
+              "endpoint() resolves dotted paths from the snapshot")
+
+    # The LIVE shipped snapshot: STRUCTURAL pins only (the keys the code walks),
+    # plus the scrub - never "it resolves" (see the calendar note above).
+    live = json.loads((prem / "models_snapshot.json").read_text(encoding="utf-8"))
+    for path in (("google_direct", "models"), ("openrouter", "models"),
+                 ("openai_direct", "models"), ("openai_direct", "batch_tier")):
+        node = live
+        for k in path:
+            node = node.get(k, {}) if isinstance(node, dict) else {}
+        check(bool(node), "shipped snapshot carries " + ".".join(path))
+    blob = json.dumps(live, ensure_ascii=False)
+    for marker in ("SPEND_CAP", "spend_month_to_date", "_spend_trend",
+                   "i-485", "i-140"):
+        check(marker not in blob,
+              "shipped snapshot scrubbed of %r (author account/case state)" % marker)
+
+    # batch_one: a missing key REFUSES in one line, never a KeyError traceback.
+    src_b1 = (prem / "batch_one.py").read_text(encoding="utf-8")
+    check(src_b1.count('_key("') == 6 and "os.environ[" not in src_b1,
+          "all six key-read sites (3 lanes x submit/poll) go through _key()")
+    env = dict(os.environ)
+    for var in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
+        env.pop(var, None)
+    env["PYTHONIOENCODING"] = "utf-8"
+    with tempfile.TemporaryDirectory() as td:
+        p = subprocess.run(
+            [PY, str(prem / "batch_one.py"), "--lane", "or", "--model", "x",
+             "--mode", "poll", "--input-file", "unused", "--rundir", td,
+             "--tag", "t"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60, env=env)
+        b = blob_of(p)
+        check("REFUSING" in b and "OPENROUTER_API_KEY" in b,
+              "batch_one without a key REFUSES and names the variable")
+        check("KeyError" not in b and "Traceback" not in b,
+              "...with no traceback (the stranger's-machine class)")
+        check(p.returncode == 1, "...exit code 1", "exit=%s" % p.returncode)
+
+    # --mode build must work OFFLINE from a bare copy of the bundle - the same
+    # property an install has: five files in one directory, no keys, no network.
+    with tempfile.TemporaryDirectory() as td:
+        tp = Path(td)
+        for f in ("batch_transport.py", "prices.py", "batch_one.py",
+                  "salvage_json.py"):
+            shutil.copy2(prem / f, tp / f)
+        (tp / "models_snapshot.json").write_text(json.dumps(fixture),
+                                                 encoding="utf-8")
+        brief = tp / "in.md"
+        brief.write_text("x" * 300, encoding="utf-8")
+        p = subprocess.run(
+            [PY, str(tp / "batch_one.py"), "--lane", "or",
+             "--model", "vendor/with-batch:batch", "--mode", "build",
+             "--input-file", str(brief), "--rundir", str(tp / "run"),
+             "--tag", "t"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60, env=env)
+        b = blob_of(p)
+        check(p.returncode == 0 and "rates:" in b,
+              "batch_one --mode build runs offline from a bare bundle copy",
+              "exit=%s" % p.returncode)
+        check("est. $" in b, "...and prints the worst-case arithmetic")
+
+
+# =================================================================================================
 def main():
     global _quiet
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
@@ -5737,7 +5957,8 @@ def main():
                   suite_r74_panel_fixes,
                   suite_r75_backlog,
                   suite_r78_agents_md,
-                  suite_r80_agy_result_detection):
+                  suite_r80_agy_result_detection,
+                  suite_r82_premium_bundle):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
