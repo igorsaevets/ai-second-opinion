@@ -102,6 +102,54 @@ limit runs out. "Codex answered" is not a fact you can act on; "Codex answered o
 Plus one file per model containing the actual review, and a diagnostics file if anything went
 wrong.
 
+## Panels: who reviews your document
+
+A **panel** decides which models see your document. Two built-in panels; standard is a
+superset of cheap.
+
+**Four channels run on your existing subscriptions — no API key needed.** If you already pay
+for Claude, ChatGPT or have an eligible Google account, you already have reviewers. Grok CLI
+is free during beta. The opencode CLI adds a Muse Spark voice with no account at all.
+
+### `--panel cheap` (the default)
+
+Free and subscription channels — no per-token API spend:
+
+| Model family | Vendor | Access | Cost |
+|---|---|---|---|
+| **Muse Spark** | Meta | opencode CLI | **Free** — no account needed |
+| **Gemini** | Google | Antigravity CLI (`agy`) | **Subscription** (Google) |
+| **Grok** | xAI | Grok CLI (`grokbuild`) | **Free** during beta |
+| **MiMo** | Xiaomi | OpenRouter | Per token |
+| **Nemotron** | NVIDIA | OpenRouter | **Free** model |
+
+Where the same model is reachable through both a CLI and OpenRouter (Gemini, Grok, Spark),
+the tool picks the cheaper transport automatically — you do not choose.
+
+### `--panel standard`
+
+Everything in cheap, plus heavier voices:
+
+| Model family | Vendor | Access | Cost |
+|---|---|---|---|
+| **GPT** | OpenAI | Codex CLI (`codex`) | **Subscription** (ChatGPT) |
+| **Kimi** | Moonshot | OpenRouter | Per token |
+| **Qwen** | Alibaba | OpenRouter | Per token |
+| **DeepSeek** | DeepSeek | OpenRouter | Per token |
+| **GLM** | Zhipu AI | OpenRouter | Per token |
+| **Claude** | Anthropic | Claude Code CLI (`claude`) | **Subscription** (off by default) |
+
+### Targeting specific channels
+
+```
+--only codex agy31pro grokbuild     # just these three
+--skip ornemotron3ultra              # everyone except this one
+```
+
+The live channel list is always `python routing.py`. This section uses model family names,
+which are stable; the specific channels and their count change — do not count them from this
+page.
+
 ## The one habit worth stealing
 
 **Put a claim you know is false into every document you send for review.**

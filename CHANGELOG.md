@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.54.0 — 2026-09-05
+
+* **New "Panels" section in both READMEs (English + Russian).**
+  Explains the two built-in panels (`--panel cheap` and `--panel standard`),
+  which model families each panel includes, and how to access them (subscription
+  CLIs vs OpenRouter). Highlights that four channels run on existing subscriptions
+  with no API key. Shows `--only` and `--skip` for targeting specific channels.
+  Uses model family names (stable) rather than channel names (change weekly).
+
 ## 1.53.0 — 2026-09-04
 
 * **README SEO/GEO rewrite (English + Russian).**
