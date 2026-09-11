@@ -327,3 +327,27 @@ tools), not this one. Do not spend a round re-running it.
 brief normally (23 KB, 10 citations, 9 live). `agy31pro` is the stronger model and is currently
 unusable headless. Before writing it off permanently, the thing worth probing is whether `agy`
 exposes an agent profile other than `deep-researcher` that does not post-process via the shell.
+
+## 7. Claude Code CLI (`cclopus46`, kind `claudecli`) — permissions bypassed, key withheld
+
+The decision and its reasons live in ONE place: the `_permissions`, `_max_turns` and `_auth_env`
+notes on the channel in `channels.json`, next to the fields they govern. What this section adds
+is the measurement behind them — 2026-09-11, claude 2.1.268, through the harness's own binary
+resolver and neutral cwd, one prompt that needed a fetch and a shell command printing a nonce the
+model could not know:
+
+| launch | fetch / shell | `permission_denials` | result |
+|---|---|---|---|
+| no mode flag, `--max-turns 8` (the v1.52–v1.60 mode) | both denied | Bash, WebFetch | `is_error:false`, the model wrote "tool denied" and finished |
+| `bypassPermissions`, `--max-turns 1` (the v1.52–v1.60 ceiling) | the first call ends the run | — | exit 1, `terminal_reason: max_turns`, **empty result** |
+| `bypassPermissions`, `--max-turns 8` | both ran | — | nonce printed |
+| `--dangerously-skip-permissions`, `--max-turns 8` | identical to the row above | — | identical |
+| `dontAsk`, `--max-turns 8` | both denied | Bash, WebFetch | as row 1 |
+| bypass + `--disallowedTools Bash` | fetch ran, **Bash removed** | — | "tool is disabled for this session" |
+| bypass + `--disallowedTools "Bash(python *)"` | fetch ran, **the call denied** | Bash | "blocked by user settings" |
+| bypass, `ANTHROPIC_API_KEY` scrubbed from the child env | both ran | — | no auth warning on stderr |
+
+Every row with the variable present printed «claude.ai connectors are disabled because
+ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login».
+The R81 live test that shipped the channel ran on a machine with that variable set, so its
+"$0.57, covered by subscription" was billed to the key. Superseded here, not by editing R81's note.

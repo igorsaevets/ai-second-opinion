@@ -141,6 +141,10 @@ Two different faults look identical:
    **One denied tool discards the entire turn**, so the answer you get is whatever the model had
    said before it reached for the tool. If you have edited the flags for that channel, put them
    back; the shipped ones are chosen for exactly this.
+4. **The Claude Code CLI channel stopped at its turn ceiling.** `diagnostics.json` shows
+   `terminal_reason: max_turns` and the warning names the field: raise `max_turns` on
+   `cclopus46` in `channels.json`. A denied tool on this channel does not discard the turn — the
+   model carries on, and the denial is listed by tool name in the channel's notes.
 
 ### "A command-line reviewer is not installed"
 

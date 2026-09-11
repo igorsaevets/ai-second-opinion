@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.61.0 — 2026-09-11
+
+R85: the Claude Code CLI channel (`cclopus46`, kind `claudecli`) now launches
+with every permission prompt bypassed, gets a real turn ceiling, and never
+bills a metered key. the operator's instruction, and three measurements on claude
+2.1.268 behind it; the channel stays **off by default**.
+
+* **`--permission-mode bypassPermissions`, always.** A headless `-p` run has
+  nobody to answer a permission prompt, and without a mode flag it starts in
+  the CLI's `default` mode — reads only. Measured: WebFetch and Bash were
+  DENIED (`permission_denials`), the model wrote "tool denied" and finished,
+  and the JSON still said `is_error: false`. A review that quietly did less.
+  `--dangerously-skip-permissions` is the same mode under another name (CLI
+  reference; probed identical), so one spelling is passed. What bypass means:
+  every built-in tool — shell, file edits anywhere on the machine, web — and
+  every MCP server in your Claude Code config run without a prompt. Your deny
+  rules still hold (a bare tool name removes the tool, a scoped rule such as
+  `Bash(python *)` denies the call — both measured), as do hooks and the CLI's
+  own never-auto-approved class. That blast radius is why the channel ships
+  `enabled: false`, why the plan's line for it now says so before anything
+  runs, and why `SECURITY.md` and `INSTALL.md` gained a section on it.
+
+* **`--max-turns 1` (v1.52.0 – v1.60.0) had made the channel tool-less.** One
+  turn is one model reply, and a reply that calls a tool ends the run "with an
+  error when the limit is reached": exit 1, `terminal_reason: max_turns`,
+  empty result — measured. So the channel's membership in the read-by-reference
+  set (`--attach`, `--attach-dir`) was a claim the flag itself falsified, and
+  the 2+2 live test that shipped it never reached for a tool. The ceiling is
+  now `max_turns` in `channels.json` (50), carried by the plan and judged by
+  the `num_turns` that comes back; hitting it is a named warning that says
+  which field to raise.
+
+* **`ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are removed from the child's
+  environment.** With either set the CLI authenticates with it instead of the
+  claude.ai login and says so on stderr ("… takes precedence over your
+  claude.ai login") — so on a machine with the variable set, every earlier
+  call of this "subscription" channel was metered, including the one that
+  shipped it. With the variable scrubbed the same run authenticates through
+  the login, no warning, tools run (measured). If the sentence ever comes
+  back — an `apiKeyHelper`, a settings `env` block — the channel now warns
+  loudly instead of reporting a subscription it did not use.
+
+* Reported, never silent: `permission_denials` from the JSON are listed by
+  tool name in the channel's notes; a non-JSON failure carries the stderr
+  tail; "Not logged in" names `claude auth login` and says the key is
+  withheld on purpose. Selftest: a new suite pins the dispatched argv, the
+  scrubbed child environment, the registry value reaching the call, and each
+  of those reports.
+
 ## 1.60.0 — 2026-09-11
 
 R83 wave 3: the count-shaped prose left in the repository documents after

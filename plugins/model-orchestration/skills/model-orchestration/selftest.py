@@ -6283,7 +6283,8 @@ def main():
                   suite_r75_backlog,
                   suite_r78_agents_md,
                   suite_r80_agy_result_detection,
-                  suite_r82_premium_bundle):
+                  suite_r82_premium_bundle,
+                  suite_r85_claudecli_permissions):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -6299,6 +6300,193 @@ def main():
         print("\nHand this output, plus reviews/diagnostics.json from a real run, to an AI "
               "assistant and ask it to diagnose and fix the cause.")
     return 1 if failed else 0
+
+
+def suite_r85_claudecli_permissions():
+    """
+    R85 (2026-09-11). From v1.52.0 to v1.60.0 the Claude Code CLI channel ran headless in the
+    CLI's `default` permission mode with `--max-turns 1`. Measured on claude 2.1.268: in that
+    shape WebFetch and Bash are DENIED with is_error:false (a silently weaker review), and any
+    tool call under `--max-turns 1` ends the run with exit 1, terminal_reason `max_turns` and an
+    EMPTY result - so the REFS_KINDS membership was a claim the flag itself falsified. Igor's
+    instruction: always `--permission-mode bypassPermissions` (≡ --dangerously-skip-permissions).
+    A second finding from the same probe: with ANTHROPIC_API_KEY in the environment the CLI
+    bills the key, not the subscription, and says so on stderr; the channel scrubs it.
+    Every check here is on the DISPATCHED argv, the child ENV, or the returned JSON - never on
+    prose (R74: a knob must reach the call; R41: judge the meter that comes back).
+    """
+    import inspect
+
+    import orchestrate as o
+    import routing as r
+
+    class _P:
+        def __init__(self, stdout, stderr="", returncode=0):
+            self.stdout, self.stderr, self.returncode = stdout, stderr, returncode
+
+    def _run(fake_json, returncode=0, stderr="", env_extra=None, raw_stdout=None, **kw):
+        rec = {}
+
+        def _fake(cmd, **k):
+            rec["cmd"] = list(cmd)
+            rec["env"] = k.get("env")
+            rec["input"] = k.get("input")
+            rec["cwd"] = k.get("cwd")
+            out = raw_stdout if raw_stdout is not None else json.dumps(fake_json)
+            return _P(out, stderr, returncode)
+        saved = {k: os.environ.get(k) for k in (env_extra or {})}
+        os.environ.update(env_extra or {})
+        real = o.subprocess.run
+        o.subprocess.run = _fake
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    res = o.call_claudecli("brief body", "R85-MARK", os.path.join(d, "out.md"),
+                                           **kw)
+        finally:
+            o.subprocess.run = real
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        return rec, res
+
+    good = {"result": "answer body\nR85-MARK", "is_error": False,
+            "terminal_reason": "completed", "num_turns": 3, "total_cost_usd": 0.5,
+            "usage": {"input_tokens": 10, "output_tokens": 20},
+            "modelUsage": {"claude-opus-4-6[1m]": {"contextWindow": 1000000}},
+            "permission_denials": []}
+
+    # ---- (a) the argv -------------------------------------------------------------------
+    rec, res = _run(good)
+    cmd = rec.get("cmd") or []
+    check(bool(res.get("ok")) and res.get("text", "").startswith("answer body"),
+          "R85 control: a good JSON answer parses as ok - the fake subprocess was consulted",
+          repr(res.get("warnings")))
+    check("--permission-mode" in cmd
+          and cmd[cmd.index("--permission-mode") + 1] == "bypassPermissions",
+          "R85: the Claude Code CLI child is launched with --permission-mode bypassPermissions "
+          "(Igor 2026-09-11) - on the ARGV, not in a docstring", repr(cmd))
+    check("--dangerously-skip-permissions" not in cmd,
+          "R85: one spelling of the mode - the two flags are equivalent, passing both is not "
+          "more bypass", repr(cmd))
+    check("--bare" not in cmd, "R85: --bare kills the claude.ai login (measured 2026-09-04)")
+    check("-p" in cmd and "--no-session-persistence" in cmd and "json" in cmd,
+          "R85 control: the R81 shape (-p, JSON output, no session persistence) is intact")
+    check(isinstance(o.CLAUDECLI_MAX_TURNS, int) and o.CLAUDECLI_MAX_TURNS >= 2,
+          "R85: the default turn ceiling allows at least one tool round-trip (1 = tool-less)",
+          repr(o.CLAUDECLI_MAX_TURNS))
+    check("--max-turns" in cmd
+          and cmd[cmd.index("--max-turns") + 1] == str(o.CLAUDECLI_MAX_TURNS),
+          "R85: without a registry value the default ceiling reaches --max-turns", repr(cmd))
+    rec2, _ = _run(good, max_turns=7)
+    c2 = rec2.get("cmd") or []
+    check("--max-turns" in c2 and c2[c2.index("--max-turns") + 1] == "7",
+          "R85: the registry's max_turns reaches the call (a knob you only stored is not a knob)",
+          repr(c2))
+    check(rec.get("input") == "brief body" and rec.get("cwd") == o.neutral_cwd(),
+          "R85 control: the brief still rides on stdin and the child starts in the neutral cwd")
+
+    # ---- (b) the child env: metered-key variables scrubbed ------------------------------
+    rec3, _ = _run(good, env_extra={"ANTHROPIC_API_KEY": "r85-selftest-placeholder",
+                                    "ANTHROPIC_AUTH_TOKEN": "r85-selftest-placeholder"})
+    env3 = rec3.get("env")
+    check(isinstance(env3, dict) and "ANTHROPIC_API_KEY" not in env3
+          and "ANTHROPIC_AUTH_TOKEN" not in env3,
+          "R85: ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN never reach the Claude Code child - "
+          "with either set the CLI bills the key, not the subscription (measured 2026-09-11)",
+          repr(sorted(k for k in (env3 or {}) if k.startswith("ANTHROPIC"))))
+    check(isinstance(env3, dict) and "PATH" in env3 and len(env3) >= len(os.environ) - 2,
+          "R85 control: the scrub removes the two variables, not the environment")
+    check(os.environ.get("ANTHROPIC_API_KEY") != "r85-selftest-placeholder",
+          "R85 control: the test restored the caller's environment")
+    check(tuple(o.CLAUDECLI_SCRUB_ENV) == ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
+          "R85: the scrub list is the two metered-auth variables, exactly",
+          repr(o.CLAUDECLI_SCRUB_ENV))
+
+    # ---- (c) what the JSON says, reported -----------------------------------------------
+    den = dict(good, permission_denials=[{"tool_name": "Bash", "tool_input": {}},
+                                         {"tool_name": "WebFetch", "tool_input": {}}])
+    _, r4 = _run(den)
+    check(bool(r4.get("ok")) and any("DENIED" in n and "Bash" in n and "WebFetch" in n
+                                     for n in r4.get("notes", [])),
+          "R85: a denied tool call is REPORTED by tool name (the model carries on as if nothing "
+          "happened - silence is the dangerous state) and the answer is kept",
+          repr(r4.get("notes")))
+    mt = {"result": "", "is_error": True, "terminal_reason": "max_turns", "num_turns": 2,
+          "usage": {}, "permission_denials": []}
+    _, r5 = _run(mt, returncode=1)
+    check(not r5.get("ok") and any("MAX TURNS" in w and "max_turns" in w
+                                   for w in r5.get("warnings", [])),
+          "R85: terminal_reason max_turns is a NAMED warning that says which field to raise - "
+          "this is what every tool call looked like under the old --max-turns 1",
+          repr(r5.get("warnings")))
+    nl = {"result": "Not logged in · Please run /login", "is_error": True,
+          "terminal_reason": "completed", "num_turns": 1, "usage": {}}
+    _, r6 = _run(nl, returncode=1)
+    check(not r6.get("ok") and any("claude auth login" in w for w in r6.get("warnings", [])),
+          "R85: 'Not logged in' names the fix and says the API key is withheld on purpose",
+          repr(r6.get("warnings")))
+    _, r7 = _run(good, stderr="claude.ai connectors are disabled because ANTHROPIC_API_KEY or "
+                              "another auth source is set and takes precedence over your "
+                              "claude.ai login")
+    check(not r7.get("ok") and any("METERED KEY" in w for w in r7.get("warnings", [])),
+          "R85: the CLI's own 'takes precedence over your claude.ai login' sentence is a LOUD "
+          "warning - a channel that says subscription while billing a key is the R41 class",
+          repr(r7.get("warnings")))
+    _, r8 = _run(good, stderr="")
+    check(bool(r8.get("ok")), "R85 control: no stderr sentence, no warning", repr(r8.get("warnings")))
+    two = dict(good, modelUsage={"claude-haiku-4-5-20251001": {"costUSD": 0.01},
+                                 "claude-opus-4-6[1m]": {"costUSD": 0.62}})
+    _, r10 = _run(two)
+    check(r10.get("model") == "claude-opus-4-6[1m]"
+          and any("helper model" in n and "haiku" in n for n in r10.get("notes", [])),
+          "R85: `model` is the model that carried the spend, not the first key of modelUsage - "
+          "the live run listed the WebFetch helper first and diagnostics said haiku answered an "
+          "Opus review", repr((r10.get("model"), r10.get("notes"))))
+    zero = dict(good, modelUsage={"claude-haiku-4-5-20251001": {}, "claude-opus-4-6[1m]": {}})
+    _, r11 = _run(zero, model="claude-opus-4-6[1m]")
+    check(r11.get("model") == "claude-opus-4-6[1m]",
+          "R85: with no cost meter in modelUsage the requested model wins over key order",
+          repr(r11.get("model")))
+    # The first edition of this probe fed `{"nope": 1}` - VALID JSON - so the non-JSON branch
+    # never ran and the check was graded on the marker warning instead. A probe that cannot
+    # reach the branch it grades is inert; the stdout is now genuinely not JSON.
+    _, r9 = _run(None, raw_stdout="Error: something the CLI printed on stdout", returncode=2,
+                 stderr="boom: the reason on stderr")
+    check(any("stderr" in w and "boom" in w for w in r9.get("warnings", [])),
+          "R85: a non-JSON failure carries the stderr tail - a refused mode or a missing login "
+          "explains itself there, not on stdout", repr(r9.get("warnings")))
+
+    # ---- (d) registry + plan wiring -----------------------------------------------------
+    with open(HERE / "channels.json", encoding="utf-8") as fh:
+        raw = json.load(fh)
+    ch = raw["channels"].get("cclopus46") or {}
+    check(ch.get("kind") == "claudecli" and ch.get("enabled") is False,
+          "R85: cclopus46 ships OFF - with permission prompts bypassed, enabling it is the "
+          "decision, not a default", repr((ch.get("kind"), ch.get("enabled"))))
+    check(isinstance(ch.get("max_turns"), int) and ch["max_turns"] >= 2,
+          "R85: the registry carries max_turns >= 2 for cclopus46", repr(ch.get("max_turns")))
+    check("bypassPermissions" in (ch.get("_permissions") or "")
+          and "2026-09-11" in (ch.get("_permissions") or ""),
+          "R85: the registry says the mode in words, dated, beside the channel it governs")
+    reg = r.load_registry()
+    plan = r.resolve(reg, only=["cclopus46"])
+    slot = plan.get("cclopus46") or {}
+    check(slot.get("max_turns") == ch.get("max_turns"),
+          "R85: the resolved plan slot CARRIES max_turns (the allow-list in routing.py that "
+          "killed fallback_model, read_order and supported_efforts before)",
+          repr(slot.get("max_turns")))
+    main_src = inspect.getsource(o.main)
+    check('max_turns=p.get("max_turns")' in main_src.split("call_claudecli, cbrief", 1)[1][:700],
+          "R85: the dispatcher passes the slot's max_turns to call_claudecli")
+    check("bypassPermissions" in (r._web_line({"kind": "claudecli"}) or ""),
+          "R85: the plan's own line for this channel says the prompts are bypassed - the one "
+          "screen a human reads before spending")
+    src = inspect.getsource(o.call_claudecli)
+    check(src.count('"bypassPermissions"') == 1 and '"--max-turns", "1"' not in src,
+          "R85 census: one bypass literal in the dispatcher, the tool-less --max-turns 1 gone")
 
 
 if __name__ == "__main__":

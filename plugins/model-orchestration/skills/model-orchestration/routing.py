@@ -1749,10 +1749,13 @@ def _decorate(plan, reg):
         # ladder, which echocheck reads from the PLAN slot. Without the copy its per-channel
         # arms silently degraded to the ["low","medium","high"] literal R43 existed to kill.
         # Caught by the R75 suite's derived-candidate test, not by a review.
+        # 🔴 max_turns (R85, 2026-09-11): the Claude Code CLI turn ceiling. Added HERE in the
+        # same commit as the dispatcher's p.get("max_turns") - the fourth field in this list's
+        # history, and the first added before it could be found dead.
         for extra in ("reasoning", "max_tokens", "toolsets", "role", "fetch_tool", "tools",
                       "provider", "provider_route", "prompt_suffix", "distribution",
                       "thinking_level", "thinking_levels", "fallback_models",
-                      "fallback_model", "supported_efforts"):
+                      "fallback_model", "supported_efforts", "max_turns"):
             if ch.get(extra) is not None:
                 p[extra] = ch[extra]
         # Hints are stored ONCE at top level and referenced, because the same 1.5 KB paragraph
@@ -1854,9 +1857,11 @@ def _web_line(p):
                 "opencode's infrastructure which may include search. The harness does not "
                 "control which tools the agent uses; grounding is the agent's own claim")
     if kind == "claudecli":
-        return ("web: Claude Code CLI's built-in tools and MCP servers (WebSearch, WebFetch, "
-                "Read, and any user-configured MCP). The harness does not restrict tools; "
-                "grounding is the agent's own claim")
+        return ("web: Claude Code CLI's built-in tools and every MCP server in YOUR Claude Code "
+                "config, ALL WITHOUT PERMISSION PROMPTS (`--permission-mode bypassPermissions`, "
+                "on purpose): the reviewer can run shell commands and edit files on this "
+                "machine; your deny rules and hooks still apply. Grounding is the agent's own "
+                "claim")
     return None
 
 

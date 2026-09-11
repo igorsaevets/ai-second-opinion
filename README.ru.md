@@ -207,7 +207,7 @@ python premium/premium_panel.py --mode dry --plan PLAN.md --brief BRIEF.md --run
 | **`MODEL_API_KEY`** | Голоса Muse Spark напрямую от Meta | Метрируется по использованию |
 | **Платный план OpenAI с Codex** | `codex` | Подписка, недельный лимит |
 | **Подходящий Google-аккаунт** | Каналы Gemini через `agy` (Antigravity CLI) | Входит в подписку, есть лимиты |
-| **Claude Code CLI** (`claude`) | Claude Opus — по умолчанию выключен | Подписка |
+| **Claude Code CLI** (`claude`) | Claude Opus — по умолчанию выключен; включённый, он запускается **без запросов разрешений** ([SECURITY.md](SECURITY.md)) | Подписка |
 | **Grok CLI** (`grokbuild`) | Grok 4.5 с живым веб-поиском | Бесплатно на время бета-периода |
 | *Опционально:* `GEMINI_API_KEY`, `XAI_API_KEY`, `MIMO_API_KEY` | Те же модели Gemini, Grok и MiMo через **собственные API вендоров** — это покупает реальную дополнительную способность, см. INSTALL.md. По умолчанию выключены | По токенам, бесплатные тиры различаются |
 

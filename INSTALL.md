@@ -318,6 +318,7 @@ disagreement this tool exists to produce. Everything else is optional.
 | `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, a Muse Spark voice and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
 | `MODEL_API_KEY` | the Muse Spark voices reached directly from Meta | metered API |
 | the Codex CLI, signed in | `codex` | your existing subscription |
+| the Claude Code CLI, signed in | `cclopus46` — Claude Opus, **off by default**; runs with permission prompts bypassed, see its section below | your existing subscription |
 | the Antigravity CLI, signed in | the `agy` Gemini channels | your existing subscription |
 | the Grok Build CLI, signed in | `grokbuild` — Grok 4.6, and it opens pages itself | your existing subscription |
 | `GEMINI_API_KEY` | Gemini on Google's **own** API — the best-grounded channel here, and the only one whose citations carry character spans. **Off by default**, see below | metered, free tier available |
@@ -527,6 +528,29 @@ codex login
 
 No key needed — it uses your subscription. If you do not have one, run with `--skip codex`.
 
+### Claude Code CLI (Claude Opus — off by default)
+
+Install the Claude Code CLI and sign in with a Claude subscription:
+
+```
+npm install -g @anthropic-ai/claude-code
+claude auth login
+claude auth status
+```
+
+The channel is `cclopus46` and it ships **disabled**. Run it for one round with `--only cclopus46`,
+or set `"enabled": true` on it in `channels.json`. No key is used: the channel removes
+`ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the CLI's environment on purpose, because with
+either set the CLI bills that key instead of your subscription.
+
+🔴 **Read before enabling.** The CLI is launched with `--permission-mode bypassPermissions`: every
+built-in tool — shell, file edits anywhere on your machine, web — and every MCP server configured
+in your Claude Code run **without a permission prompt**, on a brief that is untrusted input. A
+headless run cannot prompt, and without that mode the reviewer's fetches and commands were silently
+denied (measured 2026-09-11). Your `permissions.deny` rules and hooks still apply in this mode;
+[SECURITY.md](SECURITY.md) has the full picture. If that is not acceptable on the machine you run
+this from, leave the channel off — the panel does not need it.
+
 ### Grok Build CLI (Grok 4.6)
 
 ```
@@ -583,7 +607,9 @@ calls.
 
 The script edits one settings file, is additive and idempotent, backs up before writing, and has
 `--revert`. It also blocks metered crawling tools that bill per page with no ceiling — which is
-why the answer to a permissions problem is never `--dangerously-skip-permissions`.
+why, for this CLI, the answer to a permissions problem is never `--dangerously-skip-permissions`.
+(The Claude Code CLI channel is the deliberate exception — its own section above says what that
+costs.)
 
 `doctor.py` re-checks this on every run and tells you if it has been reverted.
 

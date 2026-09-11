@@ -3251,8 +3251,29 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
             "warnings": warn, "notes": note}
 
 
+# --- Claude Code CLI channel (kind claudecli) ---------------------------------------------------
+# The ceiling on agentic turns per call (`--max-turns`), used when the registry carries no
+# `max_turns` for the channel. A ceiling against a runaway loop, judged by the `num_turns` that
+# comes back in the JSON - never a "single answer" switch. v1.52.0 through v1.60.0 shipped
+# `--max-turns 1`, which made the channel TOOL-LESS: one turn is one model reply, and a reply that
+# calls a tool ends the run "with an error when the limit is reached" (CLI reference). Measured
+# 2026-09-11 on claude 2.1.268: exit 1, terminal_reason `max_turns`, num_turns 2, EMPTY result. So
+# the channel's REFS_KINDS membership was a claim the flag itself falsified, and the 2+2 live test
+# that shipped it never reached for a tool.
+CLAUDECLI_MAX_TURNS = 50
+# Removed from the child's environment. With either set, the CLI authenticates with it INSTEAD of
+# the claude.ai login and bills the key - it says so itself on stderr: "ANTHROPIC_API_KEY or
+# another auth source is set and takes precedence over your claude.ai login". This channel is
+# subscription-only by design (Igor 2026-09-04: «claude code использовать только по подписке, не
+# по api»), and on a machine where the variable is set every earlier call of this channel was
+# metered while the registry said "subscription" - the R81 live test included. Measured
+# 2026-09-11: with the variable scrubbed the same run authenticates through the login, prints no
+# warning, and its tools run.
+CLAUDECLI_SCRUB_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
 def call_claudecli(brief, marker, outfile, model=None, effort=None, system=None,
-                   fallback_model=None, timeout=2400, name="cclopus46"):
+                   fallback_model=None, timeout=2400, name="cclopus46", max_turns=None):
     """Claude Code CLI (Anthropic) — subscription-only, no API key.
 
     Measured 2026-09-04 on claude 2.1.250:
@@ -3265,6 +3286,24 @@ def call_claudecli(brief, marker, outfile, model=None, effort=None, system=None,
       - `--system-prompt` works alongside subscription auth
       - `--no-session-persistence` prevents disk clutter
       - `--max-turns 1` confirmed working (num_turns: 1 in output)
+        🔴 SUPERSEDED 2026-09-11: "working" meant the flag was ACCEPTED. With any tool call the
+        run ends with exit 1, terminal_reason `max_turns` and an EMPTY result - see
+        CLAUDECLI_MAX_TURNS above.
+
+    🔴 PERMISSIONS: `--permission-mode bypassPermissions`, ALWAYS. Igor 2026-09-11: «надо для
+    claude code cli добавить … что бы он сразу запускал claude code в режиме всегда claude
+    --permission-mode bypassPermissions или claude --dangerously-skip-permissions». The CLI
+    reference says the two flags are equivalent, and a probe of both on 2.1.268 behaved
+    identically, so one spelling is passed - the mode's own name. Without it a `-p` run starts in
+    the CLI's `default` mode (reads only) with nobody to answer a prompt: measured 2026-09-11,
+    WebFetch and Bash were DENIED (`permission_denials`), the model wrote "tool denied" and
+    finished, and the JSON said is_error:false - a review that quietly did less.
+    What bypass means: every built-in tool (shell, file edits anywhere on the machine, web) and
+    every MCP server in the user's Claude Code config run without a prompt. Deny rules still hold
+    in this mode - a bare tool name removes the tool, a scoped rule such as `Bash(python *)`
+    denies the matching call (both measured 2026-09-11) - as do hooks and the CLI's own
+    never-auto-approved class. That blast radius is why the channel ships enabled:false and why
+    the plan line says it before anything runs.
 
     The brief goes through stdin (same pattern as opencode/codex). No --allowedTools restriction
     (Igor 2026-09-04: «не ограничивай инструменты, пусть сам какие хочет использует»).
@@ -3284,11 +3323,16 @@ def call_claudecli(brief, marker, outfile, model=None, effort=None, system=None,
     """
     binary = claudecli_bin()
     text_in = ((system.strip() + "\n\n---\n\n") if system else "") + brief
+    turns = int(max_turns or CLAUDECLI_MAX_TURNS)
 
     cmd = [binary, "-p",
            "--model", model or "claude-opus-4-6[1m]",
            "--output-format", "json",
-           "--max-turns", "1",
+           # ONE spelling of the mode, the CLI's canonical one. --dangerously-skip-permissions is
+           # the same mode under another name (CLI reference; probed 2026-09-11); passing both is
+           # not "more bypass". Rationale and blast radius: the docstring above.
+           "--permission-mode", "bypassPermissions",
+           "--max-turns", str(turns),
            "--no-session-persistence"]
     if effort:
         cmd += ["--effort", effort]
@@ -3296,14 +3340,18 @@ def call_claudecli(brief, marker, outfile, model=None, effort=None, system=None,
         cmd += ["--fallback-model", fallback_model]
 
     cwd = neutral_cwd()
+    # The child never sees a metered key - see CLAUDECLI_SCRUB_ENV. A copy, never os.environ.
+    env = dict(os.environ)
+    for k in CLAUDECLI_SCRUB_ENV:
+        env.pop(k, None)
 
-    log("  [%s] Claude Code CLI, subscription auth; brief via stdin (%d chars), effort=%s, "
-        "fallback=%s"
-        % (name, len(text_in), effort or "default", fallback_model or "none"))
+    log("  [%s] Claude Code CLI on the claude.ai login (API-key vars scrubbed); brief via stdin "
+        "(%d chars), effort=%s, fallback=%s, permissions BYPASSED, max_turns=%d"
+        % (name, len(text_in), effort or "default", fallback_model or "none", turns))
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           input=text_in, cwd=cwd,
+                           input=text_in, cwd=cwd, env=env,
                            timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
@@ -3324,12 +3372,25 @@ def call_claudecli(brief, marker, outfile, model=None, effort=None, system=None,
     cost = None
     model_served = model
 
+    stderr_tail = (p.stderr or "").strip()[-400:]
     try:
         obj = json.loads(raw)
     except (ValueError, TypeError):
         obj = {}
         if p.returncode != 0:
-            warn.append("EXIT %d, non-JSON stdout: %s" % (p.returncode, raw[:300]))
+            warn.append("EXIT %d, non-JSON stdout: %s%s"
+                        % (p.returncode, raw[:300],
+                           (" | stderr: " + stderr_tail) if stderr_tail else ""))
+
+    # 🔴 The CLI's own sentence for "a metered key won over your subscription". The scrub above
+    # removes the two variables this module knows; an `apiKeyHelper` or a variable added later
+    # would put the sentence back - and a channel that says "subscription" while billing a key is
+    # the R41 class (the meter that spends and the one that reports were different fields). Loud.
+    if "takes precedence over your claude.ai login" in (p.stderr or ""):
+        warn.append("METERED KEY IN USE, NOT THE SUBSCRIPTION: the CLI reports that an API-key "
+                    "auth source took precedence over the claude.ai login. This channel is "
+                    "subscription-only; find what still sets a key for it (apiKeyHelper, a "
+                    "settings `env` block). The answer was produced - and billed to that key.")
 
     if obj:
         text = obj.get("result") or ""
@@ -3347,17 +3408,51 @@ def call_claudecli(brief, marker, outfile, model=None, effort=None, system=None,
 
         mu = obj.get("modelUsage") or {}
         if mu:
-            first_model = next(iter(mu), None)
-            if first_model:
-                model_served = first_model
+            # 🔴 NOT the first key. `modelUsage` lists EVERY model the run touched, and a WebFetch
+            # is summarised by a small helper model that can come first: the live run of
+            # 2026-09-11 reported model=claude-haiku-4-5 for an Opus 4.6 review carrying $0.63
+            # of Opus spend (R48 class - the "which model answered" column lying). The model
+            # that answered is the one that carried the spend; helpers are listed as a note.
+            def _cost(m):
+                try:
+                    return float((mu.get(m) or {}).get("costUSD") or 0)
+                except (TypeError, ValueError):
+                    return 0.0
+            ranked = sorted(mu, key=_cost, reverse=True)
+            if ranked:
+                model_served = ranked[0]
+                if _cost(ranked[0]) == 0 and model in mu:
+                    model_served = model          # no cost meter: trust the requested model
+            if len(ranked) > 1:
+                note.append("helper model(s) also billed in this run: %s"
+                            % ", ".join("%s $%.4f" % (m, _cost(m)) for m in ranked[1:]))
 
-        if is_err:
+        if terminal == "max_turns":
+            # is_error is true here too, and `result` is empty BY CONSTRUCTION: the CLI stopped
+            # the loop before the model wrote. Measured 2026-09-11 - this is what every tool call
+            # looked like under the old `--max-turns 1`.
+            warn.append("MAX TURNS (%d) REACHED: the CLI stopped the agent loop before the model "
+                        "wrote its answer. Raise `max_turns` for %s in channels.json, or narrow "
+                        "the brief." % (turns, name))
+        elif is_err:
             err_msg = text or terminal or "is_error=true"
             warn.append("CLAUDE CLI ERROR: %s" % err_msg[:300])
-        if terminal and terminal not in ("completed",):
+            if "not logged in" in err_msg.lower():
+                warn.append("This channel runs on the claude.ai login only - `claude auth login`. "
+                            "ANTHROPIC_API_KEY is deliberately not passed to it.")
+        if terminal and terminal not in ("completed", "max_turns"):
             note.append("terminal_reason=%s" % terminal)
         if num_turns and num_turns > 1:
             note.append("num_turns=%d" % num_turns)
+        # 🔴 A denied tool is a weaker review, and here the model carries on as if nothing had
+        # happened (R45: on agy a denial discards the turn; this is quieter, which is worse).
+        # Under bypassPermissions only this machine's own deny rules, hooks and the CLI's
+        # never-auto-approved class can deny - so a non-empty list names a local rule, by tool.
+        denials = obj.get("permission_denials") or []
+        if isinstance(denials, list) and denials:
+            names = sorted({str(d.get("tool_name", "?")) for d in denials if isinstance(d, dict)})
+            note.append("%d tool call(s) DENIED by this machine's own rules (%s) - the review "
+                        "ran without them" % (len(denials), ", ".join(names)))
 
     if text:
         with open(outfile, "w", encoding="utf-8") as f:
@@ -7401,13 +7496,15 @@ def main():
                ("; %d folder(s), as a vetted copy" % len(att_dirs)) if att_dirs else ""))
         log("  API channels receive the file(s) INLINE%s. CLI channels (codex, agy, grok build) "
             "receive ABSOLUTE PATHS and read from this disk themselves - read-only, no write or "
-            "shell tools, and they may consult surrounding material."
+            "shell tools, and they may consult surrounding material. The Claude Code CLI "
+            "channel (cclopus46) is the exception: it runs with permission prompts bypassed, "
+            "so its shell and file-editing tools are live too."
             % ("; folders reach CLI channels only, as a VETTED COPY of the scanned files"
                if att_dirs else ""))
         log("  🔴 refs mode TRUSTS the attached material: a hostile document can steer a CLI "
             "reviewer's read tools (grok build's read_file is not bounded by its cwd - "
-            "measured). Attach material you authored or trust; send foreign documents inline "
-            "in the brief instead.")
+            "measured) - and on cclopus46 its shell and edit tools as well. Attach material "
+            "you authored or trust; send foreign documents inline in the brief instead.")
 
     # Attached FOLDERS are scanned file by file HERE, before the payload is assembled, because
     # the refs section must name the VETTED COPY and its skip manifest, not the original dir
@@ -7825,6 +7922,7 @@ def main():
                                         system=_system_for(system, p),
                                         fallback_model=p.get("fallback_model"),
                                         timeout=_seconds(p.get("timeout"), 2400),
+                                        max_turns=p.get("max_turns"),
                                         name=cname)
             else:
                 # Named in the registry, unknown to the code. A log line is NOT enough: a log

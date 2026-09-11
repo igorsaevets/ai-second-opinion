@@ -345,6 +345,10 @@
       "_added": "2026-09-04, the operator: «добавим Claude code cli и модели opus 4.6 Max [1M] и fallback Opus 4.7 Max. По дефолту отключен. Нам нужно, что если добавят наш kit в codex, agy, ... То что бы их тоже можно было вызывать.» Subscription-only (no API key); --bare KILLS subscription auth (measured: 'Not logged in' error). No --allowedTools restriction (the operator: «не ограничивай инструменты, пусть сам какие хочет использует»).",
       "label": "CCL Opus 4.6 [1M]",
       "cost": "expensive",
+      "max_turns": 50,
+      "_max_turns": "Ceiling on agentic turns per call (--max-turns), a guard against a runaway loop, judged by num_turns in the JSON that comes back. v1.52.0–v1.60.0 shipped 1, which made the channel TOOL-LESS: the first tool call ended the run with exit 1, terminal_reason max_turns and an EMPTY result (measured 2026-09-11, claude 2.1.268). Raise it here if a legitimate review hits the ceiling; the run log says MAX TURNS REACHED when it does.",
+      "_permissions": "--permission-mode bypassPermissions, ALWAYS. the operator 2026-09-11: «надо для claude code cli добавить … что бы он сразу запускал claude code в режиме всегда claude --permission-mode bypassPermissions или claude --dangerously-skip-permissions» (the CLI reference calls the two flags equivalent; probed identical on 2.1.268). Without it a headless -p run starts in the CLI's default mode - reads only - with nobody to answer a prompt: WebFetch and Bash were DENIED while the JSON said is_error:false (measured 2026-09-11). What bypass means: every built-in tool (shell, file edits anywhere on the machine, web) and every MCP server in the user's Claude Code config run without a prompt; deny rules (a bare name removes the tool, a scoped rule denies the call - both measured), hooks and the CLI's never-auto-approved class still hold. That blast radius is why enabled stays false: turning it on is the decision, and the plan prints the line first.",
+      "_auth_env": "ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN are REMOVED from the child's environment (orchestrate.CLAUDECLI_SCRUB_ENV). With either set the CLI bills the key instead of the claude.ai login and says so on stderr («… takes precedence over your claude.ai login»); this channel is subscription-only by design, and on a machine with the variable set every earlier call was metered while this entry said subscription - the R81 live test included (measured 2026-09-11; with the variable scrubbed the same run authenticates through the login).",
       "model": "claude-opus-4-6[1m]",
       "fallback_model": "claude-opus-4-7",
       "_fallback": "CLI-level fallback via --fallback-model flag. The CLI itself handles the retry when the primary model is overloaded or unavailable. claude-opus-4-7 also has 1M context by default.",
@@ -384,7 +388,7 @@
         "клод46",
         "клодкод"
       ],
-      "notes": "Claude Opus 4.6 with 1M context window via Claude Code CLI. Subscription auth only — no API key needed but the user must be logged in (claude auth login). Fallback to Opus 4.7 handled by the CLI. Disabled by default — enable with --only cclopus46 or by setting enabled:true."
+      "notes": "Claude Opus 4.6 with 1M context window via Claude Code CLI. Subscription auth only — no API key needed but the user must be logged in (claude auth login). Fallback to Opus 4.7 handled by the CLI. Runs with ALL permission prompts bypassed (see _permissions) - which is why it is disabled by default; enable with --only cclopus46 for one round or by setting enabled:true."
     },
     "codex": {
       "read_order": 1,

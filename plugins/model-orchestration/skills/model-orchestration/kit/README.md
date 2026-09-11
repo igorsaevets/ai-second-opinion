@@ -208,7 +208,7 @@ Several accounts, none of which this tool provides — but **one of them gets yo
 | **`MODEL_API_KEY`** | The Muse Spark voices reached directly from Meta | Metered per use |
 | **A paid OpenAI plan with Codex** | `codex` | Subscription, weekly limit |
 | **An eligible Google account** | The Gemini channels via `agy` (Antigravity CLI) | Subscription, with limits |
-| **Claude Code CLI** (`claude`) | Claude Opus — off by default | Subscription |
+| **Claude Code CLI** (`claude`) | Claude Opus — off by default; when on, it runs with **permission prompts bypassed** ([SECURITY.md](SECURITY.md)) | Subscription |
 | **Grok CLI** (`grokbuild`) | Grok 4.5 with live web search | Free during beta |
 | *Optional:* `GEMINI_API_KEY`, `XAI_API_KEY`, `MIMO_API_KEY` | The same Gemini, Grok and MiMo models through the **vendors' own** APIs, which buys real extra capability — see INSTALL.md. Off by default | Metered, free tiers vary |
 

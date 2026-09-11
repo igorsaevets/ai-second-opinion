@@ -82,8 +82,29 @@ one file: the Antigravity CLI's settings. It is additive and idempotent, backs u
 supports `--dry-run` and `--revert`, and `doctor.py` re-checks the result on every run.
 
 It also **denies metered crawling tools** that bill per page with no ceiling, and scheduled
-monitors that bill with nobody watching. That is why the answer to a permissions problem is never
-`--dangerously-skip-permissions` — that flag unlocks those too.
+monitors that bill with nobody watching. That is why, for the Antigravity CLI, the answer to a
+permissions problem is never `--dangerously-skip-permissions` — that flag unlocks those too.
+
+## The Claude Code CLI channel runs with permission prompts bypassed
+
+`cclopus46` launches `claude -p --permission-mode bypassPermissions` — the same mode as
+`--dangerously-skip-permissions` — on purpose, every time. A headless run has nobody to answer a
+prompt, and in the CLI's default mode the reviewer's web fetches and shell commands were denied
+while its JSON still reported success: a review that quietly did less (measured 2026-09-11).
+
+What that mode means on the machine that runs it: every built-in tool — shell, file edits anywhere,
+web — and **every MCP server configured in your Claude Code, with its credentials**, run without a
+prompt, on a brief that is untrusted input by this document's own rule. Claude Code's own
+documentation recommends the mode for isolated containers and VMs only. Three things still hold in
+it: your `permissions.deny` rules (a bare tool name removes the tool, a scoped rule such as
+`Bash(git push *)` denies the matching call — both measured), your hooks, and the CLI's short list
+of actions no mode auto-approves.
+
+So the channel ships **off**. Turning it on — `--only cclopus46` for a round, or `"enabled": true`
+in `channels.json` — is the decision, and the plan prints the line before anything runs. To narrow
+it, add deny rules to `~/.claude/settings.json`; they apply in every mode. The channel also removes
+`ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the child's environment: with either set the
+CLI bills that key instead of the claude.ai login, and this channel is subscription-only.
 
 ## Treat model output as untrusted input
 
