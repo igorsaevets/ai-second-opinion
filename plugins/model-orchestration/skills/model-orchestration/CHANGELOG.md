@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.62.1 — 2026-09-11
+
+R86-И2: two hotfixes surfaced by the fresh update cycle.
+
+* **`doctor.py` stops printing `[FAIL] secret/pii gate did not detect: XAI_KEY` on
+  every install.** The block-doc at the head of the gate self-test promised the
+  probe was "derived from the tables themselves so a newly added pattern fails
+  this check until it is given a probe line"; that was aspirational, not
+  enforced. XAI_KEY entered `SECRET_PATTERNS` at v1.44.0 (2026-08-30) and the
+  probe was not regenerated, so 18 shipped releases printed `NOT READY` on any
+  healthy install — an empty home, this project's own dev tree, and existing
+  1.61.0 installs alike. Because `upgrade.py` runs the doctor at the end of
+  every `update_check.py --apply`, that exit code also surfaced a phony
+  "checks did not pass" rollback prompt after every self-update the 1.62.0
+  release enabled.
+
+* **Selftest pins the coverage as a property, not a promise.** A new suite
+  imports `doctor.check_pii_gate`, calls it against a fresh `Report`, demands
+  `worst == 0` and asserts the "detectors live" number equals
+  `len(SECRET_PATTERNS) + len(PII_PATTERNS)`. A pattern added tomorrow without
+  a probe line reddens this file before it reddens a stranger's install.
+
+* **CI guard: `tag-version-matches`.** On any `refs/tags/v*` push, a new job
+  reads `.claude-plugin/marketplace.json` and
+  `plugins/model-orchestration/.claude-plugin/plugin.json` and fails loudly if
+  either `version` field does not equal the tag (stripped of its leading `v`).
+  Claude Code decides "is there a new release" for a plugin install from that
+  field alone (its docs: "users only receive updates when you change this
+  field"); a forgotten bump silently ships a tag no installed plugin can see.
+  The v1.45.1 hand-sync that shipped a tag whose `VERSION` said 1.45.0 inside
+  is the failure this job would have caught.
+
 ## 1.62.0 — 2026-09-11
 
 R86: the kit now has its own update cycle — it notices a release, tells you and

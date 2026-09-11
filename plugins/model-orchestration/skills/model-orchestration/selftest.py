@@ -6839,7 +6839,8 @@ def main():
                   suite_r80_agy_result_detection,
                   suite_r82_premium_bundle,
                   suite_r85_claudecli_permissions,
-                  suite_r86_self_update):
+                  suite_r86_self_update,
+                  suite_r86_i2_doctor_probe_covers_every_kind):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -7042,6 +7043,71 @@ def suite_r85_claudecli_permissions():
     src = inspect.getsource(o.call_claudecli)
     check(src.count('"bypassPermissions"') == 1 and '"--max-turns", "1"' not in src,
           "R85 census: one bypass literal in the dispatcher, the tool-less --max-turns 1 gone")
+
+
+def suite_r86_i2_doctor_probe_covers_every_kind():
+    """
+    R86-И2. The gate-selftest inside doctor.py builds a synthetic payload and asserts that
+    every kind in orchestrate.SECRET_PATTERNS and PII_PATTERNS trips at least once. The
+    function's own block comment promises this coverage is "derived from the tables themselves
+    so a newly added pattern fails this check until it is given a probe line". That was
+    aspirational, not enforced: XAI_KEY entered the tables at v1.44.0 (2026-08-30) and the
+    probe was not regenerated, so 18 shipped releases printed [FAIL] on every install (empty
+    home, dev tree, and existing 1.61.0 alike). Since upgrade.py runs doctor at the end of
+    every --apply and treats its exit code as "checks did not pass", every self-update also
+    surfaced a phony rollback prompt.
+
+    This suite is the missing enforcement. Two checks: the runtime one (call the function,
+    demand r.worst == 0), and a static one (count-derive the expected detector total from the
+    pattern tables and assert doctor's own OK detail names that number).
+    """
+    import doctor as _doc
+    import orchestrate as o
+    r = _doc.Report()
+    _doc.check_pii_gate(r, o)
+    fails = [row for row in r.rows if row["level"] == 2]
+    warns = [row for row in r.rows if row["level"] == 1]
+    check(not fails,
+          "R86-И2: doctor's secret/pii gate probe covers every kind in SECRET_PATTERNS and "
+          "PII_PATTERNS (missing since v1.44.0)",
+          "; ".join("%s %s" % (row["check"], row["detail"]) for row in fails))
+    check(not warns,
+          "R86-И2: doctor's probe does not raise a warning on the control text either",
+          "; ".join("%s %s" % (row["check"], row["detail"]) for row in warns))
+    if not fails:
+        expected = len(o.SECRET_PATTERNS) + len(o.PII_PATTERNS)
+        ok_row = next((row for row in r.rows if row["level"] == 0), None)
+        detail = (ok_row or {}).get("detail", "")
+        check("%d detectors live" % expected in detail,
+              "R86-И2: doctor names as many detectors as the tables carry - so a pattern added "
+              "without a probe fails this pin before it fails a stranger's install",
+              "detail=%r expected=%d SECRET=%d PII=%d" % (detail, expected,
+                                                          len(o.SECRET_PATTERNS),
+                                                          len(o.PII_PATTERNS)))
+
+    # R86-И2, second half: the CI guard that stops a tag push whose plugin.json /
+    # marketplace.json version diverges from the tag. Claude Code decides "is there a new
+    # release" by the `version` field alone (docs: "users only receive updates when you change
+    # this field"), so a forgotten bump silently ships a tag that no plugin install can see.
+    # Pins the source workflow file the packager copies to the kit's .github/workflows/.
+    kit = HERE / "kit"
+    wf = kit / "workflow-selftest.yml"
+    if not wf.exists():
+        check(True, "R86-И2: no source kit/workflow-selftest.yml here - an installed tree, "
+              "nothing to pin (the file under test exists only in the source layout)")
+    else:
+        wt = wf.read_text(encoding="utf-8")
+        check("tag-version-matches:" in wt,
+              "R86-И2: the workflow declares the tag-version-matches job")
+        check("startsWith(github.ref, 'refs/tags/v')" in wt,
+              "R86-И2: the tag-version-matches job runs only on tag pushes")
+        check("marketplace.json" in wt and "plugin.json" in wt,
+              "R86-И2: the job compares BOTH manifests, not just one - a bump to the "
+              "marketplace with a stale plugin.json (or vice versa) would still hide the "
+              "release")
+        check("${GITHUB_REF_NAME#v}" in wt or "${GITHUB_REF#refs/tags/v}" in wt,
+              "R86-И2: the job derives the version from the pushed tag (GITHUB_REF_NAME "
+              "or GITHUB_REF) - no hardcoded value the guard could go stale against")
 
 
 if __name__ == "__main__":

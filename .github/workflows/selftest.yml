@@ -72,3 +72,31 @@ jobs:
         run: |
           python -m pip install --quiet pre-commit
           pre-commit run --all-files --show-diff-on-failure
+
+  # 🔴 R86-И2: a tag push whose plugin.json / marketplace.json version does not match the tag
+  # ships a release Claude Code will never surface, because the plugin update path decides
+  # "is there a new release" from the manifest `version` field alone (docs: "users only receive
+  # updates when you change this field"). Before this job the only backstop was human memory,
+  # and one hand-sync at v1.45.1 already shipped a tag whose VERSION file said 1.45.0 inside
+  # (the R78 lesson). This job fails loudly on the tag itself, before the release object is
+  # created by tools/backfill_releases.py.
+  tag-version-matches:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: version fields in plugin.json and marketplace.json match the tag
+        shell: bash
+        run: |
+          tag_v="${GITHUB_REF_NAME#v}"
+          mv=$(python -c 'import json;print(json.load(open(".claude-plugin/marketplace.json"))["plugins"][0]["version"])')
+          pv=$(python -c 'import json;print(json.load(open("plugins/model-orchestration/.claude-plugin/plugin.json"))["version"])')
+          echo "tag=${GITHUB_REF_NAME}  tag_stripped=${tag_v}  marketplace.json=${mv}  plugin.json=${pv}"
+          if [ "$mv" != "$tag_v" ]; then
+            echo "::error::marketplace.json version ${mv} != tag v${tag_v} - Claude Code decides 'is there a new release' by this field; a stale value silently hides the tag"
+            exit 1
+          fi
+          if [ "$pv" != "$tag_v" ]; then
+            echo "::error::plugin.json version ${pv} != tag v${tag_v} - same field on the plugin manifest, also load-bearing"
+            exit 1
+          fi

@@ -484,7 +484,15 @@ def check_pii_gate(r, mod):
              "aws AKIAIOSFODNN7EXAMPLE\n"
              "github ghp_" + "c" * 36 + "\n"
              "slack xoxb-1234567890-abcdefghij\n"
-             "google AIza" + "d" * 35 + "\n")
+             "google AIza" + "d" * 35 + "\n"
+             # Missing in every shipped doctor for 18 releases, because the block-doc at the top
+             # of this function - "derived from the tables themselves so a newly added pattern
+             # fails this check" - was written aspirationally: the probe was not actually
+             # regenerated when XAI_KEY entered SECRET_PATTERNS, and the resulting exit-1 tripped
+             # upgrade.py's "checks did not pass" prompt on every healthy install. selftest now
+             # holds the property literally, so a future kind added without a probe line reddens
+             # this file rather than a stranger's install.
+             "xai xai-" + "e" * 20 + "\n")
     secrets, pii = mod.scan_payload(probe, "selftest")
     kinds = {h.split(" at ")[0] for h in secrets + pii}
     expect = {k for k, _ in mod.SECRET_PATTERNS} | {k for k, _ in mod.PII_PATTERNS}
