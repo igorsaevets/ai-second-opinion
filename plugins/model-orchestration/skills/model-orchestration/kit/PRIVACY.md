@@ -49,18 +49,18 @@ Each vendor's own privacy policy and retention rules apply to what you send them
 and does not change them. **Once a brief has been sent it cannot be recalled.** If you enable no
 channels, nothing is transmitted.
 
-## Four channels are cheap because of their data terms
+## Some channels are cheap because of their data terms
 
 Some tiers are discounted, or free, **in exchange for permission to train on what you send**. As
-published, four channels are on such a tier: `ocspark13free` (Meta's Muse Spark 1.3 Contributor,
+published, the channels on such a tier are: `ocspark13free` (Meta's Muse Spark 1.3 Contributor,
 free, through the opencode CLI), `spark13cont` (the same contributor tier, reached directly),
 `orspark13cont` (the **same** contributor tier reached through OpenRouter — so the payload passes
 OpenRouter's own policy on the way to Meta's contributor terms), and `ornemotron3ultra` (a free
 tier, which on OpenRouter requires the account-level prompt-training setting to be on).
 
 This is not a defect and it is not hidden: each channel's data policy is printed in the plan before
-anything is spent, and it is the reason those channels cost almost nothing. If a brief should not
-be trained on, drop them for that run:
+anything is spent — that printout, not the list above, is the current set — and it is the reason
+those channels cost almost nothing. If a brief should not be trained on, drop them for that run:
 
 ```
 --skip ocspark13free spark13cont orspark13cont ornemotron3ultra

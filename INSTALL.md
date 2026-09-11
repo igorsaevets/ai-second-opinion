@@ -316,7 +316,7 @@ disagreement this tool exists to produce. Everything else is optional.
 |---|---|---|
 | the opencode CLI (`npm install -g opencode-ai`) | `ocspark13free` — the **free** Spark 1.3 voice, and the default `--ask` channel | **free** |
 | `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, a Muse Spark voice and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
-| `MODEL_API_KEY` | the two Spark voices | metered API |
+| `MODEL_API_KEY` | the Muse Spark voices reached directly from Meta | metered API |
 | the Codex CLI, signed in | `codex` | your existing subscription |
 | the Antigravity CLI, signed in | the `agy` Gemini channels | your existing subscription |
 | the Grok Build CLI, signed in | `grokbuild` — Grok 4.6, and it opens pages itself | your existing subscription |
@@ -474,7 +474,7 @@ export OPENROUTER_API_KEY="<your key>"
 
 The optional premium panel (`premium/premium_panel.py` — see the README's «Premium» section) is
 a separate script and reuses the keys above: `OPENROUTER_API_KEY` for its `solpro` lane and
-`GEMINI_API_KEY` for its two Google batch lanes. Its two OpenAI lanes need **`OPENAI_API_KEY`**,
+`GEMINI_API_KEY` for its Google batch lanes. Its OpenAI lanes need **`OPENAI_API_KEY`**,
 which nothing else in this kit uses — set it the same way as the others, only if you want those
 lanes. A missing key refuses loudly on its own lane and the rest still run; with only an
 OpenRouter key, run it with `--only solpro`.
@@ -509,10 +509,10 @@ Spark 1.3 Contributor checkpoint among others.
 
 **This is the default `--ask` channel** (`ocspark13free`). When the opencode CLI is installed,
 `--ask` uses it first — ahead of `spark13cont` (needs `MODEL_API_KEY`) and `orspark13cont`
-(needs `OPENROUTER_API_KEY`). A machine with none of the three has no `--ask` channel, which is
+(needs `OPENROUTER_API_KEY`). A machine with none of them has no `--ask` channel, which is
 reported and skipped, not fatal.
 
-If the CLI is absent, the other two work the same as before — you only lose the free default.
+If the CLI is absent, the others work the same as before — you only lose the free default.
 `doctor.py` reports whether the CLI is found and where. If yours is installed in an unusual
 location, set `OPENCODE_BIN` to the full path.
 

@@ -2,10 +2,11 @@
 
 ## What this tool sends where
 
-It sends the document you point it at, plus a system-prompt preset, to whichever of three vendors
-you have enabled. Nothing else. No telemetry, no analytics, no background process, no phone-home.
+It sends the document you point it at, plus a system-prompt preset, to the vendors behind whichever
+channels you have enabled — the plan names them before anything is sent. Nothing else. No telemetry,
+no analytics, no background process, no phone-home.
 
-**Once a payload is sent it cannot be recalled.** It is at up to three separate vendors, under
+**Once a payload is sent it cannot be recalled.** It is at every vendor the round reached, under
 their retention policies, not yours. Everything below exists because of that one sentence.
 
 ## What it refuses to send

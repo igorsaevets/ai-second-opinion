@@ -24,10 +24,9 @@ python plugins/model-orchestration/skills/model-orchestration/selftest.py
 ```
 
 The suite prints its own count — do not trust any number a document states for it. It costs
-nothing and contacts no vendor, and it covers the three
-properties the tool actually promises: partial installs degrade instead of crashing, channel
-selection is obeyed exactly, and nothing secret-shaped can reach a console, a log or a diagnostics
-file.
+nothing and contacts no vendor, and it covers the properties the tool actually promises — among
+them: partial installs degrade instead of crashing, channel selection is obeyed exactly, and
+nothing secret-shaped can reach a console, a log or a diagnostics file.
 
 **A change that breaks one of those is not a trade-off to discuss — it is a regression.**
 

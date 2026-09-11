@@ -10,7 +10,10 @@ Nothing was inherited from a vendor's documentation without being reproduced.
 
 ## 1. Architecture
 
-One brief, three independent reviewers, in parallel, followed by verification of each answer.
+One brief, every configured reviewer, in parallel, followed by verification of each answer.
+
+The table shows the two transport shapes — an HTTPS API and a local CLI subprocess — through the
+channels that established them. The live roster is `python routing.py`; it has changed most weeks.
 
 | Channel | What it is | Transport | Typical time | Billed against |
 |---|---|---|---|---|
@@ -18,13 +21,13 @@ One brief, three independent reviewers, in parallel, followed by verification of
 | **codex** | OpenAI Codex CLI | local subprocess | **7–35 min** | your subscription's heaviest tier |
 | **agy** | Antigravity CLI (Gemini 3.1 Pro) | local subprocess | ~1 min | your Google subscription |
 
-Threads, not asyncio: two of the three are blocking subprocesses, and on Windows asyncio
+Threads, not asyncio: the CLI channels are blocking subprocesses, and on Windows asyncio
 subprocess support depends on the event-loop policy. Threads just work.
 
 **The point is not redundancy, it is disagreement.** Measured across two rounds on real work the
 ordering inverted: once the 55-second channel found the item both slower ones missed, once the
 25-minute one did. Which channel wins is not predictable from cost, from speed, or from the
-previous round. That is the entire argument for running all nine.
+previous round. That is the entire argument for running the whole panel.
 
 ### Files
 
@@ -34,7 +37,7 @@ orchestrate.py            the harness: dispatch, verification, gates, diagnostic
 routing.py                resolves registry + flags + free text into a plan
 channels.json             THE registry - every model name lives here and nowhere else
 doctor.py                 "is this machine set up?"      - probes, never asserts
-selftest.py               "does the code still behave?"  - ~50 behavioural checks
+selftest.py               "does the code still behave?"  - behavioural checks; prints its own count
 citecheck.py              citation grounding and existence checks
 upgrade.py                install/update in one path; migrates settings out of the tree
 patch_agy_permissions.py  mandatory post-install step for the agy channel
@@ -63,17 +66,18 @@ call. Only permission rules worked. So everything that must not happen is a chec
 ### Outbound payload gate
 
 - **A payload containing a key, token or private key is never sent. There is no override flag.**
-  Nine detectors: private-key blocks, vendor key formats, labelled assignments, bearer tokens.
+  The detectors are `SECRET_PATTERNS` in `orchestrate.py`: private-key blocks, vendor key formats,
+  labelled assignments, bearer tokens.
 - **A payload containing personal identifiers is reported, itemised by kind and line, and sent** — pass `--strict-pii` to refuse instead. Secrets are refused always, with no override
-  deliberately. Seven detectors: national ID numbers, case/receipt numbers, SSNs, emails, phone
-  numbers, labelled dates of birth, labelled passport numbers.
+  deliberately. The detectors are `PII_PATTERNS` in the same file: national ID numbers, case/receipt
+  numbers, SSNs, emails, phone numbers, labelled dates of birth, labelled passport numbers.
 - **The gate reports kind and line number, never the value.** Printing the value would leak it
   into the transcript, which is the same mistake one step earlier.
 - Both the brief **and** the system-prompt file are scanned. A hand-written preset is just as
   capable of carrying a name or a key as the brief is.
 - It runs under `--dry-run`, so checking costs nothing.
 
-**Once a payload is sent it cannot be recalled. It is at three separate vendors.**
+**Once a payload is sent it cannot be recalled. It is at every vendor the round reached.**
 
 ### Inbound / logging gate
 
@@ -467,7 +471,7 @@ which is one more reason never to gate on an exit code.
 What this harness does instead is the same shape — agentic multi-step web research at maximum
 effort with a source-discipline system prompt. Honest differences: shorter autonomous horizon, no
 built-in clarification loop, no vendor report formatting. Honest advantage, and not a consolation
-prize: three independent models that disagree, plus a mechanical audit of whether the citations
+prize: several independent models that disagree, plus a mechanical audit of whether the citations
 were opened and whether they exist. Deep-research products emit citations with no audit trail.
 
 If you want a vendor's deep research, run it by hand in the browser, save the report, and pass it

@@ -60,7 +60,7 @@ That answer is nearly worthless, for three reasons most people never check:
 
 | You are | You use it to |
 |---|---|
-| **Founder / CEO** | Pressure-test a strategy memo, a board deck, an investor update or a pricing decision before anyone external sees it. Three models, three sets of objections, before your board finds them. |
+| **Founder / CEO** | Pressure-test a strategy memo, a board deck, an investor update or a pricing decision before anyone external sees it. Several models, several sets of objections, before your board finds them. |
 | **Product manager** | Review a spec or PRD for holes, check competitive claims you are about to publish, stress-test a launch plan's assumptions. |
 | **C-level / operations** | Verify claims in a vendor proposal or a consultant's report. Check that a regulation you are relying on is still current and says what someone told you it says. |
 | **Legal / compliance** | Verify that every citation in a research memo resolves to a real document that actually says what the memo claims. This is source-verification work, done properly and at speed. See the note below. |
@@ -107,7 +107,7 @@ wrong.
 A **panel** decides which models see your document. Two built-in panels; standard is a
 superset of cheap.
 
-**Four channels run on your existing subscriptions — no API key needed.** If you already pay
+**Several channels run on your existing subscriptions — no API key needed.** If you already pay
 for Claude, ChatGPT or have an eligible Google account, you already have reviewers. Grok CLI
 is free during beta. The opencode CLI adds a Muse Spark voice with no account at all.
 
@@ -165,19 +165,19 @@ pointer here.
 | `flash` | Gemini 3.7 Flash | Google batch | `GEMINI_API_KEY` | **canary** — reported in its own section, never counted into convergence |
 | `live54` | GPT-5.4 + web search | OpenAI Flex, synchronous | `OPENAI_API_KEY` | vote — the one live-web seat |
 
-**With only an `OPENROUTER_API_KEY`, one lane of five is reachable: run `--only solpro`.** A
+**With only an `OPENROUTER_API_KEY`, only the broker lane is reachable: run `--only solpro`.** A
 missing key refuses loudly per lane, and `--mode collect` aggregates what exists — the report
 shows the hole rather than papering over it.
 
 Prices resolve from `premium/models_snapshot.json` (capture dates inside; a price past its
 validity date refuses rather than inventing a number). Maturity, stated honestly: each lane's
-transport was measured against its vendor individually; the assembled five-seat panel has not
+transport was measured against its vendor individually; the assembled panel has not
 yet run a paid round. Smoke first.
 
 ### Targeting specific channels
 
 ```
---only codex agy31pro grokbuild     # just these three
+--only codex agy31pro grokbuild     # just the ones named
 --skip ornemotron3ultra              # everyone except this one
 ```
 
@@ -192,8 +192,10 @@ page.
 It costs nothing. A model that "confirms" your planted falsehood has just told you exactly what
 all its other confirmations are worth. In the three-channel rounds this test was built on, all
 three models caught both planted claims — which is the only reason to believe the things they
-*did* confirm. (Scope stated on purpose: that measurement is from a three-channel round and has
-not been repeated across the full panel. A number is worth only the run it came from.)
+*did* confirm. (Scope stated on purpose: that measurement is from a three-channel round. Later,
+larger panels kept refuting the planted claim — 4 of 4 in the 1.46.0 review and 12 of 12 readable
+answers in the thirteen-channel round behind 1.44.0, per CHANGELOG.md — but a number is worth only
+the run it came from.)
 
 ## What it costs, honestly
 
@@ -203,7 +205,7 @@ Several accounts, none of which this tool provides — but **one of them gets yo
 |---|---|---|
 | **The opencode CLI** (`npm install -g opencode-ai`) | `ocspark13free` — the **free** Muse Spark 1.3 voice, and the **default `--ask` channel** | **Free** — no key, no account |
 | **`OPENROUTER_API_KEY`** | The biggest group in one account: Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, **a Muse Spark voice** and **a free NVIDIA Nemotron** — one signup | Metered per token, **plus per web search**. The Nemotron model itself is free |
-| **`MODEL_API_KEY`** | The two Spark voices | Metered per use |
+| **`MODEL_API_KEY`** | The Muse Spark voices reached directly from Meta | Metered per use |
 | **A paid OpenAI plan with Codex** | `codex` | Subscription, weekly limit |
 | **An eligible Google account** | The Gemini channels via `agy` (Antigravity CLI) | Subscription, with limits |
 | **Claude Code CLI** (`claude`) | Claude Opus — off by default | Subscription |
@@ -219,14 +221,14 @@ it has changed most weeks. `python routing.py` prints the live list and spends n
 prose copy of that list in this repository has been wrong within days of being written — including,
 at one point, two different numbers four lines apart in this very file.)
 
-**Four channels are cheap because of their data terms, not despite them.** `ocspark13free`,
-`spark13cont` and `orspark13cont` run the same Muse Spark 1.3 *Contributor* tier — through
-opencode, directly and through OpenRouter respectively — and `ornemotron3ultra` runs a *free*
-tier; on all four, the vendor may use prompts and completions for training. That is the trade
-being made, it is stated in [PRIVACY.md](PRIVACY.md) with each vendor named, and the tool prints
-each channel's data policy in the plan **before** it spends anything. If a brief should not be
-trained on, drop those channels for that run:
-`--skip ocspark13free spark13cont orspark13cont ornemotron3ultra`.
+**Some channels are cheap because of their data terms, not despite them.** As published,
+`ocspark13free`, `spark13cont` and `orspark13cont` run the same Muse Spark 1.3 *Contributor* tier
+— through opencode, directly and through OpenRouter respectively — and `ornemotron3ultra` runs a
+*free* tier; on every one of them the vendor may use prompts and completions for training. That is
+the trade being made, it is stated in [PRIVACY.md](PRIVACY.md) with each vendor named, and the
+tool prints each channel's data policy in the plan **before** it spends anything — that line, not
+this paragraph, is the current list. If a brief should not be trained on, drop those channels for
+that run: `--skip ocspark13free spark13cont orspark13cont ornemotron3ultra`.
 
 Nothing else in this file will tell you when to avoid a channel, and that is deliberate. An
 earlier version carried a loud warning here and in the registry, and it was obeyed twice in ways
@@ -413,9 +415,9 @@ MiMo, Grok, GLM, DeepSeek, Muse Spark and NVIDIA Nemotron. Start with that and a
 vendor access later for the models that benefit from it.
 
 **Is this expensive?**<br>
-One channel is free (Muse Spark 1.3 via opencode). The default cheap panel runs on subscriptions
-and free/metered accounts, not premium APIs. A full run typically costs under $2 — and the tool
-prints the exact cost when it finishes. See [what it costs](#what-it-costs-honestly).
+One channel is free with no account at all (Muse Spark 1.3 via opencode). The default cheap panel
+runs on subscriptions and free/metered accounts, not premium APIs. A full run typically costs under
+$2 — and the tool prints the exact cost when it finishes. See [what it costs](#what-it-costs-honestly).
 
 ## Found a bug? Want a feature? Want to work together?
 

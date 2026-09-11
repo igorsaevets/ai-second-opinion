@@ -1,5 +1,67 @@
 # Changelog
 
+## 1.60.0 — 2026-09-11
+
+R83 wave 3: the count-shaped prose left in the repository documents after
+1.59.0. Same class — a number in prose that describes the tool's *current*
+state (how many channels, vendors, detectors, checks) drifts silently because
+nothing executes it. Documentation only: no code path changed (one code
+comment carried the same sentence as `SECURITY.md` and was corrected with it).
+
+* **Every present-tense count of channels or vendors in `SECURITY.md`,
+  `TECHNICAL.md`, `PRIVACY.md`, `README.md`, `README.ru.md`, `INSTALL.md`,
+  `CONTRIBUTING.md` now describes the pattern or points at the live source.**
+  "to whichever of three vendors" / "at up to three separate vendors" /
+  "three independent reviewers" / "two of the three are blocking
+  subprocesses" / "running all nine" / "Four channels run on your existing
+  subscriptions" / "Four channels are cheap because of their data terms" /
+  "the two Spark voices" / "one lane of five" / "none of the three" became
+  "the vendors behind whichever channels you have enabled", "every vendor
+  the round reached", "every configured reviewer", "the CLI channels", "the
+  whole panel", "several", "some", "the Muse Spark voices reached directly
+  from Meta", "the broker lane", "none of them" — with `python routing.py`
+  and the plan's per-channel data-policy line named as the current list.
+  `TECHNICAL.md` §1's channel table is now captioned as what it is — the two
+  transport shapes, HTTPS API and CLI subprocess, through the channels that
+  established them — instead of reading as the roster. Both READMEs changed
+  together, as CONTRIBUTING.md requires.
+
+* **Two of those counts were already wrong by the code, not merely
+  drift-prone.** `TECHNICAL.md` §2 said "Nine detectors" for the secret gate;
+  `SECRET_PATTERNS` holds ten — the `xai-` pattern joined in 1.44.0 and the
+  sentence did not follow. §1's file table said `selftest.py` runs "~50
+  behavioural checks" while the suite prints several hundred (902 in-tree,
+  848 shipped at 1.59.0). Both lines now name the list or the suite instead
+  of a number; the PII sentence beside the first one ("Seven detectors" —
+  correct today) was converted the same way so it cannot rot next.
+
+* **One sentence was false: `TROUBLESHOOTING.md` still said there are two
+  `--tier` values and "the lower one is already the default".** There has
+  been exactly one since 1.22.0 (2026-08-15), every channel at its own
+  vendor's ceiling; the line now says so.
+
+* **One status clause had rotted the other way.** Both READMEs said the
+  planted-false-claim measurement "has not been repeated across the full
+  panel". It has — 4/4 in the 1.46.0 review, 12/12 readable answers in the
+  thirteen-channel round behind 1.44.0 — and the scope note now cites those
+  while keeping the rule that a number is worth only the run it came from.
+
+* **Kept on purpose, because there the number *is* the fact:** dated
+  measurements ("3 dead URLs out of 11", "fifteen fictional spans and five
+  genuine ones", "the three-channel round behind this document", "every
+  channel of the three then configured"); enumerations counted in the same
+  sentence ("Three ways" to install, "Three things are configured for you",
+  "Four ways in"); the algorithm description in `TECHNICAL.md` §4 ("one
+  vendor holds half the seats … six channels"); the README tagline; and the
+  illustration in "The problem this solves".
+
+* Catalogued, not touched: `TECHNICAL.md` §10 and §8 still describe
+  telemetry and the cost ladder for the three original channels
+  (agy/Spark/Codex) while the OpenRouter channels — whose pages the harness
+  fetches itself — have the most provable grounding of all. That is a roster
+  rewrite with measurements behind it, not a count fix, and belongs to its
+  own release.
+
 ## 1.59.0 — 2026-09-10
 
 The R83 ecosystem audit's wave-1 corrections, shipped. Class: prose that

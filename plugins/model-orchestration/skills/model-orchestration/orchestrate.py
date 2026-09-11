@@ -1042,7 +1042,7 @@ SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
 # that depends on someone remembering it under time pressure is not a control.
 #
 # The asymmetry here is worse than with tools. A denied tool costs a re-run. A sent payload
-# cannot be recalled - it is at three separate vendors, possibly logged, possibly retained, and
+# cannot be recalled - it sits at every vendor the round reached, possibly logged, retained, and
 # the material in this workspace is immigration-case material.
 #
 # Two classes, and they are NOT the same:
