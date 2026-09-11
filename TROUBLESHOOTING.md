@@ -159,7 +159,7 @@ not in your setup — please report it.
 ### "It refuses to send my document"
 
 If it found something shaped like a key, token or password: **there is no override.** A credential
-sent to three external vendors cannot be recalled. Remove or redact it in the document.
+sent to external vendors cannot be recalled. Remove or redact it in the document.
 
 If it found personal identifiers: replace them with placeholders in the *sent copy only* — never
 edit your source of record — and tell the model the placeholders are expected. A reviewer never

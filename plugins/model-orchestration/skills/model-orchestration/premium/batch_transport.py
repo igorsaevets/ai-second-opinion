@@ -10,12 +10,19 @@ domain-free and travel VERBATIM — copied functions, not a rewrite, so the fixe
 measured there (URLError surfaced as a status, the double-nested result walk,
 cached tokens billed at the cached rate) arrive intact.
 
-Provenance — sha256 of the source files at copy time (2026-09-05):
-  heavy_batch.py   a161ce3aecae7356bf4f61e98b7e01469d42d26111487df03e6b94f3398a286c
+Provenance — commit-pinned to the source repository (R83, 2026-09-06). The
+copy was taken on 2026-09-05 from an UNCOMMITTED working copy; that state was
+then committed unchanged as second-opinion-batch@7647737 (branch wip/v0.3,
+local + `git bundle` — NOT on the public main as of this writing), so the
+hashes below are now verifiable against a git object rather than a folder:
+  second-opinion-batch@7647737:tools/heavy_batch.py
+                   sha256 a161ce3aecae7356bf4f61e98b7e01469d42d26111487df03e6b94f3398a286c
                    -> post(), get()                       (lines 285-307)
-  google_batch.py  2c9653471e262ef5247c50c368a4133ea147fb67350f84e2da8be4726cdf8924
+  second-opinion-batch@7647737:tools/google_batch.py
+                   sha256 2c9653471e262ef5247c50c368a4133ea147fb67350f84e2da8be4726cdf8924
                    -> API, _req(), _find_responses(), parse_results()
                                                           (lines 70, 84-101, 250-345)
+  Check: `git cat-file blob 7647737:tools/heavy_batch.py | sha256sum`.
 
 Heritage asymmetry, kept on purpose: _req() converts URLError/socket failures
 into a status tuple (an R06 lesson from the source project); post()/get() catch

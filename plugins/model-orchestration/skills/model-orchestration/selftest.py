@@ -2986,6 +2986,13 @@ def suite_panels():
          "opencode/ prefix models are free. Same Spark 1.3 weights as spark13cont (already "
          "in DICTATED_CHEAP). Primary in ask_default when the opencode CLI is installed; "
          "fallback to paid spark13cont/orspark13cont. distribution: both."),
+        ("R83 2026-09-06", "REMOVE", "ornemotron3ultra",
+         "Igor's OK on R83 wave 1 (audit plan item 10) after the 04.09 cheap-panel test: "
+         "297 s, 1.4M input tokens, NO answer (runs/r80-panel-test; memory "
+         "r80-panel-test-results), on top of his standing note «never read Nemotron» "
+         "(2026-08-31). A free seat that returns nothing costs wall-clock and a token bomb on "
+         "every default round. Demoted to standard, not deleted: still `enabled: true`, still "
+         "runs by name and on --panel standard. The only registry edit is `panel`."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because

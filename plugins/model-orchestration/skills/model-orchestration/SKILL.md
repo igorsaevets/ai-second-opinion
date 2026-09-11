@@ -87,7 +87,7 @@ truncated. Detail lives beside it in `references/` (paths relative to this skill
 | `reading-the-answers.md` | **a round landed** — the manifest, the read cost, when to defer to a fresh context |
 | `when-it-breaks.md` | **anything failed** — symptom → cause → fix, and the status fields that lie |
 | `systems.md` | the `--system` presets in full, and why the legal one omits a clause |
-| `../KIT-README.md` + `package.py` | giving this to another machine — `package.py --out <dir>` regenerates the kit |
+| `kit/README.md` + `package.py` | giving this to another machine — `package.py --out <dir>` regenerates the kit |
 
 
 ## 0. Just run it

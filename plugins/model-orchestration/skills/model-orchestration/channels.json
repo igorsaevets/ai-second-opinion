@@ -1138,7 +1138,8 @@
     "ornemotron3ultra": {
       "read_order": 3,
       "kind": "openrouter",
-      "panel": "cheap",
+      "panel": "standard",
+      "_panel_standard_since_R83": "Moved OUT of the cheap panel 2026-09-06 (R83 wave 1, plan item 10, the operator's OK): the 04.09 cheap-panel test spent 297 s and 1.4M input tokens and returned NO answer (runs/r80-panel-test; memory r80-panel-test-results), and the operator's standing note above says never to read this channel anyway. A default-round seat that returns nothing is wall-clock plus a token bomb. Demoted, not deleted: still enabled, still runs by name and on --panel standard. The selftest's PANEL_EVENTS ledger carries the same decision.",
       "vendor": "nvidia",
       "provider": "openrouter",
       "enabled": true,

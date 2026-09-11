@@ -328,10 +328,10 @@ disagreement this tool exists to produce. Everything else is optional.
 and it has changed most weeks. Run `python routing.py` — it prints the live list and spends
 nothing.
 
-### The three channels that are off by default
+### Direct-vendor alternatives to OpenRouter (off by default)
 
-Three models are reachable **two ways**: through OpenRouter (on by default here) or through the
-vendor's own API (off by default). They are not duplicates — the direct route buys real
+The models below are reachable **two ways**: through OpenRouter (on by default here) or through
+the vendor's own API (off by default). They are not duplicates — the direct route buys real
 capability, measured, not assumed:
 
 | model | via OpenRouter | via the vendor's own key |

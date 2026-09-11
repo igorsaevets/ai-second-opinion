@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.59.0 — 2026-09-10
+
+The R83 ecosystem audit's wave-1 corrections, shipped. Class: prose that
+counts (channels, vendors) drifts silently because nothing checks it, and one
+default that was measured non-answering.
+
+* **`ornemotron3ultra` moved out of the default `cheap` panel.** Measured
+  04-09 on the cheap-panel brief: 1.4M input tokens consumed, no answer
+  produced. Panel now runs without it by default; explicit `--only
+  ornemotron3ultra` or `--panel standard` still reaches it, and the
+  removal-with-cause is recorded in the selftest's `PANEL_EVENTS` ledger so
+  the composition check stays honest instead of hard-coded. Standing note
+  from the operator (31-08): "never read Nemotron's answer."
+
+* **DESCRIPTION no longer claims a channel count.** `package.py`'s
+  DESCRIPTION (which flows into `plugin.json` and the marketplace manifest —
+  the first prose an installer sees) had said "three external reviewer
+  models" since July while the registry held twenty-plus. Rewritten without a
+  number and without a channel roster: "every configured external reviewer
+  model … declared in `channels.json`." Same rule as `INSTALL.md`'s
+  "do not count the channels from this file — the number is whatever
+  `channels.json` enables, run `python routing.py`."
+
+* **`INSTALL.md` and `TROUBLESHOOTING.md`: the count came out of two more
+  lines.** `INSTALL.md`'s "The three channels that are off by default" was
+  the heading of a section that has always been about the *pattern* — a
+  handful of models reachable both through OpenRouter and through the
+  vendor's own API — not about the total number of disabled channels (there
+  are more). Renamed to "Direct-vendor alternatives to OpenRouter (off by
+  default)"; the opening paragraph points at the table below instead of
+  restating a count. `TROUBLESHOOTING.md`'s "A credential sent to three
+  external vendors cannot be recalled" now says "external vendors" — the
+  actual number depends on the panel and can only rise. (Other count-shaped
+  lines in the kit prose exist and are catalogued for a later wave; this
+  release scope is wave 1 only.)
+
+* **Source layout: `channels.shipped.json` is no longer tracked in the
+  source tree.** The file is written *only* into the built tree by
+  `package.py`; a stale copy inside the source tree had been sitting in git
+  since v1.45.1 and made `routing.py` print a false "channels.json has been
+  edited since it was installed — 22 field(s)" banner on the author's
+  machine at the top of every plan. Removed from git and added to
+  `.gitignore` with the reason inline; the built tree is unaffected.
+
+* **`premium/batch_transport.py` provenance line now cites a real git
+  object.** The header claimed "sha256 of the source files at copy time"
+  against hashes of a private working copy that had never been committed
+  anywhere. That working copy was captured verbatim as
+  `second-opinion-batch@7647737` (local branch `wip/v0.3` + `git bundle`;
+  the public `main` was not touched — operator's call), and the header now
+  references that commit, so `git cat-file` reproduces the hashes the file
+  cites.
+
 ## 1.58.1 — 2026-09-05
 
 * **Fix: the OpenAI batch lane's meter read a usage shape the pinned endpoint
