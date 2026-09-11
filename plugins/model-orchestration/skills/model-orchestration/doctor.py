@@ -878,12 +878,12 @@ def main():
         print("NOT READY. Fix the [FAIL] lines above first.")
     print('  python "%s" --brief BRIEF.md --marker DONE-01 --out reviews --dry-run'
           % os.path.join(HERE, "orchestrate.py"))
-    # R58: an update check runs from HERE because doctor is the one command every install
-    # method tells the user to run (INSTALL.md §After installing). The plugin path COULD have
-    # done it via a SessionStart hook, but anthropics/claude-code#16538 discards the hook's
-    # additionalContext for plugin-defined hooks — verified in the R58 panel — so doctor is the
-    # reliable delivery channel until that bug is fixed. Anything the check emits is a normal
-    # print to stdout; a network failure is silent by design (see update_check.py's docstring).
+    # R58/R86: the weekly release check runs from HERE because doctor is the one command every
+    # install method tells the user to run (INSTALL.md §After installing). It is stamped
+    # (168 h), so this costs a network call at most once a week; the same check runs from the
+    # plugin's SessionStart hook and at the end of a real orchestrate round. Anything it emits
+    # is a normal print to stdout, ending in the ONE command that applies the update
+    # (`update_check.py --apply`); a network failure is silent by design (its docstring).
     try:
         uc = os.path.join(HERE, "update_check.py")
         if os.path.isfile(uc):

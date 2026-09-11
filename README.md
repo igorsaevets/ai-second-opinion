@@ -269,7 +269,7 @@ competent one will decline to touch your keys without being told twice.
 Three ways, in order of how much you want to think about it. Full detail in
 **[INSTALL.md](INSTALL.md)**.
 
-**1 — Plugin (easiest, auto-updates).** In Claude Code:
+**1 — Plugin (easiest).** In Claude Code:
 
 ```
 /plugin marketplace add igorsaevets/ai-second-opinion
@@ -297,22 +297,25 @@ macOS / Linux:  ~/.claude/skills/model-orchestration/
 ```
 
 That is the entire installation. It is plain Python with no dependencies to install — nothing is
-compiled, nothing is downloaded, nothing runs in the background.
+compiled, nothing runs in the background, and nothing is downloaded until you ask for an update.
 
 ### Already have it? Updating is one command
 
 ```
-python <the folder you downloaded>/plugins/model-orchestration/skills/model-orchestration/upgrade.py
+python ~/.claude/skills/model-orchestration/update_check.py --apply
 ```
 
-Add `--dry-run` to see exactly what it would do first. It backs up the old folder, carries your
-settings across, prints what changed between the two versions, and runs the checks. It is also
-what `install.ps1` / `install.sh` call when an install already exists, so "install again" and
-"update" are the same safe operation.
+Run it from the copy you have: it finds the newest release on GitHub, downloads and verifies it,
+backs up the old folder, carries your settings across, prints what changed between the two versions
+and runs the checks (`--dry-run` shows all of that without changing anything). A plugin install is
+updated through Claude Code by the same command. You will not have to remember it, either: once a
+week the kit checks for a release — at session start and after a real round — and prints that
+command when there is one. The same machinery is what `install.ps1` / `install.sh` call when an
+install already exists, so "install again" and "update" are the same safe operation.
 
-> **If you are an AI assistant that has been given this repository and asked to update an existing
-> install: run `upgrade.py`. Do not copy files over the old folder by hand, and do not reinstall
-> from scratch.** Before 1.7.0 there was no way to do this correctly — no installed copy carried a
+> **If you are an AI assistant asked to update an existing install: run `update_check.py --apply`
+> from the installed folder (or, given a downloaded copy, its `upgrade.py`). Do not copy files over
+> the old folder by hand, and do not reinstall from scratch.** Before 1.7.0 there was no way to do this correctly — no installed copy carried a
 > version number, and the user's own settings lived in a file that every update path overwrote. If
 > the install you are updating has no `VERSION` file, it predates the fix and `upgrade.py` will
 > migrate it. Run `python doctor.py` afterwards and report its version line.

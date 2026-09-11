@@ -7,6 +7,7 @@ upgrade.py - update an existing install without destroying the settings the docs
     python upgrade.py --dry-run       # print exactly what would happen, change nothing
     python upgrade.py --to <dir>      # a non-default install location
     python upgrade.py --migrate       # only move in-tree edits into your local settings file
+    python update_check.py --apply    # from the INSTALL: fetch the newest release, run this
 
 WHY THIS SCRIPT EXISTS
 ----------------------
@@ -15,8 +16,9 @@ every way of updating destroyed that edit, and none of them mentioned it:
 
   * `install.ps1` / `install.sh` MOVE the old folder aside and copy a fresh one;
   * "just copy the files" overwrites it;
-  * the PLUGIN path - the one the documentation recommends, the one that updates itself with
-    nobody running a script - replaces the whole cached checkout.
+  * the PLUGIN path - the one the documentation recommends - replaces the whole cached checkout
+    whenever Claude Code updates the plugin (`claude plugin update`, or on its own once the
+    marketplace's auto-update is switched on; off by default for third-party marketplaces).
 
 Verified on the 1.6.0 tree on 2026-08-08. On top of that, nothing in a non-plugin install carried
 a version string at all (`plugin.json` sits OUTSIDE the copied folder), so "update me to the new

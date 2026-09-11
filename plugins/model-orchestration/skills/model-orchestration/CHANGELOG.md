@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.62.0 — 2026-09-11
+
+R86: the kit now has its own update cycle — it notices a release, tells you and
+the assistant, and updates itself with one command. Until now nobody was told,
+on any install path, and the documentation said otherwise.
+
+* **What was measured (2026-09-11, claude 2.1.268, an isolated config against the
+  real GitHub marketplace).** Claude Code's plugin auto-update is *off by default
+  for third-party marketplaces* (its docs say so; a stale 1.60.0 plugin stayed
+  stale across four sessions and `-p --maintenance` until a manual `claude plugin
+  update`), and the CLI has no "newer available" signal. Script and manual
+  installs had no network check except `doctor.py` by hand: the
+  `--refresh-background` mode was documented as «spawned by orchestrate.py
+  preflight» and had zero callers, and 1.34.0's `--install-hook` switch from
+  `--check` to `--hook` had made the installed hook a no-op on those paths.
+  INSTALL.md, README.md, README.ru.md, TECHNICAL.md and `upgrade.py` all promised
+  an auto-update that did not happen. Every one of those lines is rewritten.
+
+* **Detect.** One `GET /tags` at most every 168 hours (stamp outside the tree,
+  ETag, 3 s timeout, backoff, `MODEL_ORCH_UPDATE_CHECK=0` / `NO_UPDATE_NOTIFIER` /
+  `CI` kill switches — all as before), now actually reached: at the end of every
+  real `orchestrate.py` round (never on `--dry-run`), from `doctor.py`, and from
+  the SessionStart hook, which used to be local-only. The notice quotes the
+  release notes (the release object by tag; the CHANGELOG at the tag's commit as
+  fallback) and names the one command below. `--refresh-background` is gone.
+
+* **Apply: `python update_check.py --apply`.** Resolves the newest tag (or
+  `--tag vX.Y.Z`), downloads the archive pinned to that tag's commit, refuses it
+  unless it holds one top-level folder, the skill subtree, every required file, a
+  `VERSION` equal to the tag and no path escaping the folder, then runs the
+  *incoming* release's `upgrade.py --from <extracted> --to <install>` — backup to
+  `<folder>.bak.<timestamp>`, settings carried into the overlay file, doctor at
+  the end. A Claude Code plugin install is updated through Claude Code itself
+  (`claude plugin marketplace update`, then `claude plugin update`, restart
+  afterwards); a git checkout and the development tree are refused with the
+  right command printed. `--dry-run` downloads, verifies and shows the full
+  upgrade report without changing anything. No signature: TLS plus the commit
+  pin, the same trust as `git clone` — SECURITY.md and INSTALL.md say so.
+
+* **Assistant.** `SKILL.md`, `AGENTS.md`, INSTALL.md and both READMEs now tell an
+  assistant asked to update the kit («обнови kit») to run that command and report
+  the version line. The hook's `additionalContext` carries the same command, so
+  the assistant knows it at session start without being told.
+
+* **Hook timeout 15 s** (`hooks.json` and `--install-hook`, which also replaces an
+  older entry with the old ceiling): the week the check is due pays two short
+  GETs; every other session start returns in well under a second.
+  `MODEL_ORCH_UPDATE_STAMP` overrides the stamp path (tests; probing another home).
+
+* **Selftest.** A new suite covers install-kind detection (dev / plugin cache /
+  git checkout / plain tree), archive verification (version mismatch, missing
+  file, zip-slip, two top-level folders), the notes fetch with its fallback, the
+  hook JSON, the end-of-round notice, a full `--apply` against a loopback HTTP
+  server with the real `upgrade.py`, the plugin-path dispatch in `--dry-run`, and
+  a prose check that no kit document promises an update that does not happen.
+
 ## 1.61.0 — 2026-09-11
 
 R85: the Claude Code CLI channel (`cclopus46`, kind `claudecli`) now launches

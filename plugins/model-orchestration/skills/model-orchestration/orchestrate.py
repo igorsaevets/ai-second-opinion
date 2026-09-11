@@ -7181,6 +7181,28 @@ def _write_vetted_snapshot(pairs, writes):
             fh.write(text)
 
 
+def _release_notice():
+    """R86: the kit's weekly release check, at the END of a real round and nowhere earlier.
+    --dry-run returned long before this is reached, so a preflight never touches the network.
+    The stamp (168 h), the ETag, the 3 s timeout and every kill switch live in update_check.py;
+    this only prints what it returns - a notice that names the version and the ONE command
+    that applies it. Never raises: a finished round must not turn into a crash over a
+    version check, and a machine without network must not notice this line exists."""
+    try:
+        import importlib.util as _ilu
+        p = os.path.join(SKILL_DIR, "update_check.py")
+        if not os.path.isfile(p):
+            return
+        spec = _ilu.spec_from_file_location("_update_check_for_notice", p)
+        uc = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(uc)
+        msg = uc.pending_notice()
+        if msg:
+            log("\n" + msg)
+    except Exception:                                    # noqa: BLE001 - see the docstring
+        pass
+
+
 def main():
     ap = argparse.ArgumentParser(description="Run one brief past several reviewer models at once.")
     ap.add_argument("--brief", help="path to the brief sent to every channel (or use --ask)")
@@ -8629,10 +8651,12 @@ def main():
             print("\n" + "-" * 78)
             print("%d channels answered. Where they DISAGREE is the signal - a lookup both of "
                   "them get right needed neither of them." % len(order))
+        _release_notice()
         return 0 if ok_count else 1
 
     log("Now report, per channel: accepted / rejected with proof / where they disagreed. "
         "The disagreement is the product.")
+    _release_notice()
     return 0 if ok_count else 1
 
 

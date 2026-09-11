@@ -4042,7 +4042,7 @@ def suite_r58_update_check():
     one-sided check can only fail towards too little safety, which is exactly why the R57
     over-reach shipped.
     """
-    section("R58. update_check: local-only hook, full doctor path, no phones-home surprises")
+    section("R58. update_check: stamp, backoff, the tags endpoint, the local delta")
     import importlib.util as _ilu
     spec = _ilu.spec_from_file_location("_uc58", os.path.join(HERE, "update_check.py"))
     uc = _ilu.module_from_spec(spec)
@@ -4097,9 +4097,8 @@ def suite_r58_update_check():
     for var in ("MODEL_ORCH_UPDATE_CHECK", "NO_UPDATE_NOTIFIER", "CI"):
         os.environ.pop(var, None)
     check(not uc.is_check_disabled(),
-          "no env vars set: check is enabled (the default is ON, which is why the LOCAL-only "
-          "hook design matters — the network path is opt-in via --install-hook only for "
-          "Method-2/3 users)")
+          "no env vars set: check is enabled (the default is ON: weekly, stamped, one GET; "
+          "the kill switches below are the opt-out)")
     os.environ["MODEL_ORCH_UPDATE_CHECK"] = "0"
     check(uc.is_check_disabled(), "our own env=0 disables")
     os.environ["MODEL_ORCH_UPDATE_CHECK"] = ""
@@ -6238,6 +6237,561 @@ def suite_r82_premium_bundle():
           "SKILL.md carries the premium pointer line")
 
 
+def suite_r86_self_update():
+    """R86. The kit's own update cycle: detect (weekly, stamped) -> notify (one command) ->
+    --apply (download pinned to the tag's commit, verify, hand to the incoming upgrade.py).
+
+    Two-sided where a property is safety-shaped (R57 rule). The apply path is exercised against
+    a REAL loopback HTTP server and the REAL upgrade.py, not a mock of our own code: the R70
+    lesson is that a transport bug hides behind a mock for weeks.
+    """
+    section("R86. update_check: install kinds, archive verification, notice, --apply end to end")
+    import contextlib
+    import http.server
+    import importlib.util as _ilu
+    import io
+    import json as _json
+    import threading
+    import types
+    import zipfile
+
+    spec = _ilu.spec_from_file_location("_uc86", os.path.join(HERE, "update_check.py"))
+    uc = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(uc)
+
+    d = tempfile.mkdtemp(prefix="uc86_")
+    saved = {k: getattr(uc, k) for k in (
+        "HERE", "STAMP_PATH", "UPDATES_DIR", "GITHUB_TAGS_URL", "GITHUB_RELEASE_URL",
+        "GITHUB_RAW_CHANGELOG_URL", "GITHUB_ARCHIVE_URL", "read_local_version",
+        "check_agy_stale", "install_kind", "do_local_delta", "do_check", "resolve_target",
+        "_apply_tree")}
+    saved_which, saved_run, saved_call = shutil.which, subprocess.run, subprocess.call
+    saved_cache_env = os.environ.get("MODEL_ORCH_PLUGIN_CACHE")
+    for var in ("MODEL_ORCH_UPDATE_CHECK", "NO_UPDATE_NOTIFIER", "CI"):
+        os.environ.pop(var, None)
+    try:
+        # ---- (a) install_kind: four kinds, decided by the path and two marker files --------
+        dev = os.path.join(d, "dev")
+        os.makedirs(dev)
+        open(os.path.join(dev, "package.py"), "w").close()
+        check(uc.install_kind(dev)[0] == "dev",
+              "a folder holding package.py is the DEV tree (releases are built from it)")
+        plug = os.path.join(d, "cfg", "plugins", "cache", "review-channels",
+                            "model-orchestration", "1.61.0", "skills", "model-orchestration")
+        os.makedirs(plug)
+        kind, info = uc.install_kind(plug)
+        check(kind == "plugin" and info["plugin_id"] == "model-orchestration@review-channels"
+              and os.path.normcase(info["config_dir"]) == os.path.normcase(os.path.join(d, "cfg")),
+              "a path under <config>/plugins/cache/<mkt>/<plugin>/<ver>/ is a PLUGIN install, "
+              "with the id and the config dir read from the path", repr(info))
+        gitc = os.path.join(d, "clone", "plugins", "model-orchestration", "skills",
+                            "model-orchestration")
+        os.makedirs(gitc)
+        os.makedirs(os.path.join(d, "clone", ".git"))
+        kind, info = uc.install_kind(gitc)
+        check(kind == "git" and os.path.normcase(info["root"]) == os.path.normcase(
+            os.path.join(d, "clone")),
+              "a .git folder up the tree makes it a GIT checkout, root named")
+        plain = os.path.join(d, "inst")
+        os.makedirs(plain)
+        check(uc.install_kind(plain)[0] == "tree",
+              "a plain folder is a TREE install - the control: none of the three markers")
+
+        # ---- (b) the CHANGELOG slicer accepts both header shapes and caps ----------------
+        cl = ("# Changelog\n\n## 9.9.9 — 2099-01-01\n\nthe future\n\n* one\n* two\n\n"
+              "## [1.3.1] — 2026-08-07\n\nold bracket form\n\n## 1.0.0 — 2026-01-01\n\nfirst\n")
+        check(uc._changelog_section(cl, "v9.9.9").startswith("the future")
+              and "old bracket" not in uc._changelog_section(cl, "9.9.9"),
+              "the section for the requested version, header stripped, stops at the next header")
+        check(uc._changelog_section(cl, "1.3.1") == "old bracket form",
+              "the early '## [x.y.z]' header shape is recognised too")
+        check(uc._changelog_section(cl, "2.0.0") == "",
+              "an unknown version yields '' (the notice then names the version and command only)")
+        many = "## 1.0.0 — d\n\n" + "\n".join("line %d" % i for i in range(40))
+        check(uc._changelog_section(many, "1.0.0").count("\n") <= 15,
+              "the excerpt is capped (15 non-blank lines) - the 10 KB systemMessage limit")
+
+        # ---- (c) a loopback GitHub: tags, release-by-tag, raw CHANGELOG, the archive --------
+        src_real = HERE
+
+        def _fake_release_zip(version="9.9.9", top="repo-abc", skip=(), slip=False):
+            buf = io.BytesIO()
+            base = "%s/%s/" % (top, uc.SKILL_SUBTREE)
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                files = {
+                    "VERSION": version + "\n",
+                    "SKILL.md": "# stub\n",
+                    "orchestrate.py": "print('stub')\n",
+                    "doctor.py": "print('stub doctor')\n",
+                    "CHANGELOG.md": cl,
+                    "systems/base-depth.md": "stub preset\n",
+                }
+                for name in ("routing.py", "channels.json", "upgrade.py", "update_check.py"):
+                    files[name] = open(os.path.join(src_real, name), encoding="utf-8").read()
+                for name, text in files.items():
+                    if name in skip:
+                        continue
+                    z.writestr(base + name, text)
+                if slip:
+                    z.writestr(base + "../evil.txt", "escaped\n")
+            return buf.getvalue()
+
+        hits = {"tags": 0, "release": 0, "raw": 0, "archive": 0}
+        state = {"zip": _fake_release_zip(), "release_404": False, "raw_404": False}
+
+        class _GH(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _send(self, code, body, ctype="application/json"):
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("ETag", 'W/"etag-1"')
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                p = self.path
+                if p.startswith("/tags"):
+                    hits["tags"] += 1
+                    if self.headers.get("If-None-Match") == 'W/"etag-1"':
+                        self._send(304, b"")
+                        return
+                    self._send(200, _json.dumps([
+                        {"name": "v1.0.0", "commit": {"sha": "old0"}},
+                        {"name": "not-a-tag", "commit": {"sha": "x"}},
+                        {"name": "v9.9.9", "commit": {"sha": "abc123def456"}},
+                        {"name": "v9.9.8", "commit": {"sha": "abc123def455"}},
+                    ]).encode())
+                elif p.startswith("/releases/tags/"):
+                    hits["release"] += 1
+                    if state["release_404"]:
+                        self._send(404, b"{}")
+                    else:
+                        self._send(200, _json.dumps({"body": cl}).encode())
+                elif p.startswith("/raw/"):
+                    hits["raw"] += 1
+                    if state["raw_404"]:
+                        self._send(404, b"nope", "text/plain")
+                    else:
+                        self._send(200, cl.encode(), "text/plain")
+                elif p.startswith("/archive/"):
+                    hits["archive"] += 1
+                    self._send(200, state["zip"], "application/zip")
+                else:
+                    self._send(404, b"?", "text/plain")
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), _GH)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        base = "http://127.0.0.1:%d" % srv.server_address[1]
+        uc.GITHUB_TAGS_URL = base + "/tags?per_page=100"
+        uc.GITHUB_RELEASE_URL = base + "/releases/tags/%s"
+        uc.GITHUB_RAW_CHANGELOG_URL = base + "/raw/%s/CHANGELOG.md"
+        uc.GITHUB_ARCHIVE_URL = base + "/archive/%s.zip"
+        uc.STAMP_PATH = os.path.join(d, "stamp.json")
+        uc.UPDATES_DIR = os.path.join(d, "updates")
+        os.environ["MODEL_ORCH_PLUGIN_CACHE"] = os.path.join(d, "no-cache")
+
+        try:
+            # ---- (d) release notes: the release object first, the raw CHANGELOG as fallback
+            notes = uc.fetch_release_notes("v9.9.9", "abc123def456")
+            check(notes.startswith("the future") and hits["release"] == 1 and hits["raw"] == 0,
+                  "notes come from the release object by tag (small); the raw CHANGELOG is not "
+                  "fetched when it answers", repr((hits, notes[:30])))
+            state["release_404"] = True
+            notes = uc.fetch_release_notes("v9.9.9", "abc123def456")
+            check(notes.startswith("the future") and hits["raw"] == 1,
+                  "with no release object the CHANGELOG at the tag's commit is read instead")
+            state["raw_404"] = True
+            check(uc.fetch_release_notes("v9.9.9", "abc123def456") == "",
+                  "both missing -> '' and no exception (the notice still names the version)")
+            state["release_404"] = state["raw_404"] = False
+
+            # ---- (e) do_check: newer tag -> a notice naming the ONE command, cached for a week
+            inst = os.path.join(d, "inst")
+            uc.HERE = inst
+            uc.read_local_version = lambda: "1.0.0"
+            uc.check_agy_stale = lambda: False
+            hits["tags"] = 0
+            action, payload = uc.do_check()
+            msg = (payload or {}).get("message") or ""
+            check(action == "update" and "update available: 1.0.0 -> 9.9.9" in msg,
+                  "a newer tag yields action=update naming both versions (no 'v' on either side)",
+                  repr((action, msg[:80])))
+            check("--apply" in msg and 'update_check.py" --apply' in msg,
+                  "the notice names the ONE command that applies the update, with the absolute path")
+            check("the future" in msg, "the notice quotes the release notes")
+            stamp = uc.read_stamp()
+            check(stamp.get("tags_latest_sha") == "abc123def456"
+                  and stamp.get("latest_notes_for") == "v9.9.9",
+                  "the stamp keeps the tag's commit (for --apply) and the notes (for the week)")
+            before = dict(hits)
+            action2, payload2 = uc.do_check()
+            check(action2 == "cached" and (payload2 or {}).get("pending_message") == msg
+                  and hits == before,
+                  "within the week the SAME notice is served from the stamp - zero requests",
+                  repr((action2, {k: hits[k] - before[k] for k in hits})))
+            check(uc.pending_notice() == msg,
+                  "pending_notice() (what orchestrate.py prints at the end of a real round) "
+                  "returns that notice")
+            uc.read_local_version = lambda: "9.9.9"
+            action3, _p3 = uc.do_check()
+            check(action3 == "up-to-date" and uc.pending_notice() is None,
+                  "after the update the check re-runs (version changed) and says up-to-date; "
+                  "pending_notice() is None - the control that can fail", repr(action3))
+            uc.read_local_version = lambda: "1.0.0"
+
+            # ---- (f) the hook JSON carries the notice in BOTH fields; silent when nothing ---
+            real_dc, real_dl = uc.do_check, uc.do_local_delta
+            uc.do_local_delta = lambda: ("no-change", None)
+            uc.do_check = lambda force=False: ("cached", {"pending_message": "NOTICE-86"})
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = uc.cmd_hook(None)
+            out = buf.getvalue()
+            try:
+                j = _json.loads(out)
+            except ValueError:
+                j = {}
+            check(rc == 0 and j.get("systemMessage") == "NOTICE-86"
+                  and (j.get("hookSpecificOutput") or {}).get("additionalContext") == "NOTICE-86"
+                  and (j.get("hookSpecificOutput") or {}).get("hookEventName") == "SessionStart",
+                  "--hook emits the notice as systemMessage AND additionalContext (SessionStart)",
+                  out[:120])
+            uc.do_check = lambda force=False: ("fresh", {})
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = uc.cmd_hook(None)
+            check(rc == 0 and buf.getvalue() == "",
+                  "nothing pending -> the hook prints NOTHING (an empty JSON would still be noise)")
+            uc.do_local_delta = lambda: ("local-update", "DELTA-86")
+            uc.do_check = lambda force=False: ("cached", {"pending_message": "NOTICE-86"})
+            check(uc.hook_message() == "DELTA-86\n\nNOTICE-86",
+                  "both parts present -> local delta first, then the release notice")
+
+            def _boom(force=False):
+                raise RuntimeError("stamp corrupt")
+            uc.do_check = _boom
+            check(uc.pending_notice() is None,
+                  "pending_notice() never raises - a version check must not crash a finished round")
+            uc.do_check, uc.do_local_delta = real_dc, real_dl
+
+            # ---- (g) archive verification, each refusal separately ---------------------------
+            def _write_zip(data):
+                p = os.path.join(d, "rel.zip")
+                with open(p, "wb") as f:
+                    f.write(data)
+                return p
+
+            ex = os.path.join(d, "extracted")
+            n = uc.extract_skill_subtree(_write_zip(_fake_release_zip()), ex, "v9.9.9")
+            check(n >= len(uc.REQUIRED_SHIPPED_FILES)
+                  and open(os.path.join(ex, "VERSION")).read().strip() == "9.9.9"
+                  and os.path.isfile(os.path.join(ex, "systems", "base-depth.md")),
+                  "a clean release archive extracts ONLY the skill subtree, flattened, with "
+                  "subfolders", repr(n))
+            for label, kw, needle in (
+                    ("VERSION inside != tag", {"version": "9.9.8"}, "VERSION says 9.9.8"),
+                    ("a required file missing", {"skip": ("routing.py",)}, "routing.py"),
+                    ("a member escaping the folder (zip-slip)", {"slip": True}, "not a plain")):
+                try:
+                    uc.extract_skill_subtree(_write_zip(_fake_release_zip(**kw)), ex, "v9.9.9")
+                    got = "accepted"
+                except uc.VerifyError as exc:
+                    got = str(exc)
+                check(got != "accepted" and needle in got,
+                      "REFUSED: %s" % label, got[:100])
+            buf2 = io.BytesIO()
+            with zipfile.ZipFile(buf2, "w") as z:
+                z.writestr("a/x.txt", "1")
+                z.writestr("b/y.txt", "2")
+            try:
+                uc.extract_skill_subtree(_write_zip(buf2.getvalue()), ex, "v9.9.9")
+                got = "accepted"
+            except uc.VerifyError as exc:
+                got = str(exc)
+            check("one top-level" in got, "REFUSED: two top-level folders", got[:80])
+
+            # ---- (h) --apply on a TREE install, end to end: loopback download, real upgrade.py
+            inst = os.path.join(d, "inst")
+            for name in ("channels.json", "routing.py", "upgrade.py", "update_check.py"):
+                shutil.copy2(os.path.join(src_real, name), os.path.join(inst, name))
+            with open(os.path.join(inst, "VERSION"), "w") as f:
+                f.write("1.0.0\n")
+            uc.HERE = inst
+            uc.read_local_version = saved["read_local_version"]  # the real reader, on uc.HERE
+            calls = []
+
+            def _quiet_call(cmd, **kw):
+                calls.append(list(cmd))
+                return saved_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+            subprocess.call = _quiet_call
+            args = types.SimpleNamespace(dry_run=True, no_doctor=True, carry_all=False,
+                                         tag=None, force=False)
+            hits["archive"] = 0
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = uc._apply_tree("v9.9.9", "abc123def456", args, "1.0.0")
+            check(rc == 0 and hits["archive"] == 1
+                  and open(os.path.join(inst, "VERSION")).read().strip() == "1.0.0"
+                  and not os.path.exists(os.path.join(d, "updates", "9.9.9"))
+                  and calls and "--dry-run" in calls[-1] and "--no-doctor" in calls[-1]
+                  and calls[-1][1].endswith(os.path.join("9.9.9", "src", "upgrade.py"))
+                  and calls[-1][calls[-1].index("--to") + 1] == inst,
+                  "--apply --dry-run: downloads, verifies, runs the INCOMING upgrade.py with "
+                  "--dry-run --no-doctor --to <install>, changes nothing, cleans up",
+                  repr((rc, hits["archive"], calls[-1:] and calls[-1][1:])))
+            args.dry_run = False
+            hits["archive"] = 0
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = uc._apply_tree("v9.9.9", "abc123def456", args, "1.0.0")
+            out = buf.getvalue()
+            baks = [x for x in os.listdir(d) if x.startswith("inst.bak.")]
+            check(rc == 0 and open(os.path.join(inst, "VERSION")).read().strip() == "9.9.9"
+                  and os.path.isfile(os.path.join(inst, "systems", "base-depth.md")),
+                  "--apply: the install now IS the release (VERSION 9.9.9, new files present)",
+                  repr((rc, out[-200:])))
+            check(len(baks) == 1 and open(os.path.join(d, baks[0], "VERSION")).read().strip()
+                  == "1.0.0",
+                  "the previous folder was backed up as <install>.bak.<timestamp> with its VERSION")
+            check("updated: 1.0.0 -> 9.9.9" in out and "the future" in out,
+                  "the report names old -> new and quotes the new CHANGELOG section")
+            st = uc.read_stamp()
+            check(st.get("installed_version") == "9.9.9" and not st.get("pending_message"),
+                  "the stamp is advanced so the next session does not re-announce what you just saw")
+            check(not os.path.exists(os.path.join(d, "updates", "9.9.9"))
+                  and not os.path.exists(os.path.join(d, "updates", "9.9.9.zip")),
+                  "download and extraction are removed after success (the backup is the rollback)")
+            # The negative: an archive whose VERSION disagrees with the tag never reaches upgrade.py
+            state["zip"] = _fake_release_zip(version="9.9.8")
+            with open(os.path.join(inst, "VERSION"), "w") as f:
+                f.write("1.0.0\n")
+            ncalls = len(calls)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = uc._apply_tree("v9.9.9", "abc123def456", args, "1.0.0")
+            check(rc == 1 and len(calls) == ncalls
+                  and open(os.path.join(inst, "VERSION")).read().strip() == "1.0.0"
+                  and "REFUSING" in buf.getvalue()
+                  and os.path.isfile(os.path.join(d, "updates", "9.9.9.zip")),
+                  "a bad archive is REFUSED before upgrade.py runs; the install is untouched and "
+                  "the download is kept for inspection", buf.getvalue()[-160:])
+            state["zip"] = _fake_release_zip()
+            subprocess.call = saved_call
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+        # ---- (i) cmd_apply refuses the dev tree and a git checkout WITHOUT any network -------
+        def _no_net(tag=None, timeout=None):
+            raise AssertionError("resolve_target must not be called")
+        uc.resolve_target = _no_net
+        uc.read_local_version = lambda: None
+        for kind in ("dev", "git"):
+            uc.install_kind = (lambda k: (lambda here=None: (k, {"root": d})))(kind)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = uc.cmd_apply(types.SimpleNamespace(tag=None, force=False, dry_run=False,
+                                                        no_doctor=False, carry_all=False))
+            check(rc == 2 and ("Nothing done" in buf.getvalue()),
+                  "cmd_apply on a %s install: refused, exit 2, no request made" % kind,
+                  buf.getvalue()[-120:])
+        uc.install_kind = lambda here=None: ("tree", {"root": d})
+        uc.read_local_version = lambda: "9.9.9"
+        uc.resolve_target = lambda tag=None, timeout=None: (
+            ("v9.9.9", "abc", None) if not tag else ("v9.9.8", "abd", None))
+        uc._apply_tree = lambda *a, **k: (_ for _ in ()).throw(AssertionError("not here"))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = uc.cmd_apply(types.SimpleNamespace(tag=None, force=False, dry_run=False,
+                                                    no_doctor=False, carry_all=False))
+        check(rc == 0 and "up to date" in buf.getvalue(),
+              "already on the newest release: exit 0, nothing downloaded")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = uc.cmd_apply(types.SimpleNamespace(tag="v9.9.8", force=False, dry_run=False,
+                                                    no_doctor=False, carry_all=False))
+        check(rc == 2 and "--force" in buf.getvalue(),
+              "--tag older than the install is refused without --force (exit 2)")
+        uc._apply_tree = lambda *a, **k: 0
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = uc.cmd_apply(types.SimpleNamespace(tag="v9.9.8", force=True, dry_run=False,
+                                                    no_doctor=False, carry_all=False))
+        check(rc == 0, "--tag older WITH --force goes through (upgrade.py names the downgrade)")
+
+        # ---- (j) the plugin path is dispatched to Claude Code's own CLI --------------------
+        runs = []
+
+        def _fake_run(cmd, **kw):
+            runs.append(list(cmd))
+            return types.SimpleNamespace(returncode=0, stdout=(
+                '✔ Plugin "model-orchestration" updated from 1.60.0 to 1.61.0 for scope user. '
+                'Restart to apply changes.'), stderr="")
+        info = {"config_dir": d, "marketplace": "review-channels", "plugin": "model-orchestration",
+                "version_dir": "1.60.0", "plugin_id": "model-orchestration@review-channels"}
+        shutil.which = lambda name: None
+        subprocess.run = lambda *a, **k: (_ for _ in ()).throw(AssertionError("ran"))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = uc._apply_plugin(info, "v1.61.0", types.SimpleNamespace(dry_run=True))
+        check(rc == 0 and "plugin marketplace update review-channels" in buf.getvalue()
+              and "plugin update model-orchestration@review-channels" in buf.getvalue(),
+              "plugin install --dry-run prints both Claude Code commands and runs nothing")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = uc._apply_plugin(info, "v1.61.0", types.SimpleNamespace(dry_run=False))
+        check(rc == 1 and "/plugin update model-orchestration@review-channels" in buf.getvalue(),
+              "no `claude` on PATH: exit 1 with the in-Claude-Code slash command spelled out")
+        shutil.which = lambda name: os.path.join(d, "claude.cmd")
+        subprocess.run = _fake_run
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = uc._apply_plugin(info, "v1.61.0", types.SimpleNamespace(dry_run=False))
+        check(rc == 0 and len(runs) == 2
+              and runs[0][1:] == ["plugin", "marketplace", "update", "review-channels"]
+              and runs[1][1:] == ["plugin", "update", "model-orchestration@review-channels"]
+              and "was updated through Claude Code" in buf.getvalue(),
+              "plugin install: marketplace refresh THEN plugin update, in that order, with the "
+              "plugin id from the path; 'updated from' in the CLI output is read as success",
+              repr(runs))
+        shutil.which, subprocess.run = saved_which, saved_run
+
+        # ---- (k) --install-hook writes the new ceiling and replaces an older entry ----------
+        home = os.path.join(d, "home")
+        os.makedirs(os.path.join(home, ".claude"))
+        real_sp = uc._settings_path
+        uc._settings_path = lambda: os.path.join(home, ".claude", "settings.json")
+        try:
+            my_path = os.path.abspath(uc.__file__)
+            old = {"hooks": {"SessionStart": [{"matcher": "startup", "hooks": [
+                {"type": "command", "command": 'python "%s" --hook' % my_path, "timeout": 5},
+                {"type": "command", "command": "echo other-tool"}]}]}}
+            with open(uc._settings_path(), "w", encoding="utf-8") as f:
+                _json.dump(old, f)
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = uc.cmd_install_hook(None)
+            data = _json.load(open(uc._settings_path(), encoding="utf-8"))
+            mine = [h for e in data["hooks"]["SessionStart"] for h in e["hooks"]
+                    if my_path in h.get("command", "")]
+            others = [h for e in data["hooks"]["SessionStart"] for h in e["hooks"]
+                      if h.get("command") == "echo other-tool"]
+            check(rc == 0 and len(mine) == 1 and mine[0]["timeout"] == uc.HOOK_TIMEOUT_SECONDS
+                  and mine[0]["command"].endswith("--hook") and len(others) == 1,
+                  "--install-hook replaces an entry with the old 5 s ceiling by one with %d s, "
+                  "keeps the co-tenant, and never leaves two of ours" % uc.HOOK_TIMEOUT_SECONDS,
+                  repr(mine))
+            before = open(uc._settings_path(), encoding="utf-8").read()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = uc.cmd_install_hook(None)
+            check(rc == 0 and "already installed" in buf.getvalue()
+                  and open(uc._settings_path(), encoding="utf-8").read() == before,
+                  "running it again is a no-op that says so (the control)")
+        finally:
+            uc._settings_path = real_sp
+
+        # ---- (l) the shipped hook entry and the end-of-round wiring are what the docs say ---
+        hooks_candidates = [os.path.join(HERE, "kit", "plugin-hooks.json"),
+                            os.path.join(HERE, "..", "..", "hooks", "hooks.json")]
+        hj = next((p for p in hooks_candidates if os.path.isfile(p)), None)
+        if hj:
+            hooks = _json.load(open(hj, encoding="utf-8"))
+            ss = hooks["hooks"]["SessionStart"][0]["hooks"][0]
+            check(ss.get("command") == "python" and ss.get("args", [])[-1:] == ["--hook"]
+                  and ss.get("timeout") == uc.HOOK_TIMEOUT_SECONDS,
+                  "the plugin's SessionStart hook runs update_check.py --hook (exec form) with "
+                  "the %d s ceiling the weekly check needs" % uc.HOOK_TIMEOUT_SECONDS, repr(ss))
+        else:
+            check(False, "a hooks.json to inspect", "none of %r" % hooks_candidates)
+        osrc = open(os.path.join(HERE, "orchestrate.py"), encoding="utf-8").read()
+        first_call = osrc.find("    _release_notice()\n")
+        dry_ret = osrc.find("    if a.dry_run:\n")
+        check(osrc.count("_release_notice()") >= 2 and "def _release_notice():" in osrc
+              and 0 < dry_ret < first_call,
+              "orchestrate.py calls _release_notice() at BOTH ends of main() (ask mode and the "
+              "round), after the --dry-run return - a preflight never touches the network",
+              repr((osrc.count("_release_notice()"), dry_ret, first_call)))
+        # The structural check above proved the CALL exists; this proves the function WORKS.
+        # (ruff caught the first version using an undefined name inside its own try/except -
+        # a notice that would never have printed while every structural check stayed green.)
+        import orchestrate as _o
+        nd = os.path.join(d, "notice-tree")
+        os.makedirs(nd)
+        shutil.copy2(os.path.join(HERE, "update_check.py"), os.path.join(nd, "update_check.py"))
+        with open(os.path.join(nd, "VERSION"), "w") as f:
+            f.write("1.0.0\n")
+        stamp_p = os.path.join(d, "notice-stamp.json")
+        with open(stamp_p, "w", encoding="utf-8") as f:
+            _json.dump({"installed_version": "1.0.0", "last_check_utc": uc._iso_now(),
+                        "consecutive_failures": 0,
+                        "pending_message": "NOTICE-END-OF-ROUND-86"}, f)
+        saved_sd = _o.SKILL_DIR
+        saved_stamp_env = os.environ.get("MODEL_ORCH_UPDATE_STAMP")
+        try:
+            _o.SKILL_DIR = nd
+            os.environ["MODEL_ORCH_UPDATE_STAMP"] = stamp_p
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                _o._release_notice()
+            check("NOTICE-END-OF-ROUND-86" in buf.getvalue(),
+                  "orchestrate._release_notice() really prints the pending notice through log() "
+                  "(a fresh stamp with a pending message for the installed version)",
+                  buf.getvalue()[-160:])
+            os.environ["MODEL_ORCH_UPDATE_CHECK"] = "0"
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                _o._release_notice()
+            check("NOTICE-END-OF-ROUND-86" not in buf.getvalue() and buf.getvalue() == "",
+                  "with the kill switch set the end-of-round notice prints nothing (the control)")
+        finally:
+            _o.SKILL_DIR = saved_sd
+            os.environ.pop("MODEL_ORCH_UPDATE_CHECK", None)
+            if saved_stamp_env is None:
+                os.environ.pop("MODEL_ORCH_UPDATE_STAMP", None)
+            else:
+                os.environ["MODEL_ORCH_UPDATE_STAMP"] = saved_stamp_env
+        check("refresh-background" not in open(os.path.join(HERE, "update_check.py"),
+                                               encoding="utf-8").read().replace(
+                                                   "`--refresh-background` mode that used", ""),
+              "the never-called --refresh-background mode is gone (its docstring lied about a "
+              "caller)")
+
+        # ---- (m) no kit document promises an update that does not happen ------------------
+        roots = [os.path.join(HERE, "kit"), os.path.normpath(os.path.join(HERE, "..", "..", "..", ".."))]
+        stale = ("auto-updates)", "updates itself", "arrive on their own", "обновляется сам",
+                 "nothing phones home", "no phone-home", "updates itself with nobody")
+        seen, bad = [], []
+        for name in ("INSTALL.md", "README.md", "README.ru.md", "TECHNICAL.md", "SECURITY.md",
+                     "PRIVACY.md", "AGENTS.md"):
+            p = next((os.path.join(r, name) for r in roots if os.path.isfile(os.path.join(r, name))),
+                     None)
+            if not p:
+                continue
+            seen.append(name)
+            text = open(p, encoding="utf-8").read()
+            for s in stale:
+                if s in text:
+                    bad.append("%s: %r" % (name, s))
+            if name in ("INSTALL.md", "README.md", "README.ru.md", "AGENTS.md") \
+                    and "update_check.py --apply" not in text:
+                bad.append("%s: does not name update_check.py --apply" % name)
+        check("README.md" in seen and not bad,
+              "every kit document present (%s) names the one update command and none promises "
+              "an auto-update that does not happen" % ", ".join(seen), "; ".join(bad)[:300])
+    finally:
+        for k, v in saved.items():
+            setattr(uc, k, v)
+        shutil.which, subprocess.run, subprocess.call = saved_which, saved_run, saved_call
+        if saved_cache_env is None:
+            os.environ.pop("MODEL_ORCH_PLUGIN_CACHE", None)
+        else:
+            os.environ["MODEL_ORCH_PLUGIN_CACHE"] = saved_cache_env
+        shutil.rmtree(d, ignore_errors=True)
+
+
 # =================================================================================================
 def main():
     global _quiet
@@ -6284,7 +6838,8 @@ def main():
                   suite_r78_agents_md,
                   suite_r80_agy_result_detection,
                   suite_r82_premium_bundle,
-                  suite_r85_claudecli_permissions):
+                  suite_r85_claudecli_permissions,
+                  suite_r86_self_update):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure

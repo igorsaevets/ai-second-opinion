@@ -40,6 +40,7 @@ doctor.py                 "is this machine set up?"      - probes, never asserts
 selftest.py               "does the code still behave?"  - behavioural checks; prints its own count
 citecheck.py              citation grounding and existence checks
 upgrade.py                install/update in one path; migrates settings out of the tree
+update_check.py           the update cycle: weekly release check, the notice, `--apply` self-update
 patch_agy_permissions.py  mandatory post-install step for the agy channel
 echocheck.py              proves a depth knob from the counter the vendor returns
 VERSION                   the release this tree is; generated at build time
@@ -267,7 +268,8 @@ next and would find the real key.
 Until 1.7.0 the documented way to enable a channel was to edit `channels.json` — a file inside the
 folder that every update replaces. All four install methods destroyed that edit, and none of them
 mentioned it. The plugin path was the worst of them precisely because it is the one recommended:
-it updates itself, so the loss happened with nobody running a command.
+Claude Code replaces the whole folder when it updates the plugin, so the loss happened with nobody
+running a command.
 
 The fix is not a merge algorithm. It is a location — with one honest exception, below:
 
@@ -364,8 +366,9 @@ told anyone to change, and says so rather than pretending to know.
 ### 🔴 The exception: the hop INTO 1.7.0, on a path that never runs the script
 
 The guarantee above is about updates *from* 1.7.0. The one-time migration still needs something to
-run, and the recommended install path — the marketplace plugin — updates itself with nobody running
-anything. A reviewer of this release put it plainly: it "makes future updates correct only after
+run, and on the recommended install path — the marketplace plugin — Claude Code replaces the folder
+with nobody running anything (on `claude plugin update`, or by itself where the marketplace's
+auto-update is switched on). A reviewer of this release put it plainly: it "makes future updates correct only after
 the state has already been relocated", and `upgrade.py` "cannot rescue a path that never invoked
 it."
 
@@ -377,6 +380,24 @@ machine). So `upgrade.py` scans that cache for an older copy of this plugin, com
 flags with the incoming release, and offers to carry the difference into the overlay. It is
 best-effort by construction and silent when it finds nothing — a rescue that crashes is worse than
 one that misses.
+
+### How an install learns about a release, and updates (1.62.0)
+
+Measured 2026-09-11 (claude 2.1.268, an isolated `CLAUDE_CONFIG_DIR` against the real GitHub
+marketplace): Claude Code's own plugin auto-update is **off by default for third-party
+marketplaces** — a stale plugin stayed stale across four sessions and `-p --maintenance` until
+`claude plugin update` was run — and the CLI has no "newer available" signal (`claude plugin list
+--available` prints an empty list). Script and manual installs had no network check at all except
+`doctor.py` by hand. So the kit carries its own cycle, in `update_check.py`:
+
+| step | how |
+|---|---|
+| detect | `GET api.github.com/repos/igorsaevets/ai-second-opinion/tags` at most every 168 h (stamp outside the tree, ETag, 3 s timeout, backoff 1→16 h, kill switches `MODEL_ORCH_UPDATE_CHECK=0` / `NO_UPDATE_NOTIFIER` / `CI`); highest version tuple wins, never `/releases/latest` |
+| notify | at session start (the plugin's `SessionStart` hook, or the same entry `--install-hook` writes for other installs) and at the end of a real `orchestrate.py` round — never on `--dry-run`. The notice quotes the release notes (the release object by tag, else the CHANGELOG at the tag's commit) and names **one command** |
+| apply | `update_check.py --apply`: the archive at `github.com/igorsaevets/ai-second-opinion/archive/<commit>.zip`, pinned to the commit the tags API named; refused unless it has one top-level folder, the skill subtree, every required file, `VERSION` == tag, no path escaping the folder, no symlink; then the **incoming** release's `upgrade.py --from <extracted> --to <install>` (backup, settings carried, doctor). A plugin install runs `claude plugin marketplace update` + `claude plugin update` instead; a git checkout and the development tree are refused with the right command printed |
+
+No signature is checked — the trust is TLS to github.com plus the commit pin, the same as `git
+clone`. `--show-what-would-be-sent` prints every request; the User-Agent carries no version.
 
 ---
 

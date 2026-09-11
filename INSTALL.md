@@ -3,15 +3,20 @@
 Four ways in. They produce the same working tool — pick by how much machinery you want between
 you and the files.
 
-| # | Method | Needs | Auto-updates | Best for |
+| # | Method | Needs | Updating | Best for |
 |---|---|---|---|---|
-| 1 | Claude Code plugin | Claude Code, git access | **yes** | most people |
-| 2 | Installer script | PowerShell or bash | no | no plugin system, or an offline zip |
-| 3 | **Manual copy** | nothing at all | no | locked-down machines, air-gapped, "just give me the files" |
-| 4 | Run in place | nothing | n/a | trying it once without installing |
+| 1 | Claude Code plugin | Claude Code, git access | one command (`update_check.py --apply`), or Claude Code's own auto-update once you switch it on | most people |
+| 2 | Installer script | PowerShell or bash | one command | no plugin system, or an offline zip |
+| 3 | **Manual copy** | nothing at all | one command | locked-down machines, air-gapped, "just give me the files" |
+| 4 | Run in place | nothing | `git pull` | trying it once without installing |
 
 Everything is plain Python using only the standard library. **There is nothing to `pip install`,
-nothing is compiled, nothing runs in the background, and nothing phones home.**
+nothing is compiled and nothing runs in the background.** The one thing the kit sends on its own
+is a version check against `api.github.com`, at most once a week, after a real round or at session
+start — so you learn about a release, and the notice names the one command that installs it.
+`python update_check.py --show-what-would-be-sent` prints that request verbatim;
+`MODEL_ORCH_UPDATE_CHECK=0` switches it off. Everything else leaves your machine only when you run
+a review, to the channels you chose.
 
 ---
 
@@ -38,9 +43,21 @@ This repository is itself a plugin marketplace. In Claude Code:
 
 Then restart the session, or run `/reload-plugins`.
 
-Updates arrive on their own: Claude Code checks the marketplace after a session starts and offers
-to reload when there is a new version. A **private** repository works exactly the same way — you
-only need normal git access to it.
+**Updates.** Once a week the kit checks GitHub and, when a release is out, tells you at session start
+(you and the assistant both see it) with the one command that installs it:
+
+```
+python <plugin folder>/update_check.py --apply
+```
+
+On this install path that command runs `claude plugin update model-orchestration@review-channels`
+for you — the same thing as typing `/plugin update model-orchestration@review-channels` inside
+Claude Code — and asks you to restart the session. Claude Code can also update the plugin by itself,
+but **for a third-party marketplace like this one its auto-update is off by default** (measured
+2026-09-11 on claude 2.1.268: a stale install stayed stale until `plugin update` was run). To switch
+it on: `/plugin` → Marketplaces → `review-channels` → **Enable auto-update**. `DISABLE_AUTOUPDATER=1`
+in your environment also disables plugin auto-updates unless `FORCE_AUTOUPDATE_PLUGINS=1` is set.
+A **private** repository works exactly the same way — you only need normal git access to it.
 
 ### Rolling it out to a team
 
@@ -51,7 +68,8 @@ plugin automatically:
 {
   "extraKnownMarketplaces": {
     "review-channels": {
-      "source": { "source": "github", "repo": "igorsaevets/ai-second-opinion" }
+      "source": { "source": "github", "repo": "igorsaevets/ai-second-opinion" },
+      "autoUpdate": true
     }
   },
   "enabledPlugins": ["model-orchestration@review-channels"]
@@ -152,17 +170,40 @@ plain language.
 
 ## Updating an existing install
 
+One command, run from the copy you have. It looks up the newest release on GitHub, downloads the
+archive pinned to that release's commit, verifies it, backs up your folder, carries your settings
+across and runs the doctor:
+
+```
+python ~/.claude/skills/model-orchestration/update_check.py --apply            # --dry-run to preview
+```
+
+(Windows: `%USERPROFILE%\.claude\skills\model-orchestration\update_check.py`.) You do not have to
+remember it: once a week the kit checks for a release — at session start and after a real round —
+and prints exactly that command when there is one. `--dry-run` downloads and verifies, then shows
+the full upgrade report without changing anything; `--tag v1.62.0` picks a specific release. For a
+plugin install the same command goes through `claude plugin update` (restart the session after);
+for a git checkout it prints the `git pull` instead of overwriting anything.
+
+What it trusts, stated plainly: the archive comes over TLS from github.com, pinned to the commit the
+GitHub API named for the tag, and is refused unless it holds one top-level folder, the skill
+subtree, every required file, a `VERSION` equal to the tag, and no path that escapes the folder.
+There is no signature — the same trust as `git clone`.
+
+The manual way still works: download the new version (git pull, or the **Code → Download ZIP**
+button) and run *its* `upgrade.py` from the unpacked folder:
+
 ```
 python plugins/model-orchestration/skills/model-orchestration/upgrade.py --dry-run   # preview
 python plugins/model-orchestration/skills/model-orchestration/upgrade.py             # apply
 ```
 
-Download the new version (git pull, or the **Code → Download ZIP** button), then run that from the
-unpacked folder. It reports the version you had and the version you are getting, which channels
-are new and which are gone, and which of your settings it carried across; it copies the old folder
-to `<folder>.bak.<timestamp>` before writing anything, and finishes by running the doctor.
+Either way the report names the version you had and the version you are getting, which channels
+are new and which are gone, and which of your settings it carried across; the old folder is copied
+to `<folder>.bak.<timestamp>` before anything is written, and the doctor runs at the end.
 
-Plugin installs update themselves and need none of this **from 1.7.0 onward**.
+A plugin install that Claude Code updates by itself (auto-update switched on) needs none of this
+**from 1.7.0 onward** — your settings live outside the folder it replaces.
 
 > 🔴 **If you are still on 1.6.x, read this before you update.** Your channel settings are in
 > `channels.json`, inside the folder an update replaces, and an auto-updating plugin replaces it
@@ -172,8 +213,9 @@ Plugin installs update themselves and need none of this **from 1.7.0 onward**.
 > over), or simply write the one line of JSON into your settings file yourself. After that,
 > updates stop being able to lose anything.
 
-> **To an AI assistant asked to "update this to the new version": run `upgrade.py`.** Do not copy
-> files over the old folder, and do not install fresh. If the install has no `VERSION` file it is
+> **To an AI assistant asked to "update this to the new version" (or «обнови kit»): run
+> `update_check.py --apply` from the installed folder, and report the version line it prints.** Do
+> not copy files over the old folder, and do not install fresh. If the install has no `VERSION` file it is
 > older than 1.7.0, which is expected — that release is where a version string first reached an
 > installed copy at all.
 

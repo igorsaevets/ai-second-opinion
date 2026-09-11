@@ -3,8 +3,18 @@
 ## What this tool sends where
 
 It sends the document you point it at, plus a system-prompt preset, to the vendors behind whichever
-channels you have enabled — the plan names them before anything is sent. Nothing else. No telemetry,
-no analytics, no background process, no phone-home.
+channels you have enabled — the plan names them before anything is sent. Nothing else, with one
+stated exception: a version check against `api.github.com` at most once a week (the tag list; the
+release notes when a newer tag exists), carrying no version string and nothing about you beyond
+what any HTTP request carries. `python update_check.py --show-what-would-be-sent` prints it
+verbatim; `MODEL_ORCH_UPDATE_CHECK=0` switches it off. No telemetry, no analytics, no background
+process.
+
+`update_check.py --apply` — only when you run it — downloads the release archive from github.com,
+pinned to the commit the GitHub API named for the tag, and refuses it unless it holds one top-level
+folder, the skill subtree, every required file, a `VERSION` equal to the tag, and no member that
+escapes the folder or is a symlink. No signature is verified: the trust is TLS plus the commit pin,
+the same as `git clone`. A plugin install is updated through Claude Code's own `plugin update`.
 
 **Once a payload is sent it cannot be recalled.** It is at every vendor the round reached, under
 their retention policies, not yours. Everything below exists because of that one sentence.

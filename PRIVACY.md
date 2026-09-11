@@ -17,7 +17,10 @@ this text ever disagree, **the code is right and this file is a bug** — please
 
 There is no backend, no telemetry, no analytics, no crash reporting, no licence check and no
 account. The author receives nothing when you run this. Everything happens on your machine and
-between your machine and the vendors whose channels you enable.
+between your machine and the vendors whose channels you enable — plus one request the kit makes on
+its own: a version check against `api.github.com` at most once a week (GitHub sees your IP and the
+request, not what you review; the User-Agent carries no version). `python update_check.py
+--show-what-would-be-sent` prints it; `MODEL_ORCH_UPDATE_CHECK=0` switches it off.
 
 The only files written are inside the run's own output folder: the answers each channel returned,
 and the report about them. Nothing is uploaded anywhere.

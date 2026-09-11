@@ -224,7 +224,7 @@ an update replaces the skill folder and cannot reach that file. `{"channels": {"
 {"enabled": true}}}`. There it may change anything and add channels or tiers (`"_new": true`).
 Both files' changes print in the plan. 🔴 A
 change to WHERE a document goes needs `python routing.py --accept-settings` once, or a paid round
-refuses. Rules and errors: `references/when-it-breaks.md`. Updating: `python upgrade.py`.
+refuses. Rules and errors: `references/when-it-breaks.md`. Update: `python update_check.py --apply`.
 
 🔴 **A depth knob you have only SENT is not a depth knob.** `python echocheck.py --only <channel>
 --samples 3` judges by the reasoning counter that comes back, refusing CONFIRMED on overlap.
