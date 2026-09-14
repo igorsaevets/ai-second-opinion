@@ -116,6 +116,69 @@ it, add deny rules to `~/.claude/settings.json`; they apply in every mode. The c
 `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the child's environment: with either set the
 CLI bills that key instead of the claude.ai login, and this channel is subscription-only.
 
+## Bypass opt-in for the other CLI channels (R88, v1.63.0)
+
+Since v1.63.0 the four other CLI channels — `codex`, `grokbuild`, `agy31pro`, `agy36flash`,
+`agy38flash` — carry a `bypass_permissions` field in `channels.json` that ships **false**. When you
+set it to `true`, or pass `--bypass-permissions <name>` / `--all-bypass` on the command line, the
+channel launches with its vendor's own bypass flag:
+
+| Channel | Kind | Flag added under bypass | Flag replaced |
+|---|---|---|---|
+| `codex` | codex-cli 0.154.0 | `--dangerously-bypass-approvals-and-sandbox` | `--sandbox read-only` |
+| `grokbuild` | grok 1.0.30 | `--permission-mode bypassPermissions` | `--permission-mode dontAsk` |
+| `agy31pro` / `36flash` / `38flash` | agy 1.2.2 | `--dangerously-skip-permissions` | `--sandbox` |
+| `cclopus46` | claude 2.1.270 | `--permission-mode bypassPermissions` (always on since v1.61.0) | — |
+| `ocspark13free` | opencode | (no field on purpose — `opencode run` is already YOLO by default) | — |
+
+`opencode` is intentionally excluded: its `run` subcommand runs with all permissions bypassed by
+default, so the concept has no per-channel switch to toggle. The dispatcher passes `bypass=` only
+to the channels that carry the field.
+
+**What bypass means on the machine that runs the call.** Every shell command, every file edit
+anywhere, every web fetch runs without a prompt. On `agy` and `cclopus46`, every MCP server in the
+user's config runs without a prompt too, with its credentials. On `grokbuild`, `read_file` is
+**not** bounded by `--cwd` (measured — it served files out of `~/.grok/skills/` with a neutral cwd
+in force), so bypass hands the model this machine's readable files. This is the operator's
+decision to trust the reviewer with the mechanical guard OFF, not a permission the tool grants
+itself.
+
+**🔴 The `command(*)` shell fence disappears on agy under bypass** (R57, measured in
+`patch_agy_permissions.py:71-74`): `--dangerously-skip-permissions` makes agy ignore the
+operator's own deny rules for shell commands. `patch_agy_permissions.py` still governs non-bypass
+runs and the interactive TUI, but under bypass its allow/deny list is a suggestion — the flag
+overrides it. This is why the two agy channels arm a **workdir tripwire** in addition to the
+safety-directive prompt: a snapshot of the workdir file list is taken before the call, compared
+after, and any file that vanished or was truncated without a matching `BACKUP: <path>` line in the
+model's answer is reported as a loud warning in the run's `notes`. The tripwire is a **signal**
+after the fact, not a fence.
+
+**The safety-directive prompt.** Every channel run with bypass gets a two-rule safety block
+prepended to its brief:
+
+- **Rule 1 — self-configure before you act.** Declare in the first 2–4 sentences which files or
+  paths the model intends to read, write or modify, and which it will not touch. Never modify or
+  delete anything under `.claude/`, `.git/`, any `.env`, `~/.ssh/`, `~/.gnupg/`, `~/.codex/`,
+  `~/.gemini/`, or anything holding credentials.
+- **Rule 2 — deletions are a three-step ritual.** Prefer NOT to delete. If a deletion is
+  necessary, all three lines must appear in the reply BEFORE the destructive call actually runs:
+  `BACKUP: <src> -> <dst>` (into a timestamped folder under the system TEMP), a `REASONING:`
+  block of 2–4 sentences, and finally `DELETED: <path>`. Overwriting or truncating a file counts
+  as deleting the pre-existing bytes.
+
+The directive rides in the brief on purpose: measured on every CLI channel here, an instruction
+in the brief outweighs one in the persona or system slot (R40, 2/2 vs 0/1). It is **steering, not
+enforcement** — a model that ignores the directive gets past every mechanical check except the
+agy tripwire.
+
+**Reading order before you turn any of this on.** Run `--dry-run --bypass-permissions <name>`
+first — the plan prints the line `[<name>] PERMISSIONS BYPASSED (source: ...)` before anything
+runs, and for agy it also prints `+ workdir tripwire ARMED`. If that line is not in the plan, the
+flag did not reach the call. Never turn on bypass for a channel reviewing a brief you did not
+write yourself: a hostile document can steer a bypassed reviewer's write tools, and both the
+safety prompt and the tripwire are documented failures under that threat model — read them and
+decide.
+
 ## Treat model output as untrusted input
 
 A cited URL is model-generated text. `citecheck.py` refuses to fetch non-public hosts (localhost,

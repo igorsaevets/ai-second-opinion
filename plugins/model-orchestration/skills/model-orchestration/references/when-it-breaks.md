@@ -18,7 +18,7 @@ Read this when a run fails, or before diagnosing anything by reading source.
 | HTTP 400 mentioning `thinking` | wrong thinking form for the host | the harness flips the form and retries once automatically |
 | Codex output empty, exit 0 | still thinking, or buffered through a formatter | check the marker on the last line; check `Get-Process codex` and rollout growth |
 | `agy` returns `jetski ... permission` | it tried to read the brief file | shorten the brief so it goes inline via `-p` |
-| `agy` returns an EMPTY answer with `status: SUCCESS`, exit 0 | one denied tool discards the whole headless run | `python patch_agy_permissions.py`. Never `--dangerously-skip-permissions` |
+| `agy` returns an EMPTY answer with `status: SUCCESS`, exit 0 | one denied tool discards the whole headless run | `python patch_agy_permissions.py`. Do NOT reach for `--dangerously-skip-permissions` to work around a missing rule — since R88 (v1.63.0) the opt-in exists (`bypass_permissions: true` on the channel, or `--bypass-permissions <name>` / `--all-bypass` at the CLI), but it unlocks `firecrawl_crawl` and disables the `command(*)` shell fence (R57, measured). Read kit/SECURITY.md 'Bypass opt-in' before turning it on |
 | tool_calls = 0 | model never searched | treat all dated facts as unverified; re-run at a higher tier or split the question |
 | `python` not found from another directory | you used a relative path | always use the absolute path in §0 |
 | a channel is off and nothing explains why | your own settings file | the resolved plan prints its path and every field it changed, at the top. `~/.claude/model-orchestration.local.json` |

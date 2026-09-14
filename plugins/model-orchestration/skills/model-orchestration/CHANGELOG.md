@@ -1,5 +1,71 @@
 # Changelog
 
+## 1.63.0 — 2026-09-14
+
+Two features that stack: a broader `--route` parser that finally understands the
+prose the operator actually writes, and an opt-in for the CLI channels' own permission
+bypass.
+
+* **`--route` learns eight more verbs and no longer trips on its own vocabulary.**
+  Since 1.36.0 the SET clause understood `--set codex=gpt-5.5`; free-text sentences
+  such as «в codex используй 5.6 Sol», «у codex поставь GPT-5.5», «выставь codex
+  на 5.6», «выбери в codex 5.6», «use codex with gpt-5.5», «pick codex gpt-5.5»,
+  «choose codex 5.6», «set codex gpt-5.5» went through the tokeniser as ordinary
+  words and produced no SET at all — the run went ahead with the default model.
+  Two things had to be fixed together: the verb table was too short (four English
+  and four Russian forms now recognised), and the tokeniser stripped every marker
+  in one pass, so «используй» matched «use» before its own longer form got a
+  chance. The parser now sorts the trigger table by length (longest first, so
+  «используй» wins over «use») and hoists the first marker it finds in the input
+  before it lets the rest run, so a sentence with «выбери» never gets its
+  Russian verb erased by an accidental substring hit elsewhere. Four dry-run
+  measurements shipped as pins in `selftest.py`; the resolved plan prints the
+  chosen model before anything spends. (R87.)
+
+* **Bypass opt-in for the four other CLI channels.** `cclopus46` has run with
+  `--permission-mode bypassPermissions` on every call since v1.61.0 — a headless
+  reviewer had nobody to answer prompts, and the CLI's default mode silently
+  denied its web fetches and shell commands. That decision is now offered to the
+  four remaining CLI channels: `codex`, `grokbuild`, `agy31pro`, `agy36flash` and
+  `agy38flash` each carry a `bypass_permissions` field in `channels.json` that
+  ships **false**, plus two command-line flags — `--bypass-permissions <name>`
+  and `--all-bypass` — for per-run choices. When bypass is active, each channel
+  launches with its vendor's own equivalent flag:
+  `--dangerously-bypass-approvals-and-sandbox` (codex),
+  `--permission-mode bypassPermissions` (grokbuild),
+  `--dangerously-skip-permissions` (agy). `opencode` is intentionally excluded:
+  its `run` subcommand is already permission-free by default. The dry-run plan
+  now prints `[<name>] PERMISSIONS BYPASSED (source: ...)` for every channel that
+  will run with bypass, before anything spends.
+
+  Two compensations ride with every bypassed brief. A **safety directive** is
+  prepended to the brief itself — brief position beats persona (measured 2/2 vs
+  0/1) — declaring two rules: the model must state up front which paths it will
+  or will not touch (and lists `.claude/`, `.git/`, `.env`, `~/.ssh/`,
+  `~/.gnupg/`, `~/.codex/` and `~/.gemini/` as off-limits), and any deletion
+  must be a three-line ritual (`BACKUP: <src> -> <dst>` into a timestamped TEMP
+  folder, a `REASONING:` block of 2–4 sentences, then `DELETED: <path>`) that
+  appears in the reply before the destructive call runs. For the two agy
+  channels there is also a **workdir tripwire**: a snapshot of the workdir file
+  list is taken before the call, compared after, and any file that vanished or
+  was truncated without a matching `BACKUP:` line in the model's answer is
+  reported as a loud warning in the run's `notes`. The tripwire is a
+  post-hoc signal, not a fence — under bypass on agy, R57 measured that the
+  operator's own `command(*)` deny rules are ignored by the CLI, so the tool
+  cannot stop the destructive call, only notice its shape. The safety directive
+  is likewise steering, not enforcement.
+
+  Before you turn any of this on, run
+  `--dry-run --bypass-permissions <name>` first: the plan line for that channel
+  should say `PERMISSIONS BYPASSED (source: --bypass-permissions)` and, for
+  agy, `+ workdir tripwire ARMED`. If neither prints, the flag did not reach
+  the call. Never bypass a channel that will review a brief you did not write
+  yourself — a hostile document can steer a bypassed reviewer's write tools,
+  and both the safety prompt and the tripwire are documented failures under
+  that threat model. Full documentation, including the per-channel table and
+  the R57 caveat: `SECURITY.md` § "Bypass opt-in for the other CLI channels".
+  (R88.)
+
 ## 1.62.1 — 2026-09-11
 
 R86-И2: two hotfixes surfaced by the fresh update cycle.

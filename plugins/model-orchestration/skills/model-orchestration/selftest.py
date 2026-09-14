@@ -439,6 +439,35 @@ def suite_routing():
           "a flag contradicting the route is a hard stop, not a guess", f"exit={p.returncode}")
 
 
+# 🔴 R86 2026-09-14 — prose SET-in-channel. Verbatim from Igor: «Исправь чтобы сработала:
+# запусти второе мнение, но в codex используй 5.6 Sol». The defect was a natural-Russian marker
+# order the router refused with a message that already NAMED the right form («используй терра»)
+# yet did not accept it - fixed by adding «используй»/«поставь»/«выбери»/EN «use»/«pick»/etc. to
+# ADD and by hoisting the first marker to the front of the entity stream so «в X marker Y» works
+# the same as «marker X Y». Tests are the verbatim sentences, not paraphrases - the class was
+# caught this way twice already (r38 «включая», R86 «используй»).
+def suite_r86_prose_set_in_channel():
+    import tempfile
+    section("R86 verbose prose: «в X используй Y», «у X поставь Y», «use X with Y»")
+    dummy_brief = os.path.join(tempfile.gettempdir(), "_r86_prose_set_brief.md")
+    with open(dummy_brief, "w", encoding="utf-8") as fh:
+        fh.write("тестовый бриф\n")
+    cases = [
+        ("запусти второе мнение, но в codex используй 5.6 Sol", "GPT-5.6 Sol"),
+        ("у codex поставь 5.6 sol", "GPT-5.6 Sol"),
+        ("в codex выбери 5.6 sol", "GPT-5.6 Sol"),
+        ("use codex with gpt-5.5", "GPT-5.5"),
+    ]
+    for phrase, expected_model in cases:
+        p = run_cli(["--route", phrase, "--brief", dummy_brief, "--dry-run"], timeout=90)
+        blob = blob_of(p)
+        ok = (p.returncode == 0
+              and expected_model in blob
+              and "ROUTE ERROR" not in blob)
+        check(ok, f"prose SET: «{phrase[:50]}»",
+              f"expected model={expected_model}, exit={p.returncode}")
+
+
 def suite_redaction():
     section("3. Nothing secret-shaped may reach the console, the log or diagnostics.json")
 
@@ -6840,7 +6869,9 @@ def main():
                   suite_r82_premium_bundle,
                   suite_r85_claudecli_permissions,
                   suite_r86_self_update,
-                  suite_r86_i2_doctor_probe_covers_every_kind):
+                  suite_r86_i2_doctor_probe_covers_every_kind,
+                  suite_r86_prose_set_in_channel,
+                  suite_r88_bypass_opt_in):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -6941,8 +6972,10 @@ def suite_r85_claudecli_permissions():
     check("--max-turns" in c2 and c2[c2.index("--max-turns") + 1] == "7",
           "R85: the registry's max_turns reaches the call (a knob you only stored is not a knob)",
           repr(c2))
-    check(rec.get("input") == "brief body" and rec.get("cwd") == o.neutral_cwd(),
-          "R85 control: the brief still rides on stdin and the child starts in the neutral cwd")
+    check("brief body" in (rec.get("input") or "") and rec.get("cwd") == o.neutral_cwd(),
+          "R85 control: the brief still rides on stdin and the child starts in the neutral cwd - "
+          "R88 (2026-09-14) prepends the SAFETY DIRECTIVE, so the assertion moved to `in` rather "
+          "than `==` to keep verifying the brief-on-stdin invariant without pinning the wrapper")
 
     # ---- (b) the child env: metered-key variables scrubbed ------------------------------
     rec3, _ = _run(good, env_extra={"ANTHROPIC_API_KEY": "r85-selftest-placeholder",
@@ -7108,6 +7141,309 @@ def suite_r86_i2_doctor_probe_covers_every_kind():
         check("${GITHUB_REF_NAME#v}" in wt or "${GITHUB_REF#refs/tags/v}" in wt,
               "R86-И2: the job derives the version from the pushed tag (GITHUB_REF_NAME "
               "or GITHUB_REF) - no hardcoded value the guard could go stale against")
+
+
+def suite_r88_bypass_opt_in():
+    """
+    R88 (2026-09-14). Opt-in permission-prompt bypass for the four CLI channels that carry a
+    `bypass_permissions` field (codex, grokbuild, agy31pro, agy36flash, agy38flash); cclopus46
+    is always-on (v1.61.0, R85); opencode has no field on purpose (`opencode run` is already
+    YOLO by default). Every knob is judged on what reaches the DISPATCHED argv, on the returned
+    warnings, or on the resolved plan-line - never on prose (R74: a knob you only sent is not a
+    knob; R41: judge the meter that comes back).
+
+    Igor's exact instruction 14.09.2026 for the safety directive: «С усиливающим промтом
+    отправь ему, что бы он ничего не удалял, а если ему надо что-то удалить, то он в начале
+    сделает резервную копию, потом подумает вслух (напишет текстом размышление) и только
+    потом удалит.» Rule 2 is his; Rule 1 was added on top to compensate for the R57 measurement
+    (`command(*)` deny is IGNORED under `--dangerously-skip-permissions` on agy).
+    """
+    import orchestrate as o
+    import routing as r
+
+    # ---- (a) registry defaults ---------------------------------------------------------
+    with open(HERE / "channels.json", encoding="utf-8") as fh:
+        raw = json.load(fh)
+    ch = raw["channels"]
+    expected = {"cclopus46": True, "codex": False, "grokbuild": False,
+                "agy31pro": False, "agy36flash": False, "agy38flash": False}
+    for name, want in expected.items():
+        slot = ch.get(name) or {}
+        got = slot.get("bypass_permissions", "MISSING")
+        check(got is want,
+              "R88 registry: %s.bypass_permissions == %r (opt-in matrix; cclopus46 always, "
+              "the other four ship OFF)" % (name, want),
+              "got=%r" % (got,))
+        check("R88" in (slot.get("_bypass_permissions") or ""),
+              "R88 registry: %s carries an R88-tagged _bypass_permissions comment - the blast "
+              "radius sits beside the knob, not in a doc a stranger will not read" % name,
+              repr(slot.get("_bypass_permissions", ""))[:120])
+    for name in ("ocspark13free", "spark12cont", "kimik3"):
+        slot = ch.get(name) or {}
+        check("bypass_permissions" not in slot,
+              "R88 registry: %s has NO bypass_permissions field - opencode's run subcommand is "
+              "already YOLO by default and HTTP channels have no CLI to bypass. cli_bypass_active "
+              "must return None here" % name,
+              repr(slot.get("bypass_permissions", "absent")))
+
+    # ---- (b) _with_bypass_safety helper ------------------------------------------------
+    plain = "some brief body"
+    check(o._with_bypass_safety(plain, False) == plain,
+          "R88 helper: bypass=False leaves the brief BYTE-IDENTICAL (no header, no separator)")
+    check(o._with_bypass_safety(plain, None) == plain,
+          "R88 helper: bypass=None (opencode / unknown) also leaves the brief unchanged - the "
+          "helper only prepends on strict True")
+    wrapped = o._with_bypass_safety(plain, True)
+    check("SAFETY DIRECTIVE" in wrapped and plain in wrapped and wrapped.endswith(plain),
+          "R88 helper: bypass=True PREPENDS the safety directive and keeps the brief intact at "
+          "the end (marker splice still lands last, position rules preserved)",
+          "len=%d, ends_with_brief=%s" % (len(wrapped), wrapped.endswith(plain)))
+    for keyword in ("BACKUP:", "REASONING:", "DELETED:", "RULE 1", "RULE 2",
+                    "STEERING, not\nenforcement"):
+        check(keyword in wrapped,
+              "R88 helper: safety directive names %r verbatim - the three-step ritual and the "
+              "steering-vs-enforcement caveat are both there" % keyword)
+
+    # ---- (c) cli_bypass_active resolution ----------------------------------------------
+    reg = r.load_registry()
+
+    class _A:
+        def __init__(self, all_bypass=False, bypass_permissions=None):
+            self.all_bypass = all_bypass
+            self.bypass_permissions = bypass_permissions
+    check(o.cli_bypass_active("cclopus46", _A(), reg) is True,
+          "R88 cli_bypass_active: cclopus46 = True from the registry (always-on since v1.61.0)")
+    check(o.cli_bypass_active("codex", _A(), reg) is False,
+          "R88 cli_bypass_active: codex ships False in the registry")
+    check(o.cli_bypass_active("codex", _A(bypass_permissions=["codex"]), reg) is True,
+          "R88 cli_bypass_active: --bypass-permissions codex flips it True for the run")
+    check(o.cli_bypass_active("codex", _A(all_bypass=True), reg) is True,
+          "R88 cli_bypass_active: --all-bypass covers codex too")
+    check(o.cli_bypass_active("codex",
+                              _A(bypass_permissions=["grokbuild"]), reg) is False,
+          "R88 cli_bypass_active: --bypass-permissions naming ANOTHER channel does NOT bypass "
+          "this one - the flag is per-channel by name, not a broadcast")
+    check(o.cli_bypass_active("ocspark13free", _A(), reg) is None,
+          "R88 cli_bypass_active: opencode returns None (no bypass_permissions field) - the "
+          "dispatcher must not pass bypass= to call_opencode")
+    check(o.cli_bypass_active("ocspark13free", _A(all_bypass=True), reg) is None,
+          "R88 cli_bypass_active: --all-bypass does NOT invent the field on opencode - only "
+          "channels that carry it are eligible")
+    check(o.cli_bypass_active("agy31pro", _A(all_bypass=True), reg) is True,
+          "R88 cli_bypass_active: --all-bypass covers every agy channel (the operator's shorthand "
+          "is symmetric across every channel that CAN take the flag)")
+
+    # ---- (d) call_codex argv under both branches ---------------------------------------
+    class _P:
+        def __init__(self, stderr=""):
+            self.stderr = stderr
+            self.returncode = 0
+            self.stdout = ""
+    codex_captured = {}
+
+    def _fake_run(cmd, stdin_text=None, timeout=None, stdout_path=None, env=None, cwd=None):
+        codex_captured["cmd"] = list(cmd)
+        codex_captured["stdin"] = stdin_text
+        return _P(), 0.1
+    saved_run = o._run
+    o._run = _fake_run
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            with contextlib.redirect_stdout(io.StringIO()):
+                o.call_codex("brief body", "MARK",
+                             os.path.join(d, "wd"), os.path.join(d, "out.md"),
+                             model="gpt-5.5", effort="xhigh", bypass=False)
+    finally:
+        o._run = saved_run
+    c1 = codex_captured.get("cmd") or []
+    check("--sandbox" in c1 and "read-only" in c1
+          and "--dangerously-bypass-approvals-and-sandbox" not in c1,
+          "R88 codex OFF: default argv keeps --sandbox read-only, no bypass flag", repr(c1))
+    check("SAFETY DIRECTIVE" not in (codex_captured.get("stdin") or ""),
+          "R88 codex OFF: no safety-directive prepend on the stdin (control)",
+          (codex_captured.get("stdin") or "")[:200])
+
+    codex_captured.clear()
+    o._run = _fake_run
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            with contextlib.redirect_stdout(io.StringIO()):
+                o.call_codex("brief body", "MARK",
+                             os.path.join(d, "wd"), os.path.join(d, "out.md"),
+                             model="gpt-5.5", effort="xhigh", bypass=True)
+    finally:
+        o._run = saved_run
+    c2 = codex_captured.get("cmd") or []
+    check("--dangerously-bypass-approvals-and-sandbox" in c2
+          and "--sandbox" not in c2 and "read-only" not in c2,
+          "R88 codex ON: bypass argv swaps --sandbox read-only for "
+          "--dangerously-bypass-approvals-and-sandbox (verified against codex-cli 0.154.0 --help)",
+          repr(c2))
+    check("SAFETY DIRECTIVE" in (codex_captured.get("stdin") or "")
+          and "brief body" in (codex_captured.get("stdin") or ""),
+          "R88 codex ON: safety directive PREPENDED, brief still present on stdin")
+
+    # ---- (e) call_grokcli argv under both branches -------------------------------------
+    grok_captured = {}
+
+    class _P2:
+        def __init__(self):
+            self.stdout = json.dumps({"text": "grok body\nMARK",
+                                      "stopReason": "end_turn",
+                                      "num_turns": 1,
+                                      "usage": {"input_tokens": 1,
+                                                "output_tokens": 1}})
+            self.stderr = ""
+            self.returncode = 0
+
+    def _fake_subprocess_run(cmd, **k):
+        grok_captured["cmd"] = list(cmd)
+        # capture the prompt-file content
+        try:
+            i = cmd.index("--prompt-file")
+            with open(cmd[i + 1], encoding="utf-8") as fh:
+                grok_captured["pf"] = fh.read()
+        except (ValueError, IndexError, OSError):
+            grok_captured["pf"] = None
+        return _P2()
+    saved_sub = o.subprocess.run
+    o.subprocess.run = _fake_subprocess_run
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            with contextlib.redirect_stdout(io.StringIO()):
+                o.call_grokcli("brief body", "MARK",
+                               os.path.join(d, "wd"), os.path.join(d, "out.md"),
+                               model="grok-4.5", effort="high", bypass=False)
+    finally:
+        o.subprocess.run = saved_sub
+    g1 = grok_captured.get("cmd") or []
+    check("--permission-mode" in g1
+          and g1[g1.index("--permission-mode") + 1] == "dontAsk",
+          "R88 grokbuild OFF: default argv keeps --permission-mode dontAsk", repr(g1))
+    check("SAFETY DIRECTIVE" not in (grok_captured.get("pf") or ""),
+          "R88 grokbuild OFF: no safety-directive prepend in the prompt-file (control)")
+
+    grok_captured.clear()
+    o.subprocess.run = _fake_subprocess_run
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            with contextlib.redirect_stdout(io.StringIO()):
+                o.call_grokcli("brief body", "MARK",
+                               os.path.join(d, "wd"), os.path.join(d, "out.md"),
+                               model="grok-4.5", effort="high", bypass=True)
+    finally:
+        o.subprocess.run = saved_sub
+    g2 = grok_captured.get("cmd") or []
+    check("--permission-mode" in g2
+          and g2[g2.index("--permission-mode") + 1] == "bypassPermissions",
+          "R88 grokbuild ON: bypass argv swaps dontAsk for bypassPermissions (grok 1.0.30 --help: "
+          "no --dangerously-skip-permissions on this CLI - Select-String dangerously returned "
+          "zero lines; the mode enum lists bypassPermissions)", repr(g2))
+    check("SAFETY DIRECTIVE" in (grok_captured.get("pf") or "")
+          and "brief body" in (grok_captured.get("pf") or ""),
+          "R88 grokbuild ON: safety directive PREPENDED, brief still present in the prompt-file")
+
+    # ---- (f) _agy_once argv under both branches ----------------------------------------
+    agy_captured = {}
+
+    class _AgyProc:
+        def __init__(self):
+            self.stderr = ""
+            self.stdout = ""
+            self.returncode = 0
+
+    def _fake_run_agy(cmd, timeout=None, cwd=None, stdout_path=None, env=None):
+        agy_captured["cmd"] = list(cmd)
+        # write an empty NDJSON so _parse_agy_stream returns clean
+        if stdout_path:
+            with open(stdout_path, "w", encoding="utf-8") as fh:
+                fh.write('{"event":"result","status":"success"}\n')
+        return _AgyProc(), 0.1
+    saved_agy = o._run_agy
+    o._run_agy = _fake_run_agy
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            with contextlib.redirect_stdout(io.StringIO()):
+                o._agy_once("brief body", "MARK",
+                            os.path.join(d, "wd"), os.path.join(d, "out.md"),
+                            model="gemini-3.1-pro", effort="high", timeout="1m",
+                            bypass=False)
+    finally:
+        o._run_agy = saved_agy
+    a1 = agy_captured.get("cmd") or []
+    check("--sandbox" in a1 and "--dangerously-skip-permissions" not in a1,
+          "R88 agy OFF: default argv keeps --sandbox and does NOT add --dangerously-skip-"
+          "permissions", repr(a1))
+
+    agy_captured.clear()
+    o._run_agy = _fake_run_agy
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            with contextlib.redirect_stdout(io.StringIO()):
+                o._agy_once("brief body", "MARK",
+                            os.path.join(d, "wd"), os.path.join(d, "out.md"),
+                            model="gemini-3.1-pro", effort="high", timeout="1m",
+                            bypass=True)
+    finally:
+        o._run_agy = saved_agy
+    a2 = agy_captured.get("cmd") or []
+    check("--dangerously-skip-permissions" in a2 and "--sandbox" not in a2,
+          "R88 agy ON: bypass argv adds --dangerously-skip-permissions and DROPS --sandbox "
+          "(mutually exclusive on agy 1.2.2 --help)", repr(a2))
+
+    # ---- (g) tripwire ------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "keeper.txt"), "w") as fh:
+            fh.write("stays")
+        with open(os.path.join(d, "victim.txt"), "w") as fh:
+            fh.write("gets deleted")
+        before = o._agy_snapshot_workdir(d)
+        check("victim.txt" in "".join(before.keys()) and "keeper.txt" in "".join(before.keys()),
+              "R88 tripwire control: snapshot lists both files",
+              repr(sorted(os.path.basename(p) for p in before)))
+        # simulate deletion
+        os.remove(os.path.join(d, "victim.txt"))
+        after = o._agy_snapshot_workdir(d)
+        # answer text without BACKUP: acknowledgement -> warning
+        warn_bad = o._agy_tripwire_check(before, after,
+                                         "here is my answer, I removed victim.txt")
+        check(len(warn_bad) == 1 and "victim.txt" in warn_bad[0],
+              "R88 tripwire: file deleted without BACKUP: line -> warning names the path",
+              repr(warn_bad))
+        # answer text WITH BACKUP: acknowledgement -> no warning
+        warn_good = o._agy_tripwire_check(before, after,
+                                          "BACKUP: %s -> %s\nREASONING: ...\nDELETED: ...\n"
+                                          % (os.path.join(d, "victim.txt"),
+                                             os.path.join("temp", "victim.txt.bak")))
+        check(len(warn_good) == 0,
+              "R88 tripwire: same deletion WITH a matching BACKUP: line in the answer is silent")
+        # untouched workdir -> no warning even under bypass
+        with tempfile.TemporaryDirectory() as d2:
+            with open(os.path.join(d2, "a.txt"), "w") as fh:
+                fh.write("x")
+            b2 = o._agy_snapshot_workdir(d2)
+            a2 = o._agy_snapshot_workdir(d2)
+            check(o._agy_tripwire_check(b2, a2, "") == [],
+                  "R88 tripwire control: nothing changed -> no warning (even with empty text)")
+
+    # ---- (h) dispatcher wiring -------------------------------------------------------
+    import inspect
+    main_src = inspect.getsource(o.main)
+    for kind_line in ("call_codex, cbrief", "call_agy, cbrief", "call_grokcli, cbrief"):
+        after = main_src.split(kind_line, 1)[1] if kind_line in main_src else ""
+        # The dispatch block for one kind ends at the next `elif kind ==` marker (or the else
+        # arm). Cut the segment there so a later kind's bypass= does not falsely satisfy this
+        # kind's check.
+        end = after.find("elif kind ==")
+        segment = after[:end] if end > 0 else after[:2000]
+        check("cli_bypass_active(cname, a, reg)" in segment,
+              "R88 dispatcher: bypass=bool(cli_bypass_active(cname, a, reg)) is passed to %s"
+              % kind_line.split(",")[0].split()[-1],
+              segment[:200] if segment else "not found")
+
+    # ---- (i) argparse flags --------------------------------------------------------
+    check("--bypass-permissions" in main_src and "--all-bypass" in main_src,
+          "R88 CLI: --bypass-permissions and --all-bypass are on the argparse")
 
 
 if __name__ == "__main__":

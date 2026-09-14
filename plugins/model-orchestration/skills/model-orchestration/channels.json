@@ -342,6 +342,8 @@
       "panel": "standard",
       "vendor": "anthropic",
       "enabled": false,
+      "bypass_permissions": true,
+      "_bypass_permissions": "R88 (2026-09-14). Machine-readable copy of the always-on decision already documented in _permissions above and hard-coded in call_claudecli. Kept in the registry so cli_bypass_active() gives a symmetric answer for every CLI channel and the plan line prints for this channel too. Value is `true` on purpose: the Claude Code CLI has been shipped in bypass mode since v1.61.0 (R85), the field just makes it visible. Blast radius, in one line: every built-in tool (shell, file edits anywhere on the machine, web) and every MCP server in the user's Claude Code config run without a prompt; the CLI's own never-auto-approved class and any hooks still hold. That is why this channel ships enabled:false - turning it on is the decision, and the plan prints it before anything runs.",
       "_added": "2026-09-04, the operator: «добавим Claude code cli и модели opus 4.6 Max [1M] и fallback Opus 4.7 Max. По дефолту отключен. Нам нужно, что если добавят наш kit в codex, agy, ... То что бы их тоже можно было вызывать.» Subscription-only (no API key); --bare KILLS subscription auth (measured: 'Not logged in' error). No --allowedTools restriction (the operator: «не ограничивай инструменты, пусть сам какие хочет использует»).",
       "label": "CCL Opus 4.6 [1M]",
       "cost": "expensive",
@@ -396,6 +398,8 @@
       "panel": "standard",
       "vendor": "openai",
       "enabled": true,
+      "bypass_permissions": false,
+      "_bypass_permissions": "R88 (2026-09-14) opt-in. Default off. When true, call_codex swaps `--sandbox read-only` for `--dangerously-bypass-approvals-and-sandbox` (verbatim from codex-cli 0.154.0 --help; a separate `--dangerously-bypass-hook-trust` covers hook trust and is not touched). Every shell command the model asks for runs on the operator's machine without a prompt. `CLI_BYPASS_SAFETY_PROMPT` (no-delete + BACKUP -> REASONING -> DELETE ritual) is injected into the brief. Enable per-run with `--bypass-permissions codex` / `--all-bypass`, or set this field to `true` for standing bypass on this install. Not a fence: read kit/SECURITY.md 'Bypass opt-in' before turning it on for briefs you did not write.",
       "label": "Codex",
       "_label_carries_no_model_ON_PURPOSE": "2026-08-07, the operator: «пусть ИИ выводит codex и название модели, а не просто Codex». Done - but NOT by putting the model in this string, which is the one way of doing it that would rot. This channel is the only one whose model is DELIBERATELY variable (three ids in its table) because an exhausted weekly limit is answered by switching model, so a label reading `CodexGPT54` would be wrong the first time that happens and would go on being wrong silently. The model is therefore resolved at RUN time and printed everywhere the channel is named: the plan, the status line, diagnostics.json, and the channel column of REPORT.md, which is the artifact another chat actually reads. kimik3 and qwen38max CAN carry the model in the name, and do, because their model cannot change - the registry refuses it.",
       "cost": "expensive",
@@ -422,6 +426,17 @@
             "gpt-5.6-sol",
             "5.6 sol",
             "5.6-sol"
+          ]
+        },
+        "gpt-6-astra": {
+          "label": "GPT-6 Astra",
+          "_added": "2026-09-13, the operator (Plugins ironmemo, I4 round): «Codex 6 Astra Max». PROBED the same day on codex-cli 0.154.0: `codex exec -m gpt-6-astra -c model_reasoning_effort=max` answered, self-identifying as GPT-6 (session 01a0996e-d6bb-7f80-956c-b8cf4e3ae512). Effort `max` is ACCEPTED for this model (probe exit 0, marker present). Added as a LISTED model only - the channel default stays gpt-5.5 until the operator rotates it; use `--set codex=gpt-6-astra`.",
+          "aliases": [
+            "gpt-6-astra",
+            "6 astra",
+            "6-astra",
+            "astra",
+            "астра"
           ]
         },
         "gpt-5.4": {
@@ -451,6 +466,8 @@
       "panel": "cheap",
       "vendor": "google",
       "enabled": true,
+      "bypass_permissions": false,
+      "_bypass_permissions": "R88 (2026-09-14) opt-in. Default off. When true, _agy_once adds `--dangerously-skip-permissions` and removes `--sandbox` (mutually exclusive on agy 1.2.2 --help; verified by Select-String bypass|permission|dangerous|skip|approve|sandbox). CLI_BYPASS_SAFETY_PROMPT is injected into the brief AND a workdir tripwire is armed - a file removed or truncated without a matching `BACKUP: <path>` line in the answer fires a loud warning in the run's notes. 🔴🔴 R57 CAVEAT (patch_agy_permissions.py:71-74, measured): under this flag the operator's own `command(*)` deny is IGNORED - the shell fence disappears. The safety directive is STEERING, the tripwire is a SIGNAL after the fact; neither is enforcement. patch_agy_permissions.py still governs non-bypass and interactive TUI runs and is orthogonal to this flag. the operator accepted this blast radius on 14.09.2026 after an explicit warning. Turn it on per-run with `--bypass-permissions agy31pro` / `--all-bypass`; standing bypass with `bypass_permissions: true` here.",
       "label": "agy 3.1 Pro",
       "cost": "mid",
       "model": "gemini-3.1-pro",
@@ -486,6 +503,8 @@
       "panel": "cheap",
       "vendor": "google",
       "enabled": false,
+      "bypass_permissions": false,
+      "_bypass_permissions": "R88 opt-in, same mechanics as agy31pro._bypass_permissions - one home for the details, this one carries the same value on purpose (a divergence between two channels of the same kind would be a bug the operator would spot at plan time).",
       "_disabled_r80": "R80 (2026-09-04), the operator: «agy36flash и orgemini36flash отключаем для всех». Superseded by agy38flash (same transport, newer model).",
       "label": "agy 3.6 Flash",
       "cost": "mid",
@@ -522,6 +541,8 @@
       "panel": "cheap",
       "vendor": "google",
       "enabled": true,
+      "bypass_permissions": false,
+      "_bypass_permissions": "R88 opt-in, same mechanics as agy31pro._bypass_permissions - one home for the details, this one carries the same value on purpose (a divergence between two channels of the same kind would be a bug the operator would spot at plan time).",
       "label": "agy 3.8 Flash",
       "cost": "mid",
       "model": "gemini-3.8-flash",
@@ -1286,6 +1307,8 @@
       "panel": "cheap",
       "vendor": "xai",
       "enabled": true,
+      "bypass_permissions": false,
+      "_bypass_permissions": "R88 (2026-09-14) opt-in. Default off. When true, call_grokcli swaps `--permission-mode dontAsk` for `--permission-mode bypassPermissions`. 🔴 SMOKE-TESTED grok 1.0.30 --help: this CLI is Claude-Code-derived and has ONLY `--permission-mode <MODE>` with `bypassPermissions` in its enum - no `--dangerously-skip-permissions` (Select-String dangerously returned zero lines). The design in NOW.md §R88-A named the wrong flag; the smoke test caught it. CLI_BYPASS_SAFETY_PROMPT is injected into the brief. Enable per-run with `--bypass-permissions grokbuild` / `--all-bypass`, or set this field to `true` for standing bypass. Blast radius includes bash on the operator's machine and read_file at any absolute path (measured: this channel's read_file is NOT bounded by --cwd). Not a fence: read kit/SECURITY.md 'Bypass opt-in' before turning it on for briefs you did not write.",
       "🔴🔴_WHY_THIS_WAS_OFF_FOR_ONE_ROUND_AND_WHAT_ACTUALLY_BROKE_IT": "ON since 2026-08-16 (R45). It shipped OFF for exactly one round and the note here listed four arms proving «the flags were never the cause». 🔴 THAT CONCLUSION WAS WRONG AND SO WERE THE TWO THEORIES THAT FOLLOWED IT. `--no-plan` (the agent is literally called grok-build-plan) changed nothing; `--system-prompt-override` replacing the software-engineering-CLI persona changed nothing. All three explanations were guesses about a mechanism nobody had observed, because `--output-format json` shows only the final stopReason.\n\nWHAT IT ACTUALLY WAS, read off `--output-format streaming-messages-json` in one run: a tool_result with is_error=true and the text «User cancelled the execution for tool `web_fetch`». ONE DENIED TOOL DISCARDS THE ENTIRE TURN - the same failure the agy channel has documented since 2026-07-31, on a different binary. Two denials had to be cleared:\n  (1) web_fetch on any host outside x.ai. Isolated with one variable: same mode, same tool, dontAsk + docs.z.ai -> cancelled, dontAsk + docs.x.ai -> end_turn. That is why R44's short smoke test «worked» - it only ever fetched xAI's own docs - while every review failed, since reviewing means reading other vendors' pages.\n  (2) `use_tool`, the MCP gateway, reached for after SEVENTEEN successful fetches.\n\n🔴 THE GRANT IS SPELLED DIFFERENTLY FROM THE ALLOWLIST AND THE WRONG SPELLING IS SILENT: `--allow WebFetch` works, `--allow web_fetch` is accepted and grants nothing, while `--tools` wants the snake_case `web_fetch`. Same tool, two conventions, no error either way.\n\nRELEASE CONDITION MET, which is why this is on: 2026-08-16, the same 13.6 KB brief that produced 158 bytes in R44 returned **31 178 bytes**, `stopReason: end_turn`, `subtype: success`, marker on the last line, ZERO denied tools, 26 page fetches and 14 turns in 433 s. Its first working answer also found a real false positive in this harness's own transport_damage() check.\n\n🔴 SECURITY, TIGHTENED IN THE SAME CHANGE: read_file/list_dir/grep are no longer granted. R44 granted them believing the neutral `--cwd` made them harmless; measured on 2026-08-16, read_file served a file from `~/.grok/skills/` with that cwd in force. --cwd bounds where the agent STARTS, not what read_file can OPEN, and this channel's whole input is an untrusted brief. `search_tool`/`use_tool` are removed rather than granted for the same reason - `--tools` does not bound them, and this machine's MCP set includes a metered scraper and a git host with a write-capable token.",
       "label": "Grok Build 4.5",
       "cost": "subscription",

@@ -73,8 +73,19 @@ ONLY = ["только", "лишь", "исключительно", "only", "just 
 # could not authorise it. Found by running his sentence verbatim instead of a paraphrase of it,
 # which is the only way this class is ever found: every ADD word already here was one someone
 # imagined, and «и ещё»/«плюс» were imagined by the same person who then wrote «включая».
+# 🔴 R86 2026-09-14: «используй»/«поставь»/«выбери» ARE the ADD words a human types most
+# naturally, and they were missing through R43 - «в codex используй 5.6 Sol» got «bare name is
+# not an instruction», even though the comment in the error-raising branch (see apply_route)
+# already named «используй терра» as the exact form the router SHOULD support. Added on Igor's
+# «Исправь чтобы сработала: запусти второе мнение, но в codex используй 5.6 Sol». The SET-model
+# semantics for ADD+model already existed (see the etype=="model" branch in apply_route); these
+# words plug the marker gap. Longest-first sort at match time keeps «не используй» (11 ch)
+# winning over the bare «используй» (9 ch), so NEG is not stolen.
 ADD = ["и ещё", "и еще", "а также", "плюс ", "добавь", "добавить", "дополнительно", "вместе с",
-       "включая", "включительно", "в том числе", "and also", "plus ", "add ", "including"]
+       "включая", "включительно", "в том числе",
+       "используй", "используем", "используйте", "используешь", "использует",
+       "поставь", "поставить", "выставь", "выставить", "выбери", "выбрать",
+       "and also", "plus ", "add ", "including", "use ", "pick ", "choose ", "set "]
 
 
 class RouteError(Exception):
@@ -1095,6 +1106,20 @@ def apply_route(plan, reg, text):
     if not any(t[1] == "entity" for t in stream):
         raise RouteError("no channel or model in this route matched the registry: %r. "
                          "Known aliases: %s" % (text, ", ".join(sorted(a for a, _ in idx))))
+
+    # 🔴 R86 2026-09-14: HOIST the first marker to the front when entities precede it.
+    # Russian natural word order puts the marker after the object: «в codex используй 5.6 sol»
+    # scans as [entity(codex), marker(ADD), entity(5.6 sol)]; without this rearrangement the
+    # first entity hits mode=None and raises «bare name is not an instruction» - the very error
+    # message that already NAMED this exact use case («используй терра») as one the router
+    # SHOULD support. Semantics for a stream that already begins with a marker are unchanged
+    # (first_marker_i==0, no rearrangement). A stream with entities but NO marker still fails
+    # with the same error below (unchanged), preserving refuse-rather-than-guess.
+    first_marker_i = next((i for i, t in enumerate(stream)
+                           if t[1] in ("neg", "subst", "only", "add")), None)
+    if first_marker_i is not None and first_marker_i > 0:
+        marker = stream[first_marker_i]
+        stream = [marker] + stream[:first_marker_i] + stream[first_marker_i+1:]
 
     mode = None
     pending_neg = None      # the entity a following "вместо" replaces

@@ -2291,6 +2291,106 @@ def _system_for(system, slot):
     return out
 
 
+# R88 (2026-09-14). SAFETY DIRECTIVE injected into the brief of any CLI channel whose call was
+# resolved with permissions BYPASSED for this run. Igor's exact instruction, 14.09.2026:
+# «С усиливающим промтом отправь ему, что бы он ничего не удалял, а если ему надо что-то удалить,
+# то он в начале сделает резервную копию, потом подумает вслух (напишет текстом размышление) и
+# только потом удалит.» Rule 2 (the three-step deletion ritual) is his; Rule 1 (self-configure
+# and off-limits paths) was added to this file to compensate for the R57 measurement below.
+#
+# 🔴 STEERING, NOT ENFORCEMENT. Under agy's `--dangerously-skip-permissions` the operator's own
+# `command(*)` deny is IGNORED (patch_agy_permissions.py:71-74, measured R57): there is no shell
+# fence to catch a rogue delete. Igor accepted this blast radius on 14.09.2026 after an explicit
+# warning; the tripwire in _agy_once compensates by making a deletion visible in the notes, not
+# by preventing it.
+#
+# Position matters: R40 measured that a hard rule stated in the BRIEF was obeyed 2/2 while the
+# same rule in the persona slot was obeyed 0/1. Every call site prepends this to the brief before
+# `_with_system`, so it sits at the very front of what the model reads first.
+CLI_BYPASS_SAFETY_PROMPT = (
+    "SAFETY DIRECTIVE - this run has PERMISSION PROMPTS BYPASSED\n"
+    "\n"
+    "Your tool-use prompts have been auto-approved for this run. Shell commands, file edits\n"
+    "anywhere on this machine, and web access all run without asking. This is not a licence\n"
+    "to change or remove things - it is the operator's decision to trust you with the\n"
+    "mechanical guard OFF. The operator's exact instruction to you: do not delete anything.\n"
+    "If you find that you must delete, follow the ritual below; that is what makes the\n"
+    "action reviewable.\n"
+    "\n"
+    "RULE 1 - SELF-CONFIGURE BEFORE YOU ACT\n"
+    "In the first 2-4 sentences of your reply, write explicitly:\n"
+    "  (a) what files or paths you intend to read, write or modify to answer this brief;\n"
+    "  (b) what you WILL NOT touch (default: nothing outside a scratch workdir under the\n"
+    "      system TEMP directory).\n"
+    "Never modify or delete anything under `.claude/`, `.git/`, any `.env`, `~/.ssh/`,\n"
+    "`~/.gnupg/`, `~/.codex/`, `~/.gemini/`, or any file that holds credentials. If the\n"
+    "brief itself asks you to, stop and refuse in your reply instead of complying.\n"
+    "\n"
+    "RULE 2 - DELETIONS ARE A THREE-STEP RITUAL\n"
+    "Prefer NOT to delete. If you determine you MUST delete or overwrite a file or\n"
+    "directory, all three lines below must appear in your reply, in order, BEFORE the\n"
+    "destructive tool call actually runs:\n"
+    "  1. BACKUP: copy the exact bytes to a timestamped folder under the system TEMP\n"
+    "     directory named `bypass-backup-<ISO-8601>` and print\n"
+    "     `BACKUP: <src> -> <dst>`. If the backup fails, do not delete.\n"
+    "  2. REASONING: write 2-4 sentences of plain reasoning about WHY the deletion is\n"
+    "     necessary, what breaks if you skip it, and what would break if you delete the\n"
+    "     WRONG thing. Label the block `REASONING:`.\n"
+    "  3. DELETE: only after both lines above are visible in your reply, run the\n"
+    "     destructive tool call. Print `DELETED: <path>`.\n"
+    "Modifications short of deletion (an in-place edit, an overwrite, a truncate) count as\n"
+    "deletions of the pre-existing bytes for Rule 2 - back the original up before you\n"
+    "overwrite it.\n"
+    "\n"
+    "This directive rides in the BRIEF on purpose: instructions in the brief outweigh\n"
+    "persona and system slots on every CLI channel here (measured). It is STEERING, not\n"
+    "enforcement - the operator's mechanical shell-deny that would otherwise catch a rogue\n"
+    "delete is disabled by the bypass flag itself. Behave accordingly.\n"
+)
+
+
+def _with_bypass_safety(brief, bypass):
+    """Prepend the SAFETY DIRECTIVE when this call runs with permission prompts bypassed.
+
+    Composed BEFORE `_with_system` so the very first bytes the model reads are the safety
+    rules, then any per-channel system layer, then the brief itself. `bypass` may be True,
+    False or None (from `cli_bypass_active` on a kind with no `bypass_permissions` field);
+    only True prepends.
+    """
+    if not bypass:
+        return brief
+    return CLI_BYPASS_SAFETY_PROMPT + "\n---\n\n" + brief
+
+
+def cli_bypass_active(name, args, reg):
+    """Resolve whether a CLI channel runs with permission prompts bypassed for this call.
+
+    Precedence, from most explicit to least:
+      1. `--all-bypass` on the command line -> True for every channel that HAS a
+         `bypass_permissions` field in the registry (opencode has none; returns None).
+      2. `--bypass-permissions <name>` on the command line names this channel by canonical
+         name -> True. A channel named on the flag but without the field is ignored (a
+         warning is printed once at plan time by the caller, not here).
+      3. The channel's `bypass_permissions` value in `channels.json`. Registered as `true`
+         for cclopus46 (always-on since v1.61.0, see call_claudecli), `false` for the four
+         opt-in CLI channels (codex, grokbuild, three agy channels).
+
+    Returns None when the channel's registry entry does NOT declare `bypass_permissions` at
+    all - opencode's `run` subcommand is already YOLO by default and has no such flag, so
+    the concept is meaningless for it, and the dispatcher must not pass a bypass= kwarg to
+    call_opencode. Callers filter on `is None` explicitly.
+    """
+    slot = (reg or {}).get("channels", {}).get(name) or {}
+    if "bypass_permissions" not in slot:
+        return None
+    if getattr(args, "all_bypass", False):
+        return True
+    named = getattr(args, "bypass_permissions", None) or []
+    if name in named:
+        return True
+    return bool(slot.get("bypass_permissions"))
+
+
 # 🔴 THE PANEL COMPARED "MODEL + HIDDEN PROMPT" WHILE CLAIMING TO COMPARE MODELS.
 # Raised independently by codex and qwen38max in the round-29 review, and both were right:
 # `_system_for` composes a DIFFERENT system prompt per channel, and diagnostics.json recorded
@@ -2697,10 +2797,16 @@ def codex_quota_snapshot(timeout=12):
 
 
 def call_codex(brief, marker, workdir, outfile, model=None, effort=None, system=None,
-               timeout=None):
+               timeout=None, bypass=False):
     """
     Prompt goes on STDIN and argv ends with "-". A positional prompt while something else pipes
     stdin makes it hang on 'Reading additional input from stdin...'.
+
+    `bypass=True` swaps `--sandbox read-only` for `--dangerously-bypass-approvals-and-sandbox`
+    (measured on codex-cli 0.154.0 --help: the flag exists, verbatim; a separate
+    `--dangerously-bypass-hook-trust` covers hook trust and is not touched here). The brief is
+    prepended with CLI_BYPASS_SAFETY_PROMPT in that mode. Default False; the dispatcher resolves
+    the value from `cli_bypass_active(name, args, reg)` at the call site.
     """
     binary = codex_bin()
     os.makedirs(workdir, exist_ok=True)
@@ -2720,8 +2826,13 @@ def call_codex(brief, marker, workdir, outfile, model=None, effort=None, system=
     model = model or os.environ.get("CODEX_MODEL") or _registry_default("codex", "model", "gpt-5.4")
     effort = (effort or os.environ.get("CODEX_EFFORT")
               or _registry_default("codex", "effort", "xhigh"))
+    # R88 (2026-09-14): opt-in bypass swaps the sandbox mode flag; verified against
+    # codex-cli 0.154.0 --help (Select-String bypass|sandbox|dangerous). The two are mutually
+    # exclusive at the vendor's argparse; a plan line under the flag also announces it.
+    sandbox_flags = (["--dangerously-bypass-approvals-and-sandbox"] if bypass
+                     else ["--sandbox", "read-only"])
     cmd = [binary, "exec",
-           "--sandbox", "read-only",
+           *sandbox_flags,
            "--skip-git-repo-check",          # -C often points outside a git repo
            "-C", workdir,
            "--color", "never",
@@ -2747,9 +2858,13 @@ def call_codex(brief, marker, workdir, outfile, model=None, effort=None, system=
     progress = os.path.join(os.path.dirname(outfile) or ".", "CODEX.progress.log")
     limit = _seconds(timeout, 3000)
     t0 = time.time()
+    if bypass:
+        log("  [codex] PERMISSIONS BYPASSED for this call: "
+            "--dangerously-bypass-approvals-and-sandbox replaces --sandbox read-only; "
+            "the SAFETY DIRECTIVE (no-delete + three-step ritual) is prepended to the brief.")
     try:
-        p, secs = _run(cmd, stdin_text=_with_system(brief, system), timeout=limit,
-                       stdout_path=progress, env=_codex_env())
+        p, secs = _run(cmd, stdin_text=_with_system(_with_bypass_safety(brief, bypass), system),
+                       timeout=limit, stdout_path=progress, env=_codex_env())
     except FileNotFoundError:
         return {"channel": "codex", "ok": False, "error": "binary not found: " + binary}
     except subprocess.TimeoutExpired:
@@ -2810,7 +2925,7 @@ def grok_bin():
 
 
 def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
-                 timeout=None, system=None, name="grokbuild", file_refs=False):
+                 timeout=None, system=None, name="grokbuild", file_refs=False, bypass=False):
     """Grok Build - xAI's own CLI, on the SUBSCRIPTION, not the metered api.x.ai key.
 
     A different thing from the `grok420` channel despite the shared vendor: that one is
@@ -2901,7 +3016,8 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
             "in the text below, and the only outside resource you have is web search and page "
             "fetching, which you should use freely for vendor documentation. Write the finished "
             "review in a single reply.\n\n---\n\n")
-    text_in = NO_REPO + ((system.strip() + "\n\n---\n\n") if system else "") + brief
+    text_in = NO_REPO + ((system.strip() + "\n\n---\n\n") if system else "") \
+              + _with_bypass_safety(brief, bypass)
     pf = os.path.join(workdir, "PROMPT.md")
     with open(pf, "w", encoding="utf-8") as f:
         f.write(text_in)
@@ -2974,12 +3090,22 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
            "--disallowed-tools", "search_tool,use_tool",
            # PascalCase HERE and snake_case in --tools, for the same tool. Not a typo - measured:
            # `--allow web_fetch` is accepted and grants nothing, `--allow WebFetch` grants it.
-           "--verbatim", "--output-format", "json", "--permission-mode", "dontAsk",
+           # R88 (2026-09-14): opt-in bypass swaps `dontAsk` for `bypassPermissions`.
+           # SMOKE-TESTED on grok 1.0.30 --help: only `--permission-mode <MODE>` exists here
+           # (no `--dangerously-skip-permissions` in this CLI — verified `Select-String
+           # dangerously` returned zero lines); the mode enum lists bypassPermissions among
+           # its values. This CLI is Claude-Code-derived and shares the mode vocabulary.
+           "--verbatim", "--output-format", "json",
+           "--permission-mode", ("bypassPermissions" if bypass else "dontAsk"),
            "--allow", "WebFetch"]
     if model:
         cmd += ["-m", model]
     if effort:
         cmd += ["--reasoning-effort", effort]
+    if bypass:
+        log("  [%s] PERMISSIONS BYPASSED for this call: --permission-mode bypassPermissions "
+            "(replaces dontAsk); every tool, incl. bash, runs without prompting. SAFETY DIRECTIVE "
+            "(no-delete + three-step ritual) is prepended to the brief." % name)
     log("  [%s] Grok Build CLI on the subscription (no API key); depth --reasoning-effort=%s, "
         "brief via --prompt-file (%d chars), neutral cwd, memory off%s"
         % (name, effort or "vendor default", len(text_in),
@@ -3322,7 +3448,12 @@ def call_claudecli(brief, marker, outfile, model=None, effort=None, system=None,
       modelUsage       — per-model breakdown with contextWindow
     """
     binary = claudecli_bin()
-    text_in = ((system.strip() + "\n\n---\n\n") if system else "") + brief
+    # R88 (2026-09-14): this channel is ALWAYS bypass (see docstring above), so the SAFETY
+    # DIRECTIVE is always prepended. Symmetry with the four opt-in CLI channels - a reviewer
+    # reading a claudecli reply should see the same no-delete + three-step ritual it would see
+    # from any other bypassed channel.
+    text_in = ((system.strip() + "\n\n---\n\n") if system else "") \
+              + _with_bypass_safety(brief, True)
     turns = int(max_turns or CLAUDECLI_MAX_TURNS)
 
     cmd = [binary, "-p",
@@ -6232,10 +6363,13 @@ def _agy_plan_shape(text):
 
 
 def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout="25m",
-             system=None, add_dirs=None):
+             system=None, add_dirs=None, bypass=False):
     """
     Run the channel, and re-run it ONCE if it planned instead of working, or if it cited
     sources without opening any.
+
+    `bypass` is threaded through to BOTH _agy_once invocations (the primary and any retry) so
+    the same permission mode covers the second call. See _agy_once for what bypass does.
 
     Measured 2026-07-31: agy issued 10 searches, opened **zero** pages, and cited 11 URLs of which
     3 return 404 - while getting the substance right. That combination is the dangerous one,
@@ -6259,7 +6393,7 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
     signal about the brief than one.
     """
     first = _agy_once(brief, marker, workdir, outfile, model, effort, timeout, system,
-                      add_dirs=add_dirs)
+                      add_dirs=add_dirs, bypass=bypass)
 
     if first.get("plan_shape"):
         log("  [agy] the answer is an implementation PLAN, not the review. Re-running once "
@@ -6267,7 +6401,7 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
         retry_out = os.path.splitext(outfile)[0] + ".retry" + (os.path.splitext(outfile)[1] or ".md")
         second = _agy_once(brief + AGY_PLAN_ESCALATION, marker,
                            os.path.join(workdir, "plan-retry"), retry_out,
-                           model, effort, timeout, system, add_dirs=add_dirs)
+                           model, effort, timeout, system, add_dirs=add_dirs, bypass=bypass)
         if second.get("text") and not second.get("plan_shape") \
                 and (not marker or marker in second["text"]):
             # Deliberately NOT chained into the zero-grounding re-run below: the cost bound is
@@ -6296,7 +6430,7 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
     retry_out = os.path.splitext(outfile)[0] + ".retry" + (os.path.splitext(outfile)[1] or ".md")
     second = _agy_once(brief + AGY_ESCALATION, marker,
                        os.path.join(workdir, "retry"), retry_out,
-                       model, effort, timeout, system, add_dirs=add_dirs)
+                       model, effort, timeout, system, add_dirs=add_dirs, bypass=bypass)
 
     if second.get("n_grounded"):
         second.setdefault("notes", []).append(
@@ -6545,12 +6679,68 @@ def _run_agy(cmd, timeout=3600, cwd=None, stdout_path=None, env=None):
     return r, secs
 
 
+def _agy_snapshot_workdir(workdir):
+    """R88 (2026-09-14) tripwire. Snapshot of the workdir's file inventory + sizes before an
+    _agy_once call runs under bypass. Compared after the call; any file that VANISHED without a
+    matching `BACKUP: <path>` line in the model's text triggers a loud warning. It does NOT block
+    the call - it makes a rogue delete visible in `notes`, which is the R57 compensation the
+    safety-prompt cannot enforce mechanically (`command(*)` deny is IGNORED under
+    `--dangerously-skip-permissions`, measured, patch_agy_permissions.py:71-74).
+    """
+    inv = {}
+    try:
+        for root, dirs, files in os.walk(workdir):
+            for f in files:
+                pth = os.path.join(root, f)
+                try:
+                    inv[pth] = os.path.getsize(pth)
+                except OSError:
+                    inv[pth] = -1
+    except OSError:
+        pass
+    return inv
+
+
+def _agy_tripwire_check(before, after, text):
+    """Return a list of tripwire warning strings, one per deleted file that lacks a BACKUP: line.
+
+    Never raises. Empty list = clean. A missing key in `after` means the file existed at snapshot
+    time and does not exist now; a smaller size than at snapshot time is a truncation and treated
+    as a deletion of the pre-existing bytes (Rule 2 in the safety directive). The BACKUP scan is
+    case-sensitive and substring-matched against the model's own reply - the ritual asks the
+    model to print the source path verbatim.
+    """
+    if before is None:
+        return []
+    warnings = []
+    text = text or ""
+    for pth, size_before in before.items():
+        size_after = after.get(pth)
+        if size_after is None:
+            # File is gone entirely.
+            if pth not in text:
+                warnings.append(pth + " (deleted)")
+        elif size_before >= 0 and size_after >= 0 and size_after < size_before:
+            # File shrank; treat as partial delete under Rule 2.
+            if pth not in text:
+                warnings.append("%s (truncated: %d -> %d bytes)"
+                                % (pth, size_before, size_after))
+    return warnings
+
+
 def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeout="25m",
-              system=None, add_dirs=None):
+              system=None, add_dirs=None, bypass=False):
     """
     Two ways in, and they fail differently. Inline -p avoids the file-reading tool (and its
     permission error) but is capped by the Windows argv limit. --add-dir has no size cap but needs
     the tool. Pick by size.
+
+    `bypass=True` adds `--dangerously-skip-permissions` and removes `--sandbox` (the two settings
+    are mutually exclusive on agy 1.2.2 --help). The brief is prepended with
+    CLI_BYPASS_SAFETY_PROMPT and a workdir tripwire is armed - see _agy_snapshot_workdir and
+    _agy_tripwire_check. Default False; the dispatcher resolves the value from
+    `cli_bypass_active(name, args, reg)` at the call site. patch_agy_permissions.py still governs
+    non-bypass and interactive TUI runs and is orthogonal to this flag.
     """
     binary = agy_bin()
     # R37 (2026-08-14) fix for agy corrupting non-ASCII path components in stream-json output
@@ -6569,7 +6759,10 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
     # the marker instruction main() spliced to the very end (orgemini37flash, R73). Re-stating
     # the marker line after it keeps «last instruction = the marker» true without moving the
     # constraint out of the position where it demonstrably works.
-    brief = _with_system(brief, system) + AGY_ENV_CONSTRAINT
+    # R88 (2026-09-14): bypass mode PREPENDS CLI_BYPASS_SAFETY_PROMPT before _with_system so the
+    # safety rules sit at the very front of the payload, then the shared system layer, then the
+    # brief. The env-constraint tail still lands after the brief, keeping the position rules.
+    brief = _with_system(_with_bypass_safety(brief, bypass), system) + AGY_ENV_CONSTRAINT
     if marker:
         brief += ("\n\nReminder: the very LAST line of your reply must be exactly:\n%s\n"
                   % marker)
@@ -6645,10 +6838,18 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
     # `--log-file <path>` the file appears at that path at 30 100 bytes and the default log
     # directory's file count is UNCHANGED (124 -> 124), so the log is diverted, not copied.
     agy_log = os.path.splitext(outfile)[0] + ".agy-cli.log"
+    # R88 (2026-09-14): under bypass we DROP --sandbox and ADD --dangerously-skip-permissions.
+    # Verified against agy 1.2.2 --help (Select-String bypass|permission|dangerous|skip|approve|
+    # sandbox): the two flags are opposing modes - sandbox restricts, dangerously-skip auto-
+    # approves. Combining them makes no sense and combining them contradicts what the plan just
+    # printed. patch_agy_permissions.py's allowlist STILL applies under this flag for the tool
+    # names it declares, but `command(*)` deny is IGNORED (measured, patch_agy_permissions.py
+    # :71-74) - that is what the CLI_BYPASS_SAFETY_PROMPT and _agy_tripwire_check compensate for.
+    perm_flag = ["--dangerously-skip-permissions"] if bypass else ["--sandbox"]
     cmd += ["--model", mdl,
             "--effort", effort,
             "--agent", AGY_AGENT,
-            "--sandbox",
+            *perm_flag,
             "--output-format", "stream-json",   # the ONLY way this channel reports tool use
             "--log-file", agy_log,              # see above: the default path collides per second
             "--print-timeout", timeout]         # default truncates at 5m
@@ -6663,6 +6864,17 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
         log("  [agy] held %.0fs so this launch does not overlap another agy start - "
             "simultaneous starts race on the shared MCP tool-schema cache and the loser's run "
             "is discarded at ~4s with no output" % waited)
+    # R88 (2026-09-14): bypass tripwire - snapshot the workdir file list + sizes BEFORE the run,
+    # compare AFTER. Any file that VANISHED or was TRUNCATED without a matching `BACKUP: <path>`
+    # line in the answer text raises a loud warning. It does not block the run; it makes a rogue
+    # delete visible. Signal-only, compensating for the R57 measurement (`command(*)` deny is
+    # IGNORED under `--dangerously-skip-permissions`). Snapshot is taken only under bypass to
+    # save the os.walk cost on the ordinary path.
+    tripwire_before = _agy_snapshot_workdir(workdir) if bypass else None
+    if bypass:
+        log("  [agy] PERMISSIONS BYPASSED for this call: --dangerously-skip-permissions replaces "
+            "--sandbox; SAFETY DIRECTIVE (no-delete + three-step ritual) prepended to the brief; "
+            "workdir tripwire ARMED (before-snapshot: %d file(s))" % len(tripwire_before or {}))
     try:
         # cwd must be the workspace or the workspace-scoped agent is never discovered.
         # env: see posix_tools_dir() - without it this channel's grep_search tool cannot
@@ -6684,6 +6896,18 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
         f.write(text or (p.stderr or ""))
 
     warn = []
+    if bypass and tripwire_before is not None:
+        tripwire_after = _agy_snapshot_workdir(workdir)
+        deleted = _agy_tripwire_check(tripwire_before, tripwire_after, text)
+        if deleted:
+            warn.append(
+                "AGY-BYPASS TRIPWIRE: %d file(s) removed or truncated in workdir without a "
+                "matching `BACKUP:` line in the model's reply - the SAFETY DIRECTIVE was IGNORED. "
+                "The three-step ritual asks the model to print `BACKUP: <src> -> <dst>` before "
+                "deletion; the missing acknowledgement is what fires this. First: %s. This is a "
+                "signal, not a block - the deletion has already happened. See kit/SECURITY.md "
+                "'Bypass opt-in' for what it means and how to review."
+                % (len(deleted), deleted[0]))
     # THE failure mode of this channel, measured 5/5 times on 2026-07-31: one tool left at the
     # default "ask" is auto-denied in headless mode (no prompt is possible), and that single
     # denial DISCARDS THE WHOLE RUN - 29 successful tool calls thrown away, response "",
@@ -6744,8 +6968,14 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
         warn.append("PERMISSION DENIAL KILLED THE RUN: %s. If it is the FIRST error, fix it "
                     "once by running patch_agy_permissions.py (adds the allow-rules for the "
                     "free read-only web tools and deny-rules for the metered Firecrawl ones). "
-                    "Do NOT reach for --dangerously-skip-permissions: that also unlocks "
-                    "firecrawl_crawl.%s" % (denial[0] if denial else "see stderr", first))
+                    "The `--dangerously-skip-permissions` opt-in exists since R88 "
+                    "(v1.63.0) — set `bypass_permissions: true` for this channel in "
+                    "channels.json or pass `--bypass-permissions %s` / `--all-bypass` on the "
+                    "command line — but that ALSO unlocks firecrawl_crawl and disables the "
+                    "`command(*)` shell fence (R57, measured). The tripwire and the SAFETY "
+                    "DIRECTIVE compensate, but they are signals, not a fence. Read the "
+                    "'Bypass opt-in' section of kit/SECURITY.md before turning it on.%s"
+                    % (denial[0] if denial else "see stderr", "agy31pro", first))
     if marker and not _marker_on_last_line(text, marker):
         # 🔴 SAY WHY, NOT JUST WHAT. Until 2026-08-07 this was the whole message, and its stock
         # advice ("re-run alone, or lower --tier") pointed at a timeout. The round-25 agy36flash
@@ -7325,6 +7555,26 @@ def main():
                     help="channels to exclude. Repeatable")
     ap.add_argument("--set", dest="sets", action="extend", nargs="*", default=None,
                     help="channel=model, e.g. codex=gpt-5.4. Repeatable")
+    # R88 (2026-09-14): opt-in bypass for CLI channels that carry a `bypass_permissions` field
+    # in channels.json (currently codex, grokbuild, agy31pro, agy36flash, agy38flash; cclopus46
+    # is always-on and does not need to be named). The safety-directive prompt is injected into
+    # the brief on bypass, and the agy channels arm the workdir tripwire. `action="extend"` for
+    # the same reason as --only/--skip: repeated flags MUST not overwrite silently.
+    ap.add_argument("--bypass-permissions", dest="bypass_permissions", action="extend",
+                    nargs="*", default=None, metavar="CHANNEL",
+                    help="turn on permission-prompt bypass for the named CLI channel(s) for "
+                         "this run. Names must match channels.json entries that carry a "
+                         "`bypass_permissions` field - opencode is intentionally excluded (its "
+                         "run subcommand is already YOLO by default). Bypass unlocks every "
+                         "tool including shell; the SAFETY DIRECTIVE (no-delete + three-step "
+                         "ritual) is prepended to the brief. Read kit/SECURITY.md 'Bypass "
+                         "opt-in' before setting this on a channel you have not run bypassed "
+                         "before")
+    ap.add_argument("--all-bypass", dest="all_bypass", action="store_true",
+                    help="shorthand for '--bypass-permissions <every-CLI-channel-that-has-the-"
+                         "field>'. Same blast radius, same directive, same tripwire on agy. "
+                         "Prefer naming channels one by one until you have run each bypassed "
+                         "with your own workload")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the resolved plan and exit without spending anything")
     ap.add_argument("--strict-pii", action="store_true",
@@ -7473,6 +7723,11 @@ def main():
                                            ("--set", a.sets), ("--only", a.only),
                                            ("--panel", a.panel)) if v))
             return 2
+    # R88 (2026-09-14): initialised BEFORE the routing block so cli_bypass_active(cname, a, reg)
+    # in the dispatcher is safe even if routing is None. The helper reads reg defensively; a
+    # None here means no channel carries the field, so bypass is off across the board.
+    reg = None
+    plan = None
     if routing is not None:
         try:
             reg = routing.load_registry()
@@ -7482,6 +7737,50 @@ def main():
         except routing.RouteError as e:          # ambiguity must stop the run, never guess
             log("ROUTE ERROR: %s" % e)
             return 2
+        # R88 (2026-09-14): bypass status is printed AFTER the routing plan and BEFORE any spend,
+        # so the operator sees which channels will run with permission prompts bypassed and where
+        # the setting came from. Every planned channel is checked; opencode returns None from
+        # cli_bypass_active and is skipped in this loop. Named channels that lack the field are
+        # warned about once (a typo in --bypass-permissions is a common failure mode).
+        # plan is a dict {channel_name: slot} - not a list; the R88 first draft got this wrong.
+        # Filter on `enabled` too: routing.resolve returns EVERY channel in the registry with
+        # its enabled flag set (True if it will run, False if --only/--skip/panel/registry
+        # excluded it). Printing bypass status for a channel that will NOT run is actively
+        # misleading - the smoke run against `--only codex` showed [cclopus46] BYPASSED even
+        # though cclopus46 was not in the run. Only announce bypass for channels the dispatcher
+        # is about to launch.
+        _bypass_lines, _bypass_bad = [], []
+        for _cn, _p in (plan or {}).items():
+            if not _p.get("enabled"):
+                continue
+            _by = cli_bypass_active(_cn, a, reg)
+            if _by is None:
+                continue    # channel has no bypass_permissions field (opencode) - not applicable
+            if _by:
+                _src = ("--all-bypass" if getattr(a, "all_bypass", False)
+                        else "--bypass-permissions" if (getattr(a, "bypass_permissions", None)
+                                                        or []) and _cn in a.bypass_permissions
+                        else "registry (channels.json)")
+                _tw = " + workdir tripwire ARMED" if _p.get("kind") == "agy" else ""
+                _bypass_lines.append("  [%s] PERMISSIONS BYPASSED (source: %s)%s"
+                                     % (_cn, _src, _tw))
+        for _n in (getattr(a, "bypass_permissions", None) or []):
+            _slot = (reg or {}).get("channels", {}).get(_n)
+            if not _slot or "bypass_permissions" not in _slot:
+                _bypass_bad.append(_n)
+        if _bypass_lines:
+            log("permissions:")
+            for _l in _bypass_lines:
+                log(_l)
+            log("  safety directive: no-delete + three-step ritual (BACKUP -> REASONING -> "
+                "DELETE), injected into the brief. See kit/SECURITY.md 'Bypass opt-in'.")
+        if _bypass_bad:
+            log("  warning: --bypass-permissions named channel(s) with no bypass_permissions "
+                "field in channels.json: %s. Ignored. Names known to take the flag: %s"
+                % (", ".join(_bypass_bad),
+                   ", ".join(sorted(
+                       n for n, s in ((reg or {}).get("channels", {}) or {}).items()
+                       if isinstance(s, dict) and "bypass_permissions" in s))))
 
     # utf-8-sig, not utf-8: a hand-made brief saved by Notepad or PowerShell 5 `Out-File` carries
     # a BOM, and plain utf-8 ships U+FEFF as the payload's FIRST character to every channel - the
@@ -7876,21 +8175,24 @@ def main():
                 jobs[cname] = ex.submit(call_codex, cbrief, a.marker, workdir, outfile,
                                         model=p.get("model"), effort=p.get("effort"),
                                         timeout=p.get("timeout"),
-                                        system=_system_for(system, p))
+                                        system=_system_for(system, p),
+                                        bypass=bool(cli_bypass_active(cname, a, reg)))
             elif kind == "agy":
                 jobs[cname] = ex.submit(call_agy, cbrief, a.marker, workdir, outfile,
                                         model=p.get("model"),
                                         effort=p.get("effort") or "high",
                                         timeout=p.get("timeout") or "25m",
                                         system=_system_for(system, p),
-                                        add_dirs=att_parents)
+                                        add_dirs=att_parents,
+                                        bypass=bool(cli_bypass_active(cname, a, reg)))
             elif kind == "grokcli":
                 jobs[cname] = ex.submit(call_grokcli, cbrief, a.marker, workdir, outfile,
                                         model=p.get("model"),
                                         effort=p.get("effort"),
                                         timeout=p.get("timeout") or "40m",
                                         system=_system_for(system, p), name=cname,
-                                        file_refs=use_refs)
+                                        file_refs=use_refs,
+                                        bypass=bool(cli_bypass_active(cname, a, reg)))
             elif kind == "hermes":
                 jobs[cname] = ex.submit(call_hermes, cbrief, a.marker, outfile,
                                         model=p.get("model"), toolsets=p.get("toolsets"),
