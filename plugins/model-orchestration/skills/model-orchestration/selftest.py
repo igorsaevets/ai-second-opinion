@@ -6871,7 +6871,8 @@ def main():
                   suite_r86_self_update,
                   suite_r86_i2_doctor_probe_covers_every_kind,
                   suite_r86_prose_set_in_channel,
-                  suite_r88_bypass_opt_in):
+                  suite_r88_bypass_opt_in,
+                  suite_r90_silent_drop_criterion_1):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -7444,6 +7445,156 @@ def suite_r88_bypass_opt_in():
     # ---- (i) argparse flags --------------------------------------------------------
     check("--bypass-permissions" in main_src and "--all-bypass" in main_src,
           "R88 CLI: --bypass-permissions and --all-bypass are on the argparse")
+
+
+def suite_r90_silent_drop_criterion_1():
+    """
+    R90 (2026-09-14). #44 criterion 1: a route that names a known channel followed by words
+    that no channel or model alias matches is REFUSED, with the words named, rather than run
+    silently under the channel's DEFAULT model. Measured 2026-09-11: `--route "только codex
+    5.9 Nova Ultra"` ran gpt-5.5 with no line in the plan naming what happened to any of the
+    three words.
+
+    Detector rules:
+      * Only Latin/digit runs count - Cyrillic prose is not a model-name candidate on purpose.
+        A false-positive check on ordinary Russian would train people to disable it.
+      * "Significant" = a run with a digit AND (letter or . or -), OR a pure-letter run of
+        length >= 4. So «5.9», «v2», «gpt-6-astra», «Nova», «Ultra» trigger; «2» in «2 голоса»
+        does not.
+      * A channel that DID match a model entity in the same clause is left alone: `5.6 Sol Max`
+        is legal because «5.6 sol» matched - the trailing decorator is decorative, not a
+        second attempt to pick a model.
+
+    Escape hatches once criteria 2/3 land: `--set <chan>=<slug>` for http/openrouter/oai/
+    codex/claudecli/grokcli, and `--new-channel <kind>:<vendor>/<model>` writing to the
+    overlay. This suite tests only criterion 1; --set unlisted and --new-channel each own
+    their own suite in a later release.
+    """
+    import tempfile
+    import routing as r
+    section("R90 criterion 1: model-like words after a channel never dropped silently")
+
+    reg = r.load_registry()
+
+    # ---- (a) DIRECT: raises on unknown model words after a known channel --------------
+    for phrase, must_include in (
+        ("только codex 5.9 Nova Ultra", ("5.9", "Nova", "Ultra")),
+        ("включая codex 5.9 Nova Ultra", ("5.9", "Nova", "Ultra")),
+        ("используй codex gpt-6-astra-max", ("gpt-6-astra-max",)),
+    ):
+        plan = r.initial_plan(reg)
+        raised = False
+        try:
+            r.apply_route(plan, reg, phrase)
+        except r.RouteError as exc:
+            raised = True
+            msg = str(exc)
+            check("not in the registry" in msg,
+                  "R90 refuses silent-drop: «%s» - message says 'not in the registry'" % phrase)
+            for w in must_include:
+                check(w in msg,
+                      "R90 error names the dropped word «%s» in «%s»" % (w, phrase[:40]),
+                      msg[:200])
+            check("--set" in msg and "--new-channel" in msg,
+                  "R90 error lists both escape hatches for «%s»" % phrase[:40])
+            check("codex" in msg,
+                  "R90 error names the channel («codex») for «%s»" % phrase[:40])
+        if not raised:
+            check(False,
+                  "R90 refuses silent-drop: «%s»" % phrase,
+                  "no exception; plan applied silently")
+
+    # ---- (b) DIRECT: allows when a model entity WAS matched ---------------------------
+    for phrase in ("только codex 5.6 Sol Max",
+                   "только codex 5.6 Sol",
+                   "используй codex 5.6 sol",
+                   "запусти второе мнение, но в codex используй 5.6 Sol"):
+        plan = r.initial_plan(reg)
+        try:
+            r.apply_route(plan, reg, phrase)
+            check(True, "R90 allows «%s» (a model entity was matched)" % phrase[:60])
+        except r.RouteError as exc:
+            check(False,
+                  "R90 allows «%s» (a model entity was matched)" % phrase[:60],
+                  "refused: " + str(exc)[:150])
+
+    # ---- (c) DIRECT: Cyrillic-only unmatched text does NOT trigger silent-drop --------
+    for phrase in ("не используй spark",
+                   "не используй codex и остальное",       # 'остальное' is Cyrillic prose
+                   "используй codex"):                      # bare add + channel is a valid route
+        plan = r.initial_plan(reg)
+        try:
+            r.apply_route(plan, reg, phrase)
+            check(True, "R90 does not refuse «%s» (no significant Latin runs)" % phrase[:60])
+        except r.RouteError as exc:
+            check("not in the registry" not in str(exc),
+                  "R90 does not silent-drop-refuse «%s» (other errors OK)" % phrase[:60],
+                  str(exc)[:150])
+
+    # ---- (d) DIRECT: lone short digits (len < 2 or bare digit) are NOT flagged --------
+    #      «2» in «spark 2 голоса» is filler, not a model-name candidate. Testing the
+    #      significance threshold: a single digit must not fire.
+    plan = r.initial_plan(reg)
+    try:
+        r.apply_route(plan, reg, "только spark 2")
+    except r.RouteError as exc:
+        check("not in the registry" not in str(exc),
+              "R90 lone short digit '2' after channel is not a silent-drop candidate",
+              str(exc)[:150])
+
+    # ---- (e) DIRECT: known model gpt-6-astra (Igor added 09-13) still works -----------
+    plan = r.initial_plan(reg)
+    try:
+        r.apply_route(plan, reg, "только GPT-6 Astra")
+        check(plan["codex"].get("model") == "gpt-6-astra",
+              "R90 «только GPT-6 Astra» resolves to gpt-6-astra (known model, no refuse)",
+              "model=%r" % plan["codex"].get("model"))
+    except r.RouteError as exc:
+        check(False, "R90 «GPT-6 Astra» must be accepted (in registry)",
+              "refused: " + str(exc)[:150])
+
+    # ---- (f) CLI dry-run behaviour ----------------------------------------------------
+    dummy_brief = os.path.join(tempfile.gettempdir(), "_r90_silent_drop_brief.md")
+    with open(dummy_brief, "w", encoding="utf-8") as fh:
+        fh.write("тестовый бриф\n")
+
+    p = run_cli(["--route", "второе мнение, только codex 5.9 Nova Ultra",
+                 "--brief", dummy_brief, "--dry-run"], timeout=60)
+    blob = blob_of(p)
+    check(p.returncode != 0 and "ROUTE ERROR" in blob
+          and "5.9" in blob and "Nova" in blob and "Ultra" in blob,
+          "R90 CLI: dry-run refuses «codex 5.9 Nova Ultra» with all three words named",
+          "exit=%d" % p.returncode)
+    check(p.returncode != 0 and "gpt-5.5" in blob and "silently" in blob.lower(),
+          "R90 CLI: error mentions the default (gpt-5.5) it would have run silently",
+          "exit=%d" % p.returncode)
+
+    p = run_cli(["--route", "второе мнение, только codex 5.6 Sol Max",
+                 "--brief", dummy_brief, "--dry-run"], timeout=60)
+    blob = blob_of(p)
+    check(p.returncode == 0 and "gpt-5.6-sol" in blob.lower() and "ROUTE ERROR" not in blob,
+          "R90 CLI: dry-run allows «codex 5.6 Sol Max» (5.6 sol matched, Max is decorator)",
+          "exit=%d" % p.returncode)
+
+    # ---- (g) Regression: the R86 SET-parser cases still work end-to-end --------------
+    for phrase, model_slug in (
+        ("запусти второе мнение, но в codex используй 5.6 Sol", "gpt-5.6-sol"),
+        ("используй codex 5.6 sol", "gpt-5.6-sol"),
+    ):
+        p = run_cli(["--route", phrase, "--brief", dummy_brief, "--dry-run"], timeout=60)
+        blob = blob_of(p)
+        check(p.returncode == 0 and model_slug in blob.lower() and "ROUTE ERROR" not in blob,
+              "R90 regression: R86 SET-parser «%s» still resolves to %s" % (phrase[:40], model_slug),
+              "exit=%d" % p.returncode)
+
+    # ---- (h) Structural: _detect_silent_drop actually lives in routing.py and is called
+    #         from apply_route. Guards against a future edit that deletes the call site.
+    import inspect
+    src = inspect.getsource(r.apply_route)
+    check("_detect_silent_drop" in src,
+          "R90 wiring: apply_route calls _detect_silent_drop (the guard's dispatch site)")
+    check(hasattr(r, "_detect_silent_drop"),
+          "R90 wiring: routing._detect_silent_drop exists as a module-level function")
 
 
 if __name__ == "__main__":

@@ -1099,6 +1099,116 @@ def _route_has_entity(reg, text):
     return any(t[1] == "entity" for t in _scan(text, alias_index(reg)))
 
 
+def _detect_silent_drop(text, stream, alias_idx, reg):
+    """
+    Refuse routes where model-looking words after a known channel would be dropped silently
+    because no alias matched them. #44 criterion 1, measured 2026-09-11: the route
+    «только codex 5.9 Nova Ultra» ran gpt-5.5 with no line in the plan naming what happened
+    to «5.9»/«Nova»/«Ultra». Silent substitution to a model the user did not spell is the exact
+    failure mode this router exists to prevent - the router raises so the user can decide
+    rather than guesses.
+
+    Only Latin/digit runs are examined: Cyrillic prose («второе мнение», «остальные модели») is
+    not a model-name candidate on purpose - the false positives would train people to disable
+    the whole check. A run is "significant" if it either carries a digit AND a letter / . / -
+    («5.9», «v2», «gpt-6») or is a pure-letter run of length >= 4 («Nova», «Ultra»); a lone
+    short digit like «2» in «2 голоса» does NOT trigger.
+
+    Only channels that have NO matched model entity in the same clause are protected. A route
+    that DID pin a model («5.6 Sol Max») is left alone: the trailing decorator is legal so long
+    as the router's model choice was actually spelled out.
+
+    Escape hatches once criteria 2/3 land: `--set <chan>=<slug>` accepted for http/openrouter/
+    oai/codex/claudecli/grokcli, and `--new-channel <kind>:<vendor>/<model>` writing into the
+    user's overlay. Until then, `--set` refuses unlisted slugs with a message that names them,
+    which is still louder than the router picking a default.
+    """
+    if not text:
+        return
+    t = " " + text.lower().replace("ё", "е") + " "
+    covered = [False] * len(t)
+    for al, _ in alias_idx:
+        for m in re.finditer(r"(?<![\w\-])" + re.escape(al) + r"(?![\w\-])", t):
+            for j in range(m.start(), m.end()):
+                covered[j] = True
+    for words in (NEG, SUBST, ONLY, ADD):
+        for w in words:
+            for m in re.finditer(r"(?<![\w\-])" + re.escape(w) + r"(?![\w\-])", t):
+                for j in range(m.start(), m.end()):
+                    covered[j] = True
+
+    channels_in_stream = [(pos, val) for pos, kind, val in stream
+                          if kind == "entity" and val[0] == "channel"]
+    if not channels_in_stream:
+        return
+
+    for i, (cpos, cval) in enumerate(channels_in_stream):
+        end_pos = channels_in_stream[i + 1][0] if i + 1 < len(channels_in_stream) else len(t)
+        cname = cval[1]
+        has_model = any(cpos < pos < end_pos and k == "entity"
+                        and v[0] == "model" and v[1] == cname
+                        for pos, k, v in stream)
+        if has_model:
+            continue
+        chan_len = len(cname)
+        for al, ent in alias_idx:
+            if ent[0] == "channel" and ent[1] == cname and t[cpos:cpos + len(al)] == al:
+                chan_len = len(al)
+                break
+        chan_end = cpos + chan_len
+        # Walk the interval and collect runs of [A-Za-z0-9.-] that no alias or marker covers.
+        interval = t[chan_end:end_pos]
+        runs = []
+        cur = []
+        cur_start = None
+        for j, c in enumerate(interval):
+            pos = chan_end + j
+            if covered[pos] or not re.match(r"[A-Za-z0-9.\-]", c):
+                if cur:
+                    runs.append((cur_start, "".join(cur)))
+                    cur, cur_start = [], None
+                continue
+            if not cur:
+                cur_start = pos
+            cur.append(c)
+        if cur:
+            runs.append((cur_start, "".join(cur)))
+        significant = []
+        for pos, w in runs:
+            w = w.strip(".-")
+            if not w:
+                continue
+            has_digit = bool(re.search(r"[0-9]", w))
+            has_letter = bool(re.search(r"[A-Za-z]", w))
+            if has_digit and (has_letter or "." in w or "-" in w) and len(w) >= 2:
+                significant.append((pos, w))
+            elif has_letter and not has_digit and len(w) >= 4:
+                significant.append((pos, w))
+        if not significant:
+            continue
+        # Extract original casing from `text` (positions in t are +1 because of the leading space).
+        shown = []
+        for pos, w in significant:
+            src = text[pos - 1:pos - 1 + len(w)]
+            shown.append(src if src else w)
+        default = reg["channels"][cname].get("model")
+        known = list((reg["channels"][cname].get("models") or {}).keys())
+        raise RouteError(
+            "route names channel %r followed by word(s) not in the registry: %s. Rather than "
+            "silently run this channel's DEFAULT model (%s), the router refuses so you can "
+            "decide - a silent substitution to a model the user did not ask for is the failure "
+            "mode this router exists to prevent (measured 2026-09-11 on «только codex 5.9 Nova "
+            "Ultra»). Two ways forward:\n"
+            "  * pin the intended slug explicitly - `--set %s=<slug>` - and check the plan;\n"
+            "  * add it to your overlay settings with `--new-channel <kind>:<vendor>/<model>`\n"
+            "    (both will be accepted for http/openrouter/oai/codex/claudecli/grokcli in a\n"
+            "    later release; agy/opencode/hermes fix their model at the CLI itself, so an\n"
+            "    unlisted slug there is still refused).\n"
+            "Known model aliases for %s: %s."
+            % (cname, ", ".join("%r" % w for w in shown), default,
+               cname, cname, ", ".join(known) or "(none)"))
+
+
 def apply_route(plan, reg, text):
     """Interpret free text into plan mutations. Raises RouteError rather than guessing."""
     idx = alias_index(reg)
@@ -1106,6 +1216,9 @@ def apply_route(plan, reg, text):
     if not any(t[1] == "entity" for t in stream):
         raise RouteError("no channel or model in this route matched the registry: %r. "
                          "Known aliases: %s" % (text, ", ".join(sorted(a for a, _ in idx))))
+    # 🔴 R90 2026-09-14: refuse to drop model-looking words after a known channel.
+    # See _detect_silent_drop for the full rationale and #44 criterion 1 in BACKLOG.md.
+    _detect_silent_drop(text, stream, idx, reg)
 
     # 🔴 R86 2026-09-14: HOIST the first marker to the front when entities precede it.
     # Russian natural word order puts the marker after the object: «в codex используй 5.6 sol»

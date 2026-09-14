@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.64.0 — 2026-09-14
+
+One correctness fix: a `--route` pattern that used to substitute the wrong model
+without saying so now stops the run instead.
+
+* **A route that names a channel followed by words no alias matches is refused,
+  with the words quoted.** Since the parser has existed, `--route "только codex
+  5.9 Nova Ultra"` scanned as `[only, channel(codex)]` — `5.9`, `Nova` and
+  `Ultra` never reached any alias table and the router carried on with the
+  channel's DEFAULT model (`gpt-5.5`), printing nothing in the plan about the
+  three words that had been thrown away. That is the exact failure mode this
+  router exists to prevent: a silent substitution to a model the user did not
+  ask for. `_detect_silent_drop` (in `routing.py`, called from `apply_route`
+  after group expansion) now walks the interval between each channel entity and
+  the next channel entity or end-of-text, collects Latin/digit runs that no
+  alias or marker covers, filters to "significant" ones (either a run with a
+  digit AND a letter/./−, or a pure-letter run of length ≥ 4), and raises
+  `RouteError` naming every one of them along with the channel's default model
+  and the two escape hatches that will land later in the release cycle.
+
+  Cyrillic prose (`«второе мнение»`, `«остальные модели»`) is not a model-name
+  candidate on purpose — a false positive on ordinary Russian would train
+  operators to disable the whole check. A channel that DID pin a model
+  (`--route "только codex 5.6 Sol Max"` — `«5.6 sol»` matches an existing
+  model alias) is left alone: the trailing decorator is decorative, not a
+  second attempt to pick a model. Only the exact case where the router would
+  otherwise have guessed silently is affected. The known-good phrasings
+  (`«запусти второе мнение, но в codex используй 5.6 Sol»`, `«используй codex
+  5.6 sol»`) still resolve to their intended model, and the R86 hoist
+  continues to work. Twenty-three new pins in `selftest.py`
+  (`suite_r90_silent_drop_criterion_1`) — direct calls into `routing.apply_route`
+  plus CLI dry-runs — cover the three main shapes (refuse, allow-with-match,
+  Cyrillic-ignore) with per-word assertions on the error text. (R90; #44
+  criterion 1. Criteria 2 and 3 — `--set <chan>=<unlisted-slug>` and
+  `--new-channel <kind>:<vendor>/<model>` — arrive in a later release.)
+
 ## 1.63.0 — 2026-09-14
 
 Two features that stack: a broader `--route` parser that finally understands the
