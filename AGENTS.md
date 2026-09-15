@@ -53,6 +53,16 @@ documents that hold the detail. It deliberately holds no channel list, no counts
 - **The PII line is the operator's job, not the tool's.** Secrets are blocked outright;
   identifiers can be itemised; **names and street addresses are not detected at all** —
   [PRIVACY.md](PRIVACY.md) has the exact boundary. Tokenize before sending; sent is sent.
+- **User names a model this release does not know: never silently substitute the channel's
+  default, and never edit shipped `channels.json`.** Two mechanisms; pick by intent.
+  For a one-off try on an existing channel: `python orchestrate.py --set <chan>=<slug>
+  --dry-run` — accepted as a HYPOTHESIS for network-API kinds (http/codex/openrouter/oai/xai/
+  gemini/claudecli/grokcli); the plan carries a 🔴 line saying `label / data_policy = UNKNOWN`;
+  a paid 4xx from the vendor is the honest verdict. Refused loudly for CLI-fixed kinds
+  (agy/opencode/hermes) with the alternative named in the error. For a permanent add:
+  `python orchestrate.py --new-channel NAME:KIND:SLUG` — writes atomically to the user's
+  overlay (`~/.claude/model-orchestration.local.json`, survives kit updates); refused on
+  colliding NAME, unknown KIND, or a redirected overlay.
 
 ## Where the instructions live
 

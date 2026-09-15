@@ -206,6 +206,31 @@ OVERLAY_SHARP_HINT = (
     "variable - so its provenance is weaker than your home directory's. Move the file to %s and "
     "the same fields are accepted, printed in full on every run." )
 
+# 🔴 R90 iter 2 (2026-09-14): kind matrix for `--set <chan>=<unlisted-slug>`. The router used to
+# refuse every unlisted slug outright with a suggestion to edit shipped `channels.json` - the file
+# an update wipes (see the CONFIG-INSIDE-A-FOLDER hard rule). Two things wrong with that in one
+# line: the escape hatch pointed at a self-healing file, and the workflow «paid vendor 400 is the
+# real test of an unknown slug» could not even be tried without editing code first.
+#
+# ALLOW_ARBITRARY_MODEL_KINDS: kinds that pass the model name to a network vendor. The vendor
+# returns an honest 4xx if it does not recognise the slug, so an unlisted `--set` becomes a
+# HYPOTHESIS the paid call resolves. `--dry-run` shows the plan free of charge; the plan carries
+# a 🔴 line naming this fact and telling the user how to persist the model via `--new-channel`.
+#
+# REFUSE_ARBITRARY_MODEL_KINDS: kinds whose CLI binary decides what a model name means. Passing
+# a slug the binary does not know can hang the TUI (agy 1.2.2), fail with an opaque exit code
+# (opencode), or route to a completely different account (hermes, once configured). The refusal
+# stays but its ADVICE now points at the overlay writer (`--new-channel`) rather than at
+# `channels.json`. Adding a channel with a genuinely-supported CLI slug is a real workflow and
+# has one home now, not two.
+#
+# `hermes` is future-proof - no channel of that kind ships today, but it is in KNOWN_KINDS and a
+# stranger's overlay could add one. Fail loud there rather than silently reinterpret.
+ALLOW_ARBITRARY_MODEL_KINDS = frozenset({
+    "http", "codex", "openrouter", "oai", "xai", "gemini", "claudecli", "grokcli",
+})
+REFUSE_ARBITRARY_MODEL_KINDS = frozenset({"agy", "opencode", "hermes"})
+
 
 def overlay_home_path():
     """The one path whose provenance is the user's own home directory."""
@@ -382,6 +407,158 @@ def _apply_overlay_tiers(reg, over, path, trust, info):
                 info["applied"].append(("tier:" + tname, field, before, value))
             known[tname][field] = value
     reg["tiers"] = known
+
+
+# 🔴 R90 iter 2 (2026-09-14): writer for the overlay-file's `channels.<name>` block.
+#
+# THE POINT of a writer, and not just "let the user edit the JSON with a text editor":
+#   1. The overlay file's location is derived (MODEL_ORCH_LOCAL, or the home default), so a docs
+#      instruction «open the file at <path>» either hard-codes the wrong path for someone whose
+#      env var points elsewhere, or teaches every user to compute a path they should not have to.
+#   2. Two required fields on a new channel (`model` and `models.<slug>`) must agree in both name
+#      and shape - `_check_channel_models` refuses a load with `model` absent from `models`. A
+#      hand-edit that gets the shape half right leaves the tool refusing to start; this writer
+#      builds the pair together and validates the merge before rename.
+#   3. Trust is enforced at write time the same way `apply_overlay` enforces it at read time -
+#      a redirected overlay cannot ADD a channel. If we let the write succeed and the load refused,
+#      the user would spend the write on a file that would be rejected at the next `orchestrate.py`
+#      invocation, with the error message pointing at the file, not at this command.
+#
+# Atomic tmp+rename is standard for config: a crash or a Ctrl-C between the open and the close
+# must not leave a truncated overlay behind that refuses to parse. `os.replace` is the one write
+# primitive Windows guarantees is atomic across FAT/NTFS.
+def _parse_new_channel_spec(spec):
+    """Parse "NAME:KIND:SLUG", return (name, kind, slug) or raise RouteError with the right shape.
+
+    SLUG may contain '/', ':' or '.' - it goes to the vendor verbatim, e.g. `openai/gpt-5.5` or
+    `us.anthropic.claude-opus-4-7-20260523-v1:0`. Only the FIRST two colons split the spec, and
+    the rest is the slug.
+    """
+    if not spec or not isinstance(spec, str):
+        raise RouteError(
+            "--new-channel expects a NAME:KIND:SLUG string (see routing.write_new_channel).")
+    parts = spec.split(":", 2)
+    if len(parts) != 3:
+        raise RouteError(
+            "--new-channel expects NAME:KIND:SLUG, got %r. Example: "
+            "  --new-channel codex59nova:codex:gpt-5.9-nova-ultra\n"
+            "The SLUG may contain / and : (only the first two colons split the spec)." % spec)
+    name, kind, slug = parts[0].strip(), parts[1].strip(), parts[2].strip()
+    if not name or not kind or not slug:
+        raise RouteError(
+            "--new-channel %r: all three of NAME, KIND, SLUG must be non-empty." % spec)
+    if not _SAFE_NAME.match(name):
+        raise RouteError(
+            "--new-channel: NAME %r is not usable as a channel identifier. It must match "
+            "[a-z][a-z0-9_-]* - the dispatcher derives an output file (%s.md) and a workspace "
+            "directory (%s-ws) from it, and %s.md must be a legal filename on Windows too."
+            % (name, name.upper(), name, name.upper()))
+    if name in _RESERVED:
+        raise RouteError("--new-channel: NAME %r is a reserved Windows device name; %s.md "
+                         "cannot be created there." % (name, name.upper()))
+    kinds = ALLOW_ARBITRARY_MODEL_KINDS | REFUSE_ARBITRARY_MODEL_KINDS
+    if kind not in kinds:
+        raise RouteError(
+            "--new-channel: KIND %r is not one this router has rules for. Known kinds: %s. "
+            "See ALLOW_ARBITRARY_MODEL_KINDS / REFUSE_ARBITRARY_MODEL_KINDS in routing.py."
+            % (kind, ", ".join(sorted(kinds))))
+    return name, kind, slug
+
+
+def write_new_channel(spec, registry_path=None, force=False):
+    """
+    Add a new channel to the user's overlay settings, atomically.
+
+    See the block comment above `_parse_new_channel_spec` for the rules.
+
+    Returns a dict {"path": ..., "name": ..., "kind": ..., "slug": ..., "created": bool, "block": ...}
+    ready to print. `created` is True if the overlay file was newly written, False if only
+    edited. `block` is the exact JSON block that was inserted, so the caller can echo it.
+
+    Raises RouteError on any of the validation failures (does not touch the file).
+    """
+    name, kind, slug = _parse_new_channel_spec(spec)
+    if registry_path is None:
+        registry_path = DEFAULT_REGISTRY
+    trust = overlay_trust()
+    if trust != OVERLAY_TRUST_HOME:
+        raise RouteError(
+            "--new-channel refuses while the overlay is redirected (MODEL_ORCH_LOCAL is set to "
+            "%s). Adding a channel needs the home settings file, same rule that apply_overlay "
+            "enforces when reading. Move the overlay to %s (or unset MODEL_ORCH_LOCAL) and try "
+            "again." % (os.environ.get(OVERLAY_ENV) or "(unset)", overlay_home_path()))
+    # Collide-check against the SHIPPED registry (a channel by this name would silently shadow it
+    # under the load-time merge). Read the raw file - not through load_registry, which would apply
+    # this same overlay and could hide a collision inside a name-remap.
+    try:
+        with open(registry_path, encoding="utf-8") as f:
+            base = json.load(f)
+    except (OSError, ValueError) as exc:
+        raise RouteError("--new-channel: cannot read shipped registry %s: %s"
+                         % (registry_path, exc))
+    _strip_comment_keys(base)
+    if name in (base.get("channels") or {}) and not force:
+        raise RouteError(
+            "--new-channel: %r is already a channel in this release's registry. Pass a different "
+            "NAME (e.g. %r) or --force to override in the overlay (which will change what the "
+            "existing channel dispatches)." % (name, name + "_local"))
+    path = overlay_path()
+    existed_before = os.path.isfile(path)
+    existing = {}
+    if existed_before:
+        try:
+            with open(path, encoding="utf-8") as f:
+                existing = json.load(f)
+        except (OSError, ValueError) as exc:
+            raise RouteError(
+                "--new-channel: your overlay at %s exists but cannot be read (%s). Fix or move "
+                "it aside before writing." % (path, exc))
+    if not isinstance(existing, dict):
+        raise RouteError("--new-channel: overlay at %s is not a JSON object at the top level."
+                         % path)
+    existing.setdefault("channels", {})
+    if not isinstance(existing.get("channels"), dict):
+        raise RouteError("--new-channel: overlay at %s has a `channels` key that is not an object."
+                         % path)
+    if name in existing["channels"] and not force:
+        raise RouteError(
+            "--new-channel: %r is already in your overlay at %s. Edit that entry by hand, or "
+            "pass --force to replace it." % (name, path))
+    block = {
+        "_new": True,
+        "_added_by": "routing.write_new_channel",
+        "_added_from_spec": spec,
+        "kind": kind,
+        "label": "%s [HYPOTHESIS - added via --new-channel]" % name,
+        "model": slug,
+        "enabled": True,
+        "models": {slug: {"label": "%s [HYPOTHESIS]" % slug,
+                          "data_policy": "UNKNOWN (vendor default terms apply)"}},
+        "aliases": [name, slug],
+    }
+    # Dry-run the merge BEFORE overwriting: if the resulting overlay would fail to load, we should
+    # know now, not on the user's next paid orchestrate.py invocation.
+    trial = json.loads(json.dumps(existing))
+    trial.setdefault("channels", {})[name] = block
+    err = validate_overlay_data(registry_path, trial, trust=OVERLAY_TRUST_HOME)
+    if err:
+        raise RouteError(
+            "--new-channel: the resulting overlay would not load - %s\n(nothing written)" % err)
+    existing["channels"][name] = block
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp-new-channel"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(existing, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, path)
+    except OSError as exc:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise RouteError("--new-channel: write failed for %s: %s" % (path, exc))
+    return {"path": path, "name": name, "kind": kind, "slug": slug,
+            "created": not existed_before, "block": block}
 
 
 def ack_path():
@@ -1441,9 +1618,43 @@ def apply_flags(plan, reg, only=None, skip=None, sets=None):
         c = targets[0]
         known = reg["channels"][c].get("models") or {}
         if m not in known:
-            raise RouteError("--set %s=%s: model not in registry. Known for %s: %s. "
-                             "Add it to channels.json rather than passing it here."
-                             % (c, m, c, ", ".join(known) or "(none)"))
+            # 🔴 R90 iter 2 (2026-09-14): kind matrix. See ALLOW_ARBITRARY_MODEL_KINDS block above.
+            kind = reg["channels"][c].get("kind")
+            if kind in REFUSE_ARBITRARY_MODEL_KINDS:
+                raise RouteError(
+                    "--set %s=%s: %r is not in this channel's `models` table (known: %s), and "
+                    "this channel's kind (%r) hard-codes the model handling in its CLI binary - "
+                    "passing an unknown slug there typically hangs the TUI or fails opaquely, so "
+                    "the router refuses rather than gamble a paid attempt on it.\n"
+                    "To add %r for this channel permanently, put it in your overlay settings:\n"
+                    "  python orchestrate.py --new-channel <name>:%s:%s\n"
+                    "which writes a new entry to %s (survives kit updates). Pick a NAME distinct "
+                    "from existing channels; the router will refuse if it collides."
+                    % (c, m, m, ", ".join(known) or "(none)", kind, m, kind, m,
+                       overlay_home_path()))
+            if kind not in ALLOW_ARBITRARY_MODEL_KINDS:
+                raise RouteError(
+                    "--set %s=%s: %r is not in this channel's `models` table (known: %s), and "
+                    "the router has no rule for its kind (%r) - neither network-API nor known "
+                    "CLI-fixed. Refusing rather than guess which shape a vendor error will take. "
+                    "Edit ALLOW_ARBITRARY_MODEL_KINDS / REFUSE_ARBITRARY_MODEL_KINDS in "
+                    "routing.py once the kind's behaviour on an unknown slug is measured."
+                    % (c, m, m, ", ".join(known) or "(none)", kind))
+            # HYPOTHESIS path - a network vendor will 4xx if the slug does not resolve. The plan
+            # carries this fact loudly BEFORE any money is spent, and --dry-run shows it free.
+            plan[c]["model"] = m
+            plan[c]["enabled"] = True
+            plan[c]["model_hypothesis"] = True
+            plan[c]["why"].append("--set %s (HYPOTHESIS)" % m)
+            plan[c]["why"].append(
+                "\U0001f534 model %r is NOT in this release's registry for %s - sent to the "
+                "vendor AS TYPED. label / data_policy = UNKNOWN (vendor default terms apply). "
+                "--dry-run shows this line for free; a paid call is the honest test - a 4xx from "
+                "the vendor means the slug does not resolve at that endpoint. To persist this "
+                "model past this one run, add a new channel via  python orchestrate.py "
+                "--new-channel <name>:%s:%s  (writes to your overlay, survives kit updates)."
+                % (m, c, kind, m))
+            continue
         plan[c]["model"] = m
         plan[c]["enabled"] = True
         plan[c]["why"].append("--set %s" % m)
@@ -1850,6 +2061,16 @@ def _decorate(plan, reg):
         p["_name"] = cname
         p["model_label"] = m.get("label") or p.get("model")
         p["data_policy"] = m.get("data_policy")
+        # 🔴 R90 iter 2 (2026-09-14): when apply_flags accepted an unlisted slug as a HYPOTHESIS
+        # for a network-API kind (see ALLOW_ARBITRARY_MODEL_KINDS), `m` is `{}` above, so the label
+        # falls back to the raw slug and data_policy is None. That silently reads as "no policy",
+        # which is a claim; the honest read is "unknown". Say so in the strings the plan actually
+        # prints, so `--dry-run` shows this state clearly before the paid call.
+        if p.get("model_hypothesis"):
+            if not m.get("label"):
+                p["model_label"] = "%s [HYPOTHESIS]" % p.get("model")
+            if not m.get("data_policy"):
+                p["data_policy"] = "UNKNOWN (vendor default terms apply)"
         # 🔴 THE NAME IS NOT THE GUARANTEE. Igor asked for `Spark12Cont` so that running a
         # non-Contributor model would be visible - but a label is a string that asserts a mutable
         # value, which is the exact rot this project keeps measuring elsewhere. The label would

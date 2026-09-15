@@ -7609,7 +7609,46 @@ def main():
                          "citation audit is arguably not that, but this kit is public and the "
                          "default is what strangers run. Without it the channel is still reported "
                          "- its publisher DOMAINS come from the response and cost no request")
+    # R90 iter 2 (2026-09-14): --new-channel writes a new channel entry to the user's overlay
+    # settings file (~/.claude/model-orchestration.local.json) and exits. See
+    # routing.write_new_channel for the rules; this option is a self-contained command, so it
+    # never requires --brief / --ask and it never spends money.
+    ap.add_argument("--new-channel", dest="new_channel", default=None, metavar="NAME:KIND:SLUG",
+                    help="add a new channel to your overlay settings and exit. Format is "
+                         "NAME:KIND:SLUG - e.g. 'codex59nova:codex:gpt-5.9-nova-ultra'. Writes "
+                         "atomically to ~/.claude/model-orchestration.local.json; survives kit "
+                         "updates. Refused when the overlay is redirected (MODEL_ORCH_LOCAL is "
+                         "set), when NAME collides with a shipped channel, or when KIND is not "
+                         "one this router has rules for (see ALLOW_ARBITRARY_MODEL_KINDS / "
+                         "REFUSE_ARBITRARY_MODEL_KINDS in routing.py). The SLUG may contain "
+                         "'/' or ':' (the vendor decides its shape) and is written verbatim")
     a = ap.parse_args()
+
+    # R90 iter 2: --new-channel handler. Runs BEFORE any brief-related logic; a config-write is
+    # not a review. We import routing here even though the review path also does - keeping the
+    # writer in routing.py (next to apply_overlay) means one file owns the overlay's shape.
+    if a.new_channel:
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import routing as _routing
+        except Exception as exc:
+            log("--new-channel: could not import routing: %s" % exc)
+            return 2
+        try:
+            info = _routing.write_new_channel(a.new_channel)
+        except _routing.RouteError as exc:
+            log(str(exc))
+            return 2
+        verb = "created" if info["created"] else "edited"
+        log("--new-channel: %s %s" % (verb, info["path"]))
+        log("  channel %r (kind=%s, model=%s)" % (info["name"], info["kind"], info["slug"]))
+        log("  next run of orchestrate.py will report:")
+        log("    - the plan calls this channel 'YOUR settings file adds' (via _overlay.added);")
+        log("    - the model shows [HYPOTHESIS] and data policy is UNKNOWN until you edit the "
+            "block by hand or the paid call resolves the slug.")
+        log("  Overlay block written (JSON):\n%s"
+            % json.dumps({info["name"]: info["block"]}, indent=2, ensure_ascii=False))
+        return 0
 
     # --- one-shot ask: assemble a real brief from a string, then fall through to the normal path.
     # Everything downstream (routing, the secret gate, verification, the citation audit) is reused

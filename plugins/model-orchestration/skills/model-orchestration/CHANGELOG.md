@@ -1,5 +1,67 @@
 # Changelog
 
+## 1.65.0 — 2026-09-14
+
+Two escape hatches for the case #44 was about — a model the release does not
+know — so a user does not have to edit the shipped `channels.json` (the file
+the next update wipes) to try one.
+
+* **`--set <chan>=<unlisted-slug>` is now accepted as a HYPOTHESIS on
+  network-API kinds.** Since 1.0 the flag refused any slug not in the channel's
+  `models` table with the advice «Add it to channels.json rather than passing
+  it here» — advice that pointed at a file inside the folder an update
+  replaces. The workflow «paid vendor 4xx is the real test of an unknown slug»
+  could not even be tried without editing the shipped tree first. From now on,
+  when the channel's `kind` is one of the network-API kinds — `http`, `codex`,
+  `openrouter`, `oai`, `xai`, `gemini`, `claudecli`, `grokcli` — the slug is
+  accepted, the plan carries a 🔴 line saying `label / data_policy = UNKNOWN
+  (vendor default terms apply)` naming both escape hatches, and `--dry-run`
+  shows this state free of charge; a paid call is the honest test — a 4xx
+  from the vendor means the slug does not resolve at that endpoint. For CLI-
+  fixed kinds (`agy`, `opencode`, `hermes`) the refusal stays but its advice
+  now points at `--new-channel` instead of `channels.json`. `_decorate`
+  stamps `model_label` with `[HYPOTHESIS]` and `data_policy` with `UNKNOWN
+  (vendor default terms apply)` so the plan reads honestly for hypothesis
+  slugs even after routing has finished.
+
+* **`--new-channel NAME:KIND:SLUG` writes a new channel to your overlay and
+  exits.** New self-contained command in `orchestrate.py`; the writer lives
+  in `routing.write_new_channel` next to `apply_overlay`. Writes atomically
+  (tmp+`os.replace`) to your overlay file — `~/.claude/model-orchestration.
+  local.json` on macOS/Linux, `%USERPROFILE%\.claude\...` on Windows. The
+  block carries `_new: true`, `enabled: true`, a `models` table keyed on the
+  slug, and a `[HYPOTHESIS]` label so the plan makes vendor terms visibly
+  unknown. Refused loudly when NAME is not a legal channel identifier (fails
+  `_SAFE_NAME` or is a reserved Windows device name), when KIND is not one
+  the router has rules for (see `ALLOW_ARBITRARY_MODEL_KINDS` /
+  `REFUSE_ARBITRARY_MODEL_KINDS` in `routing.py`), when NAME collides with a
+  shipped channel or with an existing overlay entry, or when the overlay is
+  redirected via `MODEL_ORCH_LOCAL` (adding a channel needs the home path —
+  same rule `apply_overlay` enforces at read time). Before rename we
+  `validate_overlay_data` against the shipped registry so a payload that
+  would fail to load never touches the file.
+
+  New selftest suite `suite_r91_set_unlisted_and_new_channel` — 74 pins.
+  Covers the eight allow kinds against a representative channel each
+  (`http/spark11`, `codex/codex`, `openrouter/orspark13cont`, `oai/mimo25pro`,
+  `xai/grok420`, `gemini/goog36flash`, `claudecli/cclopus46`, `grokcli/
+  grokbuild`), the three refuse kinds (`agy/agy31pro`, `opencode/ocspark13free`;
+  `hermes` is future-proof and covered by the wiring check), all spec-parsing
+  error shapes, the four end-to-end refuse scenarios for `--new-channel`
+  (bad name, bad kind, collision with shipped, collision with overlay,
+  redirected overlay), a success round-trip that reads the JSON back and
+  checks structure, and a subsequent `--dry-run` that sees the added channel
+  loaded from the overlay. Regression checks that known models via `--set`
+  still work without HYPOTHESIS flagging, and that `apply_flags` still
+  references the new frozensets and lexeme.
+
+  Docs (SKILL.md, AGENTS.md, INSTALL.md) updated to name both mechanisms and
+  to correct the old «`channels.json` edit only» sentence in `SKILL.md`
+  §0.1. INSTALL.md keeps the JSON-by-hand recipe alongside the new command
+  so the reader learns both idioms.
+
+  (R90 iter 2; #44 criteria 2, 3, 4, 5. Criterion 1 shipped in 1.64.0.)
+
 ## 1.64.0 — 2026-09-14
 
 One correctness fix: a `--route` pattern that used to substitute the wrong model

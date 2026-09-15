@@ -6872,7 +6872,8 @@ def main():
                   suite_r86_i2_doctor_probe_covers_every_kind,
                   suite_r86_prose_set_in_channel,
                   suite_r88_bypass_opt_in,
-                  suite_r90_silent_drop_criterion_1):
+                  suite_r90_silent_drop_criterion_1,
+                  suite_r91_set_unlisted_and_new_channel):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -7595,6 +7596,255 @@ def suite_r90_silent_drop_criterion_1():
           "R90 wiring: apply_route calls _detect_silent_drop (the guard's dispatch site)")
     check(hasattr(r, "_detect_silent_drop"),
           "R90 wiring: routing._detect_silent_drop exists as a module-level function")
+
+
+def suite_r91_set_unlisted_and_new_channel():
+    """
+    R90 iter 2 (2026-09-14). #44 criteria 2 and 3.
+
+    Criterion 2: `--set <chan>=<unlisted-slug>` is accepted as a HYPOTHESIS for
+    network-API kinds (http / codex / openrouter / oai / xai / gemini / claudecli / grokcli)
+    and refused for CLI-fixed kinds (agy / opencode / hermes) with advice pointing at the
+    overlay writer.
+
+    Criterion 3: `--new-channel NAME:KIND:SLUG` writes a new channel entry to the user's
+    overlay settings file (~/.claude/model-orchestration.local.json), atomically, and
+    refuses on collision / bad kind / bad name / redirected overlay.
+
+    Tests use subprocess with USERPROFILE/HOME overridden to a temp directory, so the
+    write does not touch Igor's real overlay. `run_cli` starts a full orchestrate.py
+    process; --new-channel is a self-contained command that returns before brief handling.
+    """
+    import tempfile
+    import inspect
+    import routing as r
+
+    section("R91 criterion 2: --set unlisted HYPOTHESIS (accept on 8, refuse on 3)")
+
+    reg = r.load_registry()
+    channels = reg["channels"]
+
+    # ---- (a) DIRECT: --set unlisted accepted on one representative channel per allow kind
+    #      Only kinds present in the shipped registry are exercised (http, codex, openrouter,
+    #      oai, xai, gemini, claudecli, grokcli). `hermes` is future-proof (in KNOWN_KINDS,
+    #      no shipped channel), covered by (i).
+    kind_to_rep = {}
+    for cname, ch in channels.items():
+        k = ch.get("kind")
+        if k in r.ALLOW_ARBITRARY_MODEL_KINDS and k not in kind_to_rep:
+            kind_to_rep[k] = cname
+    for kind in sorted(r.ALLOW_ARBITRARY_MODEL_KINDS):
+        rep = kind_to_rep.get(kind)
+        if not rep:
+            check(True, "R91 skip kind %s: no shipped channel of this kind (still a valid kind)"
+                  % kind)
+            continue
+        plan = r.initial_plan(reg)
+        try:
+            r.apply_flags(plan, reg, sets=["%s=invented-%s-slug-r91" % (rep, kind)])
+            slot = plan[rep]
+            check(slot.get("model") == "invented-%s-slug-r91" % kind,
+                  "R91 (a) --set unlisted accepted on kind=%s (channel %r)" % (kind, rep),
+                  "model=%r" % slot.get("model"))
+            check(slot.get("model_hypothesis") is True,
+                  "R91 (a) HYPOTHESIS flag set on plan[%r] (kind=%s)" % (rep, kind))
+            joined = " ".join(slot.get("why", []))
+            check("HYPOTHESIS" in joined,
+                  "R91 (a) plan[%r].why mentions HYPOTHESIS" % rep,
+                  joined[:180])
+            check("--new-channel" in joined,
+                  "R91 (a) plan[%r].why points at --new-channel" % rep,
+                  joined[:180])
+            check("UNKNOWN" in joined,
+                  "R91 (a) plan[%r].why says label/data policy UNKNOWN" % rep,
+                  joined[:180])
+        except r.RouteError as exc:
+            check(False,
+                  "R91 (a) --set unlisted must be accepted for kind=%s (channel %r)"
+                  % (kind, rep),
+                  "refused: " + str(exc)[:200])
+
+    # ---- (b) DIRECT: --set unlisted refused on CLI-fixed kinds, with advice on --new-channel
+    kind_to_refuse_rep = {}
+    for cname, ch in channels.items():
+        k = ch.get("kind")
+        if k in r.REFUSE_ARBITRARY_MODEL_KINDS and k not in kind_to_refuse_rep:
+            kind_to_refuse_rep[k] = cname
+    for kind in sorted(r.REFUSE_ARBITRARY_MODEL_KINDS):
+        rep = kind_to_refuse_rep.get(kind)
+        if not rep:
+            check(True, "R91 (b) skip kind %s: no shipped channel of this kind (future-proof)"
+                  % kind)
+            continue
+        plan = r.initial_plan(reg)
+        raised = False
+        try:
+            r.apply_flags(plan, reg, sets=["%s=invented-r91" % rep])
+        except r.RouteError as exc:
+            raised = True
+            msg = str(exc)
+            check("--new-channel" in msg,
+                  "R91 (b) refuse on kind=%s (%r) points at --new-channel" % (kind, rep),
+                  msg[:200])
+            check("overlay" in msg.lower(),
+                  "R91 (b) refuse on kind=%s (%r) mentions 'overlay'" % (kind, rep),
+                  msg[:200])
+            check("channels.json" not in msg,
+                  "R91 (b) refuse on kind=%s (%r) does NOT advise editing channels.json"
+                  % (kind, rep),
+                  msg[:200])
+        if not raised:
+            check(False,
+                  "R91 (b) --set unlisted must be refused on kind=%s (%r)" % (kind, rep))
+
+    # ---- (c) DIRECT: known model still works (regression, --set is untouched for listed)
+    plan = r.initial_plan(reg)
+    try:
+        r.apply_flags(plan, reg, sets=["codex=gpt-5.6-sol"])
+        check(plan["codex"].get("model") == "gpt-5.6-sol"
+              and plan["codex"].get("model_hypothesis") is not True,
+              "R91 (c) regression: known model --set codex=gpt-5.6-sol still accepted (no HYPOTHESIS)",
+              "model=%r hyp=%r" % (plan["codex"].get("model"),
+                                   plan["codex"].get("model_hypothesis")))
+    except r.RouteError as exc:
+        check(False, "R91 (c) regression --set codex=gpt-5.6-sol", "refused: " + str(exc)[:120])
+
+    # ---- (d) _decorate marks HYPOTHESIS in the label and data policy
+    reg2 = r.load_registry()
+    plan = r.initial_plan(reg2)
+    r.apply_flags(plan, reg2, sets=["codex=gpt-invent-r91"])
+    r._decorate(plan, reg2)
+    check(plan["codex"].get("model_label", "").endswith("[HYPOTHESIS]"),
+          "R91 (d) _decorate: model_label ends with [HYPOTHESIS] for hypothesis",
+          "label=%r" % plan["codex"].get("model_label"))
+    check("UNKNOWN" in (plan["codex"].get("data_policy") or ""),
+          "R91 (d) _decorate: data_policy is UNKNOWN for hypothesis",
+          "policy=%r" % plan["codex"].get("data_policy"))
+
+    section("R91 criterion 3: --new-channel writes overlay atomically")
+
+    # ---- (e) SPEC parsing: refuse on malformed input, no file touched
+    for bad_spec, why in (
+        ("", "empty spec"),
+        ("noKKformat", "no colons"),
+        ("name:kind", "only one colon"),
+        (":codex:gpt-5.9", "empty NAME"),
+        ("mychan::gpt-5.9", "empty KIND"),
+        ("mychan:codex:", "empty SLUG"),
+        ("BAD_UPPER:codex:gpt-5.9", "NAME contains uppercase (violates _SAFE_NAME)"),
+        ("con:codex:gpt-5.9", "NAME is a reserved Windows device"),
+        ("mychan:unknownkind:gpt-5.9", "KIND not in registry ALLOW/REFUSE sets"),
+    ):
+        raised = False
+        try:
+            r._parse_new_channel_spec(bad_spec) if bad_spec.count(":") == 2 or bad_spec == "" \
+                else None
+            # For malformed structural cases we call _parse directly; for KIND unknown it
+            # parses fine so also run through write_new_channel to see the second check.
+            if not raised and bad_spec.count(":") == 2:
+                # Do NOT actually write; a bare _parse_new_channel_spec already raised for
+                # empty/uppercase/reserved. For KIND unknown, _parse raises too.
+                r._parse_new_channel_spec(bad_spec)
+        except r.RouteError as exc:
+            raised = True
+            check("--new-channel" in str(exc) or "NAME" in str(exc) or "KIND" in str(exc),
+                  "R91 (e) spec %r refused (%s)" % (bad_spec, why),
+                  str(exc)[:150])
+        if not raised and bad_spec != "" and bad_spec.count(":") == 2:
+            check(False, "R91 (e) spec %r must refuse (%s)" % (bad_spec, why))
+
+    # ---- (f) CLI end-to-end: --new-channel writes to a temp overlay, isolated USERPROFILE
+    with tempfile.TemporaryDirectory() as td:
+        # Isolate the "home" directory: os.path.expanduser("~") reads USERPROFILE on Windows
+        # and HOME on Unix. Setting both keeps the test cross-platform.
+        env = {"USERPROFILE": td, "HOME": td, "MODEL_ORCH_LOCAL": ""}
+        overlay_expected = str(Path(td) / ".claude" / "model-orchestration.local.json")
+
+        # (f.1) success: write a new channel, exit 0, file present with expected structure
+        p = run_cli(["--new-channel", "r91nova:codex:gpt-5.9-nova-r91"],
+                    env_extra=env, timeout=30)
+        b = blob_of(p)
+        check(p.returncode == 0, "R91 (f.1) --new-channel success returns 0",
+              "exit=%d\n%s" % (p.returncode, b[:400]))
+        check(os.path.isfile(overlay_expected),
+              "R91 (f.1) overlay file created at %s" % overlay_expected,
+              "listing: %s" % os.listdir(td))
+        with open(overlay_expected, encoding="utf-8") as fh:
+            data = json.load(fh)
+        block = data.get("channels", {}).get("r91nova", {})
+        check(block.get("kind") == "codex" and block.get("model") == "gpt-5.9-nova-r91"
+              and block.get("_new") is True,
+              "R91 (f.1) overlay block has kind/model/_new correctly set",
+              "block=%s" % json.dumps(block)[:250])
+        check("gpt-5.9-nova-r91" in (block.get("models") or {}),
+              "R91 (f.1) models table has an entry keyed on the slug",
+              "models=%s" % json.dumps(block.get("models") or {})[:200])
+
+        # (f.2) refuse: second call with same NAME collides
+        p2 = run_cli(["--new-channel", "r91nova:codex:another-slug"],
+                     env_extra=env, timeout=30)
+        b2 = blob_of(p2)
+        check(p2.returncode != 0 and "already" in b2.lower() and "r91nova" in b2,
+              "R91 (f.2) --new-channel refuses collision with existing overlay entry",
+              "exit=%d\n%s" % (p2.returncode, b2[:300]))
+
+        # (f.3) refuse: NAME collides with a shipped channel (codex)
+        p3 = run_cli(["--new-channel", "codex:codex:my-slug"], env_extra=env, timeout=30)
+        b3 = blob_of(p3)
+        check(p3.returncode != 0 and "already a channel" in b3
+              and "release's registry" in b3.lower(),
+              "R91 (f.3) --new-channel refuses collision with shipped registry channel",
+              "exit=%d\n%s" % (p3.returncode, b3[:300]))
+
+        # (f.4) refuse: overlay is redirected (MODEL_ORCH_LOCAL set to non-home path)
+        redirected_env = dict(env)
+        redirected_env["MODEL_ORCH_LOCAL"] = str(Path(td) / "custom-overlay.json")
+        p4 = run_cli(["--new-channel", "r91redir:openrouter:test/slug-r91"],
+                     env_extra=redirected_env, timeout=30)
+        b4 = blob_of(p4)
+        check(p4.returncode != 0 and "redirected" in b4.lower(),
+              "R91 (f.4) --new-channel refuses under redirected overlay",
+              "exit=%d\n%s" % (p4.returncode, b4[:300]))
+
+        # (f.5) verify plan shows the new channel via --dry-run after --new-channel wrote it.
+        #      The overlay is loaded on the next process; the plan should mention the added
+        #      channel in the _overlay.added list or show it in the resolved plan.
+        p5 = run_cli(["--only", "r91nova", "--dry-run"], env_extra=env, timeout=60)
+        b5 = blob_of(p5)
+        check("r91nova" in b5,
+              "R91 (f.5) subsequent --dry-run sees r91nova (loaded from overlay)",
+              "exit=%d\n%s" % (p5.returncode, b5[:400]))
+
+    # ---- (g) Structural: writer + argparse wiring guards
+    check(hasattr(r, "write_new_channel"),
+          "R91 (g) routing.write_new_channel exists as a module-level function")
+    check(hasattr(r, "_parse_new_channel_spec"),
+          "R91 (g) routing._parse_new_channel_spec exists")
+    check("ALLOW_ARBITRARY_MODEL_KINDS" in dir(r)
+          and "http" in r.ALLOW_ARBITRARY_MODEL_KINDS
+          and "codex" in r.ALLOW_ARBITRARY_MODEL_KINDS,
+          "R91 (g) ALLOW_ARBITRARY_MODEL_KINDS contains http and codex")
+    check("REFUSE_ARBITRARY_MODEL_KINDS" in dir(r)
+          and "agy" in r.REFUSE_ARBITRARY_MODEL_KINDS
+          and "opencode" in r.REFUSE_ARBITRARY_MODEL_KINDS
+          and "hermes" in r.REFUSE_ARBITRARY_MODEL_KINDS,
+          "R91 (g) REFUSE_ARBITRARY_MODEL_KINDS contains agy, opencode, hermes")
+
+    # apply_flags source now references the two frozensets and mentions HYPOTHESIS
+    flags_src = inspect.getsource(r.apply_flags)
+    check("ALLOW_ARBITRARY_MODEL_KINDS" in flags_src,
+          "R91 (g) apply_flags source references ALLOW_ARBITRARY_MODEL_KINDS")
+    check("REFUSE_ARBITRARY_MODEL_KINDS" in flags_src,
+          "R91 (g) apply_flags source references REFUSE_ARBITRARY_MODEL_KINDS")
+    check("HYPOTHESIS" in flags_src,
+          "R91 (g) apply_flags source contains 'HYPOTHESIS' (the plan-line lexeme)")
+
+    # orchestrate.py source contains the --new-channel argparse and the handler
+    orch_src = Path(HERE / "orchestrate.py").read_text(encoding="utf-8")
+    check("--new-channel" in orch_src,
+          "R91 (g) orchestrate.py argparse has --new-channel option")
+    check("write_new_channel" in orch_src,
+          "R91 (g) orchestrate.py handler calls routing.write_new_channel")
 
 
 if __name__ == "__main__":

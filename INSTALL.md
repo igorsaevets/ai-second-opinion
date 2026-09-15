@@ -265,6 +265,24 @@ tier has, and it may add whole new ones.** Repoint a model, add a vendor, define
 `"_new": true` is required when you are *adding* something, so that a misspelt name fails loudly
 instead of quietly becoming a second channel.
 
+**Since 1.65.0 you no longer have to hand-edit the JSON to add a channel — one command does it:**
+
+```powershell
+python orchestrate.py --new-channel codex59nova:codex:gpt-5.9-nova-ultra
+```
+
+`NAME:KIND:SLUG`. Writes an atomically-renamed block to the file above with `_new: true`,
+`enabled: true`, a `models` table keyed on the slug, and a `[HYPOTHESIS]` label so the plan
+shows the vendor terms are UNKNOWN until you replace them. Refused when the NAME collides with
+a shipped channel (pick another), when the KIND is unknown to the router, or when your overlay
+is redirected via `MODEL_ORCH_LOCAL` (adding a channel needs the home path — same rule the
+router enforces when it reads the file). The block is a normal overlay entry; edit it by hand
+afterwards to change `label`, `data_policy`, or to add fields the vendor needs (`endpoint`,
+`provider`, etc). For a one-off try of an unlisted slug on an existing channel — no overlay
+write — use `--set <chan>=<slug>` instead: accepted for network-API kinds as a HYPOTHESIS
+(paid 4xx is the honest test); refused for CLI-fixed kinds (agy/opencode/hermes) with the
+alternative named.
+
 1.7.0 refused all of that, and it was wrong to. Your settings file and `channels.json` have the
 same write permissions — anything able to change one can change the other — and `channels.json` was
 the file nothing announced at run time. Refusing `model` here never stopped anybody; it pushed the
