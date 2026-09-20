@@ -1,5 +1,71 @@
 # Changelog
 
+## 1.71.0 — 2026-09-20
+
+**Kit-Б-10 Ф1 SEMANTIC: grounding classifier — semantic layer atop Б-9 byte-check.**
+
+Where Б-9 answers "is this quote in the bytes we hold for the claimed URL",
+two UNSEEN-BYTES answers can mean fundamentally different things — legitimate
+paraphrase (model reformulated a real page statement), wrong-URL attribution
+(real quote attributed to the wrong page), or fabrication (invented content).
+Similarly two UNSEEN-URL answers can be truncated (R44 vendor-corrupts),
+fabricated 404, or unfetched-but-live. Б-10 assigns one of **11 grounding
+classes** to every Б-9 line so a reviewer sees the action, not the mechanism:
+
+    V verified verbatim         N near-verbatim               P paraphrase
+    W wrong-URL attribution     F fabricated content          T truncated URL
+    D dead / fabricated URL     U unfetched-but-live URL      S short-unverifiable
+    X no-URL                    AMBIGUOUS (safety-net for middle-range signals)
+
+**Approach F Hybrid, default only in v1.71.0.** stdlib TF-IDF cosine gives
+`max_sim` between the quote and each body sentence; asymmetric containment
+(`|quote_words ∩ body_words| / |quote_words|`) gives `topic_overlap`. R102
+design proposed Jaccard which fails on long bodies (198 KB cpython source →
+Jaccard 0.001 even for on-topic quote — denominator dominated by body size).
+Containment answers "are the quote's words on this page" and is body-size
+independent. Thresholds SIM_HIGH=0.5, SIM_LOW=0.2, TOPIC_HIGH=0.4,
+TOPIC_LOW=0.15 — hypotheses; Ф2 calibration will measure and adjust.
+
+**FP-tolerance policy** (the operator: "false alarm worse than a miss"):
+  * Exit code always 0 (advisory).
+  * F requires TWO independent LOW signals — never one alone.
+  * W requires an EXPLICIT topic mismatch.
+  * Middle-range signals → AMBIGUOUS.
+  * Ф2 will measure F FPR; if >3 %, widen AMBIGUOUS, do NOT tighten thresholds.
+  * Truncation heuristic stays narrow (7 known-brand `.co` hosts) — false T
+    ("we called your intact URL corrupted") is worse than a missed one.
+
+**Opt-in modules deferred to Ф3.** Env vars `GROUND_EMBEDDINGS`,
+`GROUND_LLM_VERIFY`, `GROUND_WAYBACK` are recognised — they announce
+"not yet integrated in v1.71.0" in the sidecar approach line and fall back
+to the default. Ф2 calibration on real corpus will decide which are worth
+wiring; the alternative (shipping stubs) would be dead code until then.
+
+**Kit invariant preserved.** `ground_classify.py` imports only stdlib
+(`collections`, `math`, `re`, `unicodedata`, `os`, `argparse`, `json`,
+`pathlib`, `urllib.parse`) — no torch, no numpy, no sentence-transformers.
+The kit ships to employees under any Python 3.8+.
+
+**Integration.** `orchestrate.py:call_oai_reviewer` runs Б-10 right after Б-9
+in the same try/except pattern — if Б-10 raises for any reason, the sidecar
+falls back to Б-9's own format. The `note` line reads
+`QUOTE-VERIFY (Б-9+Б-10)` on success, `QUOTE-VERIFY (Б-9)` otherwise.
+Backward-compatible: an older `orchestrate.py` without Б-10 keeps working
+against a v1.71.0 install because the ground_classify import lives inside
+a try/except ImportError block.
+
+**New selftest.** `suite_r103_ground_classify` — 40 pins covering the
+tokenizer + abbreviations, content-word extraction (bilingual English +
+Russian), asymmetric containment (with body-size-invariance assertion),
+TF-IDF + cosine, URL truncation heuristic, the full rule matrix
+(P/W/F/T/D/U/AMBIGUOUS), all 11 grounding classes, R101 gold-set fixtures,
+`classify()` end-to-end with production-form tuples, sidecar rendering,
+opt-in env var recognition, and the stdlib-only import guard.
+
+**Standalone CLI.** `python ground_classify.py --answer ANSWER.md
+--fetches-dir DIR --opened-urls-json LIST -o SIDECAR.md` runs Б-10 against
+any answer + fetches pair. Exit code always 0.
+
 ## 1.70.0 — 2026-09-20
 
 **Kit-Б-9 Ф3: calibration fixes + a silent production-integration bug fixed.**

@@ -5397,6 +5397,7 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # next to the answer, and hangs a one-line summary in `note`.
     quote_verify_summary = None
     quote_verify_counts = None
+    grounding_summary = None
     try:
         import quote_verify as _b9
         _b9_fetches_dir = None
@@ -5406,18 +5407,43 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         _b9_report = _b9.check(text, fetches_dir=_b9_fetches_dir, opened_urls=opened)
         quote_verify_summary = _b9_report["summary_line"]
         quote_verify_counts = _b9_report["counts"]
-        if outfile and _b9_report["n_quotes"] > 0:
+        # Б-10 grounding classifier (R103, v1.71.0): enrich Б-9 UNSEEN-BYTES with
+        # {P, W, F, AMBIGUOUS} and UNSEEN-URL with {T, D, U, AMBIGUOUS}. Same
+        # fail-safe policy - if Б-10 raises (bad body, unexpected shape, etc.),
+        # we fall back to Б-9's own sidecar. Two homes for the same file name
+        # (`.quote-verify.md`) is intentional: readers already know that name,
+        # and the Б-10 sidecar is a strict superset of Б-9's information.
+        _sidecar_md = None
+        _summary_line_for_note = quote_verify_summary
+        try:
+            import ground_classify as _b10
+            _b10_report = _b10.classify(_b9_report, fetches_dir=_b9_fetches_dir,
+                                        cite_check_map=None)
+            grounding_summary = _b10_report["grounding_summary"]
+            _sidecar_md = _b10.format_sidecar(_b10_report, channel_name=name)
+            _summary_line_for_note = (
+                "%s -> grounding %s" % (quote_verify_summary, grounding_summary))
+        except ImportError:
+            # ground_classify.py absent from install (kit older than 1.71.0) - use Б-9 alone.
+            _sidecar_md = _b9.format_sidecar(_b9_report, channel_name=name)
+        except Exception as _b10_exc:  # noqa: BLE001 - advisory, never crash the review
+            log("  [%s] ground_classify failed (%s) - falling back to Б-9 sidecar"
+                % (name, _b10_exc))
+            _sidecar_md = _b9.format_sidecar(_b9_report, channel_name=name)
+        if outfile and _b9_report["n_quotes"] > 0 and _sidecar_md is not None:
             _b9_side = os.path.splitext(outfile)[0] + ".quote-verify.md"
             try:
                 with open(_b9_side, "w", encoding="utf-8") as _b9_f:
-                    _b9_f.write(_b9.format_sidecar(_b9_report, channel_name=name))
+                    _b9_f.write(_sidecar_md)
             except OSError as _b9_exc:
                 log("  [%s] quote-verify sidecar not written (%s)" % (name, _b9_exc))
         if _b9_report["n_quotes"] > 0:
+            _label = "Б-9+Б-10" if grounding_summary else "Б-9"
             note.append(
-                "QUOTE-VERIFY (Б-9): %s over %d fetched page(s) on disk; sidecar "
+                "QUOTE-VERIFY (%s): %s over %d fetched page(s) on disk; sidecar "
                 "%s.quote-verify.md. Advisory - reader decides."
-                % (quote_verify_summary, _b9_report["n_fetches_available"], name.upper()))
+                % (_label, _summary_line_for_note,
+                   _b9_report["n_fetches_available"], name.upper()))
     except ImportError:
         # quote_verify.py absent from install - Б-9 disabled for this run.
         pass

@@ -6878,7 +6878,8 @@ def main():
                   suite_r94_codex_vendor_error_surfacing,
                   suite_r96_allow_stale_prices_cli,
                   suite_r98_quote_verify,
-                  suite_r100_calibration_fixes):
+                  suite_r100_calibration_fixes,
+                  suite_r103_ground_classify):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -9074,6 +9075,379 @@ def suite_r100_calibration_fixes():
               "R100 (E2E3) R99 panel-test corpus: quote count dropped from 23 "
               "(baseline v1.69.0) due to F-3 dedup",
               "n_quotes=%d" % _r99["n_quotes"])
+
+
+def suite_r103_ground_classify():
+    """
+    R103 (2026-09-20), Kit-Б-10 Ф1 SEMANTIC. Grounding classifier — semantic
+    layer atop Б-9 byte-check. Assigns one of 11 grounding classes to every
+    Б-9 line, so a reviewer sees P/W/F/T/D/U (actionable) instead of raw
+    UNSEEN-BYTES / UNSEEN-URL.
+
+    Approach F Hybrid (v1.71.0 default only):
+      - stdlib TF-IDF cosine of quote vs body-sentences  -> max_sim
+      - ASYMMETRIC containment quote_words in body       -> topic_overlap
+      - URL truncation heuristic                         -> T class
+      - Rule matrix -> class in {V,N,P,W,F,T,D,U,S,X,AMBIGUOUS}
+
+    FP-tolerance: F requires TWO independent LOW signals (max_sim < SIM_LOW
+    AND topic < TOPIC_LOW). W requires an EXPLICIT topic mismatch. AMBIGUOUS
+    is the safety-net for middle-range signals. Exit code always 0.
+
+    Pins cover: tokenizer, content-words, TF-IDF, cosine, containment, URL
+    truncation, rule matrix, all 11 grounding classes, format_sidecar shape,
+    E2E integration with production-form tuples, and stdlib-only imports.
+    """
+    import ground_classify as gc
+    import quote_verify as qv
+
+    section("R103 Kit-Б-10 Ф1: grounding classifier (stdlib TF-IDF + containment + rule matrix)")
+
+    # ---- (1) tokenize_sentences: abbreviations preserved, splits on term punct ----
+
+    check(gc.tokenize_sentences("First sentence. Second sentence.") ==
+          ["First sentence.", "Second sentence."],
+          "R103 (1a) tokenize splits on `. ` followed by capital")
+
+    check(gc.tokenize_sentences("42 U.S.C. § 1983 applies. Next.") ==
+          ["42 U.S.C. § 1983 applies.", "Next."],
+          "R103 (1b) `U.S.C.` abbreviation does NOT split the sentence")
+
+    check(gc.tokenize_sentences("See Fig. 3 for details. Then Fig. 4.") ==
+          ["See Fig. 3 for details.", "Then Fig. 4."],
+          "R103 (1c) `Fig.` abbreviation preserved (Fig.3 → single sentence)")
+
+    check(gc.tokenize_sentences("Case No. 22-15432 was appealed. Decision followed.") ==
+          ["Case No. 22-15432 was appealed.", "Decision followed."],
+          "R103 (1d) `No.` abbreviation preserved (case numbers survive)")
+
+    check(gc.tokenize_sentences("") == [] and gc.tokenize_sentences("   ") == [],
+          "R103 (1e) empty / whitespace-only input returns empty list")
+
+    # ---- (2) _content_words: stop-word removal, min-length, bilingual ----
+
+    _cw = gc._content_words("The quick brown fox jumps over the lazy dog")
+    check("quick" in _cw and "brown" in _cw and "fox" in _cw
+          and "the" not in _cw and "over" not in _cw,
+          "R103 (2a) content_words drops stop-words (the/over) but keeps meaning-carrying")
+
+    _cw = gc._content_words("io os is a to")
+    check(len(_cw) == 0,
+          "R103 (2b) short (<3) and stop-words: all dropped, empty set",
+          "got %r" % (_cw,))
+
+    _cw = gc._content_words("Терминология процесса важна при верификации")
+    check("терминология" in _cw and "процесса" in _cw and "верификации" in _cw,
+          "R103 (2c) Cyrillic content-words extracted (unicode-aware)")
+
+    # ---- (3) topic_overlap (asymmetric containment) ----
+
+    check(gc.topic_overlap("terminate alias", "This page discusses terminate and kill methods") == 0.5,
+          "R103 (3a) containment: 1 of 2 quote words in body -> 0.5")
+
+    check(gc.topic_overlap("random gibberish nonsense", "Python subprocess module handles processes") == 0.0,
+          "R103 (3b) containment: no quote words in body -> 0.0 (W-signal)")
+
+    check(gc.topic_overlap("subprocess terminate kill process",
+                            "subprocess module contains terminate kill and wait for the process") == 1.0,
+          "R103 (3c) containment: all quote words in body -> 1.0 (P/V-signal)")
+
+    check(gc.topic_overlap("", "any body text here") == 0.0,
+          "R103 (3d) containment: empty quote -> 0.0 (safe default)")
+
+    # Key R103 assertion: containment is BODY-SIZE-INDEPENDENT (Jaccard would fail here).
+    _big_body = "terminate kill wait " + "unrelated words " * 500
+    check(gc.topic_overlap("terminate alias", _big_body) == 0.5,
+          "R103 (3e) containment INVARIANT to body size (unlike Jaccard - see docstring)")
+
+    # ---- (4) TF-IDF vector + cosine ----
+
+    _idf = gc._idf(["apple banana", "cherry apple", "banana cherry apple"])
+    check(_idf.get("apple", 0.0) > 0.0 and _idf.get("banana", 0.0) > 0.0,
+          "R103 (4a) _idf returns positive scores for present words")
+
+    check(abs(gc.cosine({"a": 1.0, "b": 1.0}, {"a": 1.0, "b": 1.0}) - 1.0) < 1e-9,
+          "R103 (4b) cosine of identical vectors -> 1.0 (within float epsilon)")
+
+    check(gc.cosine({"a": 1.0}, {"b": 1.0}) == 0.0,
+          "R103 (4c) cosine of orthogonal (no shared keys) -> 0.0")
+
+    check(gc.cosine({}, {"a": 1.0}) == 0.0 and gc.cosine({"a": 1.0}, {}) == 0.0,
+          "R103 (4d) cosine with empty vector -> 0.0 (safe default)")
+
+    # ---- (5) max_sentence_similarity: finds best-matching sentence ----
+
+    _body = ("Python subprocess module. It provides Popen class. "
+             "terminate is an alias for kill on Windows. "
+             "Wait for the process to finish. Return code available.")
+    _sim, _best = gc.max_sentence_similarity("terminate alias for kill", _body)
+    check(_sim > 0.3 and _best is not None and "terminate" in (_best or ""),
+          "R103 (5a) max_sentence_similarity finds relevant sentence + non-trivial score",
+          "sim=%.3f best=%r" % (_sim, _best))
+
+    _sim, _best = gc.max_sentence_similarity("completely unrelated words", _body)
+    check(_sim < 0.3,
+          "R103 (5b) max_sentence_similarity: unrelated quote -> LOW score",
+          "sim=%.3f" % _sim)
+
+    # ---- (6) is_url_truncated: R44-class heuristic ----
+
+    check(gc.is_url_truncated("https://github.co") is True,
+          "R103 (6a) `https://github.co` -> True (R44 fixture)")
+
+    check(gc.is_url_truncated("https://learn.microsoft.co") is True,
+          "R103 (6b) `https://learn.microsoft.co` -> True (suspect .co brand)")
+
+    check(gc.is_url_truncated("https://github.com/python/cpython") is False,
+          "R103 (6c) `https://github.com/x/y` -> False (has path, .com)")
+
+    check(gc.is_url_truncated("https://ecfr.gov/current/title-8") is False,
+          "R103 (6d) `https://ecfr.gov/current/x` -> False (legit .gov + path)")
+
+    check(gc.is_url_truncated("https://example") is True,
+          "R103 (6e) `https://example` -> True (no TLD, clearly broken)")
+
+    check(gc.is_url_truncated("") is False and gc.is_url_truncated(None) is False,
+          "R103 (6f) empty/None URL -> False (safe default, no crash)")
+
+    check(gc.is_url_truncated("https://openai.co") is False,
+          "R103 (6g) `https://openai.co` NOT in suspect list -> False (narrow FP-tolerance)")
+
+    # ---- (7) _classify_unseen_bytes rule matrix (P/W/F/AMBIGUOUS) ----
+
+    # W: topic containment < TOPIC_LOW (0.15) -> wrong URL
+    _sub = gc._classify_unseen_bytes("random gibberish nonsense",
+                                     "Python subprocess handles processes")
+    check(_sub["class"] == "W",
+          "R103 (7a) topic_overlap < 0.15 -> W (wrong-URL)",
+          "class=%s ev=%s" % (_sub["class"], _sub["evidence"]))
+
+    # P: max_sim ≥ 0.5 AND topic ≥ 0.4
+    _q = "terminate alias for the kill signal on Windows platforms today"
+    _body_p = ("The terminate method is an alias for the kill signal on Windows. "
+               "It stops the process immediately.")
+    _sub = gc._classify_unseen_bytes(_q, _body_p)
+    check(_sub["class"] == "P",
+          "R103 (7b) high sim + high containment -> P (paraphrase)",
+          "class=%s ev=%s" % (_sub["class"], _sub["evidence"]))
+
+    # F: on-topic-partially (some quote words in body) but no sentence match.
+    # If containment is 0 (no shared words at all), W fires FIRST - so F occupies
+    # the middle-topic + low-sim niche: "words on page, but phrasing invented".
+    # Fixture: 1 of 5 quote words appears in body (containment 0.2 - above TOPIC_LOW
+    # 0.15, below TOPIC_HIGH 0.4). Sentence-level match should be low.
+    _sub = gc._classify_unseen_bytes(
+        "subprocess invented fabricated aliens methods",
+        "Python subprocess handles processes")
+    check(_sub["class"] == "F",
+          "R103 (7c) partial-containment + low sim -> F (invented phrasing on-topic)",
+          "class=%s ev=%s" % (_sub["class"], _sub["evidence"]))
+
+    # AMBIGUOUS: middle range - reviewer must decide
+    _sub = gc._classify_unseen_bytes(
+        "terminate kill wait process signal method other unrelated words here",
+        "The terminate function stops the process. wait method blocks until done. "
+        "The kill signal is a POSIX concept.")
+    check(_sub["class"] == "AMBIGUOUS",
+          "R103 (7d) middle-range signals -> AMBIGUOUS (safety net)",
+          "class=%s ev=%s" % (_sub["class"], _sub["evidence"]))
+
+    # R103 protection assertion: F requires BOTH signals LOW, not one
+    # (design was `topic < TOPIC_HIGH`; smoke on R101 showed this fired on wrong-URL
+    # cases with topic 0.23 - reviewer wanted W or AMBIGUOUS, not F).
+    _sub = gc._classify_unseen_bytes(
+        "some quote with unrelated content",
+        "This body has some quote words like some and words and content but nothing else here")
+    # Expected: topic containment ~ 4/5 = 0.8 (high), max_sim probably low -> should NOT be F
+    check(_sub["class"] != "F",
+          "R103 (7e) FP-tolerance: high containment alone must NOT trigger F "
+          "(design bug: two independent LOW required)",
+          "class=%s ev=%s" % (_sub["class"], _sub["evidence"]))
+
+    # ---- (8) _classify_unseen_url rule matrix (T/D/U/AMBIGUOUS) ----
+
+    check(gc._classify_unseen_url("https://github.co")["class"] == "T",
+          "R103 (8a) truncated URL -> T")
+
+    check(gc._classify_unseen_url("https://real.com/x", cite_check_status="DEAD")["class"] == "D",
+          "R103 (8b) live URL + cite_check DEAD -> D")
+
+    check(gc._classify_unseen_url("https://real.com/x", cite_check_status="LIVE")["class"] == "U",
+          "R103 (8c) live URL + cite_check LIVE + not opened -> U")
+
+    check(gc._classify_unseen_url("https://real.com/x", cite_check_status="BLOCKED")["class"] == "AMBIGUOUS",
+          "R103 (8d) BLOCKED cite_check -> AMBIGUOUS (cannot decide)")
+
+    check(gc._classify_unseen_url("https://real.com/x", cite_check_status=None)["class"] == "AMBIGUOUS",
+          "R103 (8e) no cite_check run -> AMBIGUOUS (cannot decide D vs U)")
+
+    # ---- (9) classify_quote: all Б-9 statuses -> right classes ----
+
+    _cq = gc.classify_quote({"status": "VERIFIED", "quote": "x", "source_url": "u", "detail": ""})
+    check(_cq["grounding_class"] == "V",
+          "R103 (9a) Б-9 VERIFIED -> V")
+
+    _cq = gc.classify_quote({"status": "NEAR-MATCH", "quote": "x", "source_url": "u",
+                              "detail": "distance 1, kind=punct-only"})
+    check(_cq["grounding_class"] == "N" and "punctuation" in _cq["grounding_detail"].lower(),
+          "R103 (9b) Б-9 NEAR-MATCH punct-only -> N with punct language")
+
+    _cq = gc.classify_quote({"status": "NEAR-MATCH", "quote": "x", "source_url": "u",
+                              "detail": "distance 2, kind=digit-change"})
+    check(_cq["grounding_class"] == "N" and "diff" in _cq["grounding_detail"].lower(),
+          "R103 (9c) Б-9 NEAR-MATCH digit-change -> N with diff-check hint")
+
+    _cq = gc.classify_quote({"status": "UNSEEN-BYTES", "quote": "x", "source_url": "u",
+                              "detail": ""}, body=None)
+    check(_cq["grounding_class"] == "AMBIGUOUS" and "not available" in _cq["grounding_detail"],
+          "R103 (9d) UNSEEN-BYTES with body=None -> AMBIGUOUS (correctly ambiguous)")
+
+    _cq = gc.classify_quote({"status": "SHORT-UNVERIFIABLE", "quote": "x", "source_url": None,
+                              "detail": ""})
+    check(_cq["grounding_class"] == "S",
+          "R103 (9e) Б-9 SHORT-UNVERIFIABLE -> S (pass-through)")
+
+    _cq = gc.classify_quote({"status": "NO-URL", "quote": "x", "source_url": None, "detail": ""})
+    check(_cq["grounding_class"] == "X",
+          "R103 (9f) Б-9 NO-URL -> X (pass-through)")
+
+    _cq = gc.classify_quote({"status": "SOMETHING-NEW", "quote": "x", "source_url": None,
+                              "detail": ""})
+    check(_cq["grounding_class"] == "AMBIGUOUS",
+          "R103 (9g) unknown Б-9 status -> AMBIGUOUS (never crash)")
+
+    # ---- (10) R101 gold-set: real signals get safe classifications ----
+
+    # #1 "alias for terminate" + cpython body -> AMBIGUOUS (not false W, not false F)
+    _body_1 = ("The Popen.terminate() method stops the process. "
+               "On POSIX this sends SIGTERM. "
+               "terminate() is an alias for kill() on some systems.")
+    _sub = gc._classify_unseen_bytes("an alias for terminate()", _body_1)
+    check(_sub["class"] in ("P", "AMBIGUOUS"),
+          "R103 (10a) R101 gold #1 (alias for terminate + cpython-like body) -> P or AMBIGUOUS "
+          "(safe: not false W, not false F)",
+          "class=%s ev=%s" % (_sub["class"], _sub["evidence"]))
+
+    # #2 "4K stream buffer" + docs.python.org/subprocess (wrong URL by design)
+    _body_2 = ("subprocess.run runs a command and waits. "
+               "Return CompletedProcess with output and returncode. "
+               "Use timeout for slow processes.")
+    _sub = gc._classify_unseen_bytes(
+        "The default size of a stream buffer is 4K", _body_2)
+    check(_sub["class"] in ("W", "F", "AMBIGUOUS"),
+          "R103 (10b) R101 gold #2 (4K buffer + subprocess.run docs) -> W/F/AMBIGUOUS "
+          "(all are correct actions; F acceptable if body truly lacks topic)",
+          "class=%s ev=%s" % (_sub["class"], _sub["evidence"]))
+
+    # #3 truncated URL github.co
+    _cq = gc.classify_quote({"status": "UNSEEN-URL",
+                              "quote": "Win32 API TerminateProcess called",
+                              "source_url": "https://github.co", "detail": ""})
+    check(_cq["grounding_class"] == "T",
+          "R103 (10c) R101 gold #3 (github.co) -> T (truncated URL detection)")
+
+    # #4 UNSEEN-URL without cite_check -> AMBIGUOUS
+    _cq = gc.classify_quote({"status": "UNSEEN-URL", "quote": "_IOLBF",
+                              "source_url": "https://learn.microsoft.com/en-us/x",
+                              "detail": ""}, cite_check_status=None)
+    check(_cq["grounding_class"] == "AMBIGUOUS",
+          "R103 (10d) R101 gold #4 (UNSEEN-URL no cite_check) -> AMBIGUOUS (correctly)")
+
+    # ---- (11) classify() end-to-end: counts + summary + approach ----
+
+    _b9_report = {
+        "lines": [
+            {"status": "VERIFIED", "quote": "a proper long quote for testing",
+             "source_url": "https://a.com/x", "detail": ""},
+            {"status": "SHORT-UNVERIFIABLE", "quote": "short",
+             "source_url": None, "detail": "5 chars"},
+            {"status": "NO-URL", "quote": "a long enough quote without any URL",
+             "source_url": None, "detail": ""},
+            {"status": "UNSEEN-URL", "quote": "another proper long quote here",
+             "source_url": "https://github.co", "detail": ""},
+        ],
+        "counts": {}, "summary_line": "", "n_quotes": 4, "n_fetches_available": 1,
+    }
+    _g = gc.classify(_b9_report)
+    check(_g["grounding_counts"]["V"] == 1
+          and _g["grounding_counts"]["S"] == 1
+          and _g["grounding_counts"]["X"] == 1
+          and _g["grounding_counts"]["T"] == 1,
+          "R103 (11a) classify() counts by grounding class: V=1 S=1 X=1 T=1",
+          "counts=%s" % _g["grounding_counts"])
+
+    check("1 V" in _g["grounding_summary"] and "1 T" in _g["grounding_summary"],
+          "R103 (11b) classify() summary_line lists present classes",
+          "summary=%r" % _g["grounding_summary"])
+
+    check(_g["approach"] == "stdlib-tfidf",
+          "R103 (11c) classify() approach = 'stdlib-tfidf' (default, no opt-in env vars)",
+          "approach=%r" % _g["approach"])
+
+    # Opt-in env vars: recognised but announce "not yet integrated" in v1.71.0
+    _saved = os.environ.get("GROUND_EMBEDDINGS")
+    try:
+        os.environ["GROUND_EMBEDDINGS"] = "1"
+        _g_opt = gc.classify(_b9_report)
+        check("not yet integrated" in _g_opt["approach"] or "GROUND_EMBEDDINGS" in _g_opt["approach"],
+              "R103 (11d) GROUND_EMBEDDINGS=1 recognised, announces 'not yet integrated' (Ф3 roadmap)",
+              "approach=%r" % _g_opt["approach"])
+    finally:
+        if _saved is None:
+            os.environ.pop("GROUND_EMBEDDINGS", None)
+        else:
+            os.environ["GROUND_EMBEDDINGS"] = _saved
+
+    # ---- (12) format_sidecar: header, class sections, evidence lines ----
+
+    _md = gc.format_sidecar(_g, channel_name="test_chan")
+    check("# Б-10 grounding report for TEST_CHAN" in _md,
+          "R103 (12a) sidecar header has channel name upper-cased",
+          "md head: %r" % _md[:80])
+
+    check("[V] verified verbatim" in _md and "[T] truncated URL" in _md,
+          "R103 (12b) sidecar section headers use grounding class as primary axis",
+          "md contains: V=%r T=%r"
+          % ("[V]" in _md, "[T]" in _md))
+
+    check("Advisory tool" in _md,
+          "R103 (12c) sidecar has advisory-tool disclaimer (never fails run)")
+
+    # ---- (13) E2E integration: production-form tuples + real body ----
+
+    with tempfile.TemporaryDirectory() as _td:
+        _fetches = os.path.join(_td, "kimi.fetches")
+        os.makedirs(_fetches)
+        _url = "https://example.com/page"
+        _body = ("The default configuration includes a buffer of 4K bytes. "
+                 "This is standard for most systems. Advanced users may override.")
+        with open(os.path.join(_fetches, qv.slug_for_url(_url)), "w", encoding="utf-8") as _f:
+            _f.write(_body)
+        _ans = ('per https://example.com/page, "buffer of 4K bytes is standard configuration" is described.')
+        _b9r = qv.check(_ans, fetches_dir=_fetches,
+                        opened_urls=[("example.com", "/page")])  # production form: tuples
+        _g = gc.classify(_b9r, fetches_dir=_fetches)
+        check(_g["n_quotes"] >= 1,
+              "R103 (13a) E2E: production tuples opened_urls -> Б-9 -> classify runs without error",
+              "n_quotes=%d counts=%s" % (_g["n_quotes"], _g["grounding_counts"]))
+
+        # Sidecar rendering works end-to-end
+        _md = gc.format_sidecar(_g, channel_name="kimi")
+        check("KIMI" in _md and "Summary" in _md,
+              "R103 (13b) E2E: sidecar renders from classify() output",
+              "md head: %r" % _md[:120])
+
+    # ---- (14) stdlib-only imports: no torch, no numpy, no sentence-transformers ----
+
+    _forbidden = ("torch", "numpy", "sentence_transformers", "sklearn", "scipy")
+    _mod_src = Path(gc.__file__).read_text(encoding="utf-8")
+    _has_forbidden = any(("import %s" % f) in _mod_src or ("from %s" % f) in _mod_src
+                         for f in _forbidden)
+    check(not _has_forbidden,
+          "R103 (14a) ground_classify.py imports NO ML libs (stdlib-only kit invariant)",
+          "forbidden hits: %r" % [f for f in _forbidden
+                                    if ("import %s" % f) in _mod_src
+                                    or ("from %s" % f) in _mod_src])
 
 
 if __name__ == "__main__":
