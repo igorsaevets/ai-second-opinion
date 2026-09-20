@@ -6879,7 +6879,8 @@ def main():
                   suite_r96_allow_stale_prices_cli,
                   suite_r98_quote_verify,
                   suite_r100_calibration_fixes,
-                  suite_r103_ground_classify):
+                  suite_r103_ground_classify,
+                  suite_r104_calibration_regression):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -9239,8 +9240,13 @@ def suite_r103_ground_classify():
     _sub = gc._classify_unseen_bytes(
         "subprocess invented fabricated aliens methods",
         "Python subprocess handles processes")
-    check(_sub["class"] == "F",
-          "R103 (7c) partial-containment + low sim -> F (invented phrasing on-topic)",
+    # R104 F-3 broadened W: this fixture has containment 0.2 (subprocess only) and
+    # a weighted overlap ~ 0.12 (rare-word dominance), so W-secondary now fires
+    # BEFORE F. Both F and W are actionable "reject this citation" verdicts; the
+    # test now accepts either, and the more specific R104 assertion 7c' below
+    # tightens on the W-secondary path.
+    check(_sub["class"] in ("F", "W"),
+          "R103 (7c) partial-containment + low sim -> F or W (R104 F-3 broadened W)",
           "class=%s ev=%s" % (_sub["class"], _sub["evidence"]))
 
     # AMBIGUOUS: middle range - reviewer must decide
@@ -9380,8 +9386,9 @@ def suite_r103_ground_classify():
           "R103 (11b) classify() summary_line lists present classes",
           "summary=%r" % _g["grounding_summary"])
 
-    check(_g["approach"] == "stdlib-tfidf",
-          "R103 (11c) classify() approach = 'stdlib-tfidf' (default, no opt-in env vars)",
+    check(_g["approach"].startswith("stdlib-tfidf"),
+          "R103 (11c) classify() approach starts with 'stdlib-tfidf' "
+          "(default, no opt-in env vars; suffix records R104 Ф3 fixes when active)",
           "approach=%r" % _g["approach"])
 
     # Opt-in env vars: recognised but announce "not yet integrated" in v1.71.0
@@ -9448,6 +9455,197 @@ def suite_r103_ground_classify():
           "forbidden hits: %r" % [f for f in _forbidden
                                     if ("import %s" % f) in _mod_src
                                     or ("from %s" % f) in _mod_src])
+
+
+def suite_r104_calibration_regression():
+    """R104 (2026-09-20) Ф2 calibration + R105 Ф3 fixes -> kit v1.72.0.
+
+    Kit-Б-10 v1.72.0 adds four fixes measured on the 8-answer / 180-quote /
+    11-signal R47+R61+R80+R101 corpus. Each fix has a POSITIVE regression pin
+    (fix works on the gold row that motivated it) and a NEGATIVE pin (fix does
+    NOT create false positives on neighbouring cases).
+
+    F-1a: mid-path URL truncation on _KNOWN_LONG_SLUG_HOSTS (gov/edu)
+    F-1b: cite_check_map wiring from opened + probe_url (in orchestrate.py; the
+          per-URL kwarg contract is already tested by suite_r103 pins 8b-e)
+    F-3:  weighted topic_overlap as W-SECONDARY signal
+    F-4:  short-quote substring escape hatch: AMBIGUOUS -> P
+
+    Design note: gold-set corpus is small (N=11 signal quotes), so pins encode
+    behaviour on the gold rows that MOTIVATED each fix and a small set of
+    controls. Widening beyond gold requires re-calibration on an expanded
+    corpus (Ф3.5 roadmap).
+    """
+    import ground_classify as gc
+
+    section("R104 -> R105 Kit-Б-10 Ф3: calibration regression fixtures "
+            "(F-1a mid-path / F-3 weighted W-secondary / F-4 substring hatch)")
+
+    # ---- F-1a: mid-path truncation on _KNOWN_LONG_SLUG_HOSTS ----
+
+    # Positive: r80-mimo-solo-1 gold - `/cha` last segment on ecfr.gov
+    check(gc.is_url_truncated("https://www.ecfr.gov/current/title-8/cha") is True,
+          "R104 (F-1a+) `ecfr.gov/current/title-8/cha` -> True "
+          "(r80-mimo-solo-1 gold: mid-path)")
+
+    check(gc.is_url_truncated("https://ecfr.gov/current/title-8/cha") is True,
+          "R104 (F-1a+) `ecfr.gov` (no www) also fires (frozenset covers both)")
+
+    check(gc.is_url_truncated("https://govinfo.gov/CFR-2023/tit") is True,
+          "R104 (F-1a+) `govinfo.gov/CFR-2023/tit` -> True (3-char last seg)")
+
+    check(gc.is_url_truncated("https://uscis.gov/policy-manual/vol") is True,
+          "R104 (F-1a+) `uscis.gov/policy-manual/vol` -> True (3-char last seg)")
+
+    # Negative: legit long path on same host must NOT be flagged
+    check(gc.is_url_truncated(
+        "https://www.ecfr.gov/current/title-8/chapter-I/subchapter-B/part-204") is False,
+          "R104 (F-1a-) legit deep ecfr URL -> False (last seg 'part-204' has 7 chars)")
+
+    check(gc.is_url_truncated(
+        "https://www.ecfr.gov/current/title-8/part-204/section-204.5") is False,
+          "R104 (F-1a-) full ecfr section URL -> False "
+          "(last seg 'section-204.5' has 13 chars)")
+
+    # Negative: short last seg on NON-listed host must NOT fire (narrow FP scope)
+    check(gc.is_url_truncated("https://example.com/en/us/id") is False,
+          "R104 (F-1a-) short last seg on random host -> False "
+          "(narrow FP-tolerance: only _KNOWN_LONG_SLUG_HOSTS)")
+
+    check(gc.is_url_truncated("https://github.com/a/b") is False,
+          "R104 (F-1a-) short last seg on github.com -> False "
+          "(github.com not in _KNOWN_LONG_SLUG_HOSTS)")
+
+    # ---- F-3: weighted topic_overlap function ----
+
+    _tw = gc.topic_overlap_weighted(
+        "terminate alias", "This page discusses terminate and kill methods")
+    check(0.0 <= _tw <= 1.0,
+          "R104 (F-3-func) topic_overlap_weighted returns value in [0, 1]",
+          "got %.3f" % _tw)
+
+    check(gc.topic_overlap_weighted("", "any body text here") == 0.0,
+          "R104 (F-3-func) empty quote -> 0.0 (safe default)")
+
+    # Load-bearing property: weighted MUCH smaller than uniform when body is
+    # generic-word-dominated. This is precisely what makes F-3 W-secondary work.
+    _generic_body = ("stream " * 200).strip()
+    _quote_generic = "stream unique1 unique2 unique3 unique4"
+    _tw_generic = gc.topic_overlap_weighted(_quote_generic, _generic_body)
+    _tu_generic = gc.topic_overlap(_quote_generic, _generic_body)
+    check(_tw_generic < _tu_generic * 0.5,
+          "R104 (F-3-func) weighted < half uniform when body is generic-dominated "
+          "(load-bearing property of F-3)",
+          "weighted=%.3f uniform=%.3f" % (_tw_generic, _tu_generic))
+
+    # F-3 W-secondary rule fires: partial containment + low weighted + low sim -> W
+    _sub_f3 = gc._classify_unseen_bytes(
+        "subprocess invented fabricated aliens methods",
+        "Python subprocess handles processes")
+    check(_sub_f3["class"] == "W"
+          and "topic_overlap_weighted" in _sub_f3.get("evidence", {}),
+          "R104 (F-3+) partial-containment + low weighted + low sim -> W "
+          "(W-secondary, was F in v1.71.0)",
+          "class=%s ev=%s" % (_sub_f3["class"], _sub_f3.get("evidence")))
+
+    # F-3 does NOT fire when quote words are unique-to-body (weighted high) -
+    # avoids false W on legit-P-like setups where the quote genuinely contains
+    # distinctive words all present in the body.
+    _body_ok = "The alpha beta gamma delta epsilon zeta method returns eta."
+    _sub_ok = gc._classify_unseen_bytes("alpha beta gamma delta", _body_ok)
+    check(_sub_ok["class"] != "W",
+          "R104 (F-3-) high-containment all-unique quote words -> NOT W "
+          "(F-3 negative: distinctive words protect from false W)",
+          "class=%s ev=%s" % (_sub_ok["class"], _sub_ok.get("evidence")))
+
+    # ---- F-4: short-quote substring escape hatch ----
+
+    _body_r101_2 = ("Popen.kill() method. Kill the process. "
+                    "On Windows kill() is an alias for terminate(). "
+                    "Uses TerminateProcess() under the hood.")
+
+    # Positive: r101-2 gold - "an alias for terminate()" substring hit
+    _sub_f4 = gc._classify_unseen_bytes("an alias for terminate()", _body_r101_2)
+    check(_sub_f4["class"] == "P",
+          "R104 (F-4+) r101-2 gold: short-quote substring hit -> P "
+          "(was AMBIGUOUS in v1.71.0)",
+          "class=%s ev=%s" % (_sub_f4["class"], _sub_f4.get("evidence")))
+
+    # Positive: surrounding quotes / punctuation stripped before substring compare
+    _sub_f4b = gc._classify_unseen_bytes('"an alias for terminate()"', _body_r101_2)
+    check(_sub_f4b["class"] == "P",
+          "R104 (F-4+) leading/trailing quotes on short quote still hit substring",
+          "class=%s" % _sub_f4b["class"])
+
+    # Negative: quote longer than _SHORT_QUOTE_LEN=60 must NOT use F-4 path
+    _long_quote = "a" * 65
+    _sub_long = gc._classify_unseen_bytes(_long_quote, _body_r101_2)
+    check(_sub_long.get("evidence", {}).get("substring_hit") is not True,
+          "R104 (F-4-) quote > _SHORT_QUOTE_LEN never uses F-4 escape hatch",
+          "class=%s ev=%s" % (_sub_long["class"], _sub_long.get("evidence")))
+
+    # Negative: short quote NOT in body -> substring miss, no false P
+    _sub_none = gc._classify_unseen_bytes(
+        "an alias for terminate()", "completely unrelated body about weather patterns")
+    check(_sub_none.get("evidence", {}).get("substring_hit") is not True,
+          "R104 (F-4-) short quote NOT in body -> substring hit does NOT fire "
+          "(no false P from F-4)",
+          "class=%s ev=%s" % (_sub_none["class"], _sub_none.get("evidence")))
+
+    # ---- Cross: gold rows end-to-end via classify_quote ----
+
+    # Gold r80-mimo-solo-1: mid-path truncation -> T (F-1a end-to-end)
+    _cq1 = gc.classify_quote({"status": "UNSEEN-URL",
+                              "quote": "eCFR (v) evidence quoted paragraph text here",
+                              "source_url": "https://www.ecfr.gov/current/title-8/cha",
+                              "detail": ""})
+    check(_cq1["grounding_class"] == "T",
+          "R104 gold r80-mimo-solo-1: mid-path ecfr.gov/.../cha -> T "
+          "(F-1a end-to-end via classify_quote)",
+          "got %s" % _cq1["grounding_class"])
+
+    # Gold r101-2: short paraphrase -> P (F-4 end-to-end)
+    _cq2 = gc.classify_quote({"status": "UNSEEN-BYTES",
+                              "quote": "an alias for terminate()",
+                              "source_url": "https://x.com/y",
+                              "detail": ""}, body=_body_r101_2)
+    check(_cq2["grounding_class"] == "P",
+          "R104 gold r101-2: short paraphrase -> P (F-4 end-to-end)",
+          "got %s" % _cq2["grounding_class"])
+
+    # Gold r101-3: DEAD cite_check -> D (F-1b integration: kwarg wiring)
+    _cq3 = gc.classify_quote({"status": "UNSEEN-URL",
+                              "quote": "_IOLBF stream io buffering",
+                              "source_url":
+                                  "https://learn.microsoft.com/en-us/cpp/c-runtime-library/stream-io",
+                              "detail": ""}, cite_check_status="DEAD")
+    check(_cq3["grounding_class"] == "D",
+          "R104 gold r101-3: DEAD cite_check -> D "
+          "(F-1b integration - kwarg contract)",
+          "got %s" % _cq3["grounding_class"])
+
+    # ---- F FPR-invariant: none of the four fixes may create false F ----
+
+    _body_honest = ("Python subprocess module. It provides Popen class. "
+                    "terminate is an alias for kill on Windows. "
+                    "Wait for the process to finish. Return code available.")
+    _sub_honest = gc._classify_unseen_bytes(
+        "terminate alias for kill on Windows", _body_honest)
+    check(_sub_honest["class"] != "F",
+          "R104 F-FPR-invariant: legit paraphrase of body sentence -> NOT F "
+          "(Igor's rule 'FP хуже пропуска' stays 0/180 on honest corpus)",
+          "class=%s ev=%s" % (_sub_honest["class"], _sub_honest.get("evidence")))
+
+    # ---- Approach string exposes v1.72.0 fixes ----
+
+    _b9r_min = {"lines": [], "counts": {}, "summary_line": "",
+                "n_quotes": 0, "n_fetches_available": 0}
+    _g_min = gc.classify(_b9r_min)
+    check("f1a" in _g_min["approach"]
+          and "f3" in _g_min["approach"]
+          and "f4" in _g_min["approach"],
+          "R104 approach string names F-1a/F-3/F-4 markers (v1.72.0)",
+          "approach=%r" % _g_min["approach"])
 
 
 if __name__ == "__main__":

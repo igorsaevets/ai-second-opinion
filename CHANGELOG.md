@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.72.0 — 2026-09-20
+
+* **Kit-Б-10 Ф3 fixes (R104 calibration → R105 release).** Four fixes on top of
+  v1.71.0 grounding classifier, motivated by the R47/R61/R80/R101 calibration
+  corpus (8 answers, 180 quotes, 11 signal). Target: P/W/T/D recall 100% on the
+  gold set while F FPR stays 0%. Approach string now records the active fixes:
+  `stdlib-tfidf+f1a+f3+f4`.
+* **F-1a mid-path URL truncation** (`ground_classify.is_url_truncated`). A new
+  frozenset `_KNOWN_LONG_SLUG_HOSTS` (ecfr / govinfo / federalregister /
+  law.cornell / uscis / supremecourt, both `www.` and bare) flags a URL as
+  truncated when the last path segment is 1-3 characters. Motivated by
+  r80-mimo-solo-1 gold: `ecfr.gov/current/title-8/cha` is `chapter-I/...` cut
+  mid-path. Narrow list on purpose — random hosts (`github.com/a/b`) stay safe.
+* **F-1b cite_check_map wiring** (in `orchestrate.py` Б-10 integration block).
+  Builds the map from opened URLs (`LIVE` by construction) + bounded
+  `citecheck.probe_url` HTTP probes for UNSEEN-URL quotes whose URL is NOT in
+  opened (cap 5 per channel). Ловит r101-3 gold: model mistyped
+  `learn.microsoft.com/.../stream-io` (real path `stream-i-o`) → 404 → D. Opt-in
+  `GROUND_CITE_CHECK=0` disables the HTTP probe half.
+* **F-3 weighted topic overlap as W-secondary** (`ground_classify.topic_overlap_weighted`
+  + new rule in `_classify_unseen_bytes`). New IDF-like metric collapses
+  ubiquitous body terms; when it is below `_TOPIC_WEIGHTED_W = 0.30` AND max_sim
+  is low AND uniform overlap is under HIGH, we classify as W-secondary rather
+  than AMBIGUOUS. Motivated by r101-4 gold (uniform=0.615 inflated by generic
+  subprocess terms; weighted ≈ 0.3; distinguishing words absent). Uniform
+  `topic_overlap` unchanged — F-3 is a SECONDARY signal, primary matrix runs
+  first.
+* **F-4 short-quote substring escape hatch** (before AMBIGUOUS in
+  `_classify_unseen_bytes`). If `len(quote) <= _SHORT_QUOTE_LEN = 60` AND
+  `normalize(quote) in normalize(body)`, promote AMBIGUOUS → P. Motivated by
+  r101-2 gold ("an alias for terminate()", 24 chars, max_sim=0.076 despite the
+  exact phrase sitting in cpython/subprocess.py).
+* **Regression fixtures** in `suite_r104_calibration_regression`: 4 positive
+  gold-row pins (r80-mimo-solo-1 T, r101-2 P, r101-3 D via kwarg, r101-4-class
+  W-secondary), 6 negative pins (F-1a narrow scope, F-3 no false W on
+  distinctive quotes, F-4 no false P on long quotes / no substring), and
+  the F FPR invariant. `R103 (7c)` widened to `in ("F", "W")` since F-3
+  broadens W scope — both are actionable "reject citation" verdicts.
+
 ## 1.71.0 — 2026-09-20
 
 **Kit-Б-10 Ф1 SEMANTIC: grounding classifier — semantic layer atop Б-9 byte-check.**

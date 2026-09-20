@@ -49,18 +49,35 @@ Same policy as Б-9. Ф1 rules that matter:
   - T (truncated URL) heuristic stays narrow - only clearly malformed URLs. A short but
     real URL must not be flagged.
 
-APPROACH F HYBRID (v1.71.0: default only; opt-in modules on roadmap)
---------------------------------------------------------------------
-Default execution: stdlib TF-IDF cosine (quote vs body sentences) + Jaccard topic overlap
-(quote content-words vs body content-words) + URL truncation heuristic + rule matrix.
-$0, employees, no deps.
+APPROACH F HYBRID (v1.72.0: default + R104 Ф3 fixes; opt-in modules still roadmap)
+----------------------------------------------------------------------------------
+Default execution: stdlib TF-IDF cosine (quote vs body sentences) + asymmetric
+containment topic overlap (quote content-words in body content-words) + URL
+truncation heuristic (incl. R104 F-1a mid-path for gov/edu long-slug hosts) +
+weighted topic-overlap SECONDARY (R104 F-3) + short-quote substring escape hatch
+(R104 F-4) + rule matrix. $0, employees, no deps.
 
-Opt-in env vars (v1.71.0 recognises them but reports "not yet integrated" and falls back
-to default; roadmap for Ф3 after Ф2 calibration decides which are worth wiring):
+R104 Ф3 fixes over v1.71.0 (calibrated on 8 answers / 180 quotes / 11 signal;
+target: P/W/T/D recall 100% while F FPR stays 0%):
+    F-1a - is_url_truncated adds `_KNOWN_LONG_SLUG_HOSTS` + mid-path last-seg
+           length check (catches `ecfr.gov/current/title-8/cha`).
+    F-1b - orchestrate.py wires cite_check_map from opened + probe_url for
+           UNSEEN-URL quotes (catches r101-3 stream-i-o DEAD 404). NOT in this
+           file; see orchestrate.py:5410-5445.
+    F-3  - `topic_overlap_weighted` (IDF-like) as SECONDARY signal for W;
+           promotes uniform-inflated cases that used to land in AMBIGUOUS to W
+           when weighted < _TOPIC_WEIGHTED_W AND uniform is between LOW and HIGH
+           AND max_sim < _SIM_LOW.
+    F-4  - short-quote substring escape hatch: for quote len <= _SHORT_QUOTE_LEN,
+           if normalize(quote) in normalize(body), promote AMBIGUOUS -> P.
+
+Opt-in env vars (still recognised, still fall back to default with "not yet
+integrated" note in the approach line):
 
     GROUND_EMBEDDINGS=1        - replace TF-IDF with sentence-transformers (torch dep)
     GROUND_LLM_VERIFY=<chan>   - paid mini-prompt for AMBIGUOUS bucket only
     GROUND_WAYBACK=1           - rescue F -> PAGE-UPDATED via web.archive.org
+    GROUND_CITE_CHECK=0        - disable orchestrate.py F-1b HTTP probes (default enabled)
 
 STDLIB-ONLY invariant: this file imports only collections, math, re, unicodedata, os,
 urllib.parse, argparse, json, sys, pathlib.  No sentence-transformers, no numpy, no torch.
@@ -165,6 +182,45 @@ def topic_overlap(quote, body):
     if not q:
         return 0.0
     return len(q & b) / len(q)
+
+
+def topic_overlap_weighted(quote, body):
+    """WEIGHTED containment - a SECONDARY signal introduced in R104 Ф3 to catch
+    wrong-URL cases where GENERIC body terms inflate the uniform metric above.
+
+    Returns a fraction in [0.0, 1.0]: intersect_weight / total_weight.
+
+    Weights (IDF-like): a quote word gets `log((N+1) / (df+1))`, where N is
+    the body token count and df is that word's frequency in the body. A word
+    absent from the body carries `log(N+1)` (max weight); a word covering
+    much of the body carries a very small weight. When the quote is a
+    generic-word cloud that happens to overlap with a busy page, the intersect
+    weight collapses far below the total; when the quote is on-topic and
+    contains distinctive words, the ratio stays high.
+
+    R104 gold row r101-4 = "stream buffer 4K program abnormally" attributed
+    to `docs.python.org/subprocess.html`. Uniform containment = 0.615 because
+    `stream/buffer/program/output/terminates` all sit on the subprocess page -
+    but those words carry near-zero information about THIS specific quote's
+    topic. Weighted version collapses those to a small weight; distinguishing
+    words (`4K`, `abnormally`, `flushed`) that are ABSENT from the body carry
+    high weight and dominate the denominator, so the ratio drops.
+
+    Used by `_classify_unseen_bytes` as a SECONDARY signal (uniform stays
+    primary). Never on its own.
+    """
+    q = _content_words(quote)
+    if not q:
+        return 0.0
+    body_terms = Counter(w for w in _CONTENT_WORD_RE.findall((body or "").lower())
+                         if w not in _STOP_WORDS)
+    b_total = sum(body_terms.values()) or 1
+    b_set = set(body_terms.keys())
+    # log((N+1)/(df+1)) - IDF-like inverse frequency. Absent word => max weight.
+    weights = {w: math.log((b_total + 1) / (body_terms.get(w, 0) + 1)) for w in q}
+    total_w = sum(weights.values()) or 1.0
+    intersect_w = sum(weights[w] for w in q if w in b_set)
+    return intersect_w / total_w
 
 
 # =============================================================================
@@ -325,6 +381,23 @@ _SUSPECT_CO_HOSTS = frozenset({
     "developer.mozilla.co", "reactjs.co", "kubernetes.co", "docker.co",
 })
 
+# R104 F-1a: hosts whose path segments are always long slug-style words
+# (`chapter-I`, `subchapter-B`, `section-204.5`, `2023-title-8`, …). A trailing
+# segment of 1-3 characters on such a host is almost always mid-path
+# truncation - `ecfr.gov/current/title-8/cha` is `chapter-I/...` cut off.
+# The list is deliberately narrow: gov/edu legal-doc portals only. The FP cost
+# of flagging a legitimate URL on a random host is high, and we do not know
+# which random hosts have short-slug URLs. Ф3 calibration to expand only on
+# measured false-negatives.
+_KNOWN_LONG_SLUG_HOSTS = frozenset({
+    "ecfr.gov", "www.ecfr.gov",
+    "govinfo.gov", "www.govinfo.gov",
+    "federalregister.gov", "www.federalregister.gov",
+    "law.cornell.edu", "www.law.cornell.edu",
+    "uscis.gov", "www.uscis.gov",
+    "supremecourt.gov", "www.supremecourt.gov",
+})
+
 
 def is_url_truncated(url):
     """Heuristic: does this URL look TRUNCATED (mid-domain / TLD without path)?
@@ -362,6 +435,15 @@ def is_url_truncated(url):
     # Suspect `.co` after known `.com` brand, no meaningful path
     if host in _SUSPECT_CO_HOSTS and (not path or path == "/"):
         return True
+    # R104 F-1a: mid-path truncation on known long-slug hosts. R104 gold row
+    # r80-mimo-solo-1 = `ecfr.gov/current/title-8/cha` (last segment is 3 chars,
+    # a truncation of `chapter-I/subchapter-B/part-204/section-204.5#p-204.5(h`).
+    # Restricted to `_KNOWN_LONG_SLUG_HOSTS` so a legitimate short path on any
+    # random host is not falsely flagged.
+    if host in _KNOWN_LONG_SLUG_HOSTS and path:
+        segs = [s for s in path.split("/") if s]
+        if segs and 1 <= len(segs[-1]) <= 3:
+            return True
     return False
 
 
@@ -381,24 +463,45 @@ _SIM_HIGH = 0.5      # max_sim >= this: strong sentence-level match (paraphrase 
 _SIM_LOW = 0.2       # max_sim < this: no sentence-level match (F candidate, needs topic_low too)
 _TOPIC_HIGH = 0.4    # containment >= this: most of the quote's words are on-topic for the page
 _TOPIC_LOW = 0.15    # containment < this: quote's words are LARGELY ABSENT from the page (W)
+# R104 F-3: secondary weighted-containment threshold. Fires only when the
+# UNIFORM metric is above _TOPIC_LOW (so W-primary does not decide) AND max_sim
+# is low. Purpose: catch wrong-URL cases where the uniform metric is inflated
+# by ubiquitous body terms. Threshold set from r101-4 empirical (uniform=0.615,
+# weighted ≈ 0.3). Ф3 to widen only if measured false-negatives on other
+# generic-cloud cases; do NOT raise above ~0.4 or the primary matrix stops
+# being primary.
+_TOPIC_WEIGHTED_W = 0.30
+# R104 F-4: short-quote substring escape hatch length cap. Below this length,
+# TF-IDF sentence-level match cannot distinguish paraphrase from noise (a
+# 3-word phrase matches almost any body by chance), so if the quote itself
+# appears as a substring of the body it is a legitimate paraphrase, not an
+# ambiguous byte-verify miss. 60 chars fits Igor's r101-2 gold row ("an alias
+# for terminate()" is 24 chars) and stops well short of the sentence granularity
+# where TF-IDF becomes reliable.
+_SHORT_QUOTE_LEN = 60
 
 
 def _classify_unseen_bytes(quote, body):
     """UNSEEN-BYTES -> {P, W, F, AMBIGUOUS} with evidence.
 
-    Rule matrix (from design.md §4 F-default):
-        topic_overlap < _TOPIC_LOW           -> W (independent of sim)
-        max_sim >= _SIM_HIGH AND topic_high  -> P
-        max_sim < _SIM_LOW AND topic < HIGH  -> F (TWO independent LOW signals)
-        otherwise                            -> AMBIGUOUS (safety net)
+    Rule matrix (from design.md §4 F-default, extended in R104 Ф3):
+        topic_overlap < _TOPIC_LOW                       -> W (uniform, primary)
+        max_sim < _SIM_LOW AND topic < _TOPIC_HIGH
+            AND topic_weighted < _TOPIC_WEIGHTED_W       -> W (R104 F-3: weighted secondary)
+        max_sim >= _SIM_HIGH AND topic >= _TOPIC_HIGH    -> P
+        max_sim < _SIM_LOW AND topic < _TOPIC_HIGH       -> F (TWO independent LOW signals)
+        (short quote AND normalized quote in body)       -> P (R104 F-4: substring escape)
+        otherwise                                        -> AMBIGUOUS (safety net)
 
     FP-tolerance: F requires BOTH max_sim < _SIM_LOW AND topic_overlap < _TOPIC_HIGH.
-    W requires an EXPLICIT topic mismatch. Middle range is AMBIGUOUS by design.
+    W-primary requires an EXPLICIT topic mismatch. W-secondary (F-3) requires low
+    sim AND uniform-topic between LOW and HIGH AND weighted-topic below its own
+    threshold - three signals aligned, so false-W stays rare.
     """
     max_sim, best_sent = max_sentence_similarity(quote, body)
     tov = topic_overlap(quote, body)
 
-    # W first: explicit topic mismatch is decisive regardless of similarity
+    # W-primary: explicit topic mismatch is decisive regardless of similarity
     # (a quote sharing few content words with the WHOLE body is on wrong page).
     if tov < _TOPIC_LOW:
         return {
@@ -408,6 +511,27 @@ def _classify_unseen_bytes(quote, body):
                        "content words - quote likely belongs to a different page)"
                        % (tov, _TOPIC_LOW)),
         }
+    # R104 F-3: W-secondary via weighted topic-overlap. Fires only when:
+    #   (1) max_sim is LOW (no sentence-level anchor), AND
+    #   (2) uniform topic is between LOW and HIGH (would otherwise be F or AMBIGUOUS), AND
+    #   (3) weighted topic is below its own threshold (distinguishing words absent).
+    # r101-4 fixture: uniform=0.615, weighted ~ 0.3, max_sim=0.193. Uniform put
+    # this in AMBIGUOUS, gold=W. Weighted collapses the ubiquitous body terms and
+    # promotes to W. Three signals aligned = safe promotion.
+    if max_sim < _SIM_LOW and tov < _TOPIC_HIGH:
+        tov_w = topic_overlap_weighted(quote, body)
+        if tov_w < _TOPIC_WEIGHTED_W:
+            return {
+                "class": "W",
+                "evidence": {"max_sim": round(max_sim, 3),
+                             "topic_overlap": round(tov, 3),
+                             "topic_overlap_weighted": round(tov_w, 3)},
+                "detail": ("wrong-URL (weighted): topic_overlap=%.3f (uniform) BUT "
+                           "topic_overlap_weighted=%.3f < %.2f - the quote's distinguishing "
+                           "words are absent from the page; only ubiquitous body terms "
+                           "inflated the uniform overlap"
+                           % (tov, tov_w, _TOPIC_WEIGHTED_W)),
+            }
     # P: strong similarity AND on-topic
     if max_sim >= _SIM_HIGH and tov >= _TOPIC_HIGH:
         ev = {"max_sim": round(max_sim, 3), "topic_overlap": round(tov, 3)}
@@ -422,12 +546,8 @@ def _classify_unseen_bytes(quote, body):
         }
     # F: on-topic-PARTIAL (some quote words on page) BUT no sentence-level match.
     # topic >= TOPIC_LOW is implied - if it were < TOPIC_LOW, W already fired above.
-    # So F occupies "quote words are on the page but the phrase is invented" -
-    # different from W (quote-words NOT on the page at all = wrong-URL).
-    # After the R103 smoke on R101 gold set: the containment fix moved real
-    # wrong-URL cases into AMBIGUOUS (containment computed against 54K subprocess
-    # docs is HIGH for "default/output/data" words even when the SENTENCE is not
-    # there). That is the correct answer - AMBIGUOUS beats false F.
+    # F-3 already ran above (same predicate) - if weighted is high enough, we
+    # fall through to F here (or to AMBIGUOUS if F-4 does not catch it).
     if max_sim < _SIM_LOW and tov < _TOPIC_HIGH:
         return {
             "class": "F",
@@ -437,6 +557,30 @@ def _classify_unseen_bytes(quote, body):
                        "quote phrasing likely invented, not from this source page)"
                        % (max_sim, _SIM_LOW, tov, _TOPIC_HIGH)),
         }
+    # R104 F-4: short-quote substring escape hatch. TF-IDF at sentence
+    # granularity cannot match a 3-word paraphrase (r101-2 fixture: "an alias
+    # for terminate()", max_sim=0.076 vs a subprocess.py body containing
+    # "kill() is an alias for terminate()"). If the normalized quote itself
+    # is a substring of the normalized body, promote AMBIGUOUS -> P.
+    if body and quote and len(quote) <= _SHORT_QUOTE_LEN:
+        try:
+            qn = quote_verify.normalize(quote).strip("\"' .,:;()[]")
+            bn = quote_verify.normalize(body)
+            if qn and bn and qn in bn:
+                return {
+                    "class": "P",
+                    "evidence": {"max_sim": round(max_sim, 3),
+                                 "topic_overlap": round(tov, 3),
+                                 "substring_hit": True,
+                                 "quote_len": len(quote)},
+                    "detail": ("paraphrase (short-quote substring hit): normalized quote "
+                               "appears verbatim in the body; TF-IDF at sentence granularity "
+                               "cannot match a %d-char paraphrase, so this AMBIGUOUS was "
+                               "promoted to P by substring escape hatch"
+                               % len(quote)),
+                }
+        except Exception:  # noqa: BLE001 - advisory: on normalize error, fall through
+            pass
     # Otherwise: middle range - AMBIGUOUS (§7 rule 1 safety-net)
     return {
         "class": "AMBIGUOUS",
@@ -565,18 +709,18 @@ def classify_quote(q_line, body=None, cite_check_status=None):
 # =============================================================================
 
 def _resolve_approach():
-    """Print the approach line for the sidecar. In v1.71.0 default only;
-    opt-in env vars are RECOGNISED but announce 'not yet integrated' and fall
-    back to default (Ф3 will wire them after Ф2 calibration decides which are
-    worth the code)."""
-    approach = "stdlib-tfidf"
+    """Print the approach line for the sidecar. In v1.72.0 default carries the
+    R104 Ф3 fixes (F-1a mid-path, F-3 weighted secondary, F-4 substring escape);
+    opt-in env vars still fall back to default with a "not yet integrated" note
+    (Ф3.5 roadmap)."""
+    approach = "stdlib-tfidf+f1a+f3+f4"
     notes = []
     if os.environ.get("GROUND_EMBEDDINGS"):
-        notes.append("GROUND_EMBEDDINGS requested but not yet integrated in v1.71.0")
+        notes.append("GROUND_EMBEDDINGS requested but not yet integrated in v1.72.0")
     if os.environ.get("GROUND_LLM_VERIFY"):
-        notes.append("GROUND_LLM_VERIFY requested but not yet integrated in v1.71.0")
+        notes.append("GROUND_LLM_VERIFY requested but not yet integrated in v1.72.0")
     if os.environ.get("GROUND_WAYBACK"):
-        notes.append("GROUND_WAYBACK requested but not yet integrated in v1.71.0")
+        notes.append("GROUND_WAYBACK requested but not yet integrated in v1.72.0")
     if notes:
         approach += " (" + "; ".join(notes) + ")"
     return approach

@@ -5417,14 +5417,57 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         _summary_line_for_note = quote_verify_summary
         try:
             import ground_classify as _b10
+            # R104 F-1b: build cite_check_map for Б-10 from two sources:
+            #   (1) `opened` set: any URL we already fetched is LIVE by construction;
+            #   (2) opt-in per-URL probe for UNSEEN-URL quotes whose URL is NOT in
+            #       opened (catches DEAD/BLOCKED that neither the answer nor the
+            #       harness would otherwise verify - e.g. R101 stream-i-o 404).
+            # Cap probes at 5 per channel to keep per-review latency bounded (typical
+            # review has 0-3 UNSEEN-URL); env `GROUND_CITE_CHECK=0` disables probing.
+            _b10_cite_map = {}
+            _opened_norm = set(opened)  # opened is already _norm_url tuples
+            for _ln in _b9_report.get("lines", []):
+                _u = _ln.get("source_url")
+                if _u and _norm_url(_u) in _opened_norm:
+                    _b10_cite_map[_u] = "LIVE"
+            if os.environ.get("GROUND_CITE_CHECK", "1") != "0":
+                try:
+                    from citecheck import probe_url as _probe_url
+                    _urls_to_probe = []
+                    for _ln in _b9_report.get("lines", []):
+                        if _ln.get("status") == "UNSEEN-URL":
+                            _u = _ln.get("source_url") or ""
+                            if (_u.startswith(("http://", "https://"))
+                                    and _u not in _b10_cite_map
+                                    and _u not in _urls_to_probe):
+                                _urls_to_probe.append(_u)
+                    for _u in _urls_to_probe[:5]:
+                        try:
+                            _st, _detail = _probe_url(_u)
+                            # probe_url verdicts -> Б-10 labels:
+                            #   LIVE / MOVED   -> "LIVE" (page reachable)
+                            #   DEAD           -> "DEAD" (404/410 - fabrication signal)
+                            #   BLOCKED        -> "BLOCKED" (401/403/429 - can't decide)
+                            #   UNKNOWN / SKIPPED -> leave out (AMBIGUOUS)
+                            if _st in ("LIVE", "MOVED"):
+                                _b10_cite_map[_u] = "LIVE"
+                            elif _st == "DEAD":
+                                _b10_cite_map[_u] = "DEAD"
+                            elif _st == "BLOCKED":
+                                _b10_cite_map[_u] = "BLOCKED"
+                        except Exception:  # noqa: BLE001 - probe failure: leave unknown
+                            pass
+                except ImportError:
+                    pass  # citecheck absent: Б-10 uses opened-only map
             _b10_report = _b10.classify(_b9_report, fetches_dir=_b9_fetches_dir,
-                                        cite_check_map=None)
+                                        cite_check_map=_b10_cite_map)
             grounding_summary = _b10_report["grounding_summary"]
             _sidecar_md = _b10.format_sidecar(_b10_report, channel_name=name)
             _summary_line_for_note = (
                 "%s -> grounding %s" % (quote_verify_summary, grounding_summary))
         except ImportError:
             # ground_classify.py absent from install (kit older than 1.71.0) - use Б-9 alone.
+            # (v1.72.0 adds R104 Ф3 fixes F-1a/F-3/F-4 in ground_classify.py + F-1b wiring here.)
             _sidecar_md = _b9.format_sidecar(_b9_report, channel_name=name)
         except Exception as _b10_exc:  # noqa: BLE001 - advisory, never crash the review
             log("  [%s] ground_classify failed (%s) - falling back to Б-9 sidecar"

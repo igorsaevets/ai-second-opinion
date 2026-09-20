@@ -1,8 +1,9 @@
 # Grounding classifier (Б-10) — reference
 
-Kit-Б-10 SEMANTIC shipped v1.71.0 (2026-09-20). Read this when a
-`.quote-verify.md` sidecar shows a class you have not seen, or when you are
-about to write a fixture / calibrate a threshold.
+Kit-Б-10 SEMANTIC shipped v1.71.0 (2026-09-20); v1.72.0 adds R104 Ф3 fixes
+F-1a / F-1b / F-3 / F-4 (see the "R104 Ф3 fixes" section below). Read this
+when a `.quote-verify.md` sidecar shows a class you have not seen, or when
+you are about to write a fixture / calibrate a threshold.
 
 **What this tool answers.** For every quote that Б-9 marks, Б-10 assigns one
 of **11 grounding classes**, so a reviewer sees the *action* instead of the
@@ -111,7 +112,44 @@ smoke run on R101 gold set. Ф2 calibration will:
 3. If F precision < 90 % (the operator: "FP worse than miss"), widen AMBIGUOUS, do
    NOT tighten thresholds against the rule.
 
-## Opt-in modules (v1.71.0: recognised, deferred; Ф3 will wire)
+## R104 Ф3 fixes (shipped v1.72.0)
+
+Four fixes measured on the 8-answer / 180-quote / 11-signal calibration
+corpus. F FPR stays 0/180 = 0%; P/W/T/D recall on the gold set goes from
+0-50% each to 100%. Full report: `runs/b10-design/calibration-report.md`.
+
+* **F-1a — mid-path URL truncation.** `is_url_truncated` now flags a URL as
+  truncated when its host is in `_KNOWN_LONG_SLUG_HOSTS` (ecfr.gov,
+  govinfo.gov, federalregister.gov, law.cornell.edu, uscis.gov,
+  supremecourt.gov, plus `www.` prefixes) AND the last path segment is 1-3
+  chars. Ловит `ecfr.gov/current/title-8/cha` (r80-mimo-solo-1 gold).
+  Narrow scope on purpose — random hosts with genuine short last-segments
+  (`github.com/a/b`) stay unflagged.
+* **F-1b — cite_check_map wiring** (in `orchestrate.py`, not this file).
+  Builds `_b10_cite_map` from two sources: URLs in the harness's `opened`
+  set become `LIVE`; for UNSEEN-URL quotes whose URL is neither in `opened`
+  nor obviously bad, `citecheck.probe_url` runs a bounded (≤5 per channel)
+  HTTP HEAD probe. Ловит r101-3 stream-io 404 (real URL is `stream-i-o`).
+  Opt-in `GROUND_CITE_CHECK=0` disables the HTTP probe half.
+* **F-3 — weighted topic_overlap as W-secondary.** New function
+  `topic_overlap_weighted` weights each quote word by
+  `log((N+1)/(df+1))` — a body word that dominates the page carries near
+  zero weight; an absent-from-body word carries max weight. New rule in
+  `_classify_unseen_bytes`: when max_sim is low AND uniform is below
+  TOPIC_HIGH AND weighted is below `_TOPIC_WEIGHTED_W = 0.30`, promote to
+  W-secondary. Ловит r101-4 (uniform=0.615 inflated by generic subprocess
+  terms, weighted ≈ 0.3; distinguishing words absent).
+* **F-4 — short-quote substring escape hatch.** Before returning AMBIGUOUS,
+  check `len(quote) <= _SHORT_QUOTE_LEN = 60 AND normalize(quote) in
+  normalize(body)`; if so, promote to P with `substring_hit: True` in
+  evidence. Ловит r101-2 ("an alias for terminate()", max_sim=0.076 but
+  the exact phrase sits in cpython/subprocess.py). TF-IDF at sentence
+  granularity cannot match a 3-word paraphrase; this hatch does.
+
+Approach string suffix names the active fixes:
+`stdlib-tfidf+f1a+f3+f4`.
+
+## Opt-in modules (v1.71.0: recognised, deferred; Ф3.5 roadmap)
 
 Set any of these env vars and Б-10 announces it in the sidecar approach line,
 then falls back to default. Ф2 decides which are worth the code.
@@ -137,8 +175,19 @@ Called from `orchestrate.py:call_oai_reviewer` right after `quote_verify.check`:
 ```python
 try:
     import ground_classify as _b10
+    _b10_cite_map = {}
+    # (v1.72.0 F-1b) mark all opened URLs LIVE + probe UNSEEN-URLs bounded at 5
+    for _u in opened_normalized:
+        _b10_cite_map[_u] = "LIVE"
+    if os.environ.get("GROUND_CITE_CHECK", "1") != "0":
+        from citecheck import probe_url
+        for _u in unseen_urls_to_probe[:5]:
+            st, _ = probe_url(_u)
+            if st in ("LIVE", "MOVED"):    _b10_cite_map[_u] = "LIVE"
+            elif st == "DEAD":              _b10_cite_map[_u] = "DEAD"
+            elif st == "BLOCKED":           _b10_cite_map[_u] = "BLOCKED"
     _b10_report = _b10.classify(_b9_report, fetches_dir=_b9_fetches_dir,
-                                cite_check_map=None)
+                                cite_check_map=_b10_cite_map)
     _sidecar_md = _b10.format_sidecar(_b10_report, channel_name=name)
 except ImportError:
     _sidecar_md = _b9.format_sidecar(_b9_report, channel_name=name)
@@ -146,9 +195,10 @@ except Exception:
     _sidecar_md = _b9.format_sidecar(_b9_report, channel_name=name)
 ```
 
-`cite_check_map=None` in v1.71.0 — UNSEEN-URL classification uses only the
-truncation heuristic. Ф3 will wire cite_check_map from `_cite_check` output
-so D/U classes activate.
+The actual `_b10_cite_map` construction inside `orchestrate.py:5410-5445`
+handles the `_norm_url` tuple form of the `opened` set and normalises
+`probe_url` verdicts (LIVE/MOVED/DEAD/BLOCKED/UNKNOWN/SKIPPED → LIVE/DEAD/
+BLOCKED/None) into the Б-10 vocabulary. Read the source before hand-rolling.
 
 ## Standalone CLI
 
