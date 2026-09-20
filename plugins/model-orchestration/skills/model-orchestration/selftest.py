@@ -9240,13 +9240,14 @@ def suite_r103_ground_classify():
     _sub = gc._classify_unseen_bytes(
         "subprocess invented fabricated aliens methods",
         "Python subprocess handles processes")
-    # R104 F-3 broadened W: this fixture has containment 0.2 (subprocess only) and
-    # a weighted overlap ~ 0.12 (rare-word dominance), so W-secondary now fires
-    # BEFORE F. Both F and W are actionable "reject this citation" verdicts; the
-    # test now accepts either, and the more specific R104 assertion 7c' below
-    # tightens on the W-secondary path.
+    # v1.72.1 (R106 postmortem): F-3 W-secondary branch was removed after
+    # R106 measurement showed it never fired on real data. This fixture now
+    # takes the F path directly (containment 0.2 above TOPIC_LOW, below
+    # TOPIC_HIGH; max_sim below SIM_LOW). Assertion accepts either F or W to
+    # stay robust if a future Ф3.6 redesign wires W-secondary back.
     check(_sub["class"] in ("F", "W"),
-          "R103 (7c) partial-containment + low sim -> F or W (R104 F-3 broadened W)",
+          "R103 (7c) partial-containment + low sim -> F "
+          "(v1.72.1: was F-or-W under F-3 W-secondary, now just F)",
           "class=%s ev=%s" % (_sub["class"], _sub["evidence"]))
 
     # AMBIGUOUS: middle range - reviewer must decide
@@ -9458,28 +9459,38 @@ def suite_r103_ground_classify():
 
 
 def suite_r104_calibration_regression():
-    """R104 (2026-09-20) Ф2 calibration + R105 Ф3 fixes -> kit v1.72.0.
+    """R104 (2026-09-20) Ф2 calibration + R105 Ф3 fixes -> kit v1.72.0,
+    then R106 live-verify -> v1.72.1 dropped the F-3 rule branch.
 
-    Kit-Б-10 v1.72.0 adds four fixes measured on the 8-answer / 180-quote /
-    11-signal R47+R61+R80+R101 corpus. Each fix has a POSITIVE regression pin
-    (fix works on the gold row that motivated it) and a NEGATIVE pin (fix does
-    NOT create false positives on neighbouring cases).
+    Kit-Б-10 v1.72.1 (current) carries three live fixes measured on the
+    8-answer / 180-quote / 11-signal R47+R61+R80+R101 corpus. Each fix has a
+    POSITIVE regression pin (fix works on the gold row that motivated it) and
+    a NEGATIVE pin (fix does NOT create false positives on neighbouring cases).
 
     F-1a: mid-path URL truncation on _KNOWN_LONG_SLUG_HOSTS (gov/edu)
     F-1b: cite_check_map wiring from opened + probe_url (in orchestrate.py; the
           per-URL kwarg contract is already tested by suite_r103 pins 8b-e)
-    F-3:  weighted topic_overlap as W-SECONDARY signal
+    F-3:  REMOVED in v1.72.1 (R106 postmortem). The `topic_overlap_weighted`
+          function is retained as an inert reference for a future Ф3.6
+          redesign; the rule branch was deleted. F-3-func pins below verify
+          the function's numeric contract (still callable); the drop pin
+          verifies the rule branch no longer exists.
     F-4:  short-quote substring escape hatch: AMBIGUOUS -> P
 
     Design note: gold-set corpus is small (N=11 signal quotes), so pins encode
     behaviour on the gold rows that MOTIVATED each fix and a small set of
-    controls. Widening beyond gold requires re-calibration on an expanded
-    corpus (Ф3.5 roadmap).
+    controls. R106 live measurement showed the R104 §5/§6 mental math was
+    wrong for F-3 (predicate blocked by measured tov=0.615, formula ratio
+    degenerate at 1.0 when every quote-word is present) and for one F-4 gold
+    row (r101-2 «alias for terminate» is fabricated, not a paraphrase - phrase
+    absent from raw github source and all 5 fetched bodies). See NOW.md R107
+    section for the postmortem.
     """
     import ground_classify as gc
+    import inspect as _inspect
 
-    section("R104 -> R105 Kit-Б-10 Ф3: calibration regression fixtures "
-            "(F-1a mid-path / F-3 weighted W-secondary / F-4 substring hatch)")
+    section("R104 -> R107 Kit-Б-10 Ф3.5: calibration regression fixtures "
+            "(F-1a mid-path / F-3 dropped / F-4 substring hatch)")
 
     # ---- F-1a: mid-path truncation on _KNOWN_LONG_SLUG_HOSTS ----
 
@@ -9516,46 +9527,70 @@ def suite_r104_calibration_regression():
           "R104 (F-1a-) short last seg on github.com -> False "
           "(github.com not in _KNOWN_LONG_SLUG_HOSTS)")
 
-    # ---- F-3: weighted topic_overlap function ----
+    # ---- F-3: topic_overlap_weighted function retained (inert since v1.72.1) ----
+    # The function and _TOPIC_WEIGHTED_W constant are RETAINED as a reference
+    # for a future Ф3.6 redesign; the rule branch that consumed them was
+    # dropped in v1.72.1 after R106 measurement (see docstring). These pins
+    # verify the function's numeric contract is still callable so a future
+    # redesign starts from a known baseline.
 
     _tw = gc.topic_overlap_weighted(
         "terminate alias", "This page discusses terminate and kill methods")
     check(0.0 <= _tw <= 1.0,
-          "R104 (F-3-func) topic_overlap_weighted returns value in [0, 1]",
+          "R104 (F-3-func) topic_overlap_weighted returns value in [0, 1] "
+          "(inert since v1.72.1, retained for Ф3.6)",
           "got %.3f" % _tw)
 
     check(gc.topic_overlap_weighted("", "any body text here") == 0.0,
           "R104 (F-3-func) empty quote -> 0.0 (safe default)")
 
     # Load-bearing property: weighted MUCH smaller than uniform when body is
-    # generic-word-dominated. This is precisely what makes F-3 W-secondary work.
+    # generic-word-dominated. This is the ORIGINAL design intent - preserved
+    # here so a future redesign can measure whether it holds on real corpora
+    # (R106 measurement showed it does NOT hold when every quote-word is
+    # present in the body, tov_w degenerates to 1.0).
     _generic_body = ("stream " * 200).strip()
     _quote_generic = "stream unique1 unique2 unique3 unique4"
     _tw_generic = gc.topic_overlap_weighted(_quote_generic, _generic_body)
     _tu_generic = gc.topic_overlap(_quote_generic, _generic_body)
     check(_tw_generic < _tu_generic * 0.5,
           "R104 (F-3-func) weighted < half uniform when body is generic-dominated "
-          "(load-bearing property of F-3)",
+          "(original design property; kept for Ф3.6 redesign baseline)",
           "weighted=%.3f uniform=%.3f" % (_tw_generic, _tu_generic))
 
-    # F-3 W-secondary rule fires: partial containment + low weighted + low sim -> W
-    _sub_f3 = gc._classify_unseen_bytes(
+    # v1.72.1 drop: r107 (R106 postmortem) removed the F-3 W-secondary rule
+    # branch. Previously this input returned W with `topic_overlap_weighted`
+    # in evidence; now it goes down the F path (max_sim < SIM_LOW AND
+    # tov < TOPIC_HIGH), which is the pre-v1.72.0 v1.71.0 behaviour.
+    _sub_f3drop = gc._classify_unseen_bytes(
         "subprocess invented fabricated aliens methods",
         "Python subprocess handles processes")
-    check(_sub_f3["class"] == "W"
-          and "topic_overlap_weighted" in _sub_f3.get("evidence", {}),
-          "R104 (F-3+) partial-containment + low weighted + low sim -> W "
-          "(W-secondary, was F in v1.71.0)",
-          "class=%s ev=%s" % (_sub_f3["class"], _sub_f3.get("evidence")))
+    check(_sub_f3drop["class"] == "F"
+          and "topic_overlap_weighted" not in _sub_f3drop.get("evidence", {}),
+          "R107 (F-3-drop) partial-containment + low sim: v1.72.1 returns F "
+          "(no `topic_overlap_weighted` key in evidence; W-secondary branch removed)",
+          "class=%s ev=%s" % (_sub_f3drop["class"], _sub_f3drop.get("evidence")))
 
-    # F-3 does NOT fire when quote words are unique-to-body (weighted high) -
-    # avoids false W on legit-P-like setups where the quote genuinely contains
-    # distinctive words all present in the body.
+    # R107 branch-removal pin: `_classify_unseen_bytes` source must NOT
+    # contain an active call to `topic_overlap_weighted(...)`. A future
+    # accidental re-add of the branch fails this pin before shipping.
+    _cls_src = _inspect.getsource(gc._classify_unseen_bytes)
+    import re as _re
+    _tw_calls = _re.findall(r"^\s*[^#\n]*topic_overlap_weighted\s*\(",
+                            _cls_src, _re.MULTILINE)
+    check(len(_tw_calls) == 0,
+          "R107 (F-3-branch) _classify_unseen_bytes has NO active "
+          "topic_overlap_weighted() call (v1.72.1 drop verification)",
+          "found %d call(s) in source" % len(_tw_calls))
+
+    # v1.72.1 keep-behaviour: high-containment all-unique quote words still
+    # not W (this used to be F-3 negative; still holds after drop because
+    # the only W path is uniform-topic-below-LOW).
     _body_ok = "The alpha beta gamma delta epsilon zeta method returns eta."
     _sub_ok = gc._classify_unseen_bytes("alpha beta gamma delta", _body_ok)
     check(_sub_ok["class"] != "W",
-          "R104 (F-3-) high-containment all-unique quote words -> NOT W "
-          "(F-3 negative: distinctive words protect from false W)",
+          "R104 (F-3-neg-preserved) high-containment quote -> NOT W "
+          "(W only from uniform tov < TOPIC_LOW after v1.72.1 drop)",
           "class=%s ev=%s" % (_sub_ok["class"], _sub_ok.get("evidence")))
 
     # ---- F-4: short-quote substring escape hatch ----
@@ -9636,15 +9671,24 @@ def suite_r104_calibration_regression():
           "(Igor's rule 'FP хуже пропуска' stays 0/180 on honest corpus)",
           "class=%s ev=%s" % (_sub_honest["class"], _sub_honest.get("evidence")))
 
-    # ---- Approach string exposes v1.72.0 fixes ----
+    # ---- Approach string exposes v1.72.1 fixes (F-3 marker dropped) ----
 
     _b9r_min = {"lines": [], "counts": {}, "summary_line": "",
                 "n_quotes": 0, "n_fetches_available": 0}
     _g_min = gc.classify(_b9r_min)
     check("f1a" in _g_min["approach"]
-          and "f3" in _g_min["approach"]
+          and "f1b" in _g_min["approach"]
           and "f4" in _g_min["approach"],
-          "R104 approach string names F-1a/F-3/F-4 markers (v1.72.0)",
+          "R107 approach string names F-1a/F-1b/F-4 markers (v1.72.1)",
+          "approach=%r" % _g_min["approach"])
+
+    # R107 negative: approach string must NOT promise "f3" - the rule branch
+    # is gone in v1.72.1 and promising functionality that no longer runs is
+    # the class R47 «prose promises what code doesn't do» trap that R106
+    # measured on v1.72.0's approach string.
+    check("+f3+" not in _g_min["approach"] and not _g_min["approach"].endswith("+f3"),
+          "R107 approach string does NOT contain 'f3' marker "
+          "(v1.72.1: F-3 dropped, do not promise removed functionality)",
           "approach=%r" % _g_min["approach"])
 
 

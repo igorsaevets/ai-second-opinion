@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.72.1 — 2026-09-20
+
+* **Kit-Б-10 Ф3.5 hotfix (R106 postmortem → R107 drop).** R106 live-verify on
+  `ormimo25pro` measured that two of the four v1.72.0 fixes never fire on
+  production data: F-3 (weighted topic-overlap W-secondary) and — as gold
+  gap — F-4 was correct but its R104 gold row was itself a gold-error. This
+  release drops the F-3 rule branch and updates the approach string to what
+  the code actually does. F FPR stays 0/180 on the R101+R80 corpus by
+  construction (drop cannot create a new false alarm).
+* **F-3 rule branch REMOVED** (`ground_classify._classify_unseen_bytes`).
+  R106 measurement on R101 real bodies: (a) the predicate
+  `max_sim < _SIM_LOW AND tov < _TOPIC_HIGH` was blocked for r101-4 by the
+  measured `tov=0.615 > TOPIC_HIGH=0.4`; and (b) the `intersect_w / total_w`
+  formula returns `1.0` whenever every quote-word is present in the body
+  (measured tov_w=1.0 for r101-2, 0.523 for r101-4 wrong-URL). R104 §5/§6
+  predicted `tov_w ≈ 0.2` for r101-4 by mental math — off by 2.6×. Fixing
+  either the predicate or the formula requires a fresh calibration corpus of
+  2-3 production OR-rounds; that is out of scope for a hotfix. The function
+  `topic_overlap_weighted` and the constant `_TOPIC_WEIGHTED_W` are RETAINED
+  as an inert reference for a future Ф3.6 redesign.
+* **F-4 short-quote substring escape hatch UNCHANGED**. R106 measurement
+  showed the R104 gold row for F-4 (r101-2 «alias for terminate()» presumed
+  paraphrase of `cpython/subprocess.py`) was itself a gold-error: the phrase
+  is absent from all 5 fetched bodies AND from the raw
+  `raw.githubusercontent.com/python/cpython/main/Lib/subprocess.py` source.
+  The quote is a MODEL-FABRICATED sentence, not a paraphrase. F-4 branch
+  returns `False` correctly, so AMBIGUOUS is the correct answer. No code
+  change.
+* **Approach string is now honest**: `stdlib-tfidf+f1a+f1b+f4`. Previously
+  `stdlib-tfidf+f1a+f3+f4` promised F-3 that never fired. R107
+  approach-negative pin verifies the string does not contain `f3`.
+* **Selftest deltas**: +3 R107 pins (F-3-drop, F-3-branch, approach-negative),
+  1 old F-3 W-secondary rule pin rewritten, approach-string pin now names
+  `f1a/f1b/f4`. Shipped selftest: 1352/1352 (from 1350 at v1.72.0).
+
 ## 1.72.0 — 2026-09-20
 
 * **Kit-Б-10 Ф3 fixes (R104 calibration → R105 release).** Four fixes on top of

@@ -49,27 +49,40 @@ Same policy as Б-9. Ф1 rules that matter:
   - T (truncated URL) heuristic stays narrow - only clearly malformed URLs. A short but
     real URL must not be flagged.
 
-APPROACH F HYBRID (v1.72.0: default + R104 Ф3 fixes; opt-in modules still roadmap)
-----------------------------------------------------------------------------------
+APPROACH F HYBRID (v1.72.1: default + R104 Ф3 fixes minus inert F-3; opt-in still roadmap)
+------------------------------------------------------------------------------------------
 Default execution: stdlib TF-IDF cosine (quote vs body sentences) + asymmetric
 containment topic overlap (quote content-words in body content-words) + URL
 truncation heuristic (incl. R104 F-1a mid-path for gov/edu long-slug hosts) +
-weighted topic-overlap SECONDARY (R104 F-3) + short-quote substring escape hatch
-(R104 F-4) + rule matrix. $0, employees, no deps.
+short-quote substring escape hatch (R104 F-4) + rule matrix. $0, employees,
+no deps.
 
-R104 Ф3 fixes over v1.71.0 (calibrated on 8 answers / 180 quotes / 11 signal;
-target: P/W/T/D recall 100% while F FPR stays 0%):
+R104 Ф3 fixes over v1.71.0 and what R106 live-verify measured (8 answers / 180
+quotes / 11 signal; F FPR must stay 0%):
     F-1a - is_url_truncated adds `_KNOWN_LONG_SLUG_HOSTS` + mid-path last-seg
            length check (catches `ecfr.gov/current/title-8/cha`).
+           R106 LIVE: r101-T github.co -> T. WORKING.
     F-1b - orchestrate.py wires cite_check_map from opened + probe_url for
            UNSEEN-URL quotes (catches r101-3 stream-i-o DEAD 404). NOT in this
            file; see orchestrate.py:5410-5445.
-    F-3  - `topic_overlap_weighted` (IDF-like) as SECONDARY signal for W;
-           promotes uniform-inflated cases that used to land in AMBIGUOUS to W
-           when weighted < _TOPIC_WEIGHTED_W AND uniform is between LOW and HIGH
-           AND max_sim < _SIM_LOW.
+           R106 LIVE: 2 cited / 2 probed / r101-3 -> D. WORKING.
+    F-3  - REMOVED in v1.72.1 (R106 postmortem, Ф3.5). The rule branch that
+           promoted AMBIGUOUS -> W via `topic_overlap_weighted` never fired on
+           the R101 corpus: the predicate `tov < _TOPIC_HIGH=0.4` blocked
+           r101-4 (measured tov=0.615), and the formula returns 1.0 whenever
+           every quote-word is in the body regardless of body-frequency
+           (measured tov_w=0.523 for r101-4 wrong-URL, 1.0 for r101-2). Fixing
+           either the predicate or the formula requires a fresh calibration
+           corpus (2-3 production OR-rounds) - out of scope for a hotfix. The
+           `topic_overlap_weighted` FUNCTION and the `_TOPIC_WEIGHTED_W`
+           constant are RETAINED as dead-code reference for a future Ф3.6
+           redesign; the rule branch that consumed them is deleted.
     F-4  - short-quote substring escape hatch: for quote len <= _SHORT_QUOTE_LEN,
            if normalize(quote) in normalize(body), promote AMBIGUOUS -> P.
+           R106 LIVE: r101-2 «alias for terminate()» correctly returned False
+           (phrase absent from all 5 fetched bodies AND from raw github source
+           - the R104 gold P was itself a gold-error, the quote is fabricated).
+           The branch fires safely and does not create FP.
 
 Opt-in env vars (still recognised, still fall back to default with "not yet
 integrated" note in the approach line):
@@ -185,29 +198,40 @@ def topic_overlap(quote, body):
 
 
 def topic_overlap_weighted(quote, body):
-    """WEIGHTED containment - a SECONDARY signal introduced in R104 Ф3 to catch
-    wrong-URL cases where GENERIC body terms inflate the uniform metric above.
+    """WEIGHTED containment - INERT since v1.72.1 (R106 postmortem, Ф3.5).
 
     Returns a fraction in [0.0, 1.0]: intersect_weight / total_weight.
 
     Weights (IDF-like): a quote word gets `log((N+1) / (df+1))`, where N is
     the body token count and df is that word's frequency in the body. A word
     absent from the body carries `log(N+1)` (max weight); a word covering
-    much of the body carries a very small weight. When the quote is a
-    generic-word cloud that happens to overlap with a busy page, the intersect
-    weight collapses far below the total; when the quote is on-topic and
-    contains distinctive words, the ratio stays high.
+    much of the body carries a very small weight.
 
-    R104 gold row r101-4 = "stream buffer 4K program abnormally" attributed
-    to `docs.python.org/subprocess.html`. Uniform containment = 0.615 because
-    `stream/buffer/program/output/terminates` all sit on the subprocess page -
-    but those words carry near-zero information about THIS specific quote's
-    topic. Weighted version collapses those to a small weight; distinguishing
-    words (`4K`, `abnormally`, `flushed`) that are ABSENT from the body carry
-    high weight and dominate the denominator, so the ratio drops.
+    R106 MEASUREMENT (retained here as the postmortem record):
+        r101-2 «alias for terminate()» vs github blob body:
+            tov=1.000, tov_w=1.000 (all 2 content-words {alias, terminate}
+            present in body). The formula degenerates to 1.0 when every quote
+            word appears in the body, regardless of body-frequency.
+        r101-4 «default size of a stream buffer is 4K ... abnormally, ...
+                flushed, resulting in loss of data» vs docs.python.org body:
+            tov=0.615, tov_w=0.523 (8 of 13 content-words present). Threshold
+            _TOPIC_WEIGHTED_W=0.30 does not fire.
+        r101-4 SAME quote vs CORRECT URL (learn.microsoft.com/stream-i-o):
+            tov=1.000, tov_w=1.000, max_sim=0.649 (perfect fit).
 
-    Used by `_classify_unseen_bytes` as a SECONDARY signal (uniform stays
-    primary). Never on its own.
+    Retained as a REFERENCE for a future Ф3.6 redesign: a working W-secondary
+    signal needs (a) a formula that distinguishes rare-word vs common-word
+    overlap even when every quote-word is present, and (b) a predicate that
+    does not gate on `tov < _TOPIC_HIGH` (that gate is what blocked r101-4).
+    Both changes together require a fresh calibration corpus of 2-3
+    production OR-rounds and are out of scope for a v1.72.1 hotfix. The rule
+    branch in `_classify_unseen_bytes` that consumed this function was
+    deleted; only the function and its constant `_TOPIC_WEIGHTED_W` remain,
+    for that future work.
+
+    DO NOT wire this back into a rule branch without a fresh calibration -
+    R106 measured F FPR=0 on 180 quotes precisely because this signal was
+    inert; any relaxation of thresholds risks a false W.
     """
     q = _content_words(quote)
     if not q:
@@ -463,13 +487,11 @@ _SIM_HIGH = 0.5      # max_sim >= this: strong sentence-level match (paraphrase 
 _SIM_LOW = 0.2       # max_sim < this: no sentence-level match (F candidate, needs topic_low too)
 _TOPIC_HIGH = 0.4    # containment >= this: most of the quote's words are on-topic for the page
 _TOPIC_LOW = 0.15    # containment < this: quote's words are LARGELY ABSENT from the page (W)
-# R104 F-3: secondary weighted-containment threshold. Fires only when the
-# UNIFORM metric is above _TOPIC_LOW (so W-primary does not decide) AND max_sim
-# is low. Purpose: catch wrong-URL cases where the uniform metric is inflated
-# by ubiquitous body terms. Threshold set from r101-4 empirical (uniform=0.615,
-# weighted ≈ 0.3). Ф3 to widen only if measured false-negatives on other
-# generic-cloud cases; do NOT raise above ~0.4 or the primary matrix stops
-# being primary.
+# R104 F-3 threshold - INERT since v1.72.1 (R106 postmortem, Ф3.5). The
+# rule branch that consumed this was deleted; the constant is retained
+# alongside `topic_overlap_weighted` for a future Ф3.6 redesign. See the
+# function's docstring for the R106 measurement showing why both changes
+# together are needed before this signal can be wired back.
 _TOPIC_WEIGHTED_W = 0.30
 # R104 F-4: short-quote substring escape hatch length cap. Below this length,
 # TF-IDF sentence-level match cannot distinguish paraphrase from noise (a
@@ -484,19 +506,20 @@ _SHORT_QUOTE_LEN = 60
 def _classify_unseen_bytes(quote, body):
     """UNSEEN-BYTES -> {P, W, F, AMBIGUOUS} with evidence.
 
-    Rule matrix (from design.md §4 F-default, extended in R104 Ф3):
+    Rule matrix (v1.72.1 - R106 postmortem removed the F-3 W-secondary branch):
         topic_overlap < _TOPIC_LOW                       -> W (uniform, primary)
-        max_sim < _SIM_LOW AND topic < _TOPIC_HIGH
-            AND topic_weighted < _TOPIC_WEIGHTED_W       -> W (R104 F-3: weighted secondary)
         max_sim >= _SIM_HIGH AND topic >= _TOPIC_HIGH    -> P
         max_sim < _SIM_LOW AND topic < _TOPIC_HIGH       -> F (TWO independent LOW signals)
         (short quote AND normalized quote in body)       -> P (R104 F-4: substring escape)
         otherwise                                        -> AMBIGUOUS (safety net)
 
     FP-tolerance: F requires BOTH max_sim < _SIM_LOW AND topic_overlap < _TOPIC_HIGH.
-    W-primary requires an EXPLICIT topic mismatch. W-secondary (F-3) requires low
-    sim AND uniform-topic between LOW and HIGH AND weighted-topic below its own
-    threshold - three signals aligned, so false-W stays rare.
+    W-primary requires an EXPLICIT topic mismatch. Middle-range cases (e.g.
+    r101-4 with uniform_tov=0.615, weighted_tov=0.523, max_sim=0.193) land in
+    AMBIGUOUS by design - R106 measured F FPR=0 on 180 quotes precisely
+    because there is no third path from AMBIGUOUS to W without a fresh
+    calibration. `topic_overlap_weighted` is retained as an inert reference
+    for a future Ф3.6 redesign.
     """
     max_sim, best_sent = max_sentence_similarity(quote, body)
     tov = topic_overlap(quote, body)
@@ -511,27 +534,6 @@ def _classify_unseen_bytes(quote, body):
                        "content words - quote likely belongs to a different page)"
                        % (tov, _TOPIC_LOW)),
         }
-    # R104 F-3: W-secondary via weighted topic-overlap. Fires only when:
-    #   (1) max_sim is LOW (no sentence-level anchor), AND
-    #   (2) uniform topic is between LOW and HIGH (would otherwise be F or AMBIGUOUS), AND
-    #   (3) weighted topic is below its own threshold (distinguishing words absent).
-    # r101-4 fixture: uniform=0.615, weighted ~ 0.3, max_sim=0.193. Uniform put
-    # this in AMBIGUOUS, gold=W. Weighted collapses the ubiquitous body terms and
-    # promotes to W. Three signals aligned = safe promotion.
-    if max_sim < _SIM_LOW and tov < _TOPIC_HIGH:
-        tov_w = topic_overlap_weighted(quote, body)
-        if tov_w < _TOPIC_WEIGHTED_W:
-            return {
-                "class": "W",
-                "evidence": {"max_sim": round(max_sim, 3),
-                             "topic_overlap": round(tov, 3),
-                             "topic_overlap_weighted": round(tov_w, 3)},
-                "detail": ("wrong-URL (weighted): topic_overlap=%.3f (uniform) BUT "
-                           "topic_overlap_weighted=%.3f < %.2f - the quote's distinguishing "
-                           "words are absent from the page; only ubiquitous body terms "
-                           "inflated the uniform overlap"
-                           % (tov, tov_w, _TOPIC_WEIGHTED_W)),
-            }
     # P: strong similarity AND on-topic
     if max_sim >= _SIM_HIGH and tov >= _TOPIC_HIGH:
         ev = {"max_sim": round(max_sim, 3), "topic_overlap": round(tov, 3)}
@@ -546,8 +548,10 @@ def _classify_unseen_bytes(quote, body):
         }
     # F: on-topic-PARTIAL (some quote words on page) BUT no sentence-level match.
     # topic >= TOPIC_LOW is implied - if it were < TOPIC_LOW, W already fired above.
-    # F-3 already ran above (same predicate) - if weighted is high enough, we
-    # fall through to F here (or to AMBIGUOUS if F-4 does not catch it).
+    # v1.72.1: the F-3 W-secondary branch that used to run above with the same
+    # predicate was removed after R106 measurement showed it was inert on real
+    # data (see topic_overlap_weighted() docstring). This F branch remains -
+    # r101-4-shaped cases with tov >= TOPIC_HIGH land in AMBIGUOUS below.
     if max_sim < _SIM_LOW and tov < _TOPIC_HIGH:
         return {
             "class": "F",
@@ -709,18 +713,21 @@ def classify_quote(q_line, body=None, cite_check_status=None):
 # =============================================================================
 
 def _resolve_approach():
-    """Print the approach line for the sidecar. In v1.72.0 default carries the
-    R104 Ф3 fixes (F-1a mid-path, F-3 weighted secondary, F-4 substring escape);
-    opt-in env vars still fall back to default with a "not yet integrated" note
-    (Ф3.5 roadmap)."""
-    approach = "stdlib-tfidf+f1a+f3+f4"
+    """Print the approach line for the sidecar. In v1.72.1 default carries
+    F-1a (mid-path truncation for gov/edu long-slug hosts), the F-1b cite_check
+    map wired by orchestrate.py, and F-4 (short-quote substring escape hatch).
+    F-3 was removed after R106 measurement showed it never fires on real data;
+    the name is left out of the approach string on purpose (do not promise
+    functionality that no longer exists). Opt-in env vars still fall back to
+    default with a "not yet integrated" note (Ф3.5 roadmap)."""
+    approach = "stdlib-tfidf+f1a+f1b+f4"
     notes = []
     if os.environ.get("GROUND_EMBEDDINGS"):
-        notes.append("GROUND_EMBEDDINGS requested but not yet integrated in v1.72.0")
+        notes.append("GROUND_EMBEDDINGS requested but not yet integrated in v1.72.1")
     if os.environ.get("GROUND_LLM_VERIFY"):
-        notes.append("GROUND_LLM_VERIFY requested but not yet integrated in v1.72.0")
+        notes.append("GROUND_LLM_VERIFY requested but not yet integrated in v1.72.1")
     if os.environ.get("GROUND_WAYBACK"):
-        notes.append("GROUND_WAYBACK requested but not yet integrated in v1.72.0")
+        notes.append("GROUND_WAYBACK requested but not yet integrated in v1.72.1")
     if notes:
         approach += " (" + "; ".join(notes) + ")"
     return approach
