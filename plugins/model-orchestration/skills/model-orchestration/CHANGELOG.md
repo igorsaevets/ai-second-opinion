@@ -1,5 +1,88 @@
 # Changelog
 
+## 1.69.0 — 2026-09-20
+
+**Kit-Б-9 Ф1: byte-check quotes against pages we fetched.** New
+`quote_verify.py` beside `citecheck.py`, wired into the OR-channel fetch
+loop (`call_oai_reviewer` — the `openrouter` and `oai` kinds). Advisory
+tool, never fails a run. Compares each quotation in the answer against
+the BYTES we hold from the cited URL, in three layers cheapest first:
+
+1. **URL provenance.** If the claimed URL is not in this channel's
+   opened_urls set, the quote could not have come from that page —
+   `[UNSEEN-URL]`. Set-membership, free.
+2. **Normalized byte match.** Reads the persisted cleaned-text from
+   `<rundir>/<cname>.fetches/<slug>.txt` (written by the new prep-step
+   in the fetch loop), normalizes both sides (Unicode NFC, whitespace
+   runs, curly quotes → straight, ligatures → letters, NBSP → space,
+   zero-width removed, `…` → `...`), tries exact substring, then fuzzy
+   via SequenceMatcher-anchored capped Levenshtein — threshold 2% AND
+   ≤3 absolute chars. Fires `[VERIFIED]` / `[NEAR-MATCH]` (with a
+   `diff:` line + `kind=` classification) / `[UNSEEN-BYTES]`.
+3. **Short-quote guard.** Quotes ≤ 25 chars normalized are marked
+   `[SHORT-UNVERIFIABLE]` — a 3-word phrase matches a random 400 KB
+   page too often to say more than that.
+
+Output: sidecar `<CNAME>.quote-verify.md` next to each answer with
+extractable quotes, plus a one-line summary in `notes` and a new
+`quote_verify_summary` / `quote_verify_counts` on the channel record.
+Never changes an exit code; never overwrites the answer.
+
+Covers the two error classes we have real history for:
+
+- **(a) fabricated** — quote written from memory. Either the URL was
+  never opened (`[UNSEEN-URL]`) or the text is not on the page
+  (`[UNSEEN-BYTES]`).
+- **(c) vendor-corrupts** — R44 (2026-08-15): a MiMo asylum review
+  arrived with 35 `(` characters simply missing — `INA § 208(a)(2)(D)`
+  delivered as `INA § 208(a)2)(D)`. The `[NEAR-MATCH]` diff-view names
+  the punct-only change (`kind=punct-only`), so a reader can tell
+  vendor corruption from fabrication.
+
+Deliberately **out of scope** for this release:
+
+- **(b) kim-inverted** — quote's words present on the page but the
+  surrounding claim inverts the meaning. Requires semantics; that is
+  Б-10 (task #21), a separate iteration.
+- **CLI channels** (agy, codex, grokcli) — they fetch through their
+  own infrastructure, we hold no bytes on our disk, so byte-check is
+  structurally impossible. `citecheck` still covers their URLs.
+- **Distinguishing "page updated" from "vendor corrupted"** — both
+  land as `[NEAR-MATCH]`. Our bytes are a snapshot at fetch time; we
+  do not re-fetch to compare against live web.
+
+FP-tolerance policy («ложное срабатывание хуже пропуска»):
+
+- Exit code is **always 0**. Advisory tool.
+- Short quotes never FAIL, only `[SHORT-UNVERIFIABLE]`.
+- `[NEAR-MATCH]` is a question with a diff, not an accusation.
+- `[MEMORY]`-tagged quotes are skipped entirely (the model has already
+  said "not from a page").
+- Ф2 calibration will measure FPR on the r80-panel-test corpus; if
+  >5%, the fix is to widen the NORMALIZER, not loosen the fuzzy
+  threshold. Loose thresholds hide vendor corruption, which is the
+  whole point of the tool.
+
+Persist policy: cleaned-text (what the model saw), NOT raw HTML — the
+point is byte-identity with the model's view, and cleaned is 3–4× less
+disk. `runs/` is already `.gitignore`d. PII scrubbing on persisted
+bytes is a Ф2 open question (scrubbing would break the byte-match
+VERIFIED path for legitimate quotes containing PII names, so it needs
+weighing against the disk-exposure risk).
+
+Fetches directory layout: `<rundir>/<cname>.fetches/<slug>.txt` (flat
+per-channel dir, consistent with existing `<cname>.progress.log` /
+`<cname>.events.ndjson` naming — not the nested `<cname>/fetches/`
+form the design first sketched).
+
+The full algorithm, its FP-tolerance policy and Ф2's open questions
+live in `references/quote-verify.md`. Selftest: `suite_r98_quote_verify`
+adds 52 pins across normalization (11), fuzzy match (5), diff
+classification (4), quote extraction (6), end-to-end integration
+hitting all five statuses in one answer (16), FP-tolerance edge cases
+(2), slug determinism (3) and wiring assertions on `orchestrate.py`
+(6). Source selftest 1253 → 1305 pins.
+
 ## 1.68.0 — 2026-09-19
 
 R83 audit §Н-12 closed: `--allow-stale-prices` on `premium_panel.py` lets a

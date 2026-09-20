@@ -6876,7 +6876,8 @@ def main():
                   suite_r91_set_unlisted_and_new_channel,
                   suite_r92_premium_panel_fixes,
                   suite_r94_codex_vendor_error_surfacing,
-                  suite_r96_allow_stale_prices_cli):
+                  suite_r96_allow_stale_prices_cli,
+                  suite_r98_quote_verify):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -8555,6 +8556,294 @@ def suite_r96_allow_stale_prices_cli():
                   "raised=%s got=%r" % (raised, got))
     finally:
         panel_mod.PR = saved_PR
+
+
+# =================================================================================================
+def suite_r98_quote_verify():
+    """
+    R98 (2026-09-20), Kit-Б-9 Ф1. quote-vs-seen-sources: byte-compare the
+    quotes in an OR-channel answer against the persisted fetched bodies.
+
+    This suite covers the standalone module (quote_verify.py) and the wiring
+    in orchestrate.py's fetch loop (prep-step persists cleaned-text) and end
+    of call_oai_reviewer (advisory sidecar next to the answer).
+
+    Three known error classes:
+      (a) fabricated       - quote never on the page (or URL never opened)
+      (c) vendor-corrupts  - R44: `208(a)(2)(D)` -> `208(a)2)(D)` (deleted `(`)
+    (b) kim-inverted is OUT of Ф1 scope (Б-10 semantic classifier).
+
+    FP-tolerance policy: exit code ALWAYS 0; short quotes never FAIL; fuzzy
+    thresholds narrow (2% AND <=3 chars); [MEMORY]-tagged quotes skipped.
+    """
+    import quote_verify as qv
+
+    section("R98 Kit-Б-9 Ф1: quote-vs-seen-sources (extraction + normalize + 3 layers)")
+
+    # --- A. Normalization ---------------------------------------------------
+    check(qv.normalize("may not\napply if") == "may not apply if",
+          "R98 (A1) whitespace runs collapse - wrap-defect closed",
+          "closes the R51-class 33% FP rate on `may not\\napply` != `may not apply`")
+
+    check(qv.normalize('"hello" and “hello”') == '"hello" and "hello"',
+          "R98 (A2) curly double quotes normalize to straight")
+
+    check(qv.normalize("‘hello’ test") == "'hello' test",
+          "R98 (A3) curly single quotes / apostrophes normalize to ASCII")
+
+    check(qv.normalize("«text»") == '"text"',
+          "R98 (A4) French guillemets normalize to straight double quotes")
+
+    # Ligature - ffi in "efficient"
+    _lig = "eﬃcient"
+    check(qv.normalize(_lig) == "efficient",
+          "R98 (A5) ligature ffi decomposes to letters (closes 5% FP on PDF-sourced pages)",
+          "input=%r output=%r" % (_lig, qv.normalize(_lig)))
+
+    check(qv.normalize("hello world") == "hello world",
+          "R98 (A6) non-breaking space normalizes to regular space")
+
+    check(qv.normalize("hell​o") == "hello",
+          "R98 (A7) zero-width space removed entirely")
+
+    check(qv.normalize("hello…world") == "hello...world",
+          "R98 (A8) ellipsis single-char expands to three ASCII dots")
+
+    _combo = qv.normalize("é")  # combining acute after e
+    check(_combo == "é",
+          "R98 (A9) NFC composes e+combining-acute into single é code point",
+          "output=%r" % _combo)
+
+    check(qv.normalize("") == "" and qv.normalize(None) == "",
+          "R98 (A10) normalize on empty / None returns empty string")
+
+    _idem = qv.normalize("  «HELLO… world»  \n\n")
+    check(qv.normalize(_idem) == _idem,
+          "R98 (A11) normalization is idempotent",
+          "first=%r second=%r" % (_idem, qv.normalize(_idem)))
+
+    # --- B. Fuzzy match -----------------------------------------------------
+    r = qv.fuzzy_find("hello world", "say hello world today")
+    check(r is not None and r[1] == 0,
+          "R98 (B1) exact substring finds distance 0",
+          "got=%r" % (r,))
+
+    r = qv.fuzzy_find("208(a)(2)(D) may apply",
+                      "The section 208(a)2)(D) may apply here")
+    check(r is not None and r[1] == 1,
+          "R98 (B2) R44 case: `208(a)(2)(D)` vs `208(a)2)(D)` → distance 1",
+          "got=%r" % (r,))
+
+    r = qv.fuzzy_find("hello world", "the quick brown fox jumps over the lazy dog")
+    check(r is None,
+          "R98 (B3) unrelated needle → no match",
+          "expected None, got %r" % (r,))
+
+    # 4-char substitution should fail on a 30-char quote (threshold=1)
+    r = qv.fuzzy_find("a full length reasonable quote",
+                      "a XXXX length reasonable quote")
+    check(r is None,
+          "R98 (B4) 4-char alpha substitution above threshold → no match (threshold=1)",
+          "got=%r" % (r,))
+
+    r = qv.fuzzy_find("", "haystack")
+    check(r is None,
+          "R98 (B5) empty needle → None (never returns a spurious offset)")
+
+    # --- C. classify_diff ---------------------------------------------------
+    check(qv.classify_diff("208(a)(2)(D) applies", "208(a)2)(D) applies")
+          == "punct-only",
+          "R98 (C1) missing `(` classified as punct-only (R44 signature)")
+
+    check(qv.classify_diff("208 applies here", "209 applies here")
+          == "digit-change",
+          "R98 (C2) 208→209 classified as digit-change (SUSPICIOUS)")
+
+    check(qv.classify_diff("hello world", "hallo world")
+          == "letter-change",
+          "R98 (C3) hello→hallo classified as letter-change (SUSPICIOUS)")
+
+    check(qv.classify_diff("identical", "identical") == "unknown",
+          "R98 (C4) identical input returns 'unknown' (no changes)")
+
+    # --- D. Extraction ------------------------------------------------------
+    _text = ('The court said "one full sentence about statutory intent" per '
+             'https://govinfo.gov/link/uscode/8/1158 which is authoritative.')
+    _q = qv.extract_quotes(_text)
+    check(len(_q) == 1 and _q[0]["quote"] == "one full sentence about statutory intent",
+          "R98 (D1) ASCII double-quote → extracted",
+          "got=%r" % _q)
+    check(_q and _q[0]["source_url"] == "https://govinfo.gov/link/uscode/8/1158",
+          "R98 (D2) nearby URL captured as source_url",
+          "got=%r" % (_q[0].get("source_url") if _q else None))
+
+    _text2 = 'Per rule: «french-style quote here of decent length» (source)'
+    _q2 = qv.extract_quotes(_text2)
+    check(len(_q2) == 1 and "french-style" in _q2[0]["quote"],
+          "R98 (D3) French guillemets extracted",
+          "got=%r" % _q2)
+
+    _text3 = "> a legit block quote with enough length to matter\n\nother text"
+    _q3 = qv.extract_quotes(_text3)
+    check(len(_q3) == 1 and _q3[0]["kind"] == "block",
+          "R98 (D4) markdown block quote (> ...) extracted with kind=block",
+          "got=%r" % _q3)
+
+    _text4 = 'The model said "made up quote from memory" [MEMORY] not from a page.'
+    _q4 = qv.extract_quotes(_text4)
+    check(len(_q4) == 0,
+          "R98 (D5) quote followed by [MEMORY] tag is SKIPPED (design.md §5 rule 4)",
+          "got=%r" % _q4)
+
+    _text5 = ('First quote "one full statement of some length" per https://example.com/a.\n'
+              'Second quote "another full statement of some length" per https://example.com/a.\n'
+              'And a duplicate: "one full statement of some length" per https://example.com/a.')
+    _q5 = qv.extract_quotes(_text5)
+    check(len(_q5) == 2,
+          "R98 (D6) duplicate (quote, url) pairs deduplicated - 3 mentions, 2 unique",
+          "got=%d quotes" % len(_q5))
+
+    # --- E. check() integration --------------------------------------------
+    with tempfile.TemporaryDirectory() as _td:
+        _fetches = os.path.join(_td, "kimi.fetches")
+        os.makedirs(_fetches)
+        _body = ("This page contains the phrase safe third country agreement "
+                 "and other legal text. Section 208(a)(2)(D) may apply here. "
+                 "This is a longer document with more sentences to make it "
+                 "realistic enough for the byte-match layer.")
+        _url = "https://govinfo.gov/link/uscode/8/1158"
+        with open(os.path.join(_fetches, qv.slug_for_url(_url)), "w",
+                  encoding="utf-8") as _f:
+            _f.write(_body)
+
+        _answer = (
+            'Per govinfo.gov/link/uscode/8/1158, the statute says '
+            '"safe third country agreement and other legal text" and it is authoritative.\n\n'
+            'Also cited: "208(a)2)(D) may apply here" from '
+            'https://govinfo.gov/link/uscode/8/1158.\n\n'
+            'Fabricated: "this made-up phrase never appears on that page" '
+            'per https://govinfo.gov/link/uscode/8/1158.\n\n'
+            'Wrong URL: "safe third country agreement and other legal text" '
+            'per https://never-opened.example.com/page.\n\n'
+            'Short: "shall" per https://govinfo.gov/link/uscode/8/1158.\n'
+        )
+        _report = qv.check(_answer, fetches_dir=_fetches, opened_urls=[_url])
+        _by_status = {}
+        for _row in _report["lines"]:
+            _by_status.setdefault(_row["status"], []).append(_row)
+
+        check(_report["counts"]["VERIFIED"] >= 1
+              and any("safe third country agreement" in r["quote"]
+                      for r in _by_status.get("VERIFIED", [])),
+              "R98 (E1) exact byte-match on opened URL → [VERIFIED]",
+              "counts=%s" % _report["counts"])
+
+        check(_report["counts"]["NEAR-MATCH"] >= 1,
+              "R98 (E2) 1-char corruption on opened URL → [NEAR-MATCH]",
+              "counts=%s" % _report["counts"])
+
+        # For the R44 case: diff view MUST show the missing `(`
+        _near = _by_status.get("NEAR-MATCH", [])
+        check(_near and any("(" in r.get("diff", "") for r in _near),
+              "R98 (E3) NEAR-MATCH diff-view shows the corrupted character",
+              "near=%r" % _near)
+        check(_near and any("punct-only" in r.get("detail", "") for r in _near),
+              "R98 (E4) NEAR-MATCH classifies R44 corruption as punct-only "
+              "(readable signal for the reader)")
+
+        check(_report["counts"]["UNSEEN-BYTES"] >= 1,
+              "R98 (E5) quote absent from body → [UNSEEN-BYTES]",
+              "counts=%s" % _report["counts"])
+
+        check(_report["counts"]["UNSEEN-URL"] >= 1,
+              "R98 (E6) quote citing an unopened URL → [UNSEEN-URL] "
+              "(Layer 1, no bytes needed)")
+
+        check(_report["counts"]["SHORT-UNVERIFIABLE"] >= 1,
+              "R98 (E7) 5-char quote 'shall' → [SHORT-UNVERIFIABLE] "
+              "(FP-tolerance: never FAIL a short quote)",
+              "counts=%s" % _report["counts"])
+
+        check(_report["counts"]["UNSEEN-BYTES"] >= 1
+              and _report["counts"]["UNSEEN-URL"] >= 1
+              and _report["counts"]["NEAR-MATCH"] >= 1
+              and _report["counts"]["SHORT-UNVERIFIABLE"] >= 1
+              and _report["counts"]["VERIFIED"] >= 1,
+              "R98 (E8) integration test hits all 5 statuses in ONE mock answer",
+              "counts=%s" % _report["counts"])
+
+        # Summary line names every non-zero class
+        for _s in ("VERIFIED", "UNSEEN-URL", "UNSEEN-BYTES", "NEAR-MATCH",
+                   "SHORT-UNVERIFIABLE"):
+            check(_s in _report["summary_line"],
+                  "R98 (E9-%s) summary_line lists %s" % (_s, _s),
+                  "summary=%r" % _report["summary_line"])
+
+        # Sidecar rendering: header + section per non-empty status
+        _sidecar = qv.format_sidecar(_report, channel_name="kimi")
+        check("# Б-9 quote-verify report for KIMI" in _sidecar
+              and "**Summary:**" in _sidecar,
+              "R98 (E10) sidecar has KIMI header + **Summary:** line",
+              "sample=%r" % _sidecar[:200])
+        check("[VERIFIED]" in _sidecar and "[NEAR-MATCH]" in _sidecar
+              and "diff:" in _sidecar,
+              "R98 (E11) sidecar renders each status section and the diff line",
+              "len=%d" % len(_sidecar))
+
+    # --- F. FP-tolerance: opened_urls empty, no fetches ---------------------
+    _bare = qv.check('The page says "a legitimate quote of some length" per https://example.com/x.',
+                     fetches_dir=None, opened_urls=[])
+    check(_bare["counts"]["UNSEEN-URL"] == 1
+          and _bare["counts"]["VERIFIED"] == 0,
+          "R98 (F1) no fetches_dir + no opened_urls → quote-with-URL is [UNSEEN-URL], "
+          "never [VERIFIED]",
+          "counts=%s" % _bare["counts"])
+
+    _noq = qv.check("nothing quotable here at all.", fetches_dir=None, opened_urls=[])
+    check(_noq["n_quotes"] == 0
+          and _noq["summary_line"] == "0 quotes extracted",
+          "R98 (F2) empty extraction → summary reads '0 quotes extracted', never crashes",
+          "got=%r" % _noq["summary_line"])
+
+    # --- G. slug_for_url determinism (matches orchestrate.py prep-step) ----
+    _u = "https://govinfo.gov/link/uscode/8/1158"
+    _s1 = qv.slug_for_url(_u)
+    _s2 = qv.slug_for_url(_u)
+    check(_s1 == _s2 and _s1.endswith(".txt") and len(_s1) < 120,
+          "R98 (G1) slug_for_url is deterministic + .txt + bounded length",
+          "slug=%s len=%d" % (_s1, len(_s1)))
+
+    check(qv.slug_for_url("http://www.example.com/x")
+          == qv.slug_for_url("http://example.com/x"),
+          "R98 (G2) www is stripped for slug uniqueness (same origin, same file)")
+
+    check(qv.slug_for_url("https://a.com/x")
+          != qv.slug_for_url("https://a.com/y"),
+          "R98 (G3) different paths → different slugs (no collision)")
+
+    # --- H. Wiring: prep-step + integration in orchestrate.py -------------
+    _oarc_src = (HERE / "orchestrate.py").read_text(encoding="utf-8")
+
+    check("from quote_verify import slug_for_url as _b9_slug" in _oarc_src,
+          "R98 (H1) orchestrate.py fetch loop imports slug_for_url for prep-step")
+
+    check(".fetches" in _oarc_src and "quote_verify" in _oarc_src,
+          "R98 (H2) prep-step writes to <cname>.fetches/ (per-channel dir "
+          "convention matches .progress.log / .events.ndjson naming)")
+
+    check("import quote_verify as _b9" in _oarc_src
+          and "_b9.check(text, fetches_dir=" in _oarc_src,
+          "R98 (H3) call_oai_reviewer imports quote_verify and calls check()")
+
+    check(".quote-verify.md" in _oarc_src and "_b9.format_sidecar" in _oarc_src,
+          "R98 (H4) sidecar path is <CNAME>.quote-verify.md + written via format_sidecar")
+
+    check('"quote_verify_summary": quote_verify_summary' in _oarc_src,
+          "R98 (H5) return dict carries quote_verify_summary field for downstream readers")
+
+    check("QUOTE-VERIFY" in _oarc_src and "note.append" in _oarc_src,
+          "R98 (H6) note.append surfaces the Б-9 summary in the notes section "
+          "(reader sees it via REPORT.md notes column, no schema change needed)")
 
 
 if __name__ == "__main__":

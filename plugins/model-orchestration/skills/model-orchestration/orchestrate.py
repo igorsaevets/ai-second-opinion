@@ -5121,6 +5121,28 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                     else:
                         opened.append(_norm_url(url))
                         fetched_bytes += len(result)
+                        # Б-9 prep-step (R98): persist the cleaned-text on disk so
+                        # quote_verify.check() below can byte-compare quotes in the
+                        # answer against the exact bytes we sent the model. Lazy
+                        # import - if quote_verify.py is somehow absent (a partial
+                        # install) the fetch still proceeds; only Б-9 stops working,
+                        # which is advisory anyway. Never raises: an IO error on
+                        # persistence must not fail a paid review.
+                        try:
+                            from quote_verify import slug_for_url as _b9_slug
+                            _b9_dir = os.path.join(os.path.dirname(outfile) or ".",
+                                                   name + ".fetches") if outfile else None
+                            if _b9_dir:
+                                os.makedirs(_b9_dir, exist_ok=True)
+                                _b9_path = os.path.join(_b9_dir, _b9_slug(url))
+                                with open(_b9_path, "w", encoding="utf-8",
+                                          errors="replace") as _b9_f:
+                                    _b9_f.write(result)
+                        except Exception:
+                            # Silent by design: Б-9 is optional infrastructure.
+                            # A missing persisted file lands as [UNSEEN-BYTES]
+                            # in the sidecar, which is honest, not a false alarm.
+                            pass
                     log("  [%s] fetch %d/%d %s -> %s"
                         % (name, fetches, max_rounds, url[:90],
                            result[:70] if failed else "%d chars" % len(result)))
@@ -5369,6 +5391,38 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # the whole conversation, so the final call's prompt_tokens is only the last leg and reading
     # it as the total under-reports the round - on a fetch-heavy review, by most of the bill.
     n_cited, grounded, _ung = _cite_check(text, set(opened))
+    # Б-9 quote-vs-seen-sources (R98): byte-compare the quotes in the answer
+    # against the persisted fetched bodies (from prep-step in the loop above).
+    # Advisory - never fails the run. Writes <cname>.quote-verify.md sidecar
+    # next to the answer, and hangs a one-line summary in `note`.
+    quote_verify_summary = None
+    quote_verify_counts = None
+    try:
+        import quote_verify as _b9
+        _b9_fetches_dir = None
+        if outfile:
+            _b9_fetches_dir = os.path.join(os.path.dirname(outfile) or ".",
+                                           name + ".fetches")
+        _b9_report = _b9.check(text, fetches_dir=_b9_fetches_dir, opened_urls=opened)
+        quote_verify_summary = _b9_report["summary_line"]
+        quote_verify_counts = _b9_report["counts"]
+        if outfile and _b9_report["n_quotes"] > 0:
+            _b9_side = os.path.splitext(outfile)[0] + ".quote-verify.md"
+            try:
+                with open(_b9_side, "w", encoding="utf-8") as _b9_f:
+                    _b9_f.write(_b9.format_sidecar(_b9_report, channel_name=name))
+            except OSError as _b9_exc:
+                log("  [%s] quote-verify sidecar not written (%s)" % (name, _b9_exc))
+        if _b9_report["n_quotes"] > 0:
+            note.append(
+                "QUOTE-VERIFY (Б-9): %s over %d fetched page(s) on disk; sidecar "
+                "%s.quote-verify.md. Advisory - reader decides."
+                % (quote_verify_summary, _b9_report["n_fetches_available"], name.upper()))
+    except ImportError:
+        # quote_verify.py absent from install - Б-9 disabled for this run.
+        pass
+    except Exception as _b9_exc:  # noqa: BLE001 - advisory, never crash the review
+        log("  [%s] quote-verify failed (%s) - report absent" % (name, _b9_exc))
     # Vendor-side search telemetry, where the vendor reports any. MiMo returns
     # usage.web_search_usage = {"tool_usage": N, "page_usage": M} - N searches, M pages it opened
     # itself. Kept in a field named for what it counts (`vendor_*`) and NEVER folded into
@@ -5467,6 +5521,11 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             "fetch_failures": len(fetch_failures) or None,
             "n_cited": n_cited or None,
             "n_grounded": len(grounded) if opened else None,
+            # Б-9 (R98): advisory quote-vs-seen-sources summary. Present only for
+            # channels routed here (kind in {openrouter, oai}); other transports
+            # do their own fetching and hold no bytes on our disk.
+            "quote_verify_summary": quote_verify_summary,
+            "quote_verify_counts": quote_verify_counts,
             "warnings": warn, "notes": note}
 
 
