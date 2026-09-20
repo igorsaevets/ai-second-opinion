@@ -1,7 +1,7 @@
 {
   "_rule": "No slug, endpoint, price or limit enters the harness except from this file. A price copied from prose is a hypothesis; a price here carries the date it was captured and the URL it came from. Prices rot - re-capture before trusting one older than a few weeks.",
   "_captured": "2026-08-18",
-  "_source": "https://ai.google.dev/gemini-api/docs/pricing read via jina read_url on 2026-08-18; https://ai.google.dev/api/caching for the cachedContents REST surface; https://ai.google.dev/gemini-api/docs/batch-api for the 50% batch statement",
+  "_source": "https://ai.google.dev/gemini-api/docs/pricing read via jina read_url on 2026-08-18; https://ai.google.dev/api/caching for the cachedContents REST surface; https://ai.google.dev/gemini-api/docs/batch-api for the 50% batch statement. R92 (2026-09-19): gemini-3.8-flash block added; capability surface probed live at GET /v1beta/models/gemini-3.8-flash returned 200 with identical inputTokenLimit/outputTokenLimit/supportedGenerationMethods to 3.7 (probe body at D:/Claude Code/runs/r92-probes/gemini-3-8-flash-direct.json); PRICES not separately verified — INHERITED FROM 3.7 pending first paid batch and billing dashboard reconcile.",
   "_kit_scrub": "This copy ships with the ai-second-opinion kit. On 2026-09-05 the author's account-state blocks (spend cap, month-to-date spend, billing-console lag observations, account tier) and case-material annotations were removed from it; every price, limit, endpoint and capture date is unchanged from the source project's snapshot. The _rule above still applies: re-capture before trusting a price older than a few weeks.",
 
   "google_direct": {
@@ -82,6 +82,46 @@
           "_free_note": "shared across ALL Gemini 3.x models",
           "price_per_1000_requests_after_free": 14.00,
           "_retention_note": "grounding carries its own 30-day retention (Google terms, captured 2026-08-19)"
+        }
+      },
+
+      "gemini-3.8-flash": {
+        "_added": "2026-09-19 (R92 v1.66.0)",
+        "_capability_source": "GET /v1beta/models/gemini-3.8-flash returned 200 OK on GEMINI_API_KEY; body at D:/Claude Code/runs/r92-probes/gemini-3-8-flash-direct.json",
+        "_metadata_verified_2026_09_19": {
+          "version_string": "3.0",
+          "inputTokenLimit": 1048576,
+          "outputTokenLimit": 65536,
+          "supportedGenerationMethods": ["generateContent", "countTokens", "createCachedContent", "batchGenerateContent"],
+          "thinking": true,
+          "_why_it_matters": "batchGenerateContent presence is the R92 GO signal for the premium panel's flash CANARY seat (kind google-batch)."
+        },
+        "context_window_tokens_observed": 0,
+        "_context_window_note": "0 = never measured on 3.8 through this project. The 3.7 measured ceiling was 228,240 chars at 36.7% canary depth (2026-08-18). Do not quote a 3.8 number until a real run measures it.",
+        "thinking_budget_max": 24576,
+        "_thinking_budget_note": "INHERITED FROM 3.7 measurement. Not yet control-probed on 3.8 — a 3-arm probe (low/medium/high thinkingBudget) is under $0.10 and will confirm or move this ceiling. If a batch item on flash returns finishReason MAX_TOKENS with reasoning_tokens near 24576, the ceiling has moved.",
+
+        "price_per_1m_usd": {
+          "_captured": "2026-09-19 (R92): INHERITED FROM 3.7-flash 2026-09-02 capture, NOT separately verified",
+          "_valid_through": "2026-12-31",
+          "_note": "🔴 R92: these prices are ASSUMED IDENTICAL to 3.7-flash because Google's pricing page section for 3.8-flash was not fetched in R92. RECONCILE against the billing dashboard after the first paid batch on flash CANARY seat; if 3.8 is priced differently, this block is a HYPOTHESIS and every arithmetic figure from it is off. The R89 chronicle for 3.7 (prices DOUBLED between 08-18 and 09-02) warns that Google changes prices mid-promise, so 3.8 could be anywhere.",
+          "input_standard": 0.75,
+          "output_standard_incl_thinking": 3.75,
+          "input_batch": 0.375,
+          "output_batch_incl_thinking": 1.875,
+          "input_flex": 0.375,
+          "output_flex_incl_thinking": 1.875,
+          "cached_input": 0.075,
+          "_cached_confidence": "INHERITED FROM 3.7 — not re-fetched; treat as assumed",
+          "cache_storage_per_1m_tokens_per_hour": 0.50
+        },
+
+        "grounding_google_search": {
+          "_captured": "2026-09-19 (R92): INHERITED FROM 3.7-flash — Google's grounding pricing is described per-3.x-model but the R92 probe did not re-read the pricing page",
+          "free_requests_per_month": 5000,
+          "_free_note": "shared across ALL Gemini 3.x models per 2026-09-02 capture — 3.8 assumed to join the same shared pool",
+          "price_per_1000_requests_after_free": 14.00,
+          "_retention_note": "grounding carries its own 30-day retention (Google terms, captured 2026-08-19; assumed unchanged for 3.8)"
         }
       },
 
@@ -195,6 +235,20 @@
         },
         "_divergence": "CORRECTED by the panel 2026-09-02: OR sync 0.75/3.75 is PARITY with Google's current standard (which doubled between 08-18 and 09-02), not a markup. The real gap runs the other way: OR :batch $0.1875/$0.9375 is 2x CHEAPER than Google's own batch $0.375/$1.875 — a lag in the buyer's favour; do not budget on it holding.",
         "_params_note": "sync keeps temperature/top_p/seed/stop; :batch drops all four (re-confirmed on the live catalogue 2026-09-02)"
+      },
+      "google/gemini-3.8-flash": {
+        "_added": "2026-09-19 (R92 v1.66.0)",
+        "_captured": "2026-09-19: OpenRouter catalogue for 3.8 was NOT re-fetched in R92. Prices INHERITED FROM 3.7-flash; a live GET /api/v1/models will confirm or move them before the first OR-lane spend on 3.8 (the premium panel's flash CANARY seat uses google-batch kind through GEMINI_API_KEY, not OR — so this block is future-facing only).",
+        "prompt_per_1m": 0.75, "completion_per_1m": 3.75, "internal_reasoning_per_1m": 3.75,
+        "input_cache_read_per_1m": 0.075, "web_search_per_query": 0.014,
+        "batch_variant": {
+          "slug": "google/gemini-3.8-flash:batch",
+          "prompt_per_1m": 0.1875, "completion_per_1m": 0.9375, "internal_reasoning_per_1m": 0.9375,
+          "input_cache_read_per_1m": 0.01875,
+          "_captured": "2026-09-19 (R92): INHERITED FROM 3.7:batch, NOT independently verified",
+          "_reconcile_note": "🔴 The 3.7 lag-in-buyer's-favour (2x cheaper than Google direct) may or may not carry to 3.8. First OR :batch call on 3.8 must reconcile against usage.cost REAL meter and update this block."
+        },
+        "_status": "HYPOTHESIS — no OR call on 3.8 has run through this project. The kit-shipped block exists for `--set` completeness and to keep prices.py from raising on a snapshot miss; treat every figure as unverified until the first OR spend."
       },
       "openai/gpt-5.6-sol-pro": {
         "_captured": "2026-09-02, GET /api/v1/models",

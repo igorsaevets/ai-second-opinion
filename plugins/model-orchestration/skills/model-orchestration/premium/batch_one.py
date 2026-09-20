@@ -32,8 +32,10 @@ import os
 import pathlib
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 
 HERE = pathlib.Path(__file__).resolve().parent
+PY = sys.executable
 
 
 def _load(name: str):
@@ -49,6 +51,136 @@ SJ = _load("salvage_json")     # _walk_openai_jsonl
 PR = _load("prices")
 
 MIN_INPUT_CHARS = 200  # a panel brief is small but an EMPTY one must be loud
+
+
+# --------------------------------------------------------------------------
+# STILL_RUNNING sidecar — R92 (v1.66.0, 2026-09-19)
+# --------------------------------------------------------------------------
+# The operator's premium solpro batch on 2026-09-14 completed in 3 h 45 min. A
+# poll_loop with --max-minutes 20 gave up 5% of the way in and returned exit 3,
+# and the next session saw a rundir with no .parsed.json and interpreted it as
+# a dead lane. This sidecar closes that gap: batch_one.py writes it right after
+# a successful submit and updates it at every non-terminal poll; aggregate
+# recognises it as ⏳ PENDING (not ❌ FAILED); a cold session reading the file
+# gets an explicit `interpretation_note` telling it the batch is ALIVE and how
+# to resume. The vendor keeps batch results for the full completion_window
+# regardless of whether we are polling, so an interrupted poll is not lost work.
+#
+# The file's filename shape is `<tag>.still-running.json`. `_finish()` deletes
+# it on any terminal outcome (parsed or failed) so an old sidecar next to a
+# fresh .parsed.json can never confuse the aggregate.
+COMPLETION_WINDOW_HOURS = {"or": 24, "openai": 24, "google": 168}
+# Google's batch docs promise "24 h target latency" but the model card shows
+# jobs up to 168 h (7 d) in enterprise tiers; err on the side of the sidecar
+# claiming a longer deadline than the vendor actually uses.
+
+
+def _now_utc_iso() -> str:
+    """UTC ISO8601 with Z suffix. Wrapper so tests can monkeypatch one place."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _build_resume_command(a) -> str:
+    """The exact copy-paste command a subsequent session can run to resume the
+    poll on this batch. Uses ABSOLUTE paths so the string does not depend on
+    the caller's cwd. Includes only the args a poll actually needs — --system-file
+    is not required to poll; --thinking-budget is required by the google
+    argparse gate but only for build/submit, so we omit it on the resume line
+    for google too (the poll path in main() does not read it)."""
+    parts = [
+        f'"{PY}"',
+        f'"{HERE / "batch_one.py"}"',
+        "--lane", a.lane,
+        "--model", a.model,
+        "--mode", "poll",
+        "--input-file", f'"{pathlib.Path(a.input_file).resolve()}"',
+        "--rundir", f'"{pathlib.Path(a.rundir).resolve()}"',
+        "--tag", a.tag,
+        "--effort", a.effort,
+        "--max-output", str(a.max_output),
+    ]
+    # google-lane guard in main() requires --thinking-budget on build/submit,
+    # NOT on poll — so no need to include it here. But if the operator wants to
+    # replay the same argv shape, safe to add:
+    if a.lane == "google" and a.thinking_budget:
+        parts += ["--thinking-budget", str(a.thinking_budget)]
+    if a.lane == "openai" and a.endpoint:
+        parts += ["--endpoint", a.endpoint]
+    return " ".join(parts)
+
+
+def _sidecar_path(rundir: pathlib.Path, tag: str) -> pathlib.Path:
+    return rundir / f"{tag}.still-running.json"
+
+
+def _write_still_running(rundir: pathlib.Path, tag: str, lane_kind: str,
+                         batch_id: str, resume_command: str,
+                         last_status_body: dict, phase: str = "poll",
+                         extra: dict | None = None) -> None:
+    """Write or refresh <tag>.still-running.json. Attempts counter is derived
+    from the file itself so this function is idempotent — call it whenever a
+    submit succeeds or a poll returns 3 and it stays coherent.
+    `phase` is "submit" (right after create) or "poll" (during polling)."""
+    sidecar = _sidecar_path(rundir, tag)
+    created_at = _now_utc_iso()
+    attempts = 0 if phase == "submit" else 1
+    if sidecar.exists():
+        try:
+            existing = json.loads(sidecar.read_text(encoding="utf-8"))
+            created_at = existing.get("created_at_utc", created_at)
+            if phase == "poll":
+                attempts = int(existing.get("attempts", 0)) + 1
+            else:
+                # a fresh submit for this tag: reset the counter but keep the
+                # older created_at only if the caller didn't want a reset —
+                # right here we DO want the newer submit timestamp
+                created_at = _now_utc_iso()
+        except (json.JSONDecodeError, ValueError, OSError):
+            pass  # existing sidecar is unreadable — overwrite it cleanly
+    window_h = COMPLETION_WINDOW_HOURS.get(lane_kind, 24)
+    deadline = (datetime.now(timezone.utc) + timedelta(hours=window_h)) \
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
+    body: dict = {
+        "_status": "STILL_RUNNING_SERVER_SIDE",
+        "_written_by": "batch_one.py (R92 v1.66.0 sidecar)",
+        "tag": tag,
+        "lane_kind": lane_kind,
+        "batch_id": batch_id,
+        "phase": phase,
+        "created_at_utc": created_at,
+        "last_seen_utc": _now_utc_iso(),
+        "attempts": attempts,
+        "completion_window_hours": window_h,
+        "estimated_deadline_utc": deadline,
+        "last_status_body": last_status_body,
+        "resume_command": resume_command,
+        "interpretation_note": (
+            "THIS IS NOT A FAILURE. The batch is ALIVE on the vendor's server. "
+            "Aggregate reports and any subsequent AI session MUST NOT interpret "
+            "an absent <tag>.parsed.json as a failed lane while this file "
+            "exists — read this file first, either resume the poll now (copy "
+            "`resume_command` above) or defer to a later session. The vendor "
+            "keeps the result for the full `completion_window_hours` from "
+            "`created_at_utc` regardless of whether anyone is polling."),
+    }
+    if extra:
+        body.update(extra)
+    tmp = sidecar.with_suffix(".still-running.json.tmp")
+    tmp.write_text(json.dumps(body, ensure_ascii=False, indent=2),
+                   encoding="utf-8")
+    os.replace(tmp, sidecar)
+
+
+def _clear_still_running(rundir: pathlib.Path, tag: str) -> None:
+    """Called from _finish on every terminal outcome (parsed or failed). Silent
+    on missing — a lane that never wrote a sidecar (build mode, sync flex) is
+    still allowed to call _finish."""
+    try:
+        _sidecar_path(rundir, tag).unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
 
 
 def _key(name: str) -> str:
@@ -110,6 +242,15 @@ def submit_or(a, system: str, text: str, rundir: pathlib.Path) -> int:
     if status >= 400:
         print(json.dumps(body, indent=2)[:1500])
         return 1
+    # R92 F-1b: sidecar records the batch is alive server-side, with a resume
+    # command a cold session can copy-paste. Written BEFORE return so a crash
+    # between submit and the first poll still leaves a breadcrumb.
+    _write_still_running(
+        rundir, a.tag, "or",
+        body.get("id", "unknown"), _build_resume_command(a),
+        {"http_status": status, "batch_status": body.get("status")},
+        phase="submit",
+    )
     return 0
 
 
@@ -171,6 +312,13 @@ def submit_openai(a, system: str, text: str, rundir: pathlib.Path) -> int:
     if status >= 400:
         print(json.dumps(body2, indent=2)[:1500])
         return 1
+    _write_still_running(  # R92 F-1b
+        rundir, a.tag, "openai",
+        body2.get("id", "unknown"), _build_resume_command(a),
+        {"http_status": status, "batch_status": body2.get("status"),
+         "file_id": file_id, "endpoint": url_field},
+        phase="submit",
+    )
     return 0
 
 
@@ -205,6 +353,12 @@ def submit_google(a, system: str, text: str, rundir: pathlib.Path) -> int:
     if status >= 400:
         print(json.dumps(body, indent=2)[:1500])
         return 1
+    _write_still_running(  # R92 F-1b
+        rundir, a.tag, "google",
+        body.get("name", "unknown"), _build_resume_command(a),
+        {"http_status": status, "state": "PENDING_INITIAL"},
+        phase="submit",
+    )
     return 0
 
 
@@ -212,7 +366,18 @@ def submit_google(a, system: str, text: str, rundir: pathlib.Path) -> int:
 # poll per lane — exit 0 done / 1 failed / 3 still running (poll_loop contract)
 # --------------------------------------------------------------------------
 def _finish(rundir: pathlib.Path, tag: str, text: str | None, usage: dict,
-            meter: dict) -> int:
+            meter: dict, finish_reason: str | None = None) -> int:
+    """Write <tag>.parsed.json, clear the STILL_RUNNING sidecar, return 0 iff
+    a parsed answer object made it through.
+
+    `finish_reason` (R92, F-3): the vendor's verbatim reason enum for why
+    generation stopped. OpenAI/OR chat: `choices[0].finish_reason` ("stop",
+    "length", "content_filter", "tool_calls"). Google: `candidates[0].finishReason`
+    ("STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "MALFORMED_FUNCTION_CALL",
+    "OTHER", "FINISH_REASON_UNSPECIFIED"). Written into parsed[0]._finish_reason
+    when we have text, and into failures[0].finish_reason when we do not — turns
+    the previously opaque `{"reason": "no text in result"}` into something the
+    aggregator (and the next session) can reason about."""
     parsed, failures = [], []
     if text:
         (rundir / f"{tag}.md").write_text(text, encoding="utf-8")
@@ -220,16 +385,30 @@ def _finish(rundir: pathlib.Path, tag: str, text: str | None, usage: dict,
             i, j = text.find("{"), text.rfind("}")
             obj = json.loads(text[i:j + 1] if i != -1 and j > i else text)
             obj["_usage"] = usage
+            if finish_reason:
+                obj["_finish_reason"] = finish_reason
             parsed.append(obj)
         except (json.JSONDecodeError, ValueError):
-            failures.append({"custom_id": tag, "json_error": "answer is not JSON",
-                             "raw_text": text, "head": text[:400]})
+            entry = {"custom_id": tag, "json_error": "answer is not JSON",
+                     "raw_text": text, "head": text[:400]}
+            if finish_reason:
+                entry["finish_reason"] = finish_reason
+            failures.append(entry)
     else:
-        failures.append({"custom_id": tag, "reason": "no text in result"})
+        entry: dict = {"custom_id": tag, "reason": "no text in result"}
+        if finish_reason:
+            entry["finish_reason"] = finish_reason
+        failures.append(entry)
     (rundir / f"{tag}.parsed.json").write_text(
         json.dumps({"parsed": parsed, "failures": failures, "meter": meter},
                    ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"parsed={len(parsed)} failures={len(failures)}  "
+    # Terminal — remove any STILL_RUNNING sidecar. A dangling sidecar next to a
+    # fresh .parsed.json would make the aggregator print PENDING for a lane
+    # that finished; F-1c's PENDING recognition must be strictly a NO-.parsed
+    # condition.
+    _clear_still_running(rundir, tag)
+    fr = f" finish_reason={finish_reason}" if finish_reason else ""
+    print(f"parsed={len(parsed)} failures={len(failures)}{fr}  "
           f"cost: {meter.get('cost_meter') if meter.get('cost_meter') is not None else meter.get('cost_arith')} "
           f"({'METER' if meter.get('cost_meter') is not None else 'arithmetic'})")
     return 0 if parsed else 1
@@ -248,14 +427,24 @@ def poll_or(a, rundir: pathlib.Path) -> int:
     if st != "completed":
         if st in ("failed", "cancelled", "expired"):
             print(json.dumps(body, indent=2)[:1200])
+            _clear_still_running(rundir, a.tag)  # R92 F-1b: terminal-fail clears
             return 1
+        # R92 F-1b: still running — refresh sidecar with the latest poll body
+        _write_still_running(
+            rundir, a.tag, "or", bid, _build_resume_command(a),
+            {"http_status": status, "batch_status": st,
+             "request_counts": body.get("request_counts")},
+            phase="poll",
+        )
         return 3
     usage = body.get("usage", {}) or {}
     text = None
+    finish_reason = None  # R92 F-3
     for r in body.get("results", []):
         try:
             text = r["response"]["body"]["choices"][0]["message"]["content"]
             usage = r["response"]["body"].get("usage", usage)
+            finish_reason = r["response"]["body"]["choices"][0].get("finish_reason")
         except (KeyError, IndexError, TypeError):
             pass
     meter = {"cost_meter": (body.get("usage") or {}).get("cost"),
@@ -263,7 +452,7 @@ def poll_or(a, rundir: pathlib.Path) -> int:
              "prompt_tokens": usage.get("prompt_tokens"),
              "completion_tokens": usage.get("completion_tokens"),
              "meter_source": "OR usage.cost — REAL vendor meter"}
-    return _finish(rundir, a.tag, text, usage, meter)
+    return _finish(rundir, a.tag, text, usage, meter, finish_reason=finish_reason)
 
 
 def _openai_tokens(usage: dict) -> tuple[int, int, int]:
@@ -295,12 +484,21 @@ def poll_openai(a, rundir: pathlib.Path) -> int:
         print("TERMINAL non-success. NOTE: OpenAI bills any COMPLETED work even "
               "on expiry; check output/error files before assuming $0.")
         print(json.dumps(body.get("errors") or {}, indent=2)[:1200])
+        _clear_still_running(rundir, a.tag)  # R92 F-1b
         return 1
     if st != "completed":
+        # R92 F-1b: still running
+        _write_still_running(
+            rundir, a.tag, "openai", bid, _build_resume_command(a),
+            {"http_status": status, "batch_status": st,
+             "request_counts": body.get("request_counts")},
+            phase="poll",
+        )
         return 3
     out_id = body.get("output_file_id")
     if not out_id:
         print("completed but no output_file_id — inspect poll.json")
+        _clear_still_running(rundir, a.tag)  # R92 F-1b
         return 1
     import urllib.request
     req = urllib.request.Request(
@@ -310,16 +508,40 @@ def poll_openai(a, rundir: pathlib.Path) -> int:
         results_raw = r.read().decode()
     (rundir / f"{a.tag}.results.jsonl").write_text(results_raw, encoding="utf-8")
     text, usage = None, {}
+    finish_reason = None  # R92 F-3
     for cid, t, u in SJ._walk_openai_jsonl(results_raw.splitlines()):
         if t:
             text, usage = t, u
+    # F-3: re-parse the same JSONL to extract finish_reason. Both endpoint
+    # shapes: /v1/chat/completions carries choices[0].finish_reason
+    # ("stop"/"length"/"content_filter"/"tool_calls"); /v1/responses carries
+    # status ("completed"/"incomplete") at body-level. Prefer the chat form
+    # because it is per-choice and richer.
+    for line in results_raw.splitlines():
+        if not line.strip():
+            continue
+        try:
+            r_obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        body_obj = (r_obj.get("response") or {}).get("body") or {}
+        ch = body_obj.get("choices")
+        if isinstance(ch, list) and ch:
+            fr = ch[0].get("finish_reason")
+            if fr:
+                finish_reason = fr
+                break
+        # Responses-shape fallback
+        st_r = body_obj.get("status")
+        if st_r and not finish_reason:
+            finish_reason = f"responses:{st_r}"
     pricing = PR.openai_direct(a.model, "batch")
     in_tok, out_tok, cached = _openai_tokens(usage)
     meter = {"cost_meter": None,
              "cost_arith": round(pricing.cost(in_tok, out_tok, cached), 6),
              "prompt_tokens": in_tok, "completion_tokens": out_tok,
              "meter_source": pricing.meter + f" [{pricing.name}]"}
-    return _finish(rundir, a.tag, text, usage, meter)
+    return _finish(rundir, a.tag, text, usage, meter, finish_reason=finish_reason)
 
 
 def poll_google(a, rundir: pathlib.Path) -> int:
@@ -336,12 +558,20 @@ def poll_google(a, rundir: pathlib.Path) -> int:
     s = str(state).upper()
     if s.endswith(("_FAILED", "_CANCELLED", "_EXPIRED")):
         print(json.dumps(body, indent=2)[:1500])
+        _clear_still_running(rundir, a.tag)  # R92 F-1b
         return 1
     if not (s.endswith("_SUCCEEDED") or s in ("TRUE", "DONE")):
+        # R92 F-1b: still running
+        _write_still_running(
+            rundir, a.tag, "google", str(name), _build_resume_command(a),
+            {"http_status": status, "state": str(state)},
+            phase="poll",
+        )
         return 3
     pricing = PR.google_batch(a.model)
     parsed, failures, meter = GB.parse_results(body, pricing)
     text = None
+    finish_reason = None  # R92 F-3
     for item in GB._find_responses(body):
         resp = item.get("response") or item
         cands = resp.get("candidates") or []
@@ -349,10 +579,18 @@ def poll_google(a, rundir: pathlib.Path) -> int:
             text = "".join(p.get("text", "")
                            for p in cands[0].get("content", {}).get("parts", [])
                            if not p.get("thought"))
+            # F-3: verbatim Google enum. Values known to fire in the wild:
+            # STOP (nominal), MAX_TOKENS (budget cap), SAFETY (Google
+            # content-filter), RECITATION (>90% match with training),
+            # MALFORMED_FUNCTION_CALL (reasoning-only, no text — the R82 shape
+            # this fix was written against), OTHER, FINISH_REASON_UNSPECIFIED.
+            fr = cands[0].get("finishReason")
+            if fr:
+                finish_reason = fr
     usage = (parsed[0].get("_usage", {}) if parsed
              else {"prompt_tokens": meter.get("prompt_tokens")})
     meter["cost_meter"] = None
-    return _finish(rundir, a.tag, text, usage, meter)
+    return _finish(rundir, a.tag, text, usage, meter, finish_reason=finish_reason)
 
 
 # --------------------------------------------------------------------------

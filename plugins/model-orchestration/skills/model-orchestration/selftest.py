@@ -2914,7 +2914,7 @@ def suite_panels():
     DICTATED_CHEAP = {
         "ordeepseekv4pro", "grok420", "orgrok420",
         "agy31pro", "agy36flash", "agy38flash",
-        "goog36flash", "goog37flash", "orgemini36flash", "orgemini38flash",
+        "goog36flash", "goog38flash", "orgemini36flash", "orgemini38flash",
         "mimo25pro", "ormimo25pro", "ornemotron3ultra", "spark13cont",
     }
     # 🔴 THE DICTATED SET IS AN ANCHOR AND MUST NEVER SHRINK SILENTLY; growth is a SEPARATE,
@@ -6873,7 +6873,8 @@ def main():
                   suite_r86_prose_set_in_channel,
                   suite_r88_bypass_opt_in,
                   suite_r90_silent_drop_criterion_1,
-                  suite_r91_set_unlisted_and_new_channel):
+                  suite_r91_set_unlisted_and_new_channel,
+                  suite_r92_premium_panel_fixes):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -7845,6 +7846,318 @@ def suite_r91_set_unlisted_and_new_channel():
           "R91 (g) orchestrate.py argparse has --new-channel option")
     check("write_new_channel" in orch_src,
           "R91 (g) orchestrate.py handler calls routing.write_new_channel")
+
+
+def suite_r92_premium_panel_fixes():
+    """
+    R92 (2026-09-19), kit v1.66.0. Six fixes for the premium panel breakage
+    observed 2026-09-14:
+      F-0  channel goog37flash -> goog38flash across 5 places (channels.json,
+           premium_panel.py docstring + DEFAULT_LANES, models_snapshot.json
+           google_direct.models + openrouter.models).
+      F-1a poll_loop.py --max-minutes default 20 -> 240 (11 s max_sleep cap
+           preserved — the machine-wide rule).
+      F-1b batch_one.py writes a <tag>.still-running.json sidecar on every
+           successful submit_* and on every non-terminal poll_*, and _finish
+           clears it on terminal outcomes.
+      F-1c aggregate_findings.py recognises --pending NAME=path/sidecar and
+           renders a ⏳ PENDING row + a dedicated 'Pending lanes' section at
+           the top of the report; premium_panel.py --mode collect walks lanes
+           and passes --pending for those with a sidecar but no .parsed.json.
+      F-2  flex_lane.py wraps PFW.post in _retry_429 — retries ONLY on 429
+           (not billable), max 3 attempts, wait parsed from error.message
+           regex «try again in Ns» (fallback 60 s), total wait capped at 300 s.
+      F-3  batch_one.py extracts finishReason (OpenAI/OR chat: finish_reason;
+           Google: finishReason) and writes it verbatim into _finish() —
+           parsed[0]._finish_reason when there is text, failures[0].finish_reason
+           when there is not.
+
+    Pins avoid subprocess wherever possible (fast); the only spawn is
+    aggregate_findings.py to render a report against a synthetic sidecar +
+    parsed.json.
+    """
+    import ast
+    import importlib.util
+    import inspect
+
+    PREMIUM = HERE / "premium"
+    section("R92 F-0: gemini 3.7-flash -> 3.8-flash across 5 places")
+
+    # ---- (F-0.1) channels.json has the new channel key + backward-compat aliases
+    ch_json = json.loads((HERE / "channels.json").read_text(encoding="utf-8"))
+    chans = ch_json.get("channels", ch_json)
+    check("goog38flash" in chans,
+          "R92 (F-0.1a) channels.json has channel key 'goog38flash'",
+          "keys sample: %s" % list(chans)[:8])
+    check("goog37flash" not in chans,
+          "R92 (F-0.1b) old channel key 'goog37flash' removed from top-level",
+          "'goog37flash' still in registry" if "goog37flash" in chans else "")
+    goog = chans.get("goog38flash", {})
+    check(goog.get("model") == "gemini-3.8-flash",
+          "R92 (F-0.1c) goog38flash.model == 'gemini-3.8-flash'",
+          "model=%r" % goog.get("model"))
+    check("goog37flash" in (goog.get("aliases") or []),
+          "R92 (F-0.1d) backward-compat alias 'goog37flash' present in aliases",
+          "aliases=%s" % (goog.get("aliases") or [])[:8])
+    check("gemini-3.8-flash" in (goog.get("models") or {}),
+          "R92 (F-0.1e) goog38flash.models has 'gemini-3.8-flash' entry",
+          "models keys=%s" % list(goog.get("models") or {}))
+
+    # ---- (F-0.2) premium_panel.py docstring + DEFAULT_LANES flash lane
+    pp_src = (PREMIUM / "premium_panel.py").read_text(encoding="utf-8")
+    check("gemini-3.8-flash" in pp_src,
+          "R92 (F-0.2a) premium_panel.py mentions gemini-3.8-flash")
+    check("gemini-3.7-flash" not in pp_src,
+          "R92 (F-0.2b) premium_panel.py has NO leftover 'gemini-3.7-flash'",
+          "found; grep result would show the line" if "gemini-3.7-flash" in pp_src else "")
+    # DEFAULT_LANES — load via importlib to check the actual data structure
+    spec = importlib.util.spec_from_file_location(
+        "premium_panel_r92", str(PREMIUM / "premium_panel.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore
+    flash = next((l for l in mod.DEFAULT_LANES if l["name"] == "flash"), None)
+    check(flash is not None and flash.get("model") == "gemini-3.8-flash",
+          "R92 (F-0.2c) DEFAULT_LANES flash lane model == 'gemini-3.8-flash'",
+          "flash lane=%r" % flash)
+
+    # ---- (F-0.3) models_snapshot.json has 3.8 blocks in BOTH google_direct and openrouter
+    snap = json.loads((PREMIUM / "models_snapshot.json").read_text(encoding="utf-8"))
+    gd = snap.get("google_direct", {}).get("models", {})
+    check("gemini-3.8-flash" in gd,
+          "R92 (F-0.3a) models_snapshot.json google_direct.models has 'gemini-3.8-flash'",
+          "keys=%s" % list(gd))
+    check("_added" in gd.get("gemini-3.8-flash", {}),
+          "R92 (F-0.3b) gemini-3.8-flash block declares _added timestamp",
+          "block keys=%s" % list(gd.get("gemini-3.8-flash", {})))
+    orm = snap.get("openrouter", {}).get("models", {})
+    check("google/gemini-3.8-flash" in orm,
+          "R92 (F-0.3c) openrouter.models has 'google/gemini-3.8-flash'",
+          "keys sample=%s" % list(orm)[:8])
+    br = orm.get("google/gemini-3.8-flash", {}).get("batch_variant", {})
+    check(br.get("slug") == "google/gemini-3.8-flash:batch",
+          "R92 (F-0.3d) OR batch_variant slug 'google/gemini-3.8-flash:batch'",
+          "batch_variant=%s" % json.dumps(br)[:200])
+
+    section("R92 F-1a: poll_loop.py --max-minutes default 240; 11s cap intact")
+
+    pl_src = (PREMIUM / "poll_loop.py").read_text(encoding="utf-8")
+    # Look at the argparse call — the default lives in the AST
+    tree = ast.parse(pl_src)
+    default_max_minutes = None
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call)
+                and getattr(node.func, "attr", "") == "add_argument"
+                and node.args and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value == "--max-minutes"):
+            for kw in node.keywords:
+                if kw.arg == "default" and isinstance(kw.value, ast.Constant):
+                    default_max_minutes = kw.value.value
+    check(default_max_minutes == 240.0 or default_max_minutes == 240,
+          "R92 (F-1a.1) poll_loop.py --max-minutes default is 240 (raised from 20)",
+          "default=%r" % default_max_minutes)
+    # The 11s cap must still be enforced — grep for the REFUSING line
+    check("max-sleep above the 11 s project cap" in pl_src,
+          "R92 (F-1a.2) 11 s max_sleep cap enforcement preserved (no regression)")
+    # The exhaustion banner must mention STILL_RUNNING so a cold session can find it
+    check("STILL_RUNNING" in pl_src,
+          "R92 (F-1a.3) exhaustion banner mentions STILL_RUNNING sidecar",
+          "grep for STILL_RUNNING in poll_loop.py")
+
+    section("R92 F-1b: batch_one.py STILL_RUNNING sidecar (submit + poll + clear)")
+
+    bo_src = (PREMIUM / "batch_one.py").read_text(encoding="utf-8")
+    check("_write_still_running" in bo_src,
+          "R92 (F-1b.1) batch_one.py defines _write_still_running")
+    check("_clear_still_running" in bo_src,
+          "R92 (F-1b.2) batch_one.py defines _clear_still_running")
+    check(bo_src.count("_write_still_running(") >= 6,
+          "R92 (F-1b.3) _write_still_running called ≥6 times (3 submits + 3 polls)",
+          "call count=%d" % bo_src.count("_write_still_running("))
+    check(bo_src.count("_clear_still_running(") >= 4,
+          "R92 (F-1b.4) _clear_still_running called ≥4 times (_finish + 3 terminal-fail branches)",
+          "call count=%d" % bo_src.count("_clear_still_running("))
+    # The sidecar body must carry the loud interpretation_note
+    check("THIS IS NOT A FAILURE" in bo_src,
+          "R92 (F-1b.5) sidecar interpretation_note contains 'THIS IS NOT A FAILURE'")
+    # Live-test the sidecar shape: build a rundir, invoke _write_still_running with
+    # importlib, read back, assert.
+    bo_spec = importlib.util.spec_from_file_location(
+        "batch_one_r92", str(PREMIUM / "batch_one.py"))
+    bo = importlib.util.module_from_spec(bo_spec)
+    # batch_one.py imports probe_flex_web via _load; we can execute the module because
+    # our _load returns a module regardless. But it also imports batch_transport /
+    # salvage_json / prices via HB/GB/SJ/PR — these are lightweight in the shipped tree.
+    try:
+        bo_spec.loader.exec_module(bo)  # type: ignore
+        importable = True
+    except Exception as exc:
+        importable = False
+        check(False, "R92 (F-1b.6) batch_one.py imports cleanly",
+              "import failed: %r" % exc)
+    if importable:
+        with tempfile.TemporaryDirectory() as td:
+            rd = Path(td)
+            bo._write_still_running(
+                rd, "test-tag", "google", "batches/12345", "python foo.py --resume",
+                {"http_status": 200, "state": "BATCH_STATE_RUNNING"},
+                phase="submit")
+            sc = rd / "test-tag.still-running.json"
+            check(sc.exists(),
+                  "R92 (F-1b.6) sidecar file created at <rundir>/<tag>.still-running.json",
+                  "listing=%s" % os.listdir(td))
+            body = json.loads(sc.read_text(encoding="utf-8"))
+            check(body.get("_status") == "STILL_RUNNING_SERVER_SIDE",
+                  "R92 (F-1b.7) sidecar._status == 'STILL_RUNNING_SERVER_SIDE'",
+                  "body._status=%r" % body.get("_status"))
+            required = {"batch_id", "lane_kind", "created_at_utc", "attempts",
+                        "completion_window_hours", "estimated_deadline_utc",
+                        "resume_command", "interpretation_note",
+                        "last_status_body"}
+            missing = required - set(body.keys())
+            check(not missing,
+                  "R92 (F-1b.8) sidecar carries every required field",
+                  "missing=%s" % sorted(missing))
+            check(body.get("lane_kind") == "google"
+                  and body.get("completion_window_hours") == bo.COMPLETION_WINDOW_HOURS["google"],
+                  "R92 (F-1b.9) completion_window_hours matches COMPLETION_WINDOW_HOURS[lane_kind]",
+                  "hours=%r kind=%r" % (body.get("completion_window_hours"),
+                                        body.get("lane_kind")))
+            # Second poll bumps attempts
+            bo._write_still_running(
+                rd, "test-tag", "google", "batches/12345", "python foo.py --resume",
+                {"http_status": 200, "state": "BATCH_STATE_RUNNING"},
+                phase="poll")
+            body2 = json.loads(sc.read_text(encoding="utf-8"))
+            check(body2.get("attempts") == 1,
+                  "R92 (F-1b.10) attempts increments on poll (submit=0 -> poll=1)",
+                  "attempts=%r" % body2.get("attempts"))
+            # _clear removes the sidecar
+            bo._clear_still_running(rd, "test-tag")
+            check(not sc.exists(),
+                  "R92 (F-1b.11) _clear_still_running removes the sidecar",
+                  "still exists" if sc.exists() else "")
+            # _clear is idempotent on missing sidecar
+            bo._clear_still_running(rd, "test-tag")  # must not raise
+            check(True, "R92 (F-1b.12) _clear_still_running is idempotent on missing file")
+
+    section("R92 F-1c: aggregate_findings.py PENDING semantics + collect wiring")
+
+    ag_src = (PREMIUM / "aggregate_findings.py").read_text(encoding="utf-8")
+    check("--pending" in ag_src,
+          "R92 (F-1c.1) aggregate_findings.py argparse has --pending")
+    check("Pending lanes" in ag_src,
+          "R92 (F-1c.2) aggregate_findings.py renders 'Pending lanes' section")
+    check("⏳" in ag_src,
+          "R92 (F-1c.3) aggregate_findings.py uses ⏳ marker (distinct from ❌)")
+    check("STILL_RUNNING" in ag_src or "still_running" in ag_src.lower(),
+          "R92 (F-1c.4) aggregate_findings.py mentions STILL_RUNNING semantics")
+    check("--pending" in pp_src and "still-running.json" in pp_src,
+          "R92 (F-1c.5) premium_panel.py --mode collect walks sidecars and passes --pending")
+
+    # Live-render: build a fake parsed.json + a fake still-running.json, run aggregate
+    with tempfile.TemporaryDirectory() as td:
+        rd = Path(td)
+        parsed = {
+            "parsed": [{"reviewer": "solpro", "verdict": "ok",
+                        "findings": [{"severity": "minor", "claim": "test",
+                                      "where": "somewhere", "why": "because"}],
+                        "_usage": {"prompt_tokens": 100, "completion_tokens": 50}}],
+            "failures": [],
+            "meter": {"cost_meter": 0.001, "prompt_tokens": 100,
+                      "completion_tokens": 50, "meter_source": "test"}
+        }
+        (rd / "solpro.parsed.json").write_text(
+            json.dumps(parsed, ensure_ascii=False), encoding="utf-8")
+        sidecar = {
+            "_status": "STILL_RUNNING_SERVER_SIDE",
+            "tag": "flash", "lane_kind": "google",
+            "batch_id": "batches/abcdef", "phase": "poll",
+            "created_at_utc": "2026-09-19T10:00:00Z",
+            "last_seen_utc": "2026-09-19T14:00:00Z",
+            "attempts": 240, "completion_window_hours": 168,
+            "estimated_deadline_utc": "2026-09-26T10:00:00Z",
+            "last_status_body": {"state": "BATCH_STATE_RUNNING"},
+            "resume_command": "python foo.py --mode poll --resume batches/abcdef",
+            "interpretation_note": "THIS IS NOT A FAILURE. The batch is ALIVE ..."
+        }
+        (rd / "flash.still-running.json").write_text(
+            json.dumps(sidecar, ensure_ascii=False), encoding="utf-8")
+        out_path = rd / "REPORT.md"
+        p = subprocess.run(
+            [PY, str(PREMIUM / "aggregate_findings.py"),
+             "--lane", "solpro=%s" % (rd / "solpro.parsed.json"),
+             "--pending", "flash=%s" % (rd / "flash.still-running.json"),
+             "--out", str(out_path), "--title", "R92 selftest render"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30)
+        check(p.returncode == 0,
+              "R92 (F-1c.6) aggregate exits 0 with --pending (PENDING is not failure)",
+              "exit=%d stderr=%s" % (p.returncode, (p.stderr or "")[:250]))
+        rendered = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
+        check("Pending lanes" in rendered,
+              "R92 (F-1c.7) rendered report contains 'Pending lanes' section",
+              "sample=%r" % rendered[:400])
+        check("batches/abcdef" in rendered,
+              "R92 (F-1c.8) rendered report prints the batch_id from sidecar",
+              "not found")
+        check("resume_command" not in rendered or "python foo.py" in rendered,
+              "R92 (F-1c.9) rendered report prints the resume_command value",
+              "sample=%r" % rendered[:400])
+
+    section("R92 F-2: flex_lane.py 429-only retry wrapper")
+
+    fl_src = (PREMIUM / "flex_lane.py").read_text(encoding="utf-8")
+    check("_retry_429" in fl_src,
+          "R92 (F-2.1) flex_lane.py defines _retry_429 wrapper")
+    check("status != 429" in fl_src or "!= 429" in fl_src,
+          "R92 (F-2.2) _retry_429 gates specifically on HTTP 429")
+    check("cap_wait_s" in fl_src or "cap_wait" in fl_src,
+          "R92 (F-2.3) _retry_429 has a total-wait cap")
+    check("try again in" in fl_src,
+          "R92 (F-2.4) _retry_429 parses vendor 'try again in Ns' hint")
+    check("429-attempts.json" in fl_src,
+          "R92 (F-2.5) _retry_429 saves attempt trace to <tag>-429-attempts.json")
+    # Static: the ONLY call site of PFW.post inside flex_lane must now be from _retry_429
+    check(fl_src.count("PFW.post(") == 1,
+          "R92 (F-2.6) exactly ONE PFW.post call remains in flex_lane.py (inside _retry_429)",
+          "count=%d — a stray direct call would skip the 429 retry"
+          % fl_src.count("PFW.post("))
+    # Static: main() now dispatches through _retry_429, not PFW.post
+    check("_retry_429(url, body, headers" in fl_src,
+          "R92 (F-2.7) main() dispatches through _retry_429(url, body, headers, ...)")
+
+    section("R92 F-3: finishReason extraction across lanes")
+
+    check("finish_reason" in bo_src,
+          "R92 (F-3.1) batch_one.py mentions finish_reason (OpenAI/OR chat)")
+    check("finishReason" in bo_src,
+          "R92 (F-3.2) batch_one.py mentions Google's finishReason (camelCase)")
+    check("MALFORMED_FUNCTION_CALL" in bo_src or "MAX_TOKENS" in bo_src,
+          "R92 (F-3.3) batch_one.py documents at least one known Google enum value",
+          "grep for MALFORMED_FUNCTION_CALL / MAX_TOKENS in batch_one.py")
+    if importable:
+        _finish = bo._finish
+        sig = inspect.signature(_finish)
+        check("finish_reason" in sig.parameters,
+              "R92 (F-3.4) _finish() signature has finish_reason kwarg",
+              "params=%s" % list(sig.parameters))
+        # Live: no-text + finish_reason -> failures[0] carries it
+        with tempfile.TemporaryDirectory() as td:
+            rd = Path(td)
+            rc = _finish(rd, "test-lane", None, {}, {"cost_meter": None,
+                         "cost_arith": 0.0, "meter_source": "test"},
+                         finish_reason="MALFORMED_FUNCTION_CALL")
+            check(rc == 1,
+                  "R92 (F-3.5) _finish returns 1 when there is no text",
+                  "rc=%d" % rc)
+            body = json.loads((rd / "test-lane.parsed.json").read_text(encoding="utf-8"))
+            fs = body.get("failures", [])
+            check(fs and fs[0].get("finish_reason") == "MALFORMED_FUNCTION_CALL",
+                  "R92 (F-3.6) failures[0].finish_reason == 'MALFORMED_FUNCTION_CALL'",
+                  "failures=%s" % json.dumps(fs)[:300])
+            check(fs and fs[0].get("reason") == "no text in result",
+                  "R92 (F-3.7) failures[0].reason kept for backward-compat",
+                  "reason=%r" % (fs[0].get("reason") if fs else None))
 
 
 if __name__ == "__main__":

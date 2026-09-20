@@ -34,6 +34,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import sys
 import time
 
@@ -51,6 +52,78 @@ PFW = _load("probe_flex_web")   # post(), extract_openai(), extract_openrouter()
 PR = _load("prices")
 
 MIN_WEB_OUTPUT_TOKENS = 25_000  # OpenAI-recommended reasoning reserve; Probe C floor
+
+
+# --------------------------------------------------------------------------
+# R92 F-2 — 429-only retry wrapper around PFW.post
+# --------------------------------------------------------------------------
+# The project invariant is «never auto-retry a billable failure» (from
+# CLAUDE.md); 429 rate_limit_exceeded is the exemption because the request did
+# NOT enter the quota — nothing was billed. Every OTHER status still returns
+# after a single attempt: a 400 is a body defect, a 500 is a vendor bug, and
+# both must reach the operator loud rather than getting silently hammered on.
+#
+# Retry-After header is NOT read: `probe_flex_web.post()` returns the response
+# body, not headers, and we deliberately do not change that shared helper. The
+# wait is parsed from `error.message` — OpenAI's «Please try again in Ns»
+# language, seen in R82 flex smokes. Fallback 60 s when the message has no
+# explicit hint. Cap: total wait 300 s across all 3 attempts, so a vendor
+# asking «wait 30 minutes» aborts fast (429 is free; not spending 30 min on it
+# is honest, not evasive).
+#
+# Every attempt is recorded to `<rundir>/<tag>-429-attempts.json` when at
+# least one 429 happened — so the operator can audit retries after the fact
+# even if the final call succeeded.
+_RETRY_HINT = re.compile(r"try again in (\d+(?:\.\d+)?)\s*s", re.IGNORECASE)
+
+
+def _retry_429(url: str, body: dict, headers: dict,
+               max_attempts: int = 3, cap_wait_s: float = 300.0,
+               rundir: pathlib.Path | None = None,
+               tag: str = "") -> tuple[int, dict, str]:
+    """Retry ONLY on HTTP 429. Returns whatever the FINAL attempt returned:
+    a 200 (or non-429 4xx/5xx) on success or on a non-retriable error, or the
+    last 429 body if attempts were exhausted or the cap was hit."""
+    attempts: list[dict] = []
+    total_wait_s = 0.0
+    status, resp, raw = 0, {}, ""
+    for i in range(1, max_attempts + 1):
+        t0 = time.monotonic()
+        status, resp, raw = PFW.post(url, body, headers)
+        wall = time.monotonic() - t0
+        attempts.append({"attempt": i, "http_status": status,
+                         "wall_s": round(wall, 2)})
+        if status != 429:
+            break
+        err = resp.get("error", {}) if isinstance(resp, dict) else {}
+        err_msg = str(err.get("message") or "") if isinstance(err, dict) else ""
+        m = _RETRY_HINT.search(err_msg)
+        wait_s = float(m.group(1)) if m else 60.0
+        if total_wait_s + wait_s > cap_wait_s:
+            print(f"HTTP 429 attempt {i}/{max_attempts}: vendor asks "
+                  f"{wait_s:.1f}s but total wait would exceed cap "
+                  f"{cap_wait_s:.0f}s — giving up (429 is NOT billable; "
+                  f"no charge for these attempts).")
+            attempts.append({"aborted": True, "reason": "cap_exceeded",
+                             "cap_wait_s": cap_wait_s,
+                             "total_wait_so_far_s": round(total_wait_s, 2)})
+            break
+        hint = m.group(0) if m else "no explicit hint, using 60s fallback"
+        print(f"HTTP 429 attempt {i}/{max_attempts}: waiting {wait_s:.1f}s "
+              f"({hint}). 429 is NOT billable so retrying is allowed under the "
+              f"no-auto-retry-on-billable invariant.")
+        time.sleep(wait_s)
+        total_wait_s += wait_s
+    if len(attempts) > 1 and rundir is not None and tag:
+        try:
+            (rundir / f"{tag}-429-attempts.json").write_text(
+                json.dumps({"attempts": attempts,
+                            "final_http_status": status,
+                            "total_wait_s": round(total_wait_s, 2)},
+                           ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError:
+            pass  # a write failure here must not hide the caller's result
+    return status, resp, raw
 
 
 def build_openai(a, brief: str) -> dict:
@@ -193,9 +266,11 @@ def main() -> int:
              and a.path == "openai" else ""))
     print(f"rates (expectation, NOT a meter): {pricing.describe()}")
     t0 = time.monotonic()
-    # PFW.post uses urllib with NO retry of any kind: a billable error surfaces
-    # once and stops, per the no-auto-retry-on-billable invariant.
-    status, resp, _raw = PFW.post(url, body, headers)
+    # R92 F-2: PFW.post is now wrapped by _retry_429 above. 429 alone retries,
+    # up to 3 attempts, capped 300 s total wait. Every OTHER status (including
+    # 200, 400, 500) still returns after ONE attempt — the no-auto-retry-on-
+    # billable invariant holds for everything except non-billable throttling.
+    status, resp, _raw = _retry_429(url, body, headers, rundir=rundir, tag=a.tag)
     wall = time.monotonic() - t0
 
     (rundir / f"{tag}.json").write_text(

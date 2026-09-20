@@ -1,5 +1,81 @@
 # Changelog
 
+## 1.66.0 — 2026-09-19
+
+Six fixes for the premium panel breakage observed 2026-09-14 (R92). The
+operator's real batch on `solpro` completed in 3 h 45 min while the poller
+declared it dead after 20 minutes and the next session read the empty
+`.parsed.json` as a failed lane. The fixes make an alive-server-side batch
+distinguishable from a failed one at every hand-off point, and stop three
+other silent shapes in the same tree.
+
+* **`gemini-3.7-flash` → `gemini-3.8-flash` on the premium flash CANARY seat
+  and the direct-Google Flash channel** (`F-0`). Live probe of
+  `GET /v1beta/models/gemini-3.8-flash` on `GEMINI_API_KEY` returned 200 with
+  the identical capability surface (input/output token limits, all four
+  `supportedGenerationMethods` including `batchGenerateContent`, `thinking`).
+  Five places updated in one pass: `channels.json` (channel key
+  `goog37flash` → `goog38flash`, model, label, aliases, backward-compat alias
+  kept), `premium/premium_panel.py` (docstring, `DEFAULT_LANES` flash lane),
+  `premium/models_snapshot.json` (new `google_direct.models.gemini-3.8-flash`
+  block, new `openrouter.models.google/gemini-3.8-flash` block with `:batch`
+  variant, `_source` note dated 2026-09-19), and the `gemini` and `direct`
+  groups in `channels.json`. Prices in the snapshot are labelled INHERITED
+  FROM 3.7 pending the first paid batch — reconcile against the billing
+  dashboard before quoting a 3.8-flash cost figure.
+* **`poll_loop.py --max-minutes` default 20 → 240** (`F-1a`). The 20-minute
+  cap declared solpro dead at 5% of its actual runtime. The 11-second
+  `--max-sleep` politeness cap stays in place (machine-wide rule); only the
+  overall deadline moves. The exhaustion banner now points at the sidecar
+  files below and includes the rundir path in a copy-paste-safe form.
+* **`batch_one.py` writes a `<tag>.still-running.json` sidecar at every
+  submit and every non-terminal poll** (`F-1b`). Records `_status:
+  "STILL_RUNNING_SERVER_SIDE"`, `batch_id`, `lane_kind`, `created_at_utc`,
+  `attempts`, `last_status_body`, `completion_window_hours`,
+  `estimated_deadline_utc`, and — the load-bearing field — a `resume_command`
+  a cold AI session can copy-paste to poll again, and an
+  `interpretation_note` that spells out "THIS IS NOT A FAILURE. The batch is
+  ALIVE on the vendor's server." So a session that opens the rundir cold and
+  sees no `.parsed.json` can distinguish alive from dead by reading one file.
+  `_finish()` clears the sidecar on any terminal outcome (parsed or failed)
+  so a stale sidecar next to a fresh `.parsed.json` can never mislead the
+  aggregator. Atomic write via `os.replace`.
+* **`aggregate_findings.py --pending NAME=path/sidecar.json`** (`F-1c`).
+  Renders lanes with a live sidecar as ⏳ PENDING rows (not ❌ FAILED),
+  adds a `## Pending lanes (batch still running server-side)` section at the
+  very top of the report, and prints the `resume_command` for each pending
+  lane so a cold session can copy-paste. Aggregate exit code stays 0 when
+  the only missing lanes are pending — pending is not failure.
+  `premium_panel.py --mode collect` now walks lanes, and for each lane
+  without a `.parsed.json` checks for a `.still-running.json` sidecar and
+  passes `--pending` accordingly; only lanes with neither file are reported
+  as `no parsed output AND no still-running sidecar`.
+* **`flex_lane.py` retries HTTP 429 only, wrapped around the single
+  `PFW.post()` call site** (`F-2`). Max 3 attempts, wait parsed from the
+  vendor's `error.message` regex `try again in (\d+(?:\.\d+)?)s` (fallback
+  60 s), total wait capped at 300 s. Every OTHER status (200/400/500)
+  returns on the first attempt — the no-auto-retry-on-billable invariant
+  holds for everything except non-billable throttling. Every attempt is
+  saved to `<tag>-429-attempts.json` in the rundir when at least one 429
+  happened, so the operator can audit retries after the fact.
+* **`batch_one.py` extracts `finishReason` and writes it verbatim into
+  `_finish()`** (`F-3`). OpenAI/OR chat completions:
+  `choices[0].finish_reason`. Google `batchGenerateContent`:
+  `candidates[0].finishReason` (`STOP`, `MAX_TOKENS`, `SAFETY`, `RECITATION`,
+  `MALFORMED_FUNCTION_CALL`, `OTHER`, `FINISH_REASON_UNSPECIFIED`). Written
+  into `parsed[0]._finish_reason` when we have text and
+  `failures[0].finish_reason` when we do not — the previously opaque
+  `{"reason": "no text in result"}` becomes
+  `{"reason": "no text in result", "finish_reason": "MALFORMED_FUNCTION_CALL"}`
+  and the aggregator can name the failure mode. Backwards-compatible: the
+  generic `reason` field is preserved.
+
+New selftest suite `suite_r92_premium_panel_fixes` — 39 pins across the six
+fixes. Live-tests the sidecar shape by driving `_write_still_running` and
+`_finish` from a temp directory, live-renders an aggregate report against a
+synthetic sidecar, and asserts the wire-level pins (single `PFW.post` call
+site inside `_retry_429`, `finish_reason` in `_finish` signature, etc.).
+
 ## 1.65.0 — 2026-09-14
 
 Two escape hatches for the case #44 was about — a model the release does not

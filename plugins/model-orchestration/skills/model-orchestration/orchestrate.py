@@ -5866,7 +5866,7 @@ _LEGACY_KINDS = {"http": "http", "spark": "http", "spark11": "http", "spark12": 
                  "orgpt56terrapro": "openrouter", "orgpt56solpro": "openrouter",
                  "orgpt56lunapro": "openrouter", "orspark12cont": "openrouter",
                  "orspark13cont": "openrouter",
-                 "goog36flash": "gemini", "goog37flash": "gemini",
+                 "goog36flash": "gemini", "goog38flash": "gemini",
                  "mimo25pro": "oai", "grok420": "xai", "grokbuild": "grokcli",
                  "hermes": "hermes", "ocspark13free": "opencode",
                  "cclopus46": "claudecli"}

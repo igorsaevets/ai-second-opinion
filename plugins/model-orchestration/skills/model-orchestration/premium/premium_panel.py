@@ -18,7 +18,7 @@ never counted into premium convergence):
     solpro   or-batch      openai/gpt-5.6-sol-pro:batch   $1/$5 (promo ≤2026-11-21)
     gpt55    openai-batch  gpt-5.5                        $2.50/$15
     gemini31 google-batch  gemini-3.1-pro-preview         $1/$6 ≤200k
-    flash    google-batch  gemini-3.7-flash               $0.375/$1.875  [CANARY]
+    flash    google-batch  gemini-3.8-flash               $0.375/$1.875  [CANARY, R92]
     live54   flex-openai   gpt-5.4 + web_search           $1.25/$7.50 + web
 
 GATES, in order, all before any network call:
@@ -82,11 +82,16 @@ DEFAULT_LANES: list[dict] = [
      "thinking_budget": 32768, "max_output": 65536, "role": "vote",
      "_tb_note": "pro-preview thinking ceiling NOT captured — 32768 is the "
                  "call-plan number; check thoughtsTokenCount on the smoke"},
-    {"name": "flash", "kind": "google-batch", "model": "gemini-3.7-flash",
+    {"name": "flash", "kind": "google-batch", "model": "gemini-3.8-flash",
      "thinking_budget": 24576, "max_output": 65536, "role": "canary",
      "_note": "CANARY seat: detects lane/corpus breakage; findings reported in "
               "their own section, never counted into premium convergence "
-              "(grokbuild canary-vote resolution, 2026-09-02)"},
+              "(grokbuild canary-vote resolution, 2026-09-02). R92 (2026-09-19): "
+              "model bumped 3.7-flash → 3.8-flash after live metadata probe "
+              "confirmed identical capability surface + batchGenerateContent. "
+              "thinking_budget 24576 was the 3.7 measured ceiling — 3.8 not yet "
+              "control-probed; a batch that hits the cap will surface via F-3's "
+              "finishReason MAX_TOKENS field, no silent no-answer."},
     {"name": "live54", "kind": "flex-openai", "model": "gpt-5.4",
      "effort": "xhigh", "max_output": 128000, "web": "on", "role": "vote",
      "max_tool_calls": 12, "allowed_domains": ""},
@@ -311,17 +316,35 @@ def main() -> int:
         args = [PY, str(HERE / "aggregate_findings.py"), "--out",
                 str(rundir / "PANEL-REPORT.md"), "--title",
                 "Premium panel — 1 brief × N models"]
-        missing = []
+        missing, pending = [], []
         for lane in lanes:
             p = rundir / f"{lane['name']}.parsed.json"
             if p.exists():
                 prefix = "CANARY-" if lane.get("role") == "canary" else ""
                 args += ["--lane", f"{prefix}{lane['name']}={p}"]
+                continue
+            # R92 F-1c: no .parsed.json — check for a STILL_RUNNING sidecar
+            # written by batch_one.py's submit_* / poll_* on any non-terminal
+            # exit. A sidecar means the batch is ALIVE on the vendor's server
+            # (not a failure); aggregate renders it as ⏳ PENDING and prints
+            # the resume_command so a cold session can copy-paste to poll again.
+            sidecar = rundir / f"{lane['name']}.still-running.json"
+            if sidecar.exists():
+                prefix = "CANARY-" if lane.get("role") == "canary" else ""
+                args += ["--pending", f"{prefix}{lane['name']}={sidecar}"]
+                pending.append(lane["name"])
             else:
                 missing.append(lane["name"])
+        if pending:
+            # ASCII-only print (cp1251 console safety); the markdown report
+            # keeps the ⏳ marker for readability.
+            print(f"still running (batch alive server-side, NOT a failure): "
+                  f"{', '.join(pending)}. The report will list them under "
+                  f"'Pending lanes' with resume commands.")
         if missing:
-            print(f"⚠️ no parsed output for: {', '.join(missing)} — aggregating "
-                  f"the rest; the report will show the hole, not paper over it.")
+            print(f"⚠️ no parsed output AND no still-running sidecar for: "
+                  f"{', '.join(missing)} — those lanes are unaccounted for. "
+                  f"The report will show the hole, not paper over it.")
         return _spawn(args)
 
     # ---- compose the item -------------------------------------------------

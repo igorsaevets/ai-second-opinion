@@ -38,7 +38,8 @@ def _norm(s: str) -> str:
     return re.sub(r"\W+", " ", (s or "").lower()).strip()
 
 
-def panel_mode(lanes: list[str], out_path: pathlib.Path, title: str) -> int:
+def panel_mode(lanes: list[str], out_path: pathlib.Path, title: str,
+               pending: list[str] | None = None) -> int:
     """PREMIUM PANEL shape: 1 brief × N models, one answer per lane.
 
     Extends this script rather than adding aggregate_panel.py (inventory rule,
@@ -53,7 +54,15 @@ def panel_mode(lanes: list[str], out_path: pathlib.Path, title: str) -> int:
       * truncation/repair flags surfaced (a `_truncated` answer must never read
         as a complete one).
     Grouping real agreement across differently-worded findings is the READING
-    session's job, same as the cheap panel."""
+    session's job, same as the cheap panel.
+
+    R92 F-1c (2026-09-19): `pending` is a list of NAME=path/to/<tag>.still-running.json
+    specs. Each entry renders as a ⏳ PENDING row in the usage table (NOT a
+    ❌ FAILED one), and a dedicated `## Pending lanes` section at the very top
+    of the report prints the resume_command so a cold session can copy-paste.
+    Exit code stays 0 when the only missing lanes are pending — pending is
+    not failure. Pending is what stops the aggregator from silently declaring
+    a live batch dead (the R92 root cause behind Igor's 2026-09-19 note)."""
     data: list[tuple[str, dict]] = []
     for spec in lanes:
         if "=" not in spec:
@@ -66,7 +75,55 @@ def panel_mode(lanes: list[str], out_path: pathlib.Path, title: str) -> int:
                              f"an absence of findings.")
         data.append((name, json.loads(path.read_text(encoding="utf-8"))))
 
+    # R92 F-1c: PENDING sidecars — batches alive server-side, no .parsed.json yet
+    pending_data: list[tuple[str, dict]] = []
+    for spec in (pending or []):
+        if "=" not in spec:
+            raise SystemExit(f"REFUSING: --pending needs NAME=PATH, got {spec!r}")
+        name, p = spec.split("=", 1)
+        path = pathlib.Path(p)
+        if not path.exists():
+            raise SystemExit(
+                f"REFUSING: pending lane '{name}' sidecar does not exist: {path}. "
+                f"A --pending spec pointing at a missing file is caller error, not "
+                f"an absence — fix the collector or drop the spec.")
+        pending_data.append((name, json.loads(path.read_text(encoding="utf-8"))))
+
     L: list[str] = [f"# {title}\n"]
+
+    # R92 F-1c: PENDING section at the very top, before anything else. A cold
+    # AI session reading this report from top to bottom will see the ALIVE
+    # batches before it sees any per-lane findings, and will not confuse a
+    # PENDING lane with a failed one.
+    if pending_data:
+        L.append("## Pending lanes (batch still running server-side)\n")
+        L.append(f"⏳ **{len(pending_data)} lane(s) are ALIVE on the vendor's server** "
+                 f"and did not deliver a `.parsed.json` yet. THIS IS NOT A FAILURE. "
+                 f"The vendor keeps each batch's result for its full "
+                 f"`completion_window_hours` from `created_at_utc` regardless of "
+                 f"whether we are polling. Resume with the copy-paste command in "
+                 f"each row's sidecar, or re-run `poll_loop.py --cmd \"...premium_panel.py "
+                 f"--mode poll ...\" --rundir <rundir>` on the whole panel.\n")
+        L.append("| lane | batch_id | attempts | created (UTC) | deadline (UTC) | sidecar |\n"
+                 "|---|---|---:|---|---|---|")
+        for name, sd in pending_data:
+            L.append(
+                f"| **{name}** | `{sd.get('batch_id', '?')}` | "
+                f"{sd.get('attempts', '?')} | "
+                f"{sd.get('created_at_utc', '?')} | "
+                f"{sd.get('estimated_deadline_utc', '?')} | "
+                f"`{name}.still-running.json` |")
+        L.append("")
+        L.append("### Resume commands (copy-paste)\n")
+        for name, sd in pending_data:
+            cmd = sd.get("resume_command", "")
+            L.append(f"- **{name}** (`{sd.get('lane_kind', '?')}`, phase "
+                     f"`{sd.get('phase', '?')}`): {sd.get('interpretation_note', '')[:140]}...")
+            L.append("  ```")
+            L.append(f"  {cmd}")
+            L.append("  ```")
+        L.append("")
+
     L.append("## Per-lane status and usage\n")
     L.append("| lane | answers | failures | prompt tok | out tok | thinking | "
              "cost | cost kind | flags |\n|---|---:|---:|---:|---:|---:|---:|---|---|")
@@ -100,9 +157,15 @@ def panel_mode(lanes: list[str], out_path: pathlib.Path, title: str) -> int:
         L.append(f"| {name} | {len(parsed)} | {len(d.get('failures', []))} | "
                  f"{pt:,} | {ot:,} | {th:,} | {money_s} | {kind} | "
                  f"{' '.join(flags) or '—'} |")
+    # R92 F-1c: PENDING lanes in the same table so the summary is complete
+    for name, sd in pending_data:
+        L.append(f"| {name} | ⏳ pending | — | — | — | — | — | pending | "
+                 f"STILL_RUNNING (attempts={sd.get('attempts', '?')}) |")
     L.append(f"\nSum of the cost column: ${total_arith:.4f} — a MIX of meters and "
              f"arithmetic; per-lane rows above say which is which. Never quote "
-             f"this sum as a metered total.\n")
+             f"this sum as a metered total. Pending rows contribute nothing to "
+             f"this sum because their batches are unfinished; the vendor bills "
+             f"only completed items.\n")
 
     # findings per lane
     all_claims: dict[str, list[str]] = collections.defaultdict(list)
@@ -146,9 +209,13 @@ def panel_mode(lanes: list[str], out_path: pathlib.Path, title: str) -> int:
     L.append("")
 
     out_path.write_text("\n".join(L), encoding="utf-8")
+    # print() may fall through Python's default encoder (cp1251 on Windows
+    # CMD), which does not carry ⏳ — that codepoint stays in the markdown
+    # (UTF-8) but the console line uses ASCII to survive locale rot.
     print(f"panel lanes: {len(data)}  answers: "
           f"{sum(len(d.get('parsed', [])) for _, d in data)}  "
-          f"failures: {sum(len(d.get('failures', [])) for _, d in data)}")
+          f"failures: {sum(len(d.get('failures', [])) for _, d in data)}"
+          + (f"  pending: {len(pending_data)}" if pending_data else ""))
     print(f"written: {out_path}")
     return 0
 
@@ -163,10 +230,16 @@ def main() -> int:
     ap.add_argument("--lane", action="append", default=[],
                     help="panel mode: NAME=path/to/parsed.json, repeatable — "
                          "one per premium-panel lane (1 brief × N models shape)")
+    ap.add_argument("--pending", action="append", default=[],
+                    help="panel mode (R92 F-1c): NAME=path/to/<tag>.still-running.json, "
+                         "repeatable — one per lane whose batch is ALIVE on the "
+                         "vendor's server but has not delivered .parsed.json yet. "
+                         "Rendered as ⏳ PENDING (not ❌ FAILED); exit code stays 0.")
     a = ap.parse_args()
 
-    if a.lane:
-        return panel_mode(a.lane, pathlib.Path(a.out), a.title)
+    if a.lane or a.pending:
+        return panel_mode(a.lane, pathlib.Path(a.out), a.title,
+                          pending=a.pending)
     if not a.parsed:
         ap.error("either --parsed (lens mode) or --lane (panel mode) is required")
 
