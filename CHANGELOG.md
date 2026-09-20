@@ -1,5 +1,62 @@
 # Changelog
 
+## 1.70.0 — 2026-09-20
+
+**Kit-Б-9 Ф3: calibration fixes + a silent production-integration bug fixed.**
+R99 calibration of the Ф1 tool measured 5 FPs on a 7-answer corpus (170
+quotes, 9 with a byte-level verdict). All 5 FPs came from a single class —
+normalizer and extraction misses, not the fuzzy threshold. Ф3 closes all 5
+AND restores an integration that had been silently broken since 1.69.0.
+
+* **F-A (critical).** `quote_verify._norm_url_for_set` now accepts
+  `(host, path)` tuples in addition to URL strings. `call_oai_reviewer`
+  passes `opened_urls=opened`, where `opened` is a list of tuples
+  pre-normalised by orchestrate.py's own `_norm_url`. The tuple branch
+  was missing, `.rstrip()` crashed on tuple, the enclosing
+  `except Exception` in the caller swallowed it silently, and **no
+  `.quote-verify.md` sidecar was written from a real production run in
+  1.69.0** — only from calibration scripts that happened to pass strings.
+  Class: "prose promises what code doesn't do".
+
+* **F-1 (whitespace-in-parens).** eCFR and similar gov docs mark up
+  section letters as `<em>v</em>`; our HTML strip leaves `( v )` where
+  the model quotes `(v)`. F-1 adds
+  `re.sub(r"\(\s+([A-Za-z0-9]{1,4})\s+\)", r"(\1)", t)` to the
+  normalizer, restricted to 1-4 alnum tokens so `( see p.5 )` and
+  `( 12345 )` stay untouched.
+
+* **F-2 (backticks).** Models writing code-inline prose quote
+  identifiers as `` `TerminateProcess()` `` (markdown). F-2 strips
+  backticks in the normalizer BEFORE `_QUOTE_MAP` — symmetric on both
+  sides, so any rare lone-grave-as-apostrophe case cancels out.
+
+* **F-3 (dedup).** `> "X"` shape hit both Rule 2 (block quote, keeps
+  outer `"`) and Rule 1 (quoted, drops `"`), producing two candidates
+  for the same passage. The calibration report proposed
+  `(normalize(quote), url)` as the dedup key, but that does NOT close
+  the class — normalize does not strip outer wrap chars. R100 uses
+  `(normalize(quote).strip("\"' "), url)`, which collapses `"X..."`
+  and `X...` symmetrically.
+
+* **F-6 (UNSEEN-BYTES ambiguity).** `[UNSEEN-BYTES]` had four possible
+  reasons under one message. New `_body_status` helper names them
+  apart in the sidecar `detail`: file missing / file empty / OS error /
+  fuzzy did not find. Only the last, with substantial non-empty body,
+  reads as a real alarm. `_load_body` now returns None for a 0-byte
+  file so the "empty" branch is reached instead of "not found in 0
+  chars — possible fabrication".
+
+**Measured effect on the R99 corpus** (production-form tuples): NEAR-MATCH
+2 → 0, UNSEEN-BYTES 4 → 0, n_quotes 170 → 158 (F-3 dedup). Precision on
+alarms that can be judged: 4/9 (44.4%) → 4/4 (100%). Fabrication detection
+is unchanged — the fuzzy threshold `min(3, n*0.02)` stays deliberately
+narrow to catch vendor-corrupts cases like R44's `208(a)(2)(D)` →
+`208(a)2)(D)` (1 char in 20).
+
+**New selftest**: `suite_r100_calibration_fixes` — 26 pins across F-A (6),
+F-1 (7), F-2 (4), F-3 (3), F-6 (3), and end-to-end regression on the real
+R99 panel-test corpus (3, skipped gracefully when the corpus is absent).
+
 ## 1.69.0 — 2026-09-20
 
 **Kit-Б-9 Ф1: byte-check quotes against pages we fetched.** New

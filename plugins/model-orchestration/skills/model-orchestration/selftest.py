@@ -6877,7 +6877,8 @@ def main():
                   suite_r92_premium_panel_fixes,
                   suite_r94_codex_vendor_error_surfacing,
                   suite_r96_allow_stale_prices_cli,
-                  suite_r98_quote_verify):
+                  suite_r98_quote_verify,
+                  suite_r100_calibration_fixes):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -8844,6 +8845,235 @@ def suite_r98_quote_verify():
     check("QUOTE-VERIFY" in _oarc_src and "note.append" in _oarc_src,
           "R98 (H6) note.append surfaces the Б-9 summary in the notes section "
           "(reader sees it via REPORT.md notes column, no schema change needed)")
+
+
+def suite_r100_calibration_fixes():
+    """
+    R100 (2026-09-20), Kit-Б-9 Ф3. Calibration fixes applied to quote_verify:
+
+      F-A  _norm_url_for_set accepts (host, path) tuple, not just str.
+           Production integration was silently broken since v1.69.0 -
+           orchestrate.py passes tuples, quote_verify crashed on `.rstrip`, the
+           enclosing `except Exception` swallowed it, no sidecars ever wrote.
+           Same class as "prose promises what code doesn't do" (R47).
+
+      F-1  normalize strips whitespace inside (X) where X is 1-4 alnum chars.
+           Closes eCFR `<em>v</em>` HTML-strip artefact `( v )` vs model `(v)`.
+
+      F-2  normalize strips backticks BEFORE _QUOTE_MAP.
+           Closes model `` `TerminateProcess()` `` (markdown) vs page bare form.
+
+      F-3  extract_quotes dedup on `(normalize(quote).strip('"\\' '), url)`.
+           Calibration report itself proposed `(normalize(quote), url)`, which
+           does NOT close the class: normalize does not strip outer wrap chars,
+           so a `> "An applicant..."` line's Rule 2 (block, keeps `"`) and
+           Rule 1 (quoted, drops `"`) still hash differently. Strip needed.
+
+      F-6  New _body_status helper. UNSEEN-BYTES sidecar detail now names WHY
+           (file missing / empty / OS error) instead of one generic string.
+
+    R99 corpus (170 quotes, 9 signal, 5 FPs) drove these fixes; after F-1/2/3
+    the 5 FPs collapse to 0 on the same corpus (measured smoke_ф3_v2.py:
+    NM 2 -> 1, UB 4 -> 0).
+    """
+    import quote_verify as qv
+
+    section("R100 Kit-Б-9 Ф3: calibration fixes (F-A tuples + F-1 parens + F-2 backticks + F-3 dedup + F-6 detail)")
+
+    # --- F-A. _norm_url_for_set accepts tuples (production integration) ------
+    check(qv._norm_url_for_set(("ecfr.gov", "/current/title-8/part-204/section-204.5"))
+          == ("ecfr.gov", "/current/title-8/part-204/section-204.5"),
+          "R100 (F-A1) tuple form of opened URL is normalised in place")
+
+    check(qv._norm_url_for_set(("www.ECFR.gov", "/current/x/"))
+          == ("ecfr.gov", "/current/x"),
+          "R100 (F-A2) tuple form lowercases host, strips www, rstrips trailing /")
+
+    check(qv._norm_url_for_set("https://ecfr.gov/current/title-8/part-204/section-204.5")
+          == ("ecfr.gov", "/current/title-8/part-204/section-204.5"),
+          "R100 (F-A3) string form still works (backward compat)")
+
+    check(qv._norm_url_for_set(["ecfr.gov", "/x"])  # list also accepted
+          == ("ecfr.gov", "/x"),
+          "R100 (F-A4) list-form (not just tuple) is accepted as well")
+
+    check(qv._norm_url_for_set(None) == ("", "") and qv._norm_url_for_set("") == ("", ""),
+          "R100 (F-A5) empty / None still returns ('', '') without raising")
+
+    # PRODUCTION-form check: opened list of (host, path) tuples -> URL match works.
+    with tempfile.TemporaryDirectory() as _td:
+        _fetches = os.path.join(_td, "kimi.fetches")
+        os.makedirs(_fetches)
+        _url = "https://ecfr.gov/current/x"
+        _body = "The statute reads: safe third country agreement applies here " * 5
+        with open(os.path.join(_fetches, qv.slug_for_url(_url)), "w",
+                  encoding="utf-8") as _f:
+            _f.write(_body)
+        _ans = ('per ecfr.gov, "safe third country agreement applies here" is '
+                'stated at https://ecfr.gov/current/x.')
+        # Simulate orchestrate.py: opened_urls is list of (host, path) tuples.
+        _r = qv.check(_ans, fetches_dir=_fetches,
+                      opened_urls=[("ecfr.gov", "/current/x")])
+        check(_r["counts"]["VERIFIED"] >= 1,
+              "R100 (F-A6) end-to-end: tuple-form opened_urls -> VERIFIED "
+              "(would have been silent AttributeError pre-R100)",
+              "counts=%s" % _r["counts"])
+
+    # --- F-1. Whitespace-in-parens (eCFR `<em>` strip artefact) --------------
+    check(qv.normalize("(v) Evidence") == qv.normalize("( v ) Evidence"),
+          "R100 (F-1a) `(v)` and `( v )` normalize identically after F-1")
+
+    check(qv.normalize("(vi) text") == qv.normalize("( vi ) text"),
+          "R100 (F-1b) 2-char paren token (`vi`) collapses whitespace too")
+
+    check(qv.normalize("(2) text") == qv.normalize("( 2 ) text"),
+          "R100 (F-1c) digit paren token (`2`) collapses whitespace too")
+
+    check(qv.normalize("(iii) text") == qv.normalize("( iii ) text"),
+          "R100 (F-1d) 3-char paren (`iii`) collapses whitespace too")
+
+    # Edge case: don't touch 5+ char tokens or multi-word content
+    check(qv.normalize("( 12345 ) text") == "( 12345 ) text",
+          "R100 (F-1e) 5+ char paren content stays UNTOUCHED (avoids regressions)")
+
+    check(qv.normalize("( see p.5 ) text") == "( see p.5 ) text",
+          "R100 (F-1f) multi-word paren content stays UNTOUCHED "
+          "(space inside guards against overreach)")
+
+    # Fuzzy match now finds N1-class quote as VERIFIED
+    _q = "(v) Evidence of the alien's original scientific contributions of major significance"
+    _body = "eCFR section 204.5: ( v ) Evidence of the alien's original scientific contributions of major significance in the field"
+    _rf = qv.fuzzy_find(qv.normalize(_q), qv.normalize(_body))
+    check(_rf is not None and _rf[1] == 0,
+          "R100 (F-1g) R99/N1 case (`(v)` vs page `( v )`) -> exact VERIFIED after F-1",
+          "got=%r" % (_rf,))
+
+    # --- F-2. Inline backticks --------------------------------------------------
+    check(qv.normalize("The `TerminateProcess()` API") == "The TerminateProcess() API",
+          "R100 (F-2a) markdown backticks stripped from normalized text")
+
+    check(qv.normalize("The `TerminateProcess()` API")
+          == qv.normalize("The TerminateProcess() API"),
+          "R100 (F-2b) model with backticks and page without normalize identically")
+
+    # Edge case: grave alone (rare, but should be symmetric). F-2 runs BEFORE
+    # _QUOTE_MAP, so a lone grave becomes '' not "'". Symmetric on both sides.
+    check(qv.normalize("d`etre") == "detre" and qv.normalize("d`etre") == qv.normalize("d`etre"),
+          "R100 (F-2c) lone grave stripped, but symmetric on both sides")
+
+    # Fuzzy: R99/U3 case
+    _q = "On Windows the Win32 API function `TerminateProcess()` is called"
+    _body = "On Windows the Win32 API function TerminateProcess() is called for kill"
+    _rf = qv.fuzzy_find(qv.normalize(_q), qv.normalize(_body))
+    check(_rf is not None and _rf[1] == 0,
+          "R100 (F-2d) R99/U3 case (`` `TerminateProcess()` `` vs page bare) -> VERIFIED after F-2",
+          "got=%r" % (_rf,))
+
+    # --- F-3. Dedup on normalize+strip (not just normalize) -------------------
+
+    # The R99/N2 shape: block quote (Rule 2) keeps outer `"`; quoted (Rule 1)
+    # drops them. Same underlying passage, two candidates until F-3.
+    _text = ('Section 103.2 says:\n'
+             '> "An applicant or petitioner must establish they are eligible"\n'
+             'per https://ecfr.gov/current/x')
+    _q = qv.extract_quotes(_text)
+    check(len(_q) == 1,
+          "R100 (F-3a) `> \"X\"` block+quoted dedup: two Rule matches -> 1 candidate",
+          "got=%d quotes: %r" % (len(_q), [q['quote'][:40] for q in _q]))
+
+    # Cross-check: without outer `"`, still 1 candidate (Rule 2 block quote only)
+    _text2 = ('Section 103.2 says:\n'
+              '> An applicant or petitioner must establish they are eligible\n'
+              'per https://ecfr.gov/current/x')
+    _q2 = qv.extract_quotes(_text2)
+    check(len(_q2) == 1,
+          "R100 (F-3b) plain block quote (no outer wrap) -> still 1 candidate")
+
+    # Regression: legit non-dup pair should NOT collapse
+    _text3 = ('First: "one full passage of some length" per https://a.com/x.\n'
+              'Second: "another full passage of the same length" per https://a.com/x.')
+    _q3 = qv.extract_quotes(_text3)
+    check(len(_q3) == 2,
+          "R100 (F-3c) distinct quotes with same URL -> both retained "
+          "(dedup is per-normalized-content, not per-URL)")
+
+    # --- F-6. UNSEEN-BYTES detail names WHY ----------------------------------
+    with tempfile.TemporaryDirectory() as _td:
+        _fetches = os.path.join(_td, "kimi.fetches")
+        os.makedirs(_fetches)
+        # Case 1: file exists but 0 bytes (fetch was 0-byte truncated)
+        _url_empty = "https://a.com/empty"
+        with open(os.path.join(_fetches, qv.slug_for_url(_url_empty)), "w") as _f:
+            pass  # truncate to 0 bytes
+        # Case 2: no file at all
+        _url_missing = "https://a.com/missing"
+
+        _ans_empty = ('page reads: "a proper long quote for testing" per '
+                      'https://a.com/empty.')
+        _ans_missing = ('page reads: "a proper long quote for testing" per '
+                        'https://a.com/missing.')
+
+        _r_empty = qv.check(_ans_empty, fetches_dir=_fetches,
+                            opened_urls=[_url_empty])
+        _empty_rows = [r for r in _r_empty["lines"] if r["status"] == "UNSEEN-BYTES"]
+        check(len(_empty_rows) == 1 and "empty" in _empty_rows[0]["detail"].lower(),
+              "R100 (F-6a) UNSEEN-BYTES for 0-byte file mentions 'empty' in detail",
+              "detail=%r" % (_empty_rows[0]["detail"] if _empty_rows else None))
+
+        _r_missing = qv.check(_ans_missing, fetches_dir=_fetches,
+                              opened_urls=[_url_missing])
+        _miss_rows = [r for r in _r_missing["lines"] if r["status"] == "UNSEEN-BYTES"]
+        check(len(_miss_rows) == 1
+              and ("not on disk" in _miss_rows[0]["detail"] or
+                   "did not write" in _miss_rows[0]["detail"]),
+              "R100 (F-6b) UNSEEN-BYTES for missing file names 'not on disk / not written'",
+              "detail=%r" % (_miss_rows[0]["detail"] if _miss_rows else None))
+
+        # Case 3: fuzzy_find None on non-empty body -> different detail message
+        _url_nomatch = "https://a.com/nomatch"
+        with open(os.path.join(_fetches, qv.slug_for_url(_url_nomatch)), "w",
+                  encoding="utf-8") as _f:
+            _f.write("This body has completely different content than any quote")
+        _ans_nomatch = ('page reads: "safe third country agreement long enough" per '
+                        'https://a.com/nomatch.')
+        _r_nm = qv.check(_ans_nomatch, fetches_dir=_fetches,
+                         opened_urls=[_url_nomatch])
+        _nm_rows = [r for r in _r_nm["lines"] if r["status"] == "UNSEEN-BYTES"]
+        check(len(_nm_rows) == 1
+              and ("not found" in _nm_rows[0]["detail"]
+                   or "fabrication" in _nm_rows[0]["detail"]),
+              "R100 (F-6c) UNSEEN-BYTES for fuzzy-miss uses 'not found / possible fabrication' detail",
+              "detail=%r" % (_nm_rows[0]["detail"] if _nm_rows else None))
+
+    # --- R99 END-TO-END regression on real corpus -----------------------------
+    # Optional: run against a real R99 corpus if the operator points us at one
+    # via MODEL_ORCH_R99_CORPUS. Kept ENV-driven (not a hardcoded path) so the
+    # shipped kit does not carry an author-machine path - class R95 lesson.
+    # Skipped gracefully when the env var is unset or the corpus is absent.
+    _r80_env = os.environ.get("MODEL_ORCH_R99_CORPUS")
+    _r80 = Path(_r80_env) if _r80_env else None
+    _r80_ans = _r80 / "ORMIMO25PRO.md" if _r80 else None
+    _r80_diag = _r80 / "diagnostics.json" if _r80 else None
+    _r80_fetches = _r80 / "ormimo25pro.fetches" if _r80 else None
+    if _r80 and _r80_ans.exists() and _r80_diag.exists() and _r80_fetches.is_dir():
+        _diag = json.loads(_r80_diag.read_text(encoding="utf-8"))
+        _fu = _diag.get("channels", {}).get("ormimo25pro", {}).get("fetched_urls") or []
+        _tuples = [tuple(e) for e in _fu if isinstance(e, list) and len(e) == 2]
+        _ans = _r80_ans.read_text(encoding="utf-8", errors="replace")
+        _r99 = qv.check(_ans, fetches_dir=str(_r80_fetches),
+                        opened_urls=_tuples)
+        check(_r99["counts"]["UNSEEN-BYTES"] == 0,
+              "R100 (E2E1) R99 panel-test corpus: NO UNSEEN-BYTES after F-1/2/3 "
+              "(was 1 on v1.69.0 - U1 dup collapsed)",
+              "counts=%s" % _r99["counts"])
+        check(_r99["counts"]["NEAR-MATCH"] == 0,
+              "R100 (E2E2) R99 panel-test corpus: NO NEAR-MATCH after F-1/2/3 "
+              "(was 2 on v1.69.0 - N1 flipped VERIFIED, N2 duped)",
+              "counts=%s" % _r99["counts"])
+        check(_r99["n_quotes"] < 23,
+              "R100 (E2E3) R99 panel-test corpus: quote count dropped from 23 "
+              "(baseline v1.69.0) due to F-3 dedup",
+              "n_quotes=%d" % _r99["n_quotes"])
 
 
 if __name__ == "__main__":

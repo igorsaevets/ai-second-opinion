@@ -169,10 +169,30 @@ def normalize(text):
     t = _ZERO_WIDTH_RE.sub("", t)
     t = _SPACE_LIKE_RE.sub(" ", t)
     t = t.replace(_ELLIPSIS_CH, "...")
+    # R99/F-2 (whitespace-agnostic backtick strip) - must run BEFORE _QUOTE_MAP.
+    # Models writing code-flavour prose quote identifiers as `` `TerminateProcess()` ``
+    # (markdown inline code). The rendered page has no backticks. Distance of 2 was
+    # enough to push a real quote past the fuzzy threshold on R99 corpus (U3).
+    # This is symmetric on quote AND body (both go through normalize), so a legit
+    # grave-as-apostrophe pattern like `d`être` in source text is stripped from
+    # both sides identically - `dêtre` on both, still matches. Alternative was
+    # `re.sub(r"`([^`]+)`", r"\1", t)` (only paired), which preserves single-grave
+    # as apostrophes; rejected because it leaves open-only backticks and the
+    # simpler form is already symmetric.
+    t = t.replace("`", "")
     for src, dst in _QUOTE_MAP.items():
         t = t.replace(src, dst)
     for src, dst in _LIGATURE_MAP.items():
         t = t.replace(src, dst)
+    # R99/F-1 (whitespace-inside-parens for short section markers). eCFR and other
+    # gov docs serve section letters in `<em>` tags: `(<em>v</em>)`. Our
+    # _safe_fetch_url HTML-strip replaces `<em>` with a space, leaving `( v )`.
+    # Model quotes verbatim `(v)`. Distance = 2 spaces > threshold on short quotes.
+    # Restricted to 1-4 alnum tokens (`(v)`, `(vi)`, `(2)`, `(iii)`, `(D)`) to
+    # avoid touching legit multi-word content like `(see p.5 above)`.
+    # Applied AFTER quote/ligature maps but BEFORE the whitespace collapse below,
+    # so the paren-wrapped token has already been unified on curly quotes etc.
+    t = re.sub(r"\(\s+([A-Za-z0-9]{1,4})\s+\)", r"(\1)", t)
     # Whitespace runs (including \n \t) -> single space. This closes the R51-class
     # "wrap defect": `may not\napply` normalizes to `may not apply`.
     t = re.sub(r"\s+", " ", t)
@@ -407,6 +427,18 @@ def extract_quotes(answer_text):
         return any(tag_start - _MEMORY_LOOKBACK <= quote_end <= tag_start
                    for tag_start in memory_tag_positions)
 
+    # R99/F-3: dedup key. Calibration report's own proposal was
+    # `(normalize(quote), url)`. Measured on r80-panel-test/ormimo: it doesn't
+    # close the observed dup class, because normalize() does NOT strip the outer
+    # wrapping. A `> "An applicant..."` line hit both Rule 2 (block, keeps outer
+    # `"`) and Rule 1 (quoted, drops outer `"`) - two DIFFERENT normalized
+    # strings, same content. The fix is to normalize AND strip a single pair of
+    # outer wrap characters (`"`, `'`, whitespace) before hashing. This
+    # symmetrically collapses `"X..."` and `X...`, both of which came from the
+    # same underlying passage.
+    def _dedup_key(quote, url):
+        return (normalize(quote).strip("\"' "), url)
+
     # Rule 1: quoted text
     for m in _QUOTED_RE.finditer(text):
         if _preceded_by_memory(m.end()):
@@ -418,7 +450,7 @@ def extract_quotes(answer_text):
         if _URL_RE.match(quote) or quote.startswith(("http", "www.")):
             continue
         url = _find_nearby_url(text, m.end())
-        key = (quote, url)
+        key = _dedup_key(quote, url)
         if key in seen:
             continue
         seen.add(key)
@@ -432,7 +464,7 @@ def extract_quotes(answer_text):
         if not quote or _URL_RE.match(quote):
             continue
         url = _find_nearby_url(text, m.end())
-        key = (quote, url)
+        key = _dedup_key(quote, url)
         if key in seen:
             continue
         seen.add(key)
@@ -458,6 +490,12 @@ def _load_body(fetches_dir, url):
     Never raises - a missing file, a bad decode, or an OS error all resolve to
     None (which the caller treats as "we have no bytes for this URL"). This
     runs after every OR-channel review; it must not fail the review.
+
+    R100/F-6: also returns None for a 0-byte file. Otherwise `""` slipped
+    through the caller's `if body is None` guard, ran fuzzy against an empty
+    haystack, and reported `not found in 0 chars of body - possible
+    fabrication`. That is wrong: "the fetch persisted nothing" is
+    infrastructure, not fabrication. Route both cases through _body_status.
     """
     if not url or not fetches_dir:
         return None
@@ -466,9 +504,43 @@ def _load_body(fetches_dir, url):
     try:
         with open(path, "rb") as f:
             raw = f.read(BODY_READ_CAP)
+        if not raw:
+            return None
         return raw.decode("utf-8", "replace")
     except OSError:
         return None
+
+
+def _body_status(fetches_dir, url):
+    """R99/F-6. When _load_body returned None, explain WHY in one short string.
+
+    UNSEEN-BYTES is ambiguous by construction: it can mean (a) prep-step never
+    persisted this URL; (b) the persisted file exists but is empty; (c) the
+    file has bytes but they could not be read; (d) the URL/dir themselves were
+    not supplied. Only (a) is close to a real alarm - (b)-(d) point at
+    infrastructure. R99 calibration surfaced U4 (openrouter.ai/docs/... 404 on
+    backfill today) which reads as UNSEEN-BYTES but is HONEST, not fabrication.
+
+    Kept as a separate helper (not a new return shape for _load_body) so
+    existing call sites do not change. The check() below calls this only when
+    it needs the detail string, so cost is one os.path.exists + one getsize per
+    UNSEEN-BYTES row, not per every quote.
+    """
+    if not url or not fetches_dir:
+        return "no persisted bytes (URL or fetches_dir absent)"
+    slug = slug_for_url(url)
+    path = os.path.join(fetches_dir, slug)
+    if not os.path.exists(path):
+        return ("no persisted bytes on disk for this URL (prep-step did not "
+                "write it, page returned 4xx, or file was pruned)")
+    try:
+        if os.path.getsize(path) == 0:
+            return ("persisted file exists but is empty (fetch returned 0 bytes, "
+                    "or was truncated before flush)")
+    except OSError as exc:
+        return "OS error reading file size (%s)" % exc.__class__.__name__
+    return ("file exists on disk but load returned no content (unusual - "
+            "possible permissions, race, or exotic error)")
 
 
 def _norm_url_for_set(url):
@@ -477,8 +549,26 @@ def _norm_url_for_set(url):
     module graph. Deliberately narrower: no ValueError-handling for degenerate
     IPv6 - the URL comes from an opened_urls list that already passed the fetch
     fence upstream, so it is well-formed by construction.
+
+    R100/F-A. Accepts BOTH forms:
+      - a URL string (`https://ecfr.gov/current/...`) - from CLI, from selftest,
+        from any code that reads a plain URL list.
+      - a `(host, path)` tuple - what orchestrate.py's `opened` list carries,
+        because it pre-normalises through the sibling `_norm_url` before
+        collecting. Until 2026-09-20 this branch was missing, `.rstrip` crashed
+        on the tuple, and the enclosing `except Exception` in call_oai_reviewer
+        SILENTLY swallowed every call - no sidecars in prod runs after v1.69.0,
+        only in R99 calibration which happened to pass strings. Same class as
+        the R47 "prose promises what code doesn't do".
     """
     if not url:
+        return ("", "")
+    if isinstance(url, (list, tuple)):
+        # Already-normalised (host, path) pair from orchestrate.py's opened list.
+        if len(url) >= 2:
+            host = str(url[0] or "").lower().replace("www.", "")
+            path = str(url[1] or "/").rstrip("/").lower() or "/"
+            return (host, path)
         return ("", "")
     u = url.rstrip(".,;:")
     try:
@@ -564,13 +654,13 @@ def check(answer_text, fetches_dir=None, opened_urls=None):
         # Layer 2: byte match
         body = _load_body(fetches_dir, src_url)
         if body is None:
+            # R99/F-6: name the reason (missing file vs 0 bytes vs OS error).
             counts["UNSEEN-BYTES"] += 1
             lines.append({
                 "status": "UNSEEN-BYTES",
                 "quote": raw_quote,
                 "source_url": src_url,
-                "detail": "no persisted bytes on disk for this URL "
-                          "(prep-step did not write it, or it was pruned)",
+                "detail": _body_status(fetches_dir, src_url),
             })
             continue
 
@@ -582,7 +672,9 @@ def check(answer_text, fetches_dir=None, opened_urls=None):
                 "status": "UNSEEN-BYTES",
                 "quote": raw_quote,
                 "source_url": src_url,
-                "detail": "not found in %d chars of body (normalized)" % len(body_norm),
+                "detail": "not found in %d chars of body (normalized) - possible "
+                          "fabrication, page updated since original fetch, or "
+                          "quote paraphrased" % len(body_norm),
             })
             continue
 

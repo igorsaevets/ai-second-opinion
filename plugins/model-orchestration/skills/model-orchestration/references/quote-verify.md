@@ -182,21 +182,79 @@ report `[UNSEEN-BYTES]` (we cannot verify without bytes); no `--opened-urls`
   corrupted the text". Both land as `[NEAR-MATCH]`. Our bytes are a snapshot
   at fetch time; we do not re-fetch to compare.
 
-## Ф2 — the calibration this release leaves open
+## Calibration results (R99 → R100)
 
-Six questions the retrospective run on `runs/r80-panel-test/*` should answer:
+Measured on 7 answer files (r47/r61×2/r80×3), 170 quotes, 9 signal (Layer 1/2
+fired), 5 FPs. Fuzzy threshold **innocent** — all 5 FPs came from a single
+class: normalizer misses (whitespace-in-parens from HTML `<em>` strip, inline
+backticks) and extraction misses (paragraphs wrapped in outer `"..."` extracted
+twice — once by Rule 1 quoted, once by Rule 2 block quote).
 
-1. Is the fuzzy threshold `2% AND ≤3 chars` universal? R44 is the only
-   documented vendor-corruption case; more may show a different pattern.
-2. What fraction of `[OPENED]`-tagged claims does the extraction miss?
-   `_QUOTED_RE` covers quotation marks and block quotes; it does NOT (yet)
-   parse `[OPENED]`-tag semantics.
-3. Is 25 chars the right SHORT-UNVERIFIABLE threshold, or is a sentence-anchor
-   layer needed between?
-4. Are ligatures actually present in web pages? (Their 5% rate was measured on
-   PDF; web pages may be lower.)
-5. When should `<rundir>/<cname>.fetches/` be cleaned up? Same policy as the
-   parent `<rundir>/` — but that policy is not written down.
-6. Should persisted bytes be PII-scrubbed on write? Trade-off: scrubbing
-   breaks the byte-match VERIFIED path for legitimate quotes containing the
-   PII. Ф2 must weigh the disk-exposure risk against the false-negative rate.
+R100 (Ф3) applies four fixes:
+
+* **F-A** — `_norm_url_for_set` accepts `(host, path)` tuples, not only strings.
+  Production `call_oai_reviewer` passes tuples; the missing branch had
+  `.rstrip()` crash on tuple, the enclosing `except Exception` swallowed it
+  silently, and **no sidecar was ever written in a production run from v1.69.0
+  through 2026-09-20** — only from R99 calibration which happened to pass
+  strings. Class: "prose promises what code doesn't do".
+* **F-1** — normalize `( X )` → `(X)` for 1-4 char alnum tokens. Closes eCFR
+  `<em>v</em>` HTML-strip artefact. Guarded so `( see p.5 )` (multi-word) and
+  `( 12345 )` (5+ chars) stay untouched.
+* **F-2** — strip backticks in normalize, BEFORE `_QUOTE_MAP`. Closes markdown
+  code-inline quotes like `` `TerminateProcess()` ``. Symmetric on both sides,
+  so legit grave-as-apostrophe rare cases are handled without asymmetry.
+* **F-3** — extract_quotes dedup key: `(normalize(quote).strip("\"' "), url)`,
+  not `(normalize(quote), url)`. The calibration report's own proposal did NOT
+  close the class — normalize does not strip outer wrap chars, so a `> "X"`
+  block-quote line (Rule 2 keeps `"`) and its inner quoted `X` (Rule 1 drops
+  `"`) still hashed differently. Strip needed.
+
+Combined effect on the R99 corpus (measured with production-form tuples):
+
+* NEAR-MATCH: 2 → 0 (dedup + F-1 flip)
+* UNSEEN-BYTES: 4 → 0 (dedup + F-2 flip + F-A restoration)
+* n_quotes: 170 → 158 (F-3 dedup)
+
+## F-6 — UNSEEN-BYTES ambiguity
+
+R99 flagged `[UNSEEN-BYTES]` as the noisiest verdict: four possible reasons,
+same code, same wording. F-6 names them apart in the sidecar `detail`:
+
+1. **file not on disk** — prep-step never wrote it (fetch failed, 4xx, race).
+   Sidecar: `no persisted bytes on disk for this URL (prep-step did not write
+   it, page returned 4xx, or file was pruned)`.
+2. **file exists but empty** — fetch returned 0 bytes. Sidecar: `persisted
+   file exists but is empty (fetch returned 0 bytes, or was truncated before
+   flush)`. `_load_body` treats empty as None (R100) so this branch is reached.
+3. **fuzzy did not find** — bytes present, quote is not on the page. Sidecar:
+   `not found in N chars of body (normalized) - possible fabrication, page
+   updated since original fetch, or quote paraphrased`.
+4. **OS error reading** — permissions or race. Sidecar: `file exists on disk
+   but load returned no content (unusual - possible permissions, race, or
+   exotic error)`.
+
+Only case (3) with a substantial body and a stable page reads as a real alarm.
+Cases (1), (2), (4) point at infrastructure.
+
+## Ф2 open questions still open
+
+Six the design left for calibration to answer — status after R99/R100:
+
+1. **Fuzzy threshold `2% AND ≤3 chars`** — INNOCENT on measured corpus. All 5
+   FPs closed by widening the normalizer/extraction, not by loosening fuzzy.
+   Kept.
+2. **`[OPENED]`-tag extraction coverage** — NOT MEASURED. `_QUOTED_RE` still
+   covers only quotation marks and block quotes. R99 corpus was code-review /
+   legal, `[OPENED]` tag semantics deferred to a future iteration.
+3. **25-char SHORT threshold** — 44.7% of R99 corpus lands SHORT-UNVERIFIABLE.
+   By-design for code-review corpus (identifiers like `_safe_fetch_url`);
+   legal-brief corpus will look different. Sentence-anchor layer deferred to
+   Ф4 stretch.
+4. **Ligatures in web pages** — NOT MEASURED. R99 corpus was all HTML, none
+   PDF-derived. Deferred.
+5. **`<rundir>/<cname>.fetches/` life-cycle** — no fix in Ф3. Policy proposal:
+   "delete when parent rundir is deleted", no more.
+6. **PII scrub of persisted bytes** — NOT NEEDED for R99 corpus (all
+   statutory / technical). Deferred; opt-in scrub if a run holds PII-bearing
+   pages.
