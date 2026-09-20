@@ -188,30 +188,30 @@ def compose(brief: str, posture: str, lane_name: str, marker: str) -> str:
     return "\n\n".join(parts)
 
 
-def worst_case_usd(lane: dict, item_chars: int) -> float:
+def worst_case_usd(lane: dict, item_chars: int, allow_stale: bool = False) -> float:
     est_in = item_chars / 3.5
     if lane["kind"] == "or-batch":
-        p = PR.or_batch(lane["model"])
+        p = PR.or_batch(lane["model"], allow_stale=allow_stale)
         return p.cost(int(est_in), lane.get("max_output", 120000))
     if lane["kind"] == "openai-batch":
-        p = PR.openai_direct(lane["model"], "batch")
+        p = PR.openai_direct(lane["model"], "batch", allow_stale=allow_stale)
         return p.cost(int(est_in), lane.get("max_output", 128000))
     if lane["kind"] == "google-batch":
-        p = PR.google_batch(lane["model"])
+        p = PR.google_batch(lane["model"], allow_stale=allow_stale)
         return p.cost(int(est_in), lane.get("max_output", 65536))
     if lane["kind"] == "flex-openai":
-        p = PR.openai_direct(lane["model"], "flex")
+        p = PR.openai_direct(lane["model"], "flex", allow_stale=allow_stale)
         web_input = lane.get("max_tool_calls", 12) * 25_000  # Probe D shape
         web_fee = lane.get("max_tool_calls", 12) * 10.00 / 1000
         return p.cost(int(est_in) + web_input, lane.get("max_output", 128000)) + web_fee
     raise SystemExit(f"REFUSING: unknown lane kind {lane['kind']!r}")
 
 
-def discount_gate(lane: dict, allow: bool) -> None:
-    p = {"or-batch": lambda: PR.or_batch(lane["model"]),
-         "openai-batch": lambda: PR.openai_direct(lane["model"], "batch"),
-         "google-batch": lambda: PR.google_batch(lane["model"]),
-         "flex-openai": lambda: PR.openai_direct(lane["model"], "flex")}[lane["kind"]]()
+def discount_gate(lane: dict, allow: bool, allow_stale: bool = False) -> None:
+    p = {"or-batch": lambda: PR.or_batch(lane["model"], allow_stale=allow_stale),
+         "openai-batch": lambda: PR.openai_direct(lane["model"], "batch", allow_stale=allow_stale),
+         "google-batch": lambda: PR.google_batch(lane["model"], allow_stale=allow_stale),
+         "flex-openai": lambda: PR.openai_direct(lane["model"], "flex", allow_stale=allow_stale)}[lane["kind"]]()
     if not p.discount:
         msg = (f"🔴 СКИДКИ НЕТ на lane '{lane['name']}' ({p.name}): "
                f"{p.discount_reason or 'snapshot has no discounted tier'}")
@@ -273,6 +273,13 @@ def main() -> int:
                     help="JSON list overriding the built-in v0.3 lineup")
     ap.add_argument("--only", default="", help="comma list of lane names to run")
     ap.add_argument("--allow-nodiscount", action="store_true")
+    ap.add_argument("--allow-stale-prices", action="store_true",
+                    help="pass allow_stale=True to prices.py — for --mode dry "
+                         "after a snapshot's _valid_through has passed (sol-pro "
+                         "2026-11-21, Google 2026-12-31). Without this flag, a "
+                         "past _valid_through raises SystemExit even in dry mode. "
+                         "USE FOR DRY ONLY unless you have re-verified the "
+                         "vendor prices out of band — cheap.")
     ap.add_argument("--pii-needles", default="",
                     help="file of name-needles (kept OUTSIDE the repo tree) "
                          "scanned before any OR lane submit")
@@ -388,7 +395,7 @@ def main() -> int:
     item_files: dict[str, pathlib.Path] = {}
     print(f"lanes: {', '.join(l['name'] + (' [CANARY]' if l.get('role') == 'canary' else '') for l in lanes)}")
     for lane in lanes:
-        discount_gate(lane, a.allow_nodiscount)
+        discount_gate(lane, a.allow_nodiscount, allow_stale=a.allow_stale_prices)
         text = compose(brief, posture, lane["name"], a.marker)
         if lane["kind"] == "or-batch":
             hits = pii_scan(text, a.pii_needles)
@@ -401,7 +408,7 @@ def main() -> int:
         f = rundir / f"item-{lane['name']}.txt"
         f.write_text(text, encoding="utf-8")
         item_files[lane["name"]] = f
-        wc = worst_case_usd(lane, len(text))
+        wc = worst_case_usd(lane, len(text), allow_stale=a.allow_stale_prices)
         total_worst += wc
         print(f"  {lane['name']:<10} {lane['kind']:<13} worst-case ${wc:.4f}")
     print(f"worst-case total: ${total_worst:.4f}  (ARITHMETIC, pre-submit gate)")

@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.68.0 — 2026-09-19
+
+R83 audit §Н-12 closed: `--allow-stale-prices` on `premium_panel.py` lets a
+premium call proceed past a snapshot's `_valid_through` date. Before this
+release the escape hatch existed only inside `prices.py` (a `allow_stale=True`
+kwarg on every price loader), was recommended verbatim in the refusal message
+(«pass `allow_stale=True`»), and was **unreachable from the CLI** — a call
+plan for `--mode dry` (nothing is spent) would still `SystemExit` and the
+message pointed to a switch nobody could actually set.
+
+First real deadline is `openai/gpt-5.6-sol-pro:batch` `_valid_through =
+2026-11-21` (~2 months from ship); Google `_valid_through = 2026-12-31` on
+`gemini-3.1-pro-preview` and `gemini-3.8-flash` follows. Reason not to
+auto-extend: the vendor did announce a change past those dates, and silently
+proceeding on numbers that are known to be stale is exactly the
+silent-billing failure mode the operator's operating rules forbid.
+
+* **New CLI flag `--allow-stale-prices`** on `premium/premium_panel.py`
+  (`action=store_true`, default `False`, safe by design). When set, both the
+  discount gate and the worst-case arithmetic pass `allow_stale=True` through
+  to `prices.py`, which prints a WARNING to stderr and continues instead of
+  `SystemExit`. Recommended shape is `--mode dry --allow-stale-prices` — for
+  answering «what would this run cost today» without re-capturing prices; use
+  for `--mode submit` only after verifying the vendor's current numbers out
+  of band.
+* **`worst_case_usd` and `discount_gate` gain an `allow_stale=False` keyword.**
+  All four kind branches (`or-batch`, `openai-batch`, `google-batch`,
+  `flex-openai`) pass the value into the corresponding `prices.py` loader
+  (`or_batch`, `openai_direct` at both `batch` and `flex` tiers,
+  `google_batch`). Signature-preserving: default `False` keeps every existing
+  caller behaviour identical.
+* **`prices.py._guard` refusal message now names the CLI flag** as well as
+  the kwarg («or `--allow-stale-prices` on premium_panel.py»). The R83 audit
+  found the message advertised an escape hatch that had no CLI wiring; the
+  wiring now exists and the message now points at it.
+* **New selftest suite `suite_r96_allow_stale_prices_cli`** (36 pins) covers:
+  the argparse flag exists as `action=store_true`; both function signatures
+  accept `allow_stale` with default `False`; all four kind branches in both
+  functions pass `allow_stale=allow_stale` (not a bare kwarg default); the
+  `main()` body passes `a.allow_stale_prices` into both callers (extracted by
+  `\ndef ` boundary rather than a byte-cap, per R95 lesson); and integration
+  through a fake `PR` module that raises `SystemExit` unless
+  `allow_stale=True` — for each of the four kinds, without the flag both
+  callers raise, with the flag both return normally.
+
+Class trap avoided: no attempt at «auto-detect stale past N days → warn
+silently», per the operator's problem framing («риск silent-billing на неверных
+ценах»). The flag is opt-in on purpose.
+
 ## 1.67.0 — 2026-09-19
 
 Kit-Б-11: `call_codex` now surfaces the vendor's own reason for a refusal.

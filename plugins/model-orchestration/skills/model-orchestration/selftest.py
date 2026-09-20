@@ -6875,7 +6875,8 @@ def main():
                   suite_r90_silent_drop_criterion_1,
                   suite_r91_set_unlisted_and_new_channel,
                   suite_r92_premium_panel_fixes,
-                  suite_r94_codex_vendor_error_surfacing):
+                  suite_r94_codex_vendor_error_surfacing,
+                  suite_r96_allow_stale_prices_cli):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -8354,6 +8355,206 @@ def suite_r94_codex_vendor_error_surfacing():
     check("warn.append(vendor_err)" in call_codex_body,
           "R94 (15d) resolved vendor_err is appended to the warnings list",
           "body len=%d" % len(call_codex_body))
+
+
+def suite_r96_allow_stale_prices_cli():
+    """
+    R96 (2026-09-19), kit v1.68.0. R83 audit §Н-12: after a snapshot's
+    _valid_through date, prices.py raises SystemExit even inside
+    premium_panel.py --mode dry, where nothing is spent. The escape hatch
+    (allow_stale=True) existed in prices.py but was NOT wired through
+    premium_panel.py: the CLI had no way to set it. First deadline:
+    sol-pro:batch _valid_through = 2026-11-21 (Google 2026-12-31 next).
+
+    Fix in this release:
+      (a) --allow-stale-prices CLI flag (action=store_true, default False;
+          safe default preserved);
+      (b) discount_gate + worst_case_usd accept allow_stale keyword;
+      (c) main() passes a.allow_stale_prices to both callers;
+      (d) prices.py _guard message names both the kwarg AND the CLI flag —
+          the previous text advertised only the kwarg, which was unreachable
+          from the command line (class R83 "documented escape hatch IS the
+          default" only bites when the hatch is actually reachable).
+
+    Integration pins use a FAKE PR module that raises SystemExit unless
+    allow_stale=True — no real snapshot with past date is needed; the wiring
+    itself is what we test. A synthetic snapshot would test prices.py's
+    _guard (already covered) and add filesystem coupling to the pin.
+    """
+    import importlib.util as _iu_r96
+    import inspect as _in_r96
+
+    PREMIUM = HERE / "premium"
+    section("R96 R83 п.6: --allow-stale-prices for past-date snapshots")
+
+    def _load_mod(name, path):
+        spec = _iu_r96.spec_from_file_location(name, str(path))
+        mod = _iu_r96.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore
+        return mod
+
+    panel_mod = _load_mod("premium_panel_r96", PREMIUM / "premium_panel.py")
+    panel_src = (PREMIUM / "premium_panel.py").read_text(encoding="utf-8")
+    prices_src = (PREMIUM / "prices.py").read_text(encoding="utf-8")
+
+    # ---- (1) argparse flag declared in source
+    check('add_argument("--allow-stale-prices"' in panel_src,
+          "R96 (1a) argparse declares --allow-stale-prices",
+          "not found in panel_src (len=%d)" % len(panel_src))
+    check("action=\"store_true\"" in panel_src.split("--allow-stale-prices", 1)[1][:200],
+          "R96 (1b) --allow-stale-prices is action=store_true (opt-in flag)",
+          "surrounding=%r" % panel_src.split("--allow-stale-prices", 1)[1][:200])
+
+    # ---- (2) worst_case_usd signature + body wiring
+    sig = _in_r96.signature(panel_mod.worst_case_usd)
+    check("allow_stale" in sig.parameters,
+          "R96 (2a) worst_case_usd(...) accepts allow_stale keyword",
+          "signature=%s" % sig)
+    check(sig.parameters.get("allow_stale") and
+          sig.parameters["allow_stale"].default is False,
+          "R96 (2b) worst_case_usd allow_stale default is False (safe)",
+          "default=%r" % (sig.parameters.get("allow_stale").default
+                          if "allow_stale" in sig.parameters else None))
+
+    wcu_start = panel_src.find("def worst_case_usd(")
+    check(wcu_start > 0, "R96 (2c) worst_case_usd def located in source")
+    wcu_end = panel_src.find("\ndef ", wcu_start + 1)
+    wcu_body = (panel_src[wcu_start:wcu_end] if wcu_end > 0
+                else panel_src[wcu_start:])
+    for label, kind_call in (
+        ("or_batch", 'or_batch(lane["model"], allow_stale=allow_stale)'),
+        ("openai_direct/batch",
+         'openai_direct(lane["model"], "batch", allow_stale=allow_stale)'),
+        ("google_batch", 'google_batch(lane["model"], allow_stale=allow_stale)'),
+        ("openai_direct/flex",
+         'openai_direct(lane["model"], "flex", allow_stale=allow_stale)'),
+    ):
+        check(kind_call in wcu_body,
+              "R96 (2d) worst_case_usd body passes allow_stale to %s" % label,
+              "body len=%d, missing snippet=%r" % (len(wcu_body), kind_call))
+
+    # ---- (3) discount_gate signature + body wiring
+    sig_dg = _in_r96.signature(panel_mod.discount_gate)
+    check("allow_stale" in sig_dg.parameters,
+          "R96 (3a) discount_gate(...) accepts allow_stale keyword",
+          "signature=%s" % sig_dg)
+    check(sig_dg.parameters.get("allow_stale") and
+          sig_dg.parameters["allow_stale"].default is False,
+          "R96 (3b) discount_gate allow_stale default is False (safe)",
+          "default=%r" % (sig_dg.parameters.get("allow_stale").default
+                          if "allow_stale" in sig_dg.parameters else None))
+
+    dg_start = panel_src.find("def discount_gate(")
+    check(dg_start > 0, "R96 (3c) discount_gate def located in source")
+    dg_end = panel_src.find("\ndef ", dg_start + 1)
+    dg_body = (panel_src[dg_start:dg_end] if dg_end > 0
+               else panel_src[dg_start:])
+    for label, kind_call in (
+        ("or_batch", 'or_batch(lane["model"], allow_stale=allow_stale)'),
+        ("openai_direct/batch",
+         'openai_direct(lane["model"], "batch", allow_stale=allow_stale)'),
+        ("google_batch", 'google_batch(lane["model"], allow_stale=allow_stale)'),
+        ("openai_direct/flex",
+         'openai_direct(lane["model"], "flex", allow_stale=allow_stale)'),
+    ):
+        check(kind_call in dg_body,
+              "R96 (3d) discount_gate body passes allow_stale to %s" % label,
+              "body len=%d, missing snippet=%r" % (len(dg_body), kind_call))
+
+    # ---- (4) main() body wires a.allow_stale_prices to both callers.
+    # Extract main() body by \ndef boundary rather than a byte-cap (R95 lesson).
+    main_start = panel_src.find("def main(")
+    check(main_start > 0, "R96 (4a) main() def located in source")
+    main_end = panel_src.find("\ndef ", main_start + 1)
+    main_body = (panel_src[main_start:main_end] if main_end > 0
+                 else panel_src[main_start:])
+    check("discount_gate(lane, a.allow_nodiscount, allow_stale=a.allow_stale_prices)"
+          in main_body,
+          "R96 (4b) main() passes a.allow_stale_prices to discount_gate",
+          "main body len=%d" % len(main_body))
+    check("worst_case_usd(lane, len(text), allow_stale=a.allow_stale_prices)"
+          in main_body,
+          "R96 (4c) main() passes a.allow_stale_prices to worst_case_usd",
+          "main body len=%d" % len(main_body))
+
+    # ---- (5) prices.py _guard message mentions --allow-stale-prices
+    check("--allow-stale-prices" in prices_src,
+          "R96 (5) prices.py _guard message names the CLI flag",
+          "not found in prices_src (len=%d)" % len(prices_src))
+
+    # ---- (6) Integration: fake PR that raises SystemExit unless allow_stale=True
+    class _FakePricing:
+        discount = True
+        discount_reason = ""
+        name = "fake-r96"
+        def cost(self, *a, **kw):  # noqa: ANN001, ANN002, ANN003
+            return 0.001
+
+    class _FakePR:
+        """Behaves like a stale prices.py: refuses unless allow_stale=True."""
+        _fp = _FakePricing()
+        @classmethod
+        def or_batch(cls, model, allow_stale=False):
+            if not allow_stale:
+                raise SystemExit("REFUSING: r96 fake stale (or_batch)")
+            return cls._fp
+        @classmethod
+        def openai_direct(cls, model, tier="flex", allow_stale=False):
+            if not allow_stale:
+                raise SystemExit("REFUSING: r96 fake stale (openai_direct)")
+            return cls._fp
+        @classmethod
+        def google_batch(cls, model, allow_stale=False):
+            if not allow_stale:
+                raise SystemExit("REFUSING: r96 fake stale (google_batch)")
+            return cls._fp
+
+    saved_PR = panel_mod.PR
+    panel_mod.PR = _FakePR
+    try:
+        for kind in ("or-batch", "openai-batch", "google-batch", "flex-openai"):
+            lane = {"name": "t", "kind": kind, "model": "fake",
+                    "max_output": 1000, "max_tool_calls": 1}
+            # discount_gate without allow_stale → SystemExit
+            raised = False
+            try:
+                panel_mod.discount_gate(lane, False)
+            except SystemExit:
+                raised = True
+            check(raised,
+                  "R96 (6a-%s) discount_gate raises without allow_stale" % kind,
+                  "kind=%s" % kind)
+            # discount_gate with allow_stale=True → no exception
+            raised = False
+            try:
+                panel_mod.discount_gate(lane, False, allow_stale=True)
+            except SystemExit:
+                raised = True
+            check(not raised,
+                  "R96 (6b-%s) discount_gate OK with allow_stale=True" % kind,
+                  "unexpected SystemExit" if raised else "")
+            # worst_case_usd without allow_stale → SystemExit
+            raised = False
+            try:
+                panel_mod.worst_case_usd(lane, 100)
+            except SystemExit:
+                raised = True
+            check(raised,
+                  "R96 (6c-%s) worst_case_usd raises without allow_stale" % kind,
+                  "kind=%s" % kind)
+            # worst_case_usd with allow_stale=True → returns a float
+            got = None
+            raised = False
+            try:
+                got = panel_mod.worst_case_usd(lane, 100, allow_stale=True)
+            except SystemExit:
+                raised = True
+            check(not raised and isinstance(got, float),
+                  "R96 (6d-%s) worst_case_usd returns float with allow_stale=True"
+                  % kind,
+                  "raised=%s got=%r" % (raised, got))
+    finally:
+        panel_mod.PR = saved_PR
 
 
 if __name__ == "__main__":

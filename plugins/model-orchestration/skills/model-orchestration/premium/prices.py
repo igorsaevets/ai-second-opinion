@@ -62,7 +62,8 @@ def _guard(name: str, captured: str | None, valid_through: str | None,
                 f"REFUSING: price block '{name}' was valid through {vt} and today "
                 f"is {today}. The vendor announced a change past that date — "
                 f"re-capture models_snapshot.json before spending, or pass "
-                f"allow_stale=True after deciding on the record.")
+                f"allow_stale=True (or `--allow-stale-prices` on premium_panel.py) "
+                f"after deciding on the record.")
         print(f"WARNING: '{name}' past its valid-through {vt} — proceeding on "
               f"explicit override.", file=sys.stderr)
     cap = _date_of(captured)
