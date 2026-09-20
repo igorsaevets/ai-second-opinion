@@ -2605,6 +2605,103 @@ def _parse_codex_events(path):
     return out
 
 
+def _extract_codex_vendor_error(path):
+    """When codex exits non-zero, surface the vendor's reason from progress.log.
+
+    Measured R94 2026-09-19 (#44 criterion 6 paid probe): a paid call to codex with a slug the
+    vendor does not accept (`--set codex=gpt-9-nonexistent-r91`) writes five JSONL lines to
+    `CODEX.progress.log`, and lines 4 and 5 carry the same HTTP 400 body verbatim:
+
+        {"type":"error","message":"{\\"type\\":\\"error\\",\\"status\\":400,
+         \\"error\\":{\\"type\\":\\"invalid_request_error\\",
+         \\"message\\":\\"The 'gpt-9-nonexistent-r91' model is not supported when using Codex
+         with a ChatGPT account.\\"}}"}
+        {"type":"turn.failed","error":{"message":"<same JSON string>"}}
+
+    The harness printed only `EMPTY OUTPUT (exit=1)`; a reader had to open progress.log by hand
+    to learn WHY the run failed. This is exactly the class R48 «readable artifacts» + R55 «report
+    the FIRST error» name: the evidence was on disk, the report was silent, and the user learned
+    less than the log knew.
+
+    THREE THINGS THIS FUNCTION MUST NOT BREAK:
+
+    1. **`item.completed type=error` is NOT a vendor rejection** — it is codex CLI's own local
+       pre-warning ("Model metadata for `X` not found. Defaulting to fallback metadata; this can
+       degrade performance"). Confused with a vendor 400 it would print a scary line about a call
+       that then succeeded. Gate: only `type=turn.failed` and top-level `type=error` count. In
+       R94 both exist and carry the same body; if only the top-level one is present (`turn.failed`
+       written late by the CLI and lost to a kill), the top-level `type=error` is the fallback.
+
+    2. **The `error.message` in a `turn.failed` is itself a JSON STRING**, not a plain sentence:
+       an OpenAI-shape body arrived as an escaped string inside a JSON field. Best-effort
+       `json.loads` of the inner value picks up the human message; a parse failure keeps the
+       outer text as-is (a non-OpenAI CLI error would land here).
+
+    3. **A telemetry reader must not raise.** OSError on the file, invalid JSON on a line,
+       missing fields — all silently return None. A read that cannot fail is what makes the
+       existing `_parse_codex_events` safe next to a run that just crashed; this one holds the
+       same contract for the same reason.
+
+    Returns a formatted warning string like `vendor said (HTTP 400): <message>` (truncated to
+    200 chars of the human text), or None if no vendor-side signal was found. The caller (in
+    `call_codex`) gates on `p.returncode != 0` before appending it to `warnings` — an exit-0 run
+    with an unfired `turn.failed` (theoretically impossible from codex-cli, but the invariant is
+    that success never surfaces this) never produces a false-alarm line.
+    """
+    if not path or not os.path.exists(path):
+        return None
+    turn_failed_msg = None      # highest signal: the CLI decided the turn is done and failed
+    top_error_msg = None        # fallback: raw error frame before turn.failed was written
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                kind = ev.get("type")
+                if kind == "turn.failed":
+                    err = ev.get("error") or {}
+                    msg = err.get("message")
+                    if isinstance(msg, str) and msg:
+                        turn_failed_msg = msg          # last one wins if there are several
+                elif kind == "error":
+                    # TOP-LEVEL error only. `item.completed` with an `item.type == "error"` is the
+                    # CLI's own metadata pre-warning and is excluded on purpose (see #1 above).
+                    msg = ev.get("message")
+                    if isinstance(msg, str) and msg:
+                        top_error_msg = msg
+    except OSError:
+        return None
+    raw = turn_failed_msg or top_error_msg
+    if not raw:
+        return None
+    # The message may be a JSON string wrapping the vendor's real body. Parse best-effort.
+    status = None
+    human = raw
+    try:
+        inner = json.loads(raw)
+        if isinstance(inner, dict):
+            # Shape observed: {"type":"error","status":400,"error":{"type":"...","message":"..."}}
+            status = inner.get("status")
+            err_obj = inner.get("error")
+            if isinstance(err_obj, dict) and isinstance(err_obj.get("message"), str):
+                human = err_obj["message"]
+            elif isinstance(inner.get("message"), str):
+                human = inner["message"]
+    except (ValueError, TypeError):
+        pass                                            # not JSON — take raw as human text
+    human = human.strip()
+    if len(human) > 200:
+        human = human[:200].rstrip() + "..."
+    if isinstance(status, int):
+        return "vendor said (HTTP %d): %s" % (status, human)
+    return "vendor said: %s" % human
+
+
 def codex_rate_limits(workdir, started_after=None):
     """How much of the weekly subscription this account has left, from codex's own rollout.
 
@@ -2889,6 +2986,15 @@ def call_codex(brief, marker, workdir, outfile, model=None, effort=None, system=
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip():
         warn.append("EMPTY OUTPUT (exit=%d) %s" % (p.returncode, (p.stderr or "")[:200]))
+    # 🔴 R94 (2026-09-19), Kit-Б-11: when the CLI exits non-zero, the vendor's own reason for
+    # refusing the call is in CODEX.progress.log — a `turn.failed` frame with an OpenAI-shape
+    # error body. Not surfacing it made the R94 paid probe report only `EMPTY OUTPUT (exit=1)`
+    # for a call the vendor explained clearly ("model not supported when using Codex with a
+    # ChatGPT account"). Gated on exit != 0 to keep success paths silent.
+    if p.returncode != 0:
+        vendor_err = _extract_codex_vendor_error(progress)
+        if vendor_err:
+            warn.append(vendor_err)
     note = []
     record_refusal(refusal_check(text, marker), warn, note)
     # 🔴 model/effort ВОЗВРАЩАЮТСЯ с 2026-08-02. До этого дня канал не сообщал, на чём он

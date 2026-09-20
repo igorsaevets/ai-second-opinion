@@ -6874,7 +6874,8 @@ def main():
                   suite_r88_bypass_opt_in,
                   suite_r90_silent_drop_criterion_1,
                   suite_r91_set_unlisted_and_new_channel,
-                  suite_r92_premium_panel_fixes):
+                  suite_r92_premium_panel_fixes,
+                  suite_r94_codex_vendor_error_surfacing):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -8158,6 +8159,201 @@ def suite_r92_premium_panel_fixes():
             check(fs and fs[0].get("reason") == "no text in result",
                   "R92 (F-3.7) failures[0].reason kept for backward-compat",
                   "reason=%r" % (fs[0].get("reason") if fs else None))
+
+
+def suite_r94_codex_vendor_error_surfacing():
+    """
+    R94 (2026-09-19), kit v1.67.0. Kit-Б-11: `call_codex` used to swallow the vendor's own
+    reason for a refusal — `EMPTY OUTPUT (exit=1)` was all the report showed for a call whose
+    `CODEX.progress.log` clearly said (verbatim, R94 paid probe):
+
+        The 'gpt-9-nonexistent-r91' model is not supported when using Codex with a ChatGPT
+        account.
+
+    Fixture progress.log below is a byte-for-byte copy of what codex-cli 0.155.1 wrote to disk
+    on 2026-09-19 for `--set codex=gpt-9-nonexistent-r91 --only codex`. Any regression in
+    `_extract_codex_vendor_error` shape parsing fires here first.
+    """
+    import importlib.util as _iu
+
+    # Import orchestrate as a module so we can call the private helper directly. This is the
+    # same trick suite_r92 uses for premium_panel.py — hitting the function without spawning a
+    # subprocess keeps the pins fast and lets us plant deliberately malformed inputs.
+    spec = _iu.spec_from_file_location("orch_r94", str(HERE / "orchestrate.py"))
+    orch = _iu.module_from_spec(spec)
+    spec.loader.exec_module(orch)  # type: ignore
+
+    section("R94 Kit-Б-11: call_codex surfaces vendor error from progress.log")
+
+    check(callable(getattr(orch, "_extract_codex_vendor_error", None)),
+          "R94 (1) _extract_codex_vendor_error exists and is callable",
+          "attr=%r" % type(getattr(orch, "_extract_codex_vendor_error", None)).__name__)
+
+    # ---- Fixture 1: the actual R94 paid-probe body, byte-for-byte
+    R94_VERBATIM = (
+        '{"type":"thread.started","thread_id":"01a0bd62-0896-7b61-89a3-f530377c22ff"}\n'
+        '{"type":"item.completed","item":{"id":"item_0","type":"error",'
+        '"message":"Model metadata for `gpt-9-nonexistent-r91` not found. Defaulting to '
+        'fallback metadata; this can degrade performance and cause issues."}}\n'
+        '{"type":"turn.started"}\n'
+        '{"type":"error","message":"{\\"type\\":\\"error\\",\\"status\\":400,'
+        '\\"error\\":{\\"type\\":\\"invalid_request_error\\",'
+        '\\"message\\":\\"The \'gpt-9-nonexistent-r91\' model is not supported when using '
+        'Codex with a ChatGPT account.\\"}}"}\n'
+        '{"type":"turn.failed","error":{"message":"{\\"type\\":\\"error\\",\\"status\\":400,'
+        '\\"error\\":{\\"type\\":\\"invalid_request_error\\",'
+        '\\"message\\":\\"The \'gpt-9-nonexistent-r91\' model is not supported when using '
+        'Codex with a ChatGPT account.\\"}}"}}\n'
+    )
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "CODEX.progress.log"
+        p.write_text(R94_VERBATIM, encoding="utf-8")
+        result = orch._extract_codex_vendor_error(str(p))
+        check(isinstance(result, str) and result,
+              "R94 (2) verbatim R94 fixture returns a non-empty string",
+              "type=%r len=%d" % (type(result).__name__, len(result or "")))
+        check(result and "not supported when using Codex with a ChatGPT account" in result,
+              "R94 (3) fixture result contains the vendor's actual message",
+              "result=%r" % (result[:200] if result else None))
+        check(result and "HTTP 400" in result,
+              "R94 (4) HTTP status parsed out of the nested JSON body",
+              "result=%r" % (result[:200] if result else None))
+        # metadata pre-warning MUST NOT leak: that item.completed line is a codex CLI local note
+        # about missing FALLBACK METADATA, not the vendor's refusal, and confusing the two would
+        # print a false-alarm-shaped line for a call that actually succeeded.
+        check(result and "Model metadata for" not in result,
+              "R94 (5) item.completed pre-warning is NOT surfaced as a vendor error",
+              "leaked into: %r" % (result[:250] if result else None))
+
+    # ---- Fixture 2: item.completed pre-warning ALONE (no turn.failed, no top-level error)
+    ITEM_ONLY = (
+        '{"type":"thread.started","thread_id":"deadbeef"}\n'
+        '{"type":"item.completed","item":{"id":"item_0","type":"error",'
+        '"message":"Model metadata for `something` not found."}}\n'
+        '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}\n'
+    )
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "CODEX.progress.log"
+        p.write_text(ITEM_ONLY, encoding="utf-8")
+        result = orch._extract_codex_vendor_error(str(p))
+        check(result is None,
+              "R94 (6) item.completed alone returns None (never a false vendor error)",
+              "leaked: %r" % result)
+
+    # ---- Fixture 3: top-level error WITHOUT a turn.failed (killed before final frame)
+    ERROR_ONLY = (
+        '{"type":"thread.started","thread_id":"deadbeef"}\n'
+        '{"type":"turn.started"}\n'
+        '{"type":"error","message":"{\\"type\\":\\"error\\",\\"status\\":429,'
+        '\\"error\\":{\\"type\\":\\"rate_limit\\",'
+        '\\"message\\":\\"You exceeded your rate limit.\\"}}"}\n'
+    )
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "CODEX.progress.log"
+        p.write_text(ERROR_ONLY, encoding="utf-8")
+        result = orch._extract_codex_vendor_error(str(p))
+        check(result and "HTTP 429" in result and "rate limit" in result,
+              "R94 (7) top-level error is used as fallback when turn.failed absent",
+              "result=%r" % (result[:200] if result else None))
+
+    # ---- Fixture 4: non-existent path, empty file, blank input — must not raise
+    nonexistent = str(Path(tempfile.gettempdir()) / "r94-does-not-exist-abcxyz.log")
+    check(orch._extract_codex_vendor_error(nonexistent) is None,
+          "R94 (8a) non-existent path returns None (no exception)")
+    check(orch._extract_codex_vendor_error(None) is None,
+          "R94 (8b) None path returns None")
+    check(orch._extract_codex_vendor_error("") is None,
+          "R94 (8c) empty path returns None")
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "empty.log"
+        p.write_text("", encoding="utf-8")
+        check(orch._extract_codex_vendor_error(str(p)) is None,
+              "R94 (8d) empty file returns None")
+
+    # ---- Fixture 5: interleaved non-JSON lines (Rust MCP transport noise, like _parse_codex_events)
+    NOISY = (
+        'ERROR rmcp::transport::worker: worker quit with fatal something\n'
+        '{"type":"thread.started"}\n'
+        'not-json-not-brace-line\n'
+        '{"type":"turn.failed","error":{"message":"simple text vendor error"}}\n'
+        'trailing garbage\n'
+    )
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "noisy.log"
+        p.write_text(NOISY, encoding="utf-8")
+        result = orch._extract_codex_vendor_error(str(p))
+        check(result and "simple text vendor error" in result,
+              "R94 (9) non-JSON interleaved lines do not stop the parse",
+              "result=%r" % (result[:200] if result else None))
+
+    # ---- Fixture 6: non-JSON message (message is not itself JSON, just a sentence)
+    PLAIN = (
+        '{"type":"turn.failed","error":{"message":"Something went wrong on our end."}}\n'
+    )
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "plain.log"
+        p.write_text(PLAIN, encoding="utf-8")
+        result = orch._extract_codex_vendor_error(str(p))
+        check(result and "Something went wrong on our end." in result,
+              "R94 (10) plain-string error message is surfaced as-is",
+              "result=%r" % (result[:200] if result else None))
+        # No HTTP prefix when there is no parseable status
+        check(result and "HTTP" not in result,
+              "R94 (11) no fake HTTP status is invented for a plain-string message",
+              "result=%r" % (result[:200] if result else None))
+
+    # ---- Fixture 7: message longer than 200 chars is truncated with an ellipsis
+    long_body = "x" * 500
+    LONG = (
+        '{"type":"turn.failed","error":{"message":"%s"}}\n' % long_body
+    )
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "long.log"
+        p.write_text(LONG, encoding="utf-8")
+        result = orch._extract_codex_vendor_error(str(p))
+        # Human text portion capped at ~200 chars + prefix "vendor said: " (~13 chars) + ellipsis
+        check(result and len(result) <= 250,
+              "R94 (12) 500-char message truncated to ≤ 250 chars total",
+              "len=%d result=%r" % (len(result or ""), (result or "")[:100]))
+        check(result and result.endswith("..."),
+              "R94 (13) truncated result ends with '...' marker",
+              "tail=%r" % (result[-10:] if result else None))
+
+    # ---- Fixture 8: malformed JSON body inside a valid turn.failed frame — must not raise
+    MALFORMED_INNER = (
+        '{"type":"turn.failed","error":{"message":"{not valid json inside"}}\n'
+    )
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "malformed.log"
+        p.write_text(MALFORMED_INNER, encoding="utf-8")
+        result = orch._extract_codex_vendor_error(str(p))
+        check(result and "not valid json inside" in result,
+              "R94 (14) malformed inner JSON falls back to raw text (no raise)",
+              "result=%r" % (result[:200] if result else None))
+
+    # ---- (15) Prose-check: call_codex actually WIRES the helper into its warnings path.
+    # Extract the WHOLE body of call_codex — from its `def` line to the next top-level `def ` —
+    # rather than guessing a byte window. call_codex is ~100 lines and grows; a hand-picked cap
+    # would have to move on every future edit and would silently pass on new callers that added
+    # unrelated `def` lines mid-body.
+    orch_src = (HERE / "orchestrate.py").read_text(encoding="utf-8")
+    call_codex_start = orch_src.find("def call_codex(")
+    check(call_codex_start > 0,
+          "R94 (15a) call_codex definition found in orchestrate.py")
+    # Next top-level def AFTER call_codex — that is where the body ends
+    next_def = orch_src.find("\ndef ", call_codex_start + 1)
+    call_codex_body = (orch_src[call_codex_start:next_def]
+                       if next_def > 0 else orch_src[call_codex_start:])
+    check("_extract_codex_vendor_error(progress)" in call_codex_body,
+          "R94 (15b) call_codex invokes _extract_codex_vendor_error(progress)",
+          "body len=%d" % len(call_codex_body))
+    check("p.returncode != 0" in call_codex_body,
+          "R94 (15c) call_codex gates the vendor-error probe on returncode != 0",
+          "body len=%d" % len(call_codex_body))
+    # The append into warn must be the resolved vendor_err (not the raw fixture text)
+    check("warn.append(vendor_err)" in call_codex_body,
+          "R94 (15d) resolved vendor_err is appended to the warnings list",
+          "body len=%d" % len(call_codex_body))
 
 
 if __name__ == "__main__":

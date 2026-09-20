@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.67.0 — 2026-09-19
+
+Kit-Б-11: `call_codex` now surfaces the vendor's own reason for a refusal.
+
+Measured R94 the same day (`#44` criterion 6 paid probe, cost $0 on the codex
+subscription): a call with `--set codex=gpt-9-nonexistent-r91` — a slug the
+vendor does not accept — was answered by the codex CLI with a 5-line JSONL
+progress log whose last two frames carried an HTTP 400 body verbatim
+(«The 'gpt-9-nonexistent-r91' model is not supported when using Codex with a
+ChatGPT account.»). The harness printed only `EMPTY OUTPUT (exit=1)`; a reader
+had to open `CODEX.progress.log` by hand to learn WHY the call failed. That is
+exactly the shape the R48 «readable artifacts» and R55 «report the FIRST error»
+findings name.
+
+* **New helper `_extract_codex_vendor_error(progress_path)`** reads the codex
+  progress-log JSONL and, when a `turn.failed` frame is present, extracts the
+  `error.message`, best-effort parses it as an OpenAI-shape body (nested JSON
+  string) to lift the HTTP status and the human `error.message` out, and
+  returns a `vendor said (HTTP <status>): <text>` line (truncated to ~200
+  chars of the human text plus an ellipsis). When there is no `turn.failed`
+  but a top-level `type=error` frame exists (e.g. the CLI was killed before
+  its final frame), that is used as the fallback. A telemetry reader must
+  never raise: OSError, invalid JSON, missing fields all silently return
+  `None` — the same contract `_parse_codex_events` holds and for the same
+  reason.
+* **`call_codex` calls the new helper**, gated on `p.returncode != 0`, and
+  appends the result to the per-channel `warnings` list. Success paths stay
+  silent — no false-alarm-shaped line for a call that actually returned. The
+  existing `EMPTY OUTPUT (exit=%d) …` warning stays; the new line adds the
+  vendor's own words next to it, so the user no longer has to open the log.
+* **`item.completed` with `item.type == "error"` is deliberately NOT
+  surfaced.** That frame is the CLI's own local pre-warning about missing
+  fallback metadata («Model metadata for `<slug>` not found. Defaulting to
+  fallback metadata; this can degrade performance») and confusing it with a
+  vendor refusal would print an alarming line for a call that then succeeded
+  (measured R94: the same run carried both an item.completed metadata warning
+  AND the vendor's HTTP 400 — they mean different things).
+* **New selftest suite `suite_r94_codex_vendor_error_surfacing`** (21 pins)
+  covers: the exact R94-verbatim progress-log body → parsed with HTTP 400 +
+  vendor text; item.completed pre-warning alone → returns `None`; top-level
+  error without turn.failed → used as fallback with HTTP 429 parsed; non-
+  existent path / `None` path / empty path / empty file → all `None` without
+  raising; non-JSON lines interleaved (Rust MCP transport noise) → do not
+  stop the parse; plain-string vendor message → surfaced without inventing
+  an HTTP status; 500-char message → truncated to ≤ 250 chars with `...`;
+  malformed inner JSON → falls back to raw text without raising; prose-check
+  that `call_codex` actually wires the helper, gates on `returncode != 0`,
+  and appends the resolved value into `warnings`.
+
+Fixture progress log in the suite is a byte-for-byte copy of the R94 paid
+probe output (`D:/Claude Code/runs/r94-criterion6-probe/CODEX.progress.log`),
+so any regression in codex-cli's own JSONL shape fires here first.
+
 ## 1.66.0 — 2026-09-19
 
 Six fixes for the premium panel breakage observed 2026-09-14 (R92). The
