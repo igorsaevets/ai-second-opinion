@@ -1,11 +1,18 @@
 # Changelog
 
+## 1.73.2 — 2026-09-21
+
+* **Fix: `initial_plan()` was not copying `timeout` from channels.json.** The v1.73.1 fix
+  changed channels.json but `routing.py:initial_plan()` never included `timeout` in the plan
+  dict. The tier resolver fell back to a hardcoded `120` via `p.get("timeout") or 120`.
+
 ## 1.73.1 — 2026-09-21
 
 * **Fix: ocspark13free timeout 120s → 40m.** The opencode CLI channel was the only CLI
   channel with a 120-second timeout. Measured in UF6b (Plugins ironmemo, 2026-09-21):
   grokbuild answered in 159s, agy38flash in 230s, but ocspark13free was killed at 120s
   on the same brief — zero output. All other CLI channels already have `"timeout": "40m"`.
+  🔴 **INSUFFICIENT** — the value was changed but never read; see 1.73.2.
 
 ## 1.73.0 — 2026-09-20
 

@@ -1082,7 +1082,8 @@ def initial_plan(reg):
                 "panel": ch.get("panel"), "vendor": ch.get("vendor") or c,
                 "explicit_only": bool(ch.get("explicit_only")),
                 "kind": ch["kind"], "label": ch.get("label", c),
-                "effort": ch.get("effort"), "agent": ch.get("agent"), "why": []}
+                "effort": ch.get("effort"), "agent": ch.get("agent"),
+                "timeout": ch.get("timeout"), "why": []}
             for c, ch in reg["channels"].items()}
 
 
