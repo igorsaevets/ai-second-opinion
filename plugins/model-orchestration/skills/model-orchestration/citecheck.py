@@ -411,6 +411,223 @@ def resolve_all(urls, workers=10):
         return [probe_url(u) for u in urls]
 
 
+# =============================================================================
+# Kit-Б-12 SNAPSHOT classifier (R109, v1.73.0) - regex-only, no HTTP.
+# =============================================================================
+#
+# A "historical snapshot" URL is a frozen-in-time capture, not the current page. It matters
+# because a reviewer reading a brief needs to know that a legal quote came from a 2019 CFR
+# volume, not the CFR that governs the case today - the current text may have changed under
+# the same statutory citation. And that distinction is invisible without looking at the URL
+# structure: govinfo.gov/link/uscode/8/1158 (permalink, always current) and
+# govinfo.gov/content/pkg/USCODE-2019-title8/... (frozen 2019 volume) look equally official.
+#
+# Scope split with Kit-Б-10 (ground_classify.py): Б-10 answers "does the quote appear in the
+# body we hold". Б-12 answers "is this URL a historical snapshot". Different mechanism (URL
+# string vs body content), different failure mode (URL classification is deterministic and
+# regex-only; body match is fuzzy). Kept in separate homes on purpose.
+#
+# What this MUST NOT do:
+#  - fetch anything (pure classification from the URL string)
+#  - claim a URL is fabricated because it does not match a snapshot pattern - most legit URLs
+#    are not snapshots
+#  - flip the exit code of the harness (advisory only, same policy as Б-9/Б-10)
+
+
+SNAPSHOT_KINDS = frozenset([
+    "wayback",             # web.archive.org/web/{timestamp}/URL
+    "archive-today",       # archive.ph/{timestamp}/URL
+    "archive-today-short", # archive.ph/{short-hash} - no date visible
+    "govinfo-cfr",         # govinfo.gov/.../CFR-YYYY-titleN-...
+    "govinfo-uscode",      # govinfo.gov/.../USCODE-YYYY-titleN-...
+    "govinfo-statute",     # govinfo.gov/.../STATUTE-YYYY-...
+    "govinfo-fr",          # govinfo.gov/.../FR-YYYY-MM-DD-...
+    "govinfo-plaw",        # govinfo.gov/.../PLAW-{congress}publ...
+    "govinfo-bills",       # govinfo.gov/.../BILLS-{congress}...
+    "ecfr-dated",          # ecfr.gov/on/YYYY-MM-DD/...
+    "perma-cc",            # perma.cc/XXXX-XXXX
+])
+
+
+# Archive.today mirror domains. All show the same snapshots under different TLDs; users
+# and models pick whichever is reachable at any given time, so all must classify equally.
+_ARCHIVE_TODAY_HOSTS = frozenset([
+    "archive.today", "archive.ph", "archive.is",
+    "archive.li", "archive.md", "archive.fo", "archive.vn",
+])
+
+
+def _extract_year_date(timestamp_str):
+    """Pull (year, date) out of a leading YYYY[MM[DD]][hhmmss] digit run.
+
+    Returns (year, date_str_or_None). If fewer than 4 leading digits, returns (None, None).
+    date_str is 'YYYY-MM-DD' when at least 8 digits are present.
+    """
+    m = re.match(r"^(\d{4})(\d{2})?(\d{2})?", timestamp_str)
+    if not m:
+        return None, None
+    year = int(m.group(1))
+    date = ("%s-%s-%s" % (m.group(1), m.group(2), m.group(3))) if m.group(3) else None
+    return year, date
+
+
+def is_snapshot_url(url):
+    """Classify one URL as a historical snapshot. Returns dict or None.
+
+    The dict has:
+        kind      - a value from SNAPSHOT_KINDS
+        year      - int (best-effort from URL) or None
+        date      - 'YYYY-MM-DD' string or None
+        congress  - int (only on govinfo-plaw / govinfo-bills, absent otherwise)
+
+    Returns None when the URL is not a recognised snapshot pattern - the DEFAULT interpretation
+    is "current/live", not "unknown". A model that cites the CURRENT eCFR (ecfr.gov/current/...)
+    is not doing anything wrong; the caller learns nothing from being told about it.
+
+    Never raises. A malformed URL that urlsplit refuses is returned as None (unclassified),
+    not as an error - a hostile-shaped citation must not kill classification of the honest
+    ones around it. Same defence as normalise() and probe_url() above.
+    """
+    if not url:
+        return None
+    try:
+        s = urlsplit(url.rstrip(".,;:"))
+    except ValueError:
+        return None
+    host = (s.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    path = s.path or "/"
+
+    # Wayback Machine: web.archive.org/web/{timestamp-or-wildcard}/{original_url}
+    # Timestamp = 4-14 digits or '*'. The wildcard forms mean "any capture" and lose
+    # the year field but still classify as snapshot.
+    if host == "web.archive.org":
+        m = re.match(r"^/web/([\d*]+)/", path)
+        if m:
+            ts = m.group(1)
+            if ts.startswith("*"):
+                return {"kind": "wayback", "year": None, "date": None}
+            year, date = _extract_year_date(ts)
+            return {"kind": "wayback", "year": year, "date": date}
+
+    # Archive.today family: {host}/{timestamp}/{original_url} OR {host}/{short-hash}
+    if host in _ARCHIVE_TODAY_HOSTS:
+        m = re.match(r"^/(\d{4,14})/", path)
+        if m:
+            year, date = _extract_year_date(m.group(1))
+            return {"kind": "archive-today", "year": year, "date": date}
+        # Short hash form (perma.cc-style): 4-10 alphanumeric with optional trailing slash.
+        # Deliberately narrow to avoid matching random path segments.
+        if re.match(r"^/[A-Za-z0-9]{4,10}/?$", path):
+            return {"kind": "archive-today-short", "year": None, "date": None}
+
+    # govinfo.gov historical packages. Path shape is:
+    #   /content/pkg/{prefix}-{year|congress}[...]  (bulk file access)
+    #   /app/details/{prefix}-{year|congress}[...]  (browse UI)
+    # Permalinks like /link/uscode/8/1158 are NOT snapshots (they resolve to current).
+    if host == "govinfo.gov":
+        prefix = r"^/(?:content/pkg|app/details|metadata/pkg|content/granule)/"
+        # Year-based: CFR, USCODE. Volume-based: STATUTE (volume 104 covers 1990;
+        # the number in the URL is the STATUTES AT LARGE volume, not a year).
+        m = re.match(prefix + r"(CFR|USCODE)-(\d{4})", path)
+        if m:
+            kind_map = {"CFR": "govinfo-cfr", "USCODE": "govinfo-uscode"}
+            return {"kind": kind_map[m.group(1)], "year": int(m.group(2)), "date": None}
+        m = re.match(prefix + r"STATUTE-(\d{1,4})", path)
+        if m:
+            return {"kind": "govinfo-statute", "year": None, "date": None,
+                    "volume": int(m.group(1))}
+        # Date-based: FR (Federal Register historical PDF/XML) - YYYY-MM-DD
+        m = re.match(prefix + r"FR-(\d{4})-(\d{2})-(\d{2})", path)
+        if m:
+            return {"kind": "govinfo-fr", "year": int(m.group(1)),
+                    "date": "%s-%s-%s" % (m.group(1), m.group(2), m.group(3))}
+        # Congress-based: PLAW-{congress}publ{n}, BILLS-{congress}...
+        # A Congress number is a 3-digit form (116th = 2019-2021). Not a year - keep the
+        # field named `congress` so a downstream reader does not treat it as one.
+        m = re.match(prefix + r"PLAW-(\d{3})publ", path)
+        if m:
+            return {"kind": "govinfo-plaw", "year": None, "date": None,
+                    "congress": int(m.group(1))}
+        m = re.match(prefix + r"BILLS-(\d{3})", path)
+        if m:
+            return {"kind": "govinfo-bills", "year": None, "date": None,
+                    "congress": int(m.group(1))}
+
+    # eCFR dated snapshot: ecfr.gov/on/YYYY-MM-DD/... - the site's own historical form.
+    # ecfr.gov/current/... is the LIVE view and deliberately NOT classified as snapshot.
+    if host == "ecfr.gov":
+        m = re.match(r"^/on/(\d{4})-(\d{2})-(\d{2})/", path)
+        if m:
+            return {"kind": "ecfr-dated", "year": int(m.group(1)),
+                    "date": "%s-%s-%s" % (m.group(1), m.group(2), m.group(3))}
+
+    # perma.cc: strict 4-4 alphanumeric with hyphen. Legal briefs cite perma extensively
+    # (Harvard Law Library service explicitly designed for stable citation of web pages),
+    # so a hit here is a strong signal the citer knew they were fixing the source in time.
+    # The dash form is deliberate - a bare alphanumeric slug matches too many random paths.
+    if host == "perma.cc":
+        if re.match(r"^/[A-Z0-9]{4}-[A-Z0-9]{4}/?$", path):
+            return {"kind": "perma-cc", "year": None, "date": None}
+
+    return None
+
+
+def snapshot_urls_in_answer(answer_text):
+    """Scan an answer for every URL and return the ones that classify as snapshots.
+
+    Returns a list of dicts, each carrying the classification plus the URL under `url`.
+    Preserves order of first occurrence in the text; duplicate URLs are deduplicated
+    by (host, path) - the same key normalise() uses - so a snapshot cited three times
+    counts once.
+    """
+    if not answer_text:
+        return []
+    seen = set()
+    out = []
+    for m in URL_RE.finditer(answer_text):
+        raw = m.group().rstrip(".,;:")
+        key = normalise(raw)
+        if key in seen:
+            continue
+        seen.add(key)
+        c = is_snapshot_url(raw)
+        if c:
+            entry = {"url": raw}
+            entry.update(c)
+            out.append(entry)
+    return out
+
+
+def summarize_snapshots(hits):
+    """One human line: '3 snapshot(s): wayback=2, govinfo-cfr=1'. '' if no hits."""
+    if not hits:
+        return ""
+    tally = {}
+    for h in hits:
+        tally[h["kind"]] = tally.get(h["kind"], 0) + 1
+    parts = ", ".join("%s=%d" % (k, tally[k]) for k in sorted(tally))
+    return "%d snapshot(s): %s" % (len(hits), parts)
+
+
+def report_snapshots(hits):
+    """Print snapshot classifications, one URL per line. No output if hits is empty."""
+    if not hits:
+        return 0
+    print("\nHistorical snapshot URLs (%d):" % len(hits))
+    for h in hits:
+        year_s = str(h["year"]) if h.get("year") is not None else "-"
+        date_s = h.get("date") or ""
+        cong_s = ("congress=%d" % h["congress"]) if h.get("congress") is not None else ""
+        detail = " ".join(x for x in (date_s, cong_s) if x)
+        print("  %-20s year=%-4s %-30s %s" % (h["kind"], year_s, detail, h["url"][:80]))
+    print("  " + summarize_snapshots(hits))
+    print("  These are FROZEN-IN-TIME captures, not the current source. Compare with"
+          " the live page if the case turns on today's text.")
+    return len(hits)
+
+
 def report_url_resolution(cited_raw):
     """
     Print the existence check and return the number of DEAD citations.
@@ -452,6 +669,10 @@ def main():
     ap.add_argument("--resolve-urls", action="store_true",
                     help="fetch every cited URL and report which ones do not exist. Works "
                          "without an event log, so it covers channels with no telemetry")
+    ap.add_argument("--snapshot", action="store_true",
+                    help="classify cited URLs against Kit-Б-12 historical snapshot patterns"
+                         " (wayback, govinfo-cfr/uscode/fr/plaw/bills, ecfr-dated, archive-today,"
+                         " perma-cc). Pure regex, no HTTP. Composes with --resolve-urls.")
     a = ap.parse_args()
 
     if not a.ndjson:
@@ -467,8 +688,11 @@ def main():
         print("no event log given - grounding cannot be checked, only existence.")
         print("answer cites %d distinct URL(s)" % len(cited_raw))
         report_url_resolution(cited_raw if a.resolve_urls else [])
-        if not a.resolve_urls:
-            print("pass --resolve-urls to check whether those URLs exist.")
+        if a.snapshot:
+            report_snapshots(snapshot_urls_in_answer(text))
+        if not a.resolve_urls and not a.snapshot:
+            print("pass --resolve-urls to check whether those URLs exist,"
+                  " and/or --snapshot to flag historical captures.")
         return 0
 
     text = answer_text(a.ndjson, a.answer)
@@ -523,6 +747,8 @@ def main():
 
     if a.resolve_urls:
         report_url_resolution([raw for raw, _ in cited])
+    if a.snapshot:
+        report_snapshots(snapshot_urls_in_answer(text))
     return 0
 
 

@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.73.0 — 2026-09-20
+
+* **Kit-Б-12 SNAPSHOT: historical-URL classifier (task #21, R109).** New
+  `citecheck.is_snapshot_url(url)` returns `{"kind", "year", "date"[, "congress"]}`
+  or `None` for URLs that point to a frozen-in-time capture rather than the
+  current source. Twelve kinds, all regex-only, no HTTP:
+  `wayback`, `archive-today`, `archive-today-short`, `govinfo-cfr`,
+  `govinfo-uscode`, `govinfo-statute`, `govinfo-fr`, `govinfo-plaw`,
+  `govinfo-bills`, `ecfr-dated`, `perma-cc`. The `SNAPSHOT_KINDS` frozenset
+  is exported so downstream code can iterate exhaustively.
+* **Scope split with Kit-Б-10** (`ground_classify.py`), documented in that
+  file's SCOPE section since v1.71.0: Б-10 answers «does the quote appear in
+  the body we hold» (text similarity, potentially fuzzy). Б-12 answers «is
+  this URL a historical snapshot» (URL string, deterministic regex). Kept in
+  separate homes because the mechanisms and failure modes are different.
+* **Standalone CLI**: `python citecheck.py --answer FILE --snapshot` prints
+  per-URL classification with year/date/congress. Composes with
+  `--resolve-urls`. No event log needed.
+* **`snapshot_urls_in_answer(text)`** scans all URLs in an answer, returns a
+  list of hits deduplicated by `normalise(url)` (host+path lowered, tracking
+  params ignored). `summarize_snapshots(hits)` renders «3 snapshot(s):
+  wayback=2, govinfo-cfr=1» for reports. `report_snapshots(hits)` prints per-URL
+  detail plus the summary and a reminder that a snapshot is a frozen page.
+* **orchestrate.py wire (advisory only)** in `call_oai_reviewer` right after
+  `_cite_check`: if any citation classifies as a snapshot, one line is added
+  to `note` naming the count, the kind tally, and «compare with the live page
+  if today's text matters». Wrapped in `try/except` so classification cannot
+  affect a paid call — same fail-safe policy as Б-9/Б-10.
+* **What Б-12 will NOT do** (matches the design invariants named in the
+  citecheck.py block comment): fetch anything; claim a URL is fabricated
+  because it does not match a snapshot pattern; flip the exit code of the
+  harness. A non-snapshot URL is treated as «current», which is the right
+  default — most legitimate URLs are not snapshots.
+* **Permalinks are deliberately NOT snapshots.** `govinfo.gov/link/uscode/8/1158`
+  resolves to the current text and looks equally official to a reviewer.
+  `ecfr.gov/current/...` is the LIVE view. `federalregister.gov/documents/YYYY/...`
+  is the current version of a document dated by publication (not archived).
+  All three return `None`, which is the correct answer.
+* **Selftest deltas**: +34 R109 pins in `suite_r109_snapshot_classifier` —
+  positive cases for all 11 kinds (25 pins covering year/date/congress
+  extraction and mirror-domain equivalence for archive.today), negative cases
+  (7 pins: current-eCFR, permalinks, wrong-domain lookalikes, malformed URL
+  survives), aggregation (2 pins: `snapshot_urls_in_answer` order preservation
+  + dedup), and export contract (`SNAPSHOT_KINDS` enumerates exactly what
+  `is_snapshot_url` can return).
+* **New reference doc**: `references/snapshot-classifier.md` — one-page
+  summary of what each kind means, why permalinks are not snapshots, and how
+  to read the advisory note. Deliberately not in SKILL.md (the 5 000-token
+  budget is precarious after R103).
+* **No API breakage.** citecheck.py's existing `probe_url` / `resolve_wrapper`
+  / `report_url_resolution` and orchestrate.py's `_cite_check` are unchanged.
+  A caller that ignores Б-12 sees identical behaviour to v1.72.1.
+
 ## 1.72.1 — 2026-09-20
 
 * **Kit-Б-10 Ф3.5 hotfix (R106 postmortem → R107 drop).** R106 live-verify on

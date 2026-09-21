@@ -5391,6 +5391,21 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # the whole conversation, so the final call's prompt_tokens is only the last leg and reading
     # it as the total under-reports the round - on a fetch-heavy review, by most of the bill.
     n_cited, grounded, _ung = _cite_check(text, set(opened))
+    # Kit-Б-12 snapshot classification (R109, v1.73.0): flag historical/frozen URLs
+    # (wayback, govinfo yearly volumes, ecfr /on/, archive.today, perma.cc). Advisory
+    # only - same fail-safe policy as Б-9/Б-10. A URL that looks like a snapshot is
+    # not wrong; the note tells a reviewer that today's live source may say something
+    # different than the frozen page the model quoted.
+    try:
+        from citecheck import (snapshot_urls_in_answer as _snap_scan,
+                               summarize_snapshots as _snap_sum)
+        _snap_hits = _snap_scan(text)
+        if _snap_hits:
+            note.append("%s of %d cited URL(s) - these are frozen-in-time captures, not "
+                        "the current source. Compare with the live page if today's text "
+                        "matters." % (_snap_sum(_snap_hits), n_cited))
+    except Exception:  # noqa: BLE001 - classification is advisory, must not affect the call
+        pass
     # Б-9 quote-vs-seen-sources (R98): byte-compare the quotes in the answer
     # against the persisted fetched bodies (from prep-step in the loop above).
     # Advisory - never fails the run. Writes <cname>.quote-verify.md sidecar

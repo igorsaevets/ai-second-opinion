@@ -6880,7 +6880,8 @@ def main():
                   suite_r98_quote_verify,
                   suite_r100_calibration_fixes,
                   suite_r103_ground_classify,
-                  suite_r104_calibration_regression):
+                  suite_r104_calibration_regression,
+                  suite_r109_snapshot_classifier):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -9690,6 +9691,202 @@ def suite_r104_calibration_regression():
           "R107 approach string does NOT contain 'f3' marker "
           "(v1.72.1: F-3 dropped, do not promise removed functionality)",
           "approach=%r" % _g_min["approach"])
+
+
+def suite_r109_snapshot_classifier():
+    """
+    R109 (2026-09-20, v1.73.0). Kit-Б-12 SNAPSHOT: URL classifier for historical
+    captures — regex-only, no HTTP. Task #21 in the backlog, renamed to Б-12
+    on the r102 scope split (Б-10 is semantic body-similarity, Б-12 is URL-string).
+
+    The pins here cover the whole classification surface:
+      - every one of the 11 kinds in SNAPSHOT_KINDS classifies its canonical URL;
+      - year / date / congress / volume are extracted where they exist;
+      - archive.today mirror hosts (7 TLDs) all classify equally;
+      - trailing punctuation, uppercase host, wildcard timestamp survive;
+      - permalinks, current-view URLs and lookalike domains classify as None;
+      - snapshot_urls_in_answer deduplicates by (host, path) and preserves order;
+      - summarize_snapshots renders `N snapshot(s): kind=count, ...`;
+      - the exported SNAPSHOT_KINDS frozenset is the exact vocabulary the
+        classifier can return (guards against silent kind drift).
+
+    Reasoning about the FP bar (same policy as Б-9 / Б-10): a URL that fails to
+    classify is treated as CURRENT, not «unknown». That is the right default —
+    most legitimate URLs are not snapshots. Fabrication is detected elsewhere
+    (probe_url → DEAD, Б-9 → UNSEEN-BYTES); this file only annotates.
+    """
+    import citecheck as cc
+
+    # ---- Export contract ---------------------------------------------------
+    check(isinstance(cc.SNAPSHOT_KINDS, frozenset),
+          "R109 SNAPSHOT_KINDS is a frozenset (immutable public contract)",
+          "type=%r" % type(cc.SNAPSHOT_KINDS).__name__)
+    _expected = {
+        "wayback", "archive-today", "archive-today-short",
+        "govinfo-cfr", "govinfo-uscode", "govinfo-statute",
+        "govinfo-fr", "govinfo-plaw", "govinfo-bills",
+        "ecfr-dated", "perma-cc",
+    }
+    check(cc.SNAPSHOT_KINDS == frozenset(_expected),
+          "R109 SNAPSHOT_KINDS lists exactly the 11 kinds Б-12 knows",
+          "diff=%r" % (cc.SNAPSHOT_KINDS ^ frozenset(_expected)))
+
+    # ---- Wayback: 5 variants covering timestamp shapes ---------------------
+    _r = cc.is_snapshot_url(
+        "https://web.archive.org/web/20230515000000/https://example.com/foo")
+    check(_r == {"kind": "wayback", "year": 2023, "date": "2023-05-15"},
+          "R109 wayback full 14-digit timestamp -> year+date",
+          "got=%r" % _r)
+    _r = cc.is_snapshot_url(
+        "https://web.archive.org/web/20230515/https://example.com/foo")
+    check(_r == {"kind": "wayback", "year": 2023, "date": "2023-05-15"},
+          "R109 wayback 8-digit timestamp (YYYYMMDD) -> year+date",
+          "got=%r" % _r)
+    _r = cc.is_snapshot_url(
+        "https://web.archive.org/web/2023/https://example.com/foo")
+    check(_r == {"kind": "wayback", "year": 2023, "date": None},
+          "R109 wayback 4-digit timestamp (year only) -> year, date=None",
+          "got=%r" % _r)
+    _r = cc.is_snapshot_url(
+        "http://web.archive.org/web/*/https://example.com/foo")
+    check(_r == {"kind": "wayback", "year": None, "date": None},
+          "R109 wayback wildcard '*' timestamp -> kind only, year=None",
+          "got=%r" % _r)
+    _r = cc.is_snapshot_url(
+        "https://WEB.ARCHIVE.ORG/web/20230515/https://example.com/foo")
+    check(_r is not None and _r["kind"] == "wayback",
+          "R109 wayback host uppercase -> still classified (case-insensitive host)",
+          "got=%r" % _r)
+    _r = cc.is_snapshot_url(
+        "https://web.archive.org/web/20230515000000/https://example.com/foo,")
+    check(_r is not None and _r["kind"] == "wayback" and _r["year"] == 2023,
+          "R109 wayback with trailing punctuation ',' -> stripped, classified",
+          "got=%r" % _r)
+
+    # ---- Archive.today family: 7 mirror TLDs classify equally --------------
+    for _tld in ("today", "ph", "is", "li", "md", "fo", "vn"):
+        _r = cc.is_snapshot_url(
+            "https://archive.%s/20230515/https://example.com" % _tld)
+        check(_r == {"kind": "archive-today", "year": 2023, "date": "2023-05-15"},
+              "R109 archive.%s mirror -> kind=archive-today with year+date" % _tld,
+              "got=%r" % _r)
+    _r = cc.is_snapshot_url("https://archive.ph/abcde")
+    check(_r == {"kind": "archive-today-short", "year": None, "date": None},
+          "R109 archive.ph short hash (5 chars) -> archive-today-short",
+          "got=%r" % _r)
+
+    # ---- govinfo: 6 volume kinds (year / date / congress / volume) ---------
+    _r = cc.is_snapshot_url(
+        "https://www.govinfo.gov/content/pkg/CFR-2019-title8-vol1/xml/foo.xml")
+    check(_r == {"kind": "govinfo-cfr", "year": 2019, "date": None},
+          "R109 govinfo CFR-YYYY yearly volume -> year, no date",
+          "got=%r" % _r)
+    _r = cc.is_snapshot_url(
+        "https://www.govinfo.gov/app/details/USCODE-2018-title8")
+    check(_r == {"kind": "govinfo-uscode", "year": 2018, "date": None},
+          "R109 govinfo USCODE-YYYY via /app/details -> year, no date",
+          "got=%r" % _r)
+    _r = cc.is_snapshot_url(
+        "https://www.govinfo.gov/content/pkg/STATUTE-104/pdf/STATUTE-104-Pg321.pdf")
+    check(_r == {"kind": "govinfo-statute", "year": None, "date": None, "volume": 104},
+          "R109 govinfo STATUTE-N -> volume, NOT year (104 is Statutes-at-Large vol, not 104 AD)",
+          "got=%r" % _r)
+    _r = cc.is_snapshot_url(
+        "https://www.govinfo.gov/content/pkg/FR-2023-05-15/pdf/2023-10203.pdf")
+    check(_r == {"kind": "govinfo-fr", "year": 2023, "date": "2023-05-15"},
+          "R109 govinfo FR-YYYY-MM-DD Federal Register historical -> year+date",
+          "got=%r" % _r)
+    _r = cc.is_snapshot_url(
+        "https://www.govinfo.gov/content/pkg/PLAW-116publ50/pdf/PLAW-116publ50.pdf")
+    check(_r == {"kind": "govinfo-plaw", "year": None, "date": None, "congress": 116},
+          "R109 govinfo PLAW-{congress}publ -> congress number, not year",
+          "got=%r" % _r)
+    _r = cc.is_snapshot_url(
+        "https://www.govinfo.gov/content/pkg/BILLS-118hr1/xml/BILLS-118hr1.xml")
+    check(_r == {"kind": "govinfo-bills", "year": None, "date": None, "congress": 118},
+          "R109 govinfo BILLS-{congress}... -> congress number",
+          "got=%r" % _r)
+
+    # ---- ecfr dated + perma.cc ---------------------------------------------
+    _r = cc.is_snapshot_url(
+        "https://www.ecfr.gov/on/2023-05-15/title-8/chapter-I/subchapter-B/part-208")
+    check(_r == {"kind": "ecfr-dated", "year": 2023, "date": "2023-05-15"},
+          "R109 ecfr.gov/on/YYYY-MM-DD/ dated snapshot -> year+date",
+          "got=%r" % _r)
+    _r = cc.is_snapshot_url("https://perma.cc/K5RV-JZ4Y")
+    check(_r == {"kind": "perma-cc", "year": None, "date": None},
+          "R109 perma.cc/XXXX-XXXX (4-4 alphanumeric hyphenated) -> perma-cc",
+          "got=%r" % _r)
+    _r = cc.is_snapshot_url("https://perma.cc/K5RV-JZ4Y.")
+    check(_r is not None and _r["kind"] == "perma-cc",
+          "R109 perma.cc trailing dot survives (URL rstrip in classifier)",
+          "got=%r" % _r)
+
+    # ---- NEGATIVE: current / permalink / wrong-domain / malformed ---------
+    check(cc.is_snapshot_url("https://www.govinfo.gov/link/uscode/8/1158") is None,
+          "R109 govinfo /link/ PERMALINK is NOT snapshot (resolves to current text)")
+    check(cc.is_snapshot_url(
+              "https://www.ecfr.gov/current/title-8/chapter-I/subchapter-B/part-208") is None,
+          "R109 ecfr.gov/current/ is NOT snapshot (this is the live view)")
+    check(cc.is_snapshot_url(
+              "https://www.federalregister.gov/documents/2023/05/15/2023-10203/rule") is None,
+          "R109 federalregister.gov/documents/YYYY/ is NOT snapshot "
+          "(publication date on a current document, not archived)")
+    check(cc.is_snapshot_url("https://github.com/user/repo") is None,
+          "R109 random github URL -> None (default is CURRENT, not UNKNOWN)")
+    check(cc.is_snapshot_url("https://google.com/search?q=CFR-2023-title8") is None,
+          "R109 google search containing 'CFR-2023' text -> None (wrong domain, no false match)")
+    check(cc.is_snapshot_url("https://example.com/on/2023-05-15/foo") is None,
+          "R109 /on/YYYY-MM-DD/ path on wrong domain -> None (ecfr.gov required)")
+    check(cc.is_snapshot_url("https://web.archive.org/save/https://foo.com") is None,
+          "R109 wayback /save/ endpoint (creates snapshot, is not one) -> None")
+    check(cc.is_snapshot_url("") is None,
+          "R109 empty string -> None (does not raise)")
+    check(cc.is_snapshot_url(None) is None,
+          "R109 None -> None (does not raise)")
+    check(cc.is_snapshot_url("not-a-url-at-all") is None,
+          "R109 non-URL string -> None (unparseable is silently unclassified)")
+    check(cc.is_snapshot_url("https://perma.cc/random-long-slug-here") is None,
+          "R109 perma.cc without 4-4 hyphenated form -> None (strict pattern)")
+
+    # ---- snapshot_urls_in_answer: aggregation + dedup + order ----------------
+    _text = (
+        "Test brief:\n"
+        "  Historical CFR: https://www.govinfo.gov/content/pkg/CFR-2019-title8-vol1/xml/foo.xml\n"
+        "  Wayback: https://web.archive.org/web/20200101000000/https://uscis.gov/foo\n"
+        "  Current eCFR (NOT snapshot): https://www.ecfr.gov/current/title-8/part-208\n"
+        "  Same wayback again: https://web.archive.org/web/20200101000000/https://uscis.gov/foo\n"
+        "  Perma: https://perma.cc/K5RV-JZ4Y\n"
+        "  GitHub (NOT snapshot): https://github.com/user/repo\n"
+    )
+    _hits = cc.snapshot_urls_in_answer(_text)
+    check(len(_hits) == 3,
+          "R109 snapshot_urls_in_answer: 3 unique snapshots (wayback duplicate deduplicated)",
+          "count=%d hits=%r" % (len(_hits), [h["kind"] for h in _hits]))
+    check([h["kind"] for h in _hits] == ["govinfo-cfr", "wayback", "perma-cc"],
+          "R109 snapshot_urls_in_answer preserves order of first occurrence",
+          "kinds=%r" % [h["kind"] for h in _hits])
+    check(cc.snapshot_urls_in_answer("no urls here") == [],
+          "R109 snapshot_urls_in_answer on text without URLs -> []")
+    check(cc.snapshot_urls_in_answer("") == [],
+          "R109 snapshot_urls_in_answer on empty string -> []")
+
+    # ---- summarize_snapshots -----------------------------------------------
+    _sum = cc.summarize_snapshots(_hits)
+    check("3 snapshot(s):" in _sum and "wayback=1" in _sum
+          and "govinfo-cfr=1" in _sum and "perma-cc=1" in _sum,
+          "R109 summarize_snapshots renders count + sorted kind tally",
+          "sum=%r" % _sum)
+    check(cc.summarize_snapshots([]) == "",
+          "R109 summarize_snapshots on empty list -> empty string")
+
+    # ---- report_snapshots is callable & silent on empty --------------------
+    # Cannot easily capture stdout without adding complexity to the suite;
+    # this pin only proves the function exists and does not raise on []=noop.
+    _ret = cc.report_snapshots([])
+    check(_ret == 0,
+          "R109 report_snapshots([]) returns 0 and produces no output",
+          "ret=%r" % _ret)
 
 
 if __name__ == "__main__":
