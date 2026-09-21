@@ -1,7 +1,7 @@
 {
   "name": "model-orchestration",
   "description": "Run one brief past every configured external reviewer model in parallel - the API and CLI channels declared in channels.json - and verify each one actually did the work.",
-  "version": "1.73.0",
+  "version": "1.73.1",
   "author": {
     "name": "igorsaevets"
   },

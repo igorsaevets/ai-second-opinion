@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.73.1 — 2026-09-21
+
+* **Fix: ocspark13free timeout 120s → 40m.** The opencode CLI channel was the only CLI
+  channel with a 120-second timeout. Measured in UF6b (Plugins ironmemo, 2026-09-21):
+  grokbuild answered in 159s, agy38flash in 230s, but ocspark13free was killed at 120s
+  on the same brief — zero output. All other CLI channels already have `"timeout": "40m"`.
+
 ## 1.73.0 — 2026-09-20
 
 * **Kit-Б-12 SNAPSHOT: historical-URL classifier (task #21, R109).** New

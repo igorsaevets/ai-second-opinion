@@ -315,8 +315,8 @@
         "high",
         "minimal"
       ],
-      "timeout": 120,
-      "_timeout": "opencode CLI has no built-in timeout — caller-side via subprocess.run. 120s for a free model is generous; the CLI blocks synchronously once stdin is closed.",
+      "timeout": "40m",
+      "_timeout": "opencode CLI has no built-in timeout — caller-side via subprocess.run. Was 120s until R110 (2026-09-21): UF6b code review timed out at 120s while grokbuild (159s) and agy38flash (230s) answered the same brief. 40m matches the other CLI channels.",
       "models": {
         "opencode/muse-spark-1.3-contributor-free": {
           "label": "Muse Spark 1.3 Contributor Free (via opencode)",
