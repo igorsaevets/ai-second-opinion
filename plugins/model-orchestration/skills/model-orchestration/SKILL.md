@@ -50,15 +50,9 @@ changes a decision is in this block.
 - **A refusal on a legal/immigration brief is a FRAMING bug, not a subject ban.** Pass
   `--system legal-research` and write the brief as source-verification for attorney review, not as
   filing strategy: codex then answers 6/6. Recipe: **`references/legal-briefs.md`**, read it FIRST.
-- 🔴 **agy dies silently on an UNLISTED tool — a DENIED one is harmless.** A tool in neither list
-  cancels the whole turn and reports it as an empty answer with `status: SUCCESS`, exit 0; an
-  explicitly denied one is an ordinary error the model recovers from. **Silence is the dangerous
-  state, not refusal.** Fixed by `python patch_agy_permissions.py`: one `mcp(*)` allow, denies
-  the shell, Firecrawl's metered tools and cloakbrowser's session/JS tools; `playwright`
-  deliberately stays reachable (owner's call 2026-08-20, selftest-asserted) — this line once
-  promised a browser denial the list never contained (R73); the prose was the bug. Run it
-  after any update: those rules live in `~/.gemini/`, not in this tree, so pulling a new
-  version does not apply them. Check it first if agy returns empty.
+- 🔴 **agy dies silently on an UNLISTED tool — a DENIED one is harmless.** **Silence is the
+  dangerous state.** Fixed by `patch_agy_permissions.py`; run it after any update (rules in
+  `~/.gemini/`, not this tree). Check it first if agy returns empty. Detail: `references/channels.md`.
 - **agy re-runs itself once if it cites sources and opened none** — announced before it spends
   (0/3 grounded → 8/8). If the retry also grounds nothing the *first* answer is returned, both
   marked unverified. Never edit this into a loop.
@@ -69,9 +63,10 @@ changes a decision is in this block.
 - **Every model answers in English**, enforced by the default preset: Russian costs ~2× (§0.2).
 - **Choosing models is config, not code.** `--route`, `--skip`, `--set`; free `--dry-run` (§0.1).
 - **Codex is expensive and slow (~6-25 min).** Never send it a lookup: `--ask "…"` is one command.
-- 🔴 **CONTEXT IS ALMOST FREE; SEARCHING IS NOT.** Measured: **2 026 852** input tokens ≈ $0.20 with
-  no long-context premium, against **128 searches** = **$0.32, 60% of that channel's bill.**
-  Sending more material is the cheap lever; asking for more searching is the expensive one.
+- 🔴 **CONTEXT IS CHEAP; SEARCH IS THE BILL.** 2M input ≈ $0.20; 128 searches = $0.32 (60%).
+  Send material, not search demands.
+- 🔴 **Use `orchestrate.py` — do not hand-roll calls.** Three incidents: DNS failure, non-streaming
+  at 100K budget, `adaptive` doing zero searches.
 
 ## 0.3 Reference files — read on demand
 

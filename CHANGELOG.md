@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.77.0 — 2026-09-21
+
+* **HANDOFF "read the WHOLE answer" instruction (R115 И-4).** HANDOFF.md now tells the reader to
+  read unsolicited observations — the highest-value finding in past rounds arrived under "what are
+  we missing", not as a direct answer. Added to both the English reading-order section and the
+  Russian resume prompt.
+* **Anti-hand-rolling rule in SKILL.md §0.0.** "Do not hand-roll channel calls — use
+  orchestrate.py." Carried forward from the merged `second-opinion-consult` skill; the three
+  failures it names (DNS, non-streaming, zero-search) are real incidents.
+
 ## 1.76.0 — 2026-09-21
 
 * **Merge `second-opinion-consult` into this skill (R115 И-3).** Policy rules (Rule A, Rule B,

@@ -103,6 +103,14 @@ measured-strongest voice in each). `write_handoff` sorts the ★ row first withi
 prints the rule under the table and in the resume prompt, and the ★ answer is read before even
 a deferred round's telemetry report. Move the flag in the registry as models rotate.
 
+### v4 (R115, 2026-09-21): read the WHOLE answer — unsolicited observations carry the most value
+
+SKILL.md §10 tells the operator to include "what are we missing" in every brief. But the HANDOFF
+template did not tell the READER to look for unsolicited observations in the answers. Past rounds:
+the highest-value finding was not an answer to a question asked — it arrived under "what are we
+missing" or as a blind-spot flag. Now stated in the HANDOFF template (both the English reading
+order section and the Russian resume prompt).
+
 ## Alternatives considered, and why they were not built
 
 **Have a model summarise the answers.** Rejected. The value of a panel is the *disagreement*
