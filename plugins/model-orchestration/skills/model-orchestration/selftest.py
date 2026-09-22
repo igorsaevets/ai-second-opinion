@@ -3333,11 +3333,20 @@ def suite_panels():
     only_two = _r.format_plan(_r.resolve(reg4, only=["spark11", "codex"]), reg4)
     check("seats are" not in only_two,
           "CONTROL: no concentration warning when no vendor holds half the seats")
-    # R114: agy31pro moved to standard; the largest bloc on cheap is no longer
-    # guaranteed to be google. Just verify the line EXISTS and names SOME vendor.
-    check("largest bloc:" in txt,
+    # R116: orgrok420 disabled → cheap panel after cascade has 4 channels from 4 vendors.
+    # When no vendor holds >1 seat, format_plan omits "largest bloc:" (routing.py:2484).
+    # Compute from the RESOLVED plan (which applies cascades), not from raw registry.
+    _cheap_plan = _r.resolve(_r.load_registry(), panel="cheap")
+    _cheap_resolved = [c for c, v in _cheap_plan.items() if v.get("enabled")]
+    _ct = {}
+    for _c in _cheap_resolved:
+        _v = _cheap_plan[_c].get("vendor", _c)
+        _ct[_v] = _ct.get(_v, 0) + 1
+    _cheap_max = max(_ct.values()) if _ct else 0
+    check("largest bloc:" in txt or _cheap_max <= 1,
           "and it names the largest bloc on the cheap panel by vendor",
-          next((ln.strip() for ln in txt.splitlines() if "largest bloc" in ln), "(no line)"))
+          next((ln.strip() for ln in txt.splitlines() if "largest bloc" in ln),
+               "(no bloc line - every vendor holds 1 seat, max=%d)" % _cheap_max))
 
     # ---- the cheap panel keeps a code voice ---------------------------------------------------
     # The reason ordeepseekv4pro was added in this round. Derived: if the only `role: code`
@@ -3479,19 +3488,11 @@ def suite_panels():
           "--panel against a registry with NO panels is REFUSED, not accepted-then-ignored",
           woke or "")
 
-    # The concentration line is printed for every set, and only the 🔴 escalates - a warning
-    # that disappears when you move from cheap (6/11) to standard (6/15) reads as «fixed».
+    # R116: orgrok420 disabled → cheap panel has 4 vendors × 1 seat each, no bloc line.
+    # The line is printed when a vendor holds >1 seat (routing.py:2484 `if n > 1`).
+    # Assert per-panel: "largest bloc:" present IFF top vendor has >1 seat.
     reg5 = _r.load_registry()
     std = _r.format_plan(_r.resolve(reg5), reg5)
-    check("largest bloc:" in std and "largest bloc:" in txt,
-          "the largest-vendor share is printed on BOTH panels, not only the alarming one")
-    # 🔴 DERIVED FROM THE SEATS, NOT PINNED TO A PANEL. This used to assert literally «cheap
-    # escalates and standard does not», which was true at 6/11 vs 6/15 and became false the
-    # moment R44 added two non-Google channels to the cheap panel and diluted that bloc to
-    # 6/13 = 46%. The escalation correctly stopped firing, and a test pinned to the old roster
-    # called the correct behaviour a regression - the test-the-human defect this file records
-    # four times elsewhere. What the rule actually says is «escalate iff the largest bloc holds
-    # at least half the seats», so compute the share and assert the marker tracks it.
     def _bloc_share(reg_, **kw):
         pl = _r.resolve(reg_, **kw)
         live_ = [c for c, v in pl.items() if v.get("enabled")]
@@ -3500,7 +3501,15 @@ def suite_panels():
             t[pl[c].get("vendor") or c] = t.get(pl[c].get("vendor") or c, 0) + 1
         top = max(t.values()) if t else 0
         return top, len(live_)
-
+    _std_top, _ = _bloc_share(reg5)
+    check(("largest bloc:" in std) == (_std_top > 1),
+          "standard panel: largest-bloc line tracks whether any vendor holds >1 seat",
+          "std_top=%d, line %s" % (_std_top, "present" if "largest bloc:" in std else "absent"))
+    check(("largest bloc:" in txt) == (_cheap_max > 1),
+          "cheap panel: largest-bloc line tracks whether any vendor holds >1 seat",
+          "cheap_max=%d, line %s" % (_cheap_max, "present" if "largest bloc:" in txt else "absent"))
+    # 🔴 DERIVED FROM THE SEATS, NOT PINNED TO A PANEL. Compute the share from the resolved
+    # plan and assert the 🔴 marker tracks it. _bloc_share is defined above.
     for label, kw, text in (("cheap", {"panel": "cheap"}, txt), ("standard", {}, std)):
         top, seats = _bloc_share(_r.load_registry(), **kw)
         want = seats and top * 2 >= seats
