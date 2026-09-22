@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.76.0 — 2026-09-21
+
+* **Merge `second-opinion-consult` into this skill (R115 И-3).** Policy rules (Rule A, Rule B,
+  cost ladder, sub-agent discipline) now in `references/policy.md`. The former skill is a
+  redirect stub. `~/.claude/CLAUDE.md` §Second opinions points here. One skill, no duplication.
+
+## 1.75.0 — 2026-09-21
+
+* **`cli` group (R115 И-2).** `--only cli` selects all 7 CLI-binary channels (opencode,
+  claudecli, codex, agy, grokcli kinds). Aliases: cli, кли, консоль, terminal. Structural
+  selftest assertion: the group must equal all channels whose kind is a CLI kind.
+
 ## 1.74.0 — 2026-09-21
 
 * **R114: model-aware effort clamping for grokcli and codex channels.** `_clamp_effort()`

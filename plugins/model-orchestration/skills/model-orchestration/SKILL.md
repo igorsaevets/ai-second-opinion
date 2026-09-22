@@ -80,6 +80,7 @@ truncated. Detail lives beside it in `references/` (paths relative to this skill
 
 | file | read it when |
 |---|---|
+| `policy.md` | Rule A, Rule B, sub-agent discipline — who to ask, when, at what cost |
 | `legal-briefs.md` | **before** any legal / immigration / regulatory brief — a refusal there is a framing bug, and rewriting after one costs a whole round |
 | `channels.md` | wire parameters and CLI traps per channel; a channel misbehaves, or you are changing flags |
 | `briefs.md` | building any brief: what goes in it, and the live-web-search demand |
@@ -300,7 +301,7 @@ Detail: `references/reading-the-answers.md`.
 
 ---
 
-## 11. Relationship to the other skill
+## 11. Policy rules
 
-`second-opinion-consult` holds the **policy**; **this skill is the only home for the mechanics** —
-the copy there went stale in four places without looking stale. This file alone runs a round.
+Rule A, Rule B and sub-agent discipline: `references/policy.md` (merged from
+`second-opinion-consult`, R115).
