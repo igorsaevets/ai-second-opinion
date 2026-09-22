@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.79.0 — 2026-09-22
+
+* **ormimo25pro default model → xiaomi/mimo-v2.6-pro (R118).** Drop-in upgrade: same pricing
+  ($0.435/$0.87/M), same context (1M), same completion cap (131K). Now multimodal
+  (text+image+audio+video→text), intelligence index 46.3 (was 26 on v2.5). Previous model
+  `xiaomi/mimo-v2.5-pro` remains available via `--set ormimo25pro=xiaomi/mimo-v2.5-pro`.
+* **Catalogue, labels, notes updated** for the model change; reasoning config unchanged
+  (budget-as-ON-switch, measured on v2.5, API shape identical on v2.6).
+
 ## 1.78.1 — 2026-09-22
 
 * **SKILL.md: binary-name-is-a-group guidance (R117).** `--only agy` is a GROUP — it returns

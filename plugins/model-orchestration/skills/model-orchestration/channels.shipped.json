@@ -1129,18 +1129,18 @@
       "provider": "openrouter",
       "enabled": true,
       "distribution": "kit",
-      "label": "OR MiMo v2.5 Pro",
+      "label": "OR MiMo v2.6 Pro",
       "cost": "metered",
-      "model": "xiaomi/mimo-v2.5-pro",
+      "model": "xiaomi/mimo-v2.6-pro",
       "role": "analysis",
-      "_catalogue": "READ FROM THE LIVE CATALOGUE 2026-08-08: context_length 1050000 (top_provider 1048576), max_completion_tokens 131072, $0.435/M prompt, $0.87/M completion, input_cache_read $0.0036/M. supported_parameters carries `reasoning` and `include_reasoning` but NOT `reasoning_effort`, and reasoning_config is null - so there is no effort ladder here either, and asking for one would be asking for a value the model does not have.",
-      "_is_not_the_same_channel_as_mimo25pro": "🔴 SAME MODEL, MATERIALLY DIFFERENT CAPABILITY, and this is the sharpest example of it in the registry. The direct channel gets Xiaomi's own search, which opened 25 whole pages in one probe. Here there is no native search at all: the catalogue prices no `web_search` for this model, so OpenRouter's plugin falls back to Exa, which returns 2-4 KB of query-selected excerpts with `[...]` elisions. Identical weights, and one of them can be quoted verbatim while the other cannot. That asymmetry is the whole argument for `distribution`: locally take the direct key, in the kit take the one key a new user already has.",
+      "_catalogue": "READ FROM THE LIVE CATALOGUE 2026-09-22 (R118, model upgrade v2.5→v2.6): id xiaomi/mimo-v2.6-pro, context_length 1048576, top_provider.max_completion_tokens 131072, $0.435/M prompt, $0.87/M completion, input_cache_read $0.0036/M — SAME pricing as v2.5. architecture: text+image+audio+video→text (v2.5 was text-only). 1T+ parameters. supported_parameters: frequency_penalty, include_reasoning, max_tokens, presence_penalty, reasoning, response_format, stop, structured_outputs, temperature, tool_choice, tools, top_p. reasoning: {mandatory: false} — no effort ladder, same as v2.5. intelligence_index 46.3 (v2.5 was 26). v2.5 remains available via --set ormimo25pro=xiaomi/mimo-v2.5-pro.",
+      "_is_not_the_same_channel_as_mimo25pro": "🔴 NOW A DIFFERENT MODEL AND A DIFFERENT TRANSPORT. Since R118 this channel serves v2.6-pro while the direct mimo25pro channel (disabled) still points at v2.5-pro. The transport asymmetry that made this note remains: the direct channel gets Xiaomi's own search (25 whole pages in one probe), while here OpenRouter falls back to Exa (2-4 KB excerpts with `[...]` elisions). The direct channel also has NOT been verified for v2.6 availability on api.xiaomimimo.com — only the OpenRouter slug is confirmed live.",
       "reasoning": {
         "max_tokens": 90000
       },
       "max_tokens": 131072,
       "_max_tokens_R43": "60000 -> 131072, this model's `top_provider.max_completion_tokens`; reasoning budget 24000 -> 48000 (R43) -> 90000 (R80, the operator: «Подними до 90 000»). The explicit budget STAYS: the catalogue reports NO `supported_efforts` for this model at all, so there is no effort ladder to move it onto and a token budget is the only lever there is. At 90K the answer room is 131072-90000 = 41072 tokens — enough for a full review.",
-      "🟢_MEASURED_2026_08_16_R46": "First execution of this channel's reasoning knob (it had been configured-never-run). Same probe as orgrok420's, judged by the returned reasoning_tokens meter: NO reasoning block -> 0 reasoning tokens; this entry's {max_tokens: 48000} -> 1638. So the budget acts as the ON switch here too, and the setting is load-bearing, not decorative. Catalogue reasoning object for this model is bare {mandatory: false} - no ladder, no supports_max_tokens - so as with orgrok420 there is no deeper rung being missed.",
+      "🟢_MEASURED_2026_08_16_R46_on_v2_5": "First execution of this channel's reasoning knob (measured on v2.5-pro, before the R118 upgrade to v2.6-pro). Same probe as orgrok420's, judged by the returned reasoning_tokens meter: NO reasoning block -> 0 reasoning tokens; this entry's {max_tokens: 48000} -> 1638. So the budget acts as the ON switch here too, and the setting is load-bearing, not decorative. Catalogue reasoning object for v2.6-pro is also bare {mandatory: false} - no ladder, same as v2.5 - so the config carries over. Not re-probed on v2.6; first real round is the test.",
       "web": {
         "enabled": true,
         "engine": "exa",
@@ -1153,22 +1153,34 @@
         "_max_calls_was_11": "reduced from 11 to 5 (R80 panel test): 9/11 fetches produced 211K input tokens (eCFR Part 245 alone = 183KB = 45K tok, re-sent every round). Model ran out of answer room and dropped the marker. 5 fetches is enough for the key regulations (USCIS PM is 403'd anyway) without reaching the token-bomb pages."
       },
       "models": {
+        "xiaomi/mimo-v2.6-pro": {
+          "label": "MiMo v2.6 Pro (OpenRouter)",
+          "data_policy": "Metered API through OpenRouter. See _data_controls_not_wired at the end of this file.",
+          "aliases": [
+            "xiaomi/mimo-v2.6-pro",
+            "or mimo",
+            "or mimo 2.6",
+            "мимо через openrouter",
+            "мимо 2.6 про"
+          ]
+        },
         "xiaomi/mimo-v2.5-pro": {
-          "label": "MiMo v2.5 Pro (OpenRouter)",
+          "label": "MiMo v2.5 Pro (OpenRouter, legacy)",
           "data_policy": "Metered API through OpenRouter. See _data_controls_not_wired at the end of this file.",
           "aliases": [
             "xiaomi/mimo-v2.5-pro",
-            "or mimo",
-            "мимо через openrouter"
+            "or mimo 2.5",
+            "мимо 2.5 через openrouter"
           ]
         }
       },
       "aliases": [
         "ormimo25pro",
         "ormimo",
-        "ормимо"
+        "ормимо",
+        "ormimo26pro"
       ],
-      "notes": "The kit's MiMo. One OpenRouter key reaches it; no Xiaomi account needed. Search is Exa excerpts here, so treat its quotations as unverified until the citation audit resolves them."
+      "notes": "The kit's MiMo. Default model upgraded to v2.6-pro (R118); v2.5-pro available via --set. 1T+ params, multimodal (text+image+audio+video→text). One OpenRouter key reaches it; no Xiaomi account needed. Search is Exa excerpts here, so treat its quotations as unverified."
     },
     "orgrok420": {
       "read_order": 3,
