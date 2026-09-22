@@ -140,6 +140,25 @@
         "напрямую",
         "direct-api"
       ]
+    },
+    "cli": {
+      "label": "every channel that runs through a local CLI binary (opencode, claude, codex, agy, grok)",
+      "channels": [
+        "ocspark13free",
+        "cclopus46",
+        "codex",
+        "agy31pro",
+        "agy36flash",
+        "agy38flash",
+        "grokbuild"
+      ],
+      "_added": "2026-09-21 (R115 И-2). Root cause of the Plugins ironmemo bug: user said «только CLI» but no group existed to express that. CLI kinds: opencode, claudecli, codex, agy, grokcli. The selftest structurally verifies that this group contains ALL channels whose kind is a CLI kind and NOTHING else - adding a new CLI channel without updating this list will fail the test.",
+      "aliases": [
+        "cli",
+        "кли",
+        "консоль",
+        "terminal"
+      ]
     }
   },
   "channels": {

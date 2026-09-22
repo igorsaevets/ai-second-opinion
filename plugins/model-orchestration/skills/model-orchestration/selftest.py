@@ -373,6 +373,16 @@ def suite_routing():
                   "group %r does NOT resurrect its default-off members (%s)"
                   % (_g, ", ".join(_resurrected)))
 
+    # R115: the `cli` group must contain EXACTLY the channels whose kind is a CLI binary transport,
+    # and nothing else. Adding a new CLI channel without adding it to the group will fail here.
+    _CLI_KINDS = {"opencode", "claudecli", "codex", "agy", "grokcli"}
+    _cli_by_kind = {c for c, ch in _RAW["channels"].items() if ch.get("kind") in _CLI_KINDS}
+    _cli_group = set(GROUPS.get("cli", set()))
+    check(_cli_group == _cli_by_kind,
+          "cli group == every channel with a CLI kind (structural, not by name)",
+          "group=%s by_kind=%s diff=%s" % (sorted(_cli_group), sorted(_cli_by_kind),
+                                           sorted(_cli_group ^ _cli_by_kind)))
+
     cases = [
         (["--only", "spark11"], {"spark11"}, "--only spark11"),
         (["--only", "http11"], {"spark11"}, "--only http11 (channel alias)"),
@@ -389,7 +399,9 @@ def suite_routing():
         (["--only", "agy"], group_of("agy"), "--only agy (GROUP -> the subscription transport)"),
         (["--only", "gemini"], cascaded(group_of("gemini")), "--only gemini (GROUP -> the model family)"),
         (["--only", "spark"], cascaded(group_of("spark")), "--only spark (GROUP -> both Spark)"),
+        (["--only", "cli"], group_of("cli"), "--only cli (GROUP -> every CLI binary channel)"),
         (["--skip", "spark"], cascaded(without(*group_of("spark"))), "--skip spark (GROUP)"),
+        (["--skip", "cli"], cascaded(without(*group_of("cli"))), "--skip cli (GROUP)"),
         (["--skip", "codex", "agy"], cascaded(without("codex", *group_of("agy"))),
          "--skip codex + agy group"),
         (["--route", "только spark11"], {"spark11"}, "route: только spark11"),
@@ -401,6 +413,8 @@ def suite_routing():
         (["--route", "не используй spark"], cascaded(without(*GROUPS["spark"])),
          "route: RU negation of a GROUP"),
         (["--route", "only codex"], {"codex"}, "route: EN only"),
+        (["--route", "только cli"], group_of("cli"), "route: только cli (the Plugins ironmemo fix)"),
+        (["--route", "только консоль"], group_of("cli"), "route: только консоль (RU alias of cli)"),
         ([], cascaded(ALL), "no flags: every enabled channel runs"),
     ]
     if "orgpt56terrapro" in EXISTS:
