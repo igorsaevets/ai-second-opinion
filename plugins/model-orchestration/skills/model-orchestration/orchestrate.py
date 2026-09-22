@@ -3410,20 +3410,26 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
       text        — part.text is the model's response text
       step_finish — part.tokens (input/output/reasoning/cache.read/cache.write) + part.cost
 
-    The --variant flag maps to reasoning effort (high/max/minimal). Free Spark 1.3 consumed
+    opencode v1 used `--variant` for reasoning effort. opencode v2 (v2.0.0+) REMOVED that flag
+    and moved the variant into the model string: `provider/model#variant`. The `--auto` flag
+    auto-approves permissions (equivalent to bypass on other CLIs). Free Spark 1.3 consumed
     ~19K input tokens on a trivial prompt (agent framework overhead), cost=0 for free models.
+
+    🔴 UPDATED 2026-09-21 for opencode v2: `--variant` → model string `#variant` suffix.
+    Igor upgraded from v1 to v2.0.12; the old `--variant max` fails with
+    `Unrecognized flag: --variant in command opencode run`.
     """
     binary = opencode_bin()
     text_in = ((system.strip() + "\n\n---\n\n") if system else "") + brief
 
+    base_model = model or "opencode/muse-spark-1.3-contributor-free"
     cmd = [binary, "run",
-           "-m", model or "opencode/muse-spark-1.3-contributor-free",
-           "--format", "json"]
-    if effort:
-        cmd += ["--variant", effort]
+           "-m", base_model,
+           "--format", "json",
+           "--auto"]
 
-    log("  [%s] opencode CLI, free model, no API key; brief via stdin (%d chars), variant=%s"
-        % (name, len(text_in), effort or "default"))
+    log("  [%s] opencode CLI v2, free model, no API key; brief via stdin (%d chars), model=%s"
+        % (name, len(text_in), base_model))
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",

@@ -1944,25 +1944,30 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
         # sibling project, which nothing here reads. Two files, one name, and the printed advice
         # pointed at the copy that was not in play.
             elif p.get("kind") == "codex":
+                # R114: clamp effort against the model's own ladder. Without this,
+                # --set codex=gpt-5.5 with local.json effort=max would send an
+                # unsupported value and get a 400 (measured R113: "max is not
+                # supported with the gpt-5.5 model"). The clamper reads the model's
+                # `efforts` array from channels.json and picks the nearest rung.
+                p["effort"] = _clamp_effort(reg, cname, p["model"], p.get("effort"), p)
                 p["timeout"] = t.get("codex_timeout", "50m")
-                p["_tier_note"] = ("timeout %s only - effort stays %s, pinned in this channel's "
-                                   "own block because the subscription has no cheaper setting "
-                                   "worth having" % (p["timeout"], p.get("effort")))
+                p["_tier_note"] = ("timeout %s only - effort %s (clamped to this model's ceiling)"
+                                   % (p["timeout"], p.get("effort")))
             elif p.get("kind") == "opencode":
                 p["timeout"] = t.get("opencode_timeout", p.get("timeout") or 120)
                 p["_tier_note"] = ("timeout %s only - effort stays %s (--variant flag), "
                                    "free model via opencode CLI, no API key"
                                    % (p["timeout"], p.get("effort") or "default"))
             elif p.get("kind") == "grokcli":
-                # Same shape as codex: a subscription CLI whose depth is pinned in its own block
-                # at the top of the vendor's ladder, so the tier contributes wall-clock only.
-                # Unlike codex, the flag here was proved to move the meter (low [828,1697] vs
-                # xhigh [1918,4089] reasoning tokens, disjoint), so `effort` is load-bearing and
-                # the note says which rung is being bought.
+                # R114: clamp effort against the model's own ladder. Without this,
+                # --set grokbuild=grok-4.5 with channel effort=xhigh would pass an
+                # unsupported value to the CLI (grok-4.5 max is high, no xhigh).
+                # The CLI validates locally and exits 1, but clamping here catches
+                # it at plan time and prints a NOTE rather than wasting a run.
+                p["effort"] = _clamp_effort(reg, cname, p["model"], p.get("effort"), p)
                 p["timeout"] = t.get("grokcli_timeout", p.get("timeout") or "40m")
-                p["_tier_note"] = ("timeout %s only - effort stays %s, the top of this model's "
-                                   "own ladder and proved to move reasoning_tokens"
-                                   % (p["timeout"], p.get("effort")))
+                p["_tier_note"] = ("effort %s (clamped to this model's ceiling), timeout %s"
+                                   % (p.get("effort"), p["timeout"]))
         # 🔴 THE TIER DID NOTHING TO THE SPARK CHANNELS, and it looked like it did. The tier
         # varied `thinking.budget_tokens`, but Meta documents that field as "accepted for
         # compatibility but not translated into an effort value" - depth on this endpoint is set
@@ -2134,7 +2139,12 @@ def _decorate(plan, reg):
 
 
 # Ordered weakest to strongest, so clamping can pick the nearest available rung.
-EFFORT_ORDER = ["low", "medium", "high"]
+# R114: added xhigh and max so that _clamp_effort can position them correctly
+# when a model's ladder does not include them (e.g. grok-4.5 has no xhigh,
+# gpt-5.5 has no max). Without these entries, unlisted values fell through to
+# index len-1 by accident; with them, the ordering is explicit and ties break
+# upward as documented. "none" is below low for codex models that list it.
+EFFORT_ORDER = ["none", "low", "medium", "high", "xhigh", "max"]
 
 
 def _clamp_effort(reg, cname, model, want, slot):

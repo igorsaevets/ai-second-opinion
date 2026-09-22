@@ -398,7 +398,7 @@
       "panel": "standard",
       "vendor": "openai",
       "enabled": true,
-      "bypass_permissions": false,
+      "bypass_permissions": true,
       "_bypass_permissions": "R88 (2026-09-14) opt-in. Default off. When true, call_codex swaps `--sandbox read-only` for `--dangerously-bypass-approvals-and-sandbox` (verbatim from codex-cli 0.154.0 --help; a separate `--dangerously-bypass-hook-trust` covers hook trust and is not touched). Every shell command the model asks for runs on the operator's machine without a prompt. `CLI_BYPASS_SAFETY_PROMPT` (no-delete + BACKUP -> REASONING -> DELETE ritual) is injected into the brief. Enable per-run with `--bypass-permissions codex` / `--all-bypass`, or set this field to `true` for standing bypass on this install. Not a fence: read kit/SECURITY.md 'Bypass opt-in' before turning it on for briefs you did not write.",
       "label": "Codex",
       "_label_carries_no_model_ON_PURPOSE": "2026-08-07, the operator: «пусть ИИ выводит codex и название модели, а не просто Codex». Done - but NOT by putting the model in this string, which is the one way of doing it that would rot. This channel is the only one whose model is DELIBERATELY variable (three ids in its table) because an exhausted weekly limit is answered by switching model, so a label reading `CodexGPT54` would be wrong the first time that happens and would go on being wrong silently. The model is therefore resolved at RUN time and printed everywhere the channel is named: the plan, the status line, diagnostics.json, and the channel column of REPORT.md, which is the artifact another chat actually reads. kimik3 and qwen38max CAN carry the model in the name, and do, because their model cannot change - the registry refuses it.",
@@ -416,7 +416,15 @@
             "gpt-5.5",
             "5.5",
             "гпт-5.5"
-          ]
+          ],
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "_efforts_source": "R113 error: 400 'max' not supported with 'gpt-5.5', supported: none, low, medium, high, xhigh"
         },
         "gpt-5.6-sol": {
           "label": "GPT-5.6 Sol",
@@ -426,7 +434,15 @@
             "gpt-5.6-sol",
             "5.6 sol",
             "5.6-sol"
-          ]
+          ],
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "_efforts_source": "Same generation as gpt-5.5, assumed same ladder (not probed)"
         },
         "gpt-6-astra": {
           "label": "GPT-6 Astra",
@@ -437,14 +453,31 @@
             "6-astra",
             "astra",
             "астра"
-          ]
+          ],
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "_efforts_source": "R113 probe: max accepted by gpt-6-astra (exit 0, marker present)"
         },
         "gpt-5.4": {
           "label": "GPT-5.4",
           "aliases": [
             "gpt-5.4",
             "5.4"
-          ]
+          ],
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "_efforts_source": "Same generation as gpt-5.5, assumed same ladder (not probed)"
         }
       },
       "aliases": [
@@ -463,11 +496,12 @@
     "agy31pro": {
       "read_order": 1,
       "kind": "agy",
-      "panel": "cheap",
+      "panel": "standard",
+      "_panel_changed_r114": "R114 (2026-09-21), the operator: «установим по дефолту на agy модель gemini 3.8 Flash High». Moving agy31pro to standard leaves agy38flash as the sole agy channel in cheap panel. Previously cheap ran BOTH agy channels; now cheap = agy38flash only, standard = agy31pro + agy38flash.",
       "vendor": "google",
       "enabled": true,
-      "bypass_permissions": false,
-      "_bypass_permissions": "R88 (2026-09-14) opt-in. Default off. When true, _agy_once adds `--dangerously-skip-permissions` and removes `--sandbox` (mutually exclusive on agy 1.2.2 --help; verified by Select-String bypass|permission|dangerous|skip|approve|sandbox). CLI_BYPASS_SAFETY_PROMPT is injected into the brief AND a workdir tripwire is armed - a file removed or truncated without a matching `BACKUP: <path>` line in the answer fires a loud warning in the run's notes. 🔴🔴 R57 CAVEAT (patch_agy_permissions.py:71-74, measured): under this flag the operator's own `command(*)` deny is IGNORED - the shell fence disappears. The safety directive is STEERING, the tripwire is a SIGNAL after the fact; neither is enforcement. patch_agy_permissions.py still governs non-bypass and interactive TUI runs and is orthogonal to this flag. the operator accepted this blast radius on 14.09.2026 after an explicit warning. Turn it on per-run with `--bypass-permissions agy31pro` / `--all-bypass`; standing bypass with `bypass_permissions: true` here.",
+      "bypass_permissions": true,
+      "_bypass_permissions": "R88 (2026-09-14) opt-in. 🔴 R114 (2026-09-21): changed to true by default, the operator: «перепроверь что по дефолту все Cli запускаются с командой bypass permission». When true, _agy_once adds `--dangerously-skip-permissions` and removes `--sandbox`. CLI_BYPASS_SAFETY_PROMPT injected + workdir tripwire armed. 🔴🔴 R57 CAVEAT: under this flag `command(*)` deny is IGNORED. the operator accepted 14.09.2026.",
       "label": "agy 3.1 Pro",
       "cost": "mid",
       "model": "gemini-3.1-pro",
@@ -503,8 +537,8 @@
       "panel": "cheap",
       "vendor": "google",
       "enabled": false,
-      "bypass_permissions": false,
-      "_bypass_permissions": "R88 opt-in, same mechanics as agy31pro._bypass_permissions - one home for the details, this one carries the same value on purpose (a divergence between two channels of the same kind would be a bug the operator would spot at plan time).",
+      "bypass_permissions": true,
+      "_bypass_permissions": "R114 (2026-09-21): true by default. Same mechanics as agy31pro._bypass_permissions.",
       "_disabled_r80": "R80 (2026-09-04), the operator: «agy36flash и orgemini36flash отключаем для всех». Superseded by agy38flash (same transport, newer model).",
       "label": "agy 3.6 Flash",
       "cost": "mid",
@@ -541,8 +575,8 @@
       "panel": "cheap",
       "vendor": "google",
       "enabled": true,
-      "bypass_permissions": false,
-      "_bypass_permissions": "R88 opt-in, same mechanics as agy31pro._bypass_permissions - one home for the details, this one carries the same value on purpose (a divergence between two channels of the same kind would be a bug the operator would spot at plan time).",
+      "bypass_permissions": true,
+      "_bypass_permissions": "R114 (2026-09-21): true by default. Same mechanics as agy31pro._bypass_permissions.",
       "label": "agy 3.8 Flash",
       "cost": "mid",
       "model": "gemini-3.8-flash",
@@ -1313,16 +1347,17 @@
       "panel": "cheap",
       "vendor": "xai",
       "enabled": true,
-      "bypass_permissions": false,
+      "bypass_permissions": true,
       "_bypass_permissions": "R88 (2026-09-14) opt-in. Default off. When true, call_grokcli swaps `--permission-mode dontAsk` for `--permission-mode bypassPermissions`. 🔴 SMOKE-TESTED grok 1.0.30 --help: this CLI is Claude-Code-derived and has ONLY `--permission-mode <MODE>` with `bypassPermissions` in its enum - no `--dangerously-skip-permissions` (Select-String dangerously returned zero lines). The design in NOW.md §R88-A named the wrong flag; the smoke test caught it. CLI_BYPASS_SAFETY_PROMPT is injected into the brief. Enable per-run with `--bypass-permissions grokbuild` / `--all-bypass`, or set this field to `true` for standing bypass. Blast radius includes bash on the operator's machine and read_file at any absolute path (measured: this channel's read_file is NOT bounded by --cwd). Not a fence: read kit/SECURITY.md 'Bypass opt-in' before turning it on for briefs you did not write.",
       "🔴🔴_WHY_THIS_WAS_OFF_FOR_ONE_ROUND_AND_WHAT_ACTUALLY_BROKE_IT": "ON since 2026-08-16 (R45). It shipped OFF for exactly one round and the note here listed four arms proving «the flags were never the cause». 🔴 THAT CONCLUSION WAS WRONG AND SO WERE THE TWO THEORIES THAT FOLLOWED IT. `--no-plan` (the agent is literally called grok-build-plan) changed nothing; `--system-prompt-override` replacing the software-engineering-CLI persona changed nothing. All three explanations were guesses about a mechanism nobody had observed, because `--output-format json` shows only the final stopReason.\n\nWHAT IT ACTUALLY WAS, read off `--output-format streaming-messages-json` in one run: a tool_result with is_error=true and the text «User cancelled the execution for tool `web_fetch`». ONE DENIED TOOL DISCARDS THE ENTIRE TURN - the same failure the agy channel has documented since 2026-07-31, on a different binary. Two denials had to be cleared:\n  (1) web_fetch on any host outside x.ai. Isolated with one variable: same mode, same tool, dontAsk + docs.z.ai -> cancelled, dontAsk + docs.x.ai -> end_turn. That is why R44's short smoke test «worked» - it only ever fetched xAI's own docs - while every review failed, since reviewing means reading other vendors' pages.\n  (2) `use_tool`, the MCP gateway, reached for after SEVENTEEN successful fetches.\n\n🔴 THE GRANT IS SPELLED DIFFERENTLY FROM THE ALLOWLIST AND THE WRONG SPELLING IS SILENT: `--allow WebFetch` works, `--allow web_fetch` is accepted and grants nothing, while `--tools` wants the snake_case `web_fetch`. Same tool, two conventions, no error either way.\n\nRELEASE CONDITION MET, which is why this is on: 2026-08-16, the same 13.6 KB brief that produced 158 bytes in R44 returned **31 178 bytes**, `stopReason: end_turn`, `subtype: success`, marker on the last line, ZERO denied tools, 26 page fetches and 14 turns in 433 s. Its first working answer also found a real false positive in this harness's own transport_damage() check.\n\n🔴 SECURITY, TIGHTENED IN THE SAME CHANGE: read_file/list_dir/grep are no longer granted. R44 granted them believing the neutral `--cwd` made them harmless; measured on 2026-08-16, read_file served a file from `~/.grok/skills/` with that cwd in force. --cwd bounds where the agent STARTS, not what read_file can OPEN, and this channel's whole input is an untrusted brief. `search_tool`/`use_tool` are removed rather than granted for the same reason - `--tools` does not bound them, and this machine's MCP set includes a metered scraper and a git host with a write-capable token.",
-      "label": "Grok Build 4.5",
+      "label": "Grok Build 4.7",
       "cost": "subscription",
-      "model": "grok-4.5",
-      "_model_changed_r80": "R80 (2026-09-04), the operator: «grokbuild - по дефолту ставим Grok 4.5, а не Grok 4.6. Если пользователь скажет использовать Grok 4.6, тогда его используем.» Override: --set grokbuild=grok-4.6. Note: grok-4.5 has NO xhigh (its max is high); grok-4.6 has xhigh. A --set override to 4.6 runs at effort high (this channel's setting), not xhigh.",
-      "effort": "high",
+      "model": "grok-4.7",
+      "_model_changed_r114": "R114 (2026-09-21), the operator: «grok-4.7 надо было поменять только у grokbuild». grok-4.7 released 2026-09-21: slug grok-4.7, 500K context, effort ladder [xhigh, high, medium, low] same as grok-4.6. Override: --set grokbuild=grok-4.5 (auto-clamps effort to high). History: R80 grok-4.6→grok-4.5; R44 grok-4.6 (original).",
+      "effort": "xhigh",
       "role": "code",
       "supported_efforts": [
+        "xhigh",
         "high",
         "medium",
         "low"
@@ -1337,6 +1372,22 @@
       "_prompt_file_not_dash_p": "The brief goes through --prompt-file. A review brief is routinely tens of KB and the Windows command line is not - the same trap agy documents, avoided here before it could be hit.",
       "_usd": "The CLI reports total_cost_usd (~$0.008-0.012 on the probe calls). What that means on a session-authenticated subscription is UNVERIFIED, so it is printed with that word attached and deliberately kept OUT of the round's spend total. A made-up zero would be worse than an absence.",
       "models": {
+        "grok-4.7": {
+          "label": "Grok 4.7",
+          "_added": "R114 (2026-09-21). Released same day. 500K context, $2/M in + $6/M out on API (subscription here). Same effort ladder as grok-4.6. Slug confirmed from docs.x.ai.",
+          "data_policy": "xAI subscription through the Grok Build CLI, session-authenticated. This project has NOT verified xAI's consumer-subscription data terms, which are not necessarily the API terms - read them before sending client material.",
+          "aliases": [
+            "grok-4.7",
+            "грок 4.7",
+            "4.7"
+          ],
+          "efforts": [
+            "xhigh",
+            "high",
+            "medium",
+            "low"
+          ]
+        },
         "grok-4.6": {
           "label": "Grok 4.6",
           "data_policy": "xAI subscription through the Grok Build CLI, session-authenticated. This project has NOT verified xAI's consumer-subscription data terms, which are not necessarily the API terms - read them before sending client material.",

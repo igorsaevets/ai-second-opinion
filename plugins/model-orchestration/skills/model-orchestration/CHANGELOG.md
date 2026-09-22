@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.74.0 — 2026-09-21
+
+* **R114: model-aware effort clamping for grokcli and codex channels.** `_clamp_effort()`
+  already existed for agy channels; extended to grokcli and codex kinds so that `--set
+  grokbuild=grok-4.5` auto-clamps effort from `xhigh` to `high` (grok-4.5's ceiling), and
+  `--set codex=gpt-5.5` clamps `max` to `xhigh`. EFFORT_ORDER extended from 3 to 6 values:
+  `[none, low, medium, high, xhigh, max]`.
+* **grokbuild channel → Grok 4.7 / xhigh.** New model released 2026-09-21; supports xhigh
+  effort and 500K context. grok420 and orgrok420 unchanged (still grok-4.20).
+* **agy31pro moved to standard panel.** The cheap panel now runs only agy38flash as its
+  Gemini voice. agy31pro remains available via `--panel standard` or `--only agy31pro`.
+* **Codex models carry `efforts` arrays.** GPT-5.5 / 5.6-sol / 5.4 ceiling = xhigh;
+  GPT-6-astra ceiling = max. Enables the clamping above.
+* **opencode v2 transport fix.** `--variant` removed (no longer accepted); `--auto` added
+  for model routing in the opencode CLI.
+* **bypass_permissions: true** for all 6 CLI channels (codex, agy31pro, agy36flash,
+  agy38flash, grokbuild, cclopus46). Previously only cclopus46 had it.
+
 ## 1.73.2 — 2026-09-21
 
 * **Fix: `initial_plan()` was not copying `timeout` from channels.json.** The v1.73.1 fix
