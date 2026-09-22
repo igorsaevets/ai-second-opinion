@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.79.1 — 2026-09-22
+
+* **ormimo25pro reasoning budget 90K → 85K (R118 panel findings).** 3 live runs showed model
+  uses 8–11K reasoning tokens regardless of budget ceiling. the operator chose 85K (answer room
+  46,072 vs prior 41,072). Panel convergence: 4/4 channels recommended lowering.
+* **Pricing note in catalogue:** v2.5-pro currently 30% off on OR ($0.3045/$0.609), so
+  v2.6-pro is ~43% more expensive per token in practice, not "same pricing."
+* **Measurement data added:** 3 runs (45K/90K/118K budget), reasoning 8–11K each. Canary
+  claim `thinking_mode: "extended"` REFUTED by all channels. Single-provider (Xiaomi only)
+  risk noted.
+
 ## 1.79.0 — 2026-09-22
 
 * **ormimo25pro default model → xiaomi/mimo-v2.6-pro (R118).** Drop-in upgrade: same pricing
