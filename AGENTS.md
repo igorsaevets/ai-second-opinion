@@ -53,11 +53,13 @@ documents that hold the detail. It deliberately holds no channel list, no counts
 - **API channels cannot read files — attach them or they are invisible.** Channels served by
   a remote API (OpenRouter, direct vendor endpoints) see ONLY the brief text and what
   `fetch_tool` returns (limited to 5 calls). A GitHub URL in the brief does NOT give them the
-  code — they must guess paths, and a wrong path is a wasted fetch. Use `--attach <file>` or
-  `--attach-dir <dir>`: the harness automatically inlines file contents for API channels and
-  passes paths for CLI channels. For large files (>100KB), prefer `--attach` on selected files
-  over `--attach-dir` on the whole tree. Measured R119: without `--attach-dir`, an API channel
-  spent 2 of 5 fetches on 404s and tagged most findings `[UNVERIFIED]`.
+  code — they must guess paths, and a wrong path is a wasted fetch. Use `--attach <file>` to
+  inline file contents for API channels (CLI channels receive the path and read from disk).
+  `--attach-dir <dir>` gives CLI channels a vetted copy on disk; API channels receive only a
+  NOTE that folders exist but are NOT included. For code review: `--attach` specific key files
+  for API channel visibility + `--attach-dir` for the full tree for CLI channels. Measured
+  R119: without `--attach`, an API channel spent 2 of 5 fetches on 404s and tagged most
+  findings `[UNVERIFIED]`.
 - **The PII line is the operator's job, not the tool's.** Secrets are blocked outright;
   identifiers can be itemised; **names and street addresses are not detected at all** —
   [PRIVACY.md](PRIVACY.md) has the exact boundary. Tokenize before sending; sent is sent.
