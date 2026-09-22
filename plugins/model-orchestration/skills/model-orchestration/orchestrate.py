@@ -7558,23 +7558,28 @@ def _scan_dir_texts(dirs, max_bytes=2_000_000, max_files=200):
     return parts, skipped
 
 
-def _attach_inline(atts, att_dirs, n_vetted=None, n_skipped=None):
-    """The attachment section API channels receive: full file text, folders named as absent."""
+def _attach_inline(atts, dir_parts=None, att_dirs=None, n_skipped=0):
+    """The attachment section all channels receive: files inline, folder files inline."""
     out = []
     for i, (p, text) in enumerate(atts, 1):
         out.append("\n\n---\n\nATTACHMENT %d: %s\n\n%s" % (i, os.path.basename(p), text))
-    if att_dirs:
-        # Named as absent rather than silently dropped: a reviewer told about a folder it cannot
-        # see would otherwise "read" it from imagination, which is the exact fabrication class
-        # the panel exists to catch.
-        counts = ""
-        if n_vetted is not None:
-            counts = (" (host-machine reviewers receive a vetted copy: %d file(s)%s)"
-                      % (n_vetted,
-                         ", %d excluded by the vetting scan" % n_skipped if n_skipped else ""))
-        out.append("\n\n---\n\nNOTE: %d supporting folder(s) accompany this brief but are NOT "
-                   "included here - only reviewers running on the host machine can read "
-                   "folders%s. Do not claim to have read them." % (len(att_dirs), counts))
+    if dir_parts:
+        _dirs = att_dirs or []
+        for j, (label, text) in enumerate(dir_parts, 1):
+            abs_p = label[len("attach-dir:"):] if label.startswith("attach-dir:") else label
+            owners = [d for d in _dirs if abs_p.startswith(d.rstrip("\\/") + os.sep)]
+            rel = (os.path.relpath(abs_p, max(owners, key=len)) if owners
+                   else os.path.basename(abs_p))
+            out.append("\n\n---\n\nFOLDER FILE %d: %s\n\n%s" % (j, rel, text))
+        if n_skipped:
+            out.append("\n\n---\n\nNOTE: %d file(s) from the supporting folder(s) were excluded "
+                       "by the vetting scan (binary, oversized, or file cap). Reviewers running "
+                       "on the host machine receive a vetted copy and may read additional "
+                       "material in the same folders." % n_skipped)
+    elif att_dirs:
+        out.append("\n\n---\n\nNOTE: %d supporting folder(s) accompany this brief but contained "
+                   "no readable text files after the vetting scan. Reviewers running on the "
+                   "host machine receive a vetted copy." % len(att_dirs))
     return "".join(out)
 
 
@@ -8139,34 +8144,30 @@ def main():
             log("--attach-dir %s: not a directory" % pth)
             return 2
         att_dirs.append(p_abs)
+    _att_chars = sum(len(t) for _p, t in atts)
     if atts or att_dirs:
-        _att_chars = sum(len(t) for _p, t in atts)
-        log("attachments: %d file(s), %d chars total%s"
+        log("attachments: %d file(s), %d chars inline%s"
             % (len(atts), _att_chars,
-               ("; %d folder(s), as a vetted copy" % len(att_dirs)) if att_dirs else ""))
-        log("  API channels receive the file(s) INLINE%s. CLI channels (codex, agy, grok build) "
+               ("; %d folder(s), scanning..." % len(att_dirs)) if att_dirs else ""))
+        log("  API channels receive file(s) INLINE%s. CLI channels (codex, agy, grok build) "
             "receive ABSOLUTE PATHS and read from this disk themselves - read-only, no write or "
             "shell tools, and they may consult surrounding material. The Claude Code CLI "
             "channel (cclopus46) is the exception: it runs with permission prompts bypassed, "
             "so its shell and file-editing tools are live too."
-            % ("; folders reach CLI channels only, as a VETTED COPY of the scanned files"
+            % ("; folder files also INLINE to all channels after vetting scan"
                if att_dirs else ""))
         log("  🔴 refs mode TRUSTS the attached material: a hostile document can steer a CLI "
             "reviewer's read tools (grok build's read_file is not bounded by its cwd - "
             "measured) - and on cclopus46 its shell and edit tools as well. Attach material "
             "you authored or trust; send foreign documents inline in the brief instead.")
-        if a.attach_budget > 0 and atts:
-            if _att_chars > a.attach_budget:
-                _est_tok = _att_chars * 10 // 35
-                log("🔴 Inline attachment content (%d chars ≈ %dK tokens at 3.5 c/t) "
-                    "exceeds --attach-budget %d. Reduce attachments, raise the budget, "
-                    "or set --attach-budget 0 (unlimited, today's default)."
-                    % (_att_chars, _est_tok // 1000, a.attach_budget))
-                log("  Breakdown: --attach files %d chars." % _att_chars)
-                return 2
-            log("  attach-budget: %d / %d chars (%.0f%% used)"
-                % (_att_chars, a.attach_budget,
-                   _att_chars * 100.0 / a.attach_budget))
+        if a.attach_budget > 0 and _att_chars > a.attach_budget:
+            _est_tok = _att_chars * 10 // 35
+            log("🔴 Inline attachment content (%d chars ≈ %dK tokens at 3.5 c/t) "
+                "exceeds --attach-budget %d. Reduce attachments, raise the budget, "
+                "or set --attach-budget 0 (unlimited, today's default)."
+                % (_att_chars, _est_tok // 1000, a.attach_budget))
+            log("  Breakdown: --attach files %d chars." % _att_chars)
+            return 2
 
     # Attached FOLDERS are scanned file by file HERE, before the payload is assembled, because
     # the refs section must name the VETTED COPY and its skip manifest, not the original dir
@@ -8191,6 +8192,28 @@ def main():
         log("  Remove them from the folder (or rename the copy) and re-run. There is no "
             "override for the secrets class.")
         return 3
+    _dir_chars = sum(len(t) for _, t in dir_parts)
+    if dir_parts:
+        log("  folder scan: %d file(s), %d chars inline; %d excluded"
+            % (len(dir_parts), _dir_chars, len(dir_skipped)))
+    elif att_dirs and dir_skipped:
+        log("  folder scan: 0 readable file(s); %d excluded" % len(dir_skipped))
+    if a.attach_budget > 0:
+        _total_inline = _att_chars + _dir_chars
+        if _total_inline > 0:
+            if _total_inline > a.attach_budget:
+                _est_tok = _total_inline * 10 // 35
+                log("🔴 Inline content (%d chars ≈ %dK tokens at 3.5 c/t) "
+                    "exceeds --attach-budget %d. Reduce attachments, raise the budget, "
+                    "or set --attach-budget 0 (unlimited, today's default)."
+                    % (_total_inline, _est_tok // 1000, a.attach_budget))
+                log("  Breakdown: --attach files %d chars%s."
+                    % (_att_chars,
+                       " + --attach-dir content %d chars" % _dir_chars if _dir_chars else ""))
+                return 2
+            log("  attach-budget: %d / %d chars (%.0f%% used)"
+                % (_total_inline, a.attach_budget,
+                   _total_inline * 100.0 / a.attach_budget))
     _snap_pairs, _snap_writes = _vet_snapshot(
         att_dirs, dir_parts, os.path.join(a.out, "attach-vetted"))
     _skip_manifest = []
@@ -8278,7 +8301,7 @@ def main():
     if atts or att_dirs:
         brief_refs = (brief + _attach_refs(atts, _snap_pairs, _skip_manifest)
                       + _cap_block + _mk)
-        brief = (brief + _attach_inline(atts, att_dirs, n_vetted=len(_snap_writes),
+        brief = (brief + _attach_inline(atts, dir_parts, att_dirs,
                                         n_skipped=len(dir_skipped))
                  + _cap_block + _mk)
     else:
@@ -8379,9 +8402,9 @@ def main():
             "max_calls", 5) for c in want if kinds.get(c) not in REFS_KINDS) if want else 5
         log("  ⚠ brief mentions a GitHub repo but no --attach / --attach-dir is set. "
             "API channels cannot read files from a URL — they depend on fetch_tool "
-            "(%d calls). Use --attach <file> to inline key files for API channels; "
-            "--attach-dir gives CLI channels a vetted copy but API channels only a "
-            "NOTE." % _max_fetch)
+            "(%d calls). Use --attach <file> to inline individual files; "
+            "--attach-dir to scan and inline an entire folder for all channels."
+            % _max_fetch)
 
     if a.dry_run:
         log("--dry-run: nothing was called")

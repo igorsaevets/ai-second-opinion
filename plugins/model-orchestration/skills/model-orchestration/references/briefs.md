@@ -77,12 +77,13 @@ A code brief follows every rule above, plus four of its own, each paid for on a 
     the text; CLI channels receive the **path** and read from disk, so they can also
     consult surrounding material). ⚠ Large files are a token bomb — use `--attach-budget`
     to cap inline content.
-  - `--attach-dir <dir>` gives CLI channels a **vetted copy** on disk; API channels
-    receive only a NOTE that folders exist but are NOT included. Measured R119: without
-    `--attach`, an API channel spent 2/5 fetches on 404s and tagged most findings
-    `[UNVERIFIED]`.
+  - `--attach-dir <dir>` scans the folder and sends all readable files **inline** to every
+    channel (binary, oversized, and file-cap files are excluded by the vetting scan).
+    CLI channels additionally receive a **vetted copy** on disk and can read surrounding
+    material. ⚠ Large folders are a token bomb — use `--attach-budget` to cap total
+    inline content.
   - For code review: `--attach` specific key files + `--attach-dir` for the full tree.
-    CLI channels read both; API channels see only the `--attach` content inline.
+    All channels see both; CLI channels can additionally consult neighbouring files.
 
 - Ask every reviewer: **"which INPUT makes this code return a wrong result SILENTLY?"** The crash
   they would have found anyway; the silent wrong answer is what the review is for. The first

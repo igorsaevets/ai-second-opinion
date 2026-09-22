@@ -3560,15 +3560,14 @@ def suite_refs_and_meters():
 
     atts = [(r"C:\x\doc.md", "SECRET-FREE CONTENT")]
     refs = o._attach_refs(atts, [r"C:\x\sub"])
-    inline = o._attach_inline(atts, [r"C:\x\sub"])
+    inline = o._attach_inline(atts, None, [r"C:\x\sub"])
     check(r"C:\x\doc.md" in refs and "SECRET-FREE CONTENT" not in refs,
           "_attach_refs sends the PATH and never the file text")
     check("READ ONLY" in refs and "no write tools" in refs,
           "_attach_refs carries the read-only contract in the brief (R40: the brief is the "
           "strong position, the persona the weak one)")
-    check("SECRET-FREE CONTENT" in inline and "NOT" in inline and "folder" in inline.lower(),
-          "_attach_inline carries the file text and names the folders as ABSENT rather than "
-          "letting an API reviewer imagine reading them")
+    check("SECRET-FREE CONTENT" in inline and "folder" in inline.lower(),
+          "_attach_inline carries the file text and mentions folders when no dir_parts scanned")
 
     # grok build: refs grants read_file+list_dir and nothing else; no write tool in any mode
     check('"web_search,web_fetch,todo_write,read_file,list_dir" if file_refs' in src,
@@ -3658,6 +3657,52 @@ def suite_refs_and_meters():
         check(r10.returncode == 0,
               "--attach-budget 0 (unlimited) does not refuse even large files",
               "exit=%d" % r10.returncode)
+        # R120 Layer 2: --attach-dir scans and reports folder content inline
+        subdir = Path(td) / "src"
+        subdir.mkdir()
+        (subdir / "main.py").write_text("print('hello')\n", encoding="utf-8")
+        (subdir / "util.py").write_text("def helper(): pass\n", encoding="utf-8")
+        r11 = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
+                       "--attach-dir", str(subdir)])
+        check(r11.returncode == 0 and "folder scan:" in blob_of(r11),
+              "--attach-dir shows folder scan stats in log",
+              "exit=%d" % r11.returncode)
+        # R120 Layer 2: combined --attach + --attach-dir budget check (OVER)
+        # atts alone must be UNDER budget so the early refuse doesn't fire;
+        # atts + dir_parts must be OVER budget so the combined check catches it.
+        tinyf = Path(td) / "tiny.txt"
+        tinyf.write_text("x\n", encoding="utf-8")
+        r12 = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
+                       "--attach", str(tinyf), "--attach-dir", str(subdir),
+                       "--attach-budget", "20"])
+        check(r12.returncode == 2 and "exceeds --attach-budget" in blob_of(r12)
+              and "--attach-dir content" in blob_of(r12),
+              "--attach-budget refuses on combined --attach + --attach-dir overage",
+              "exit=%d" % r12.returncode)
+        # R120 Layer 2: combined --attach + --attach-dir budget check (UNDER)
+        r13 = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
+                       "--attach", str(smallf), "--attach-dir", str(subdir),
+                       "--attach-budget", "50000"])
+        check(r13.returncode == 0 and "attach-budget:" in blob_of(r13),
+              "--attach-budget passes combined --attach + --attach-dir under budget",
+              "exit=%d" % r13.returncode)
+        # R120 Layer 2: _attach_inline produces FOLDER FILE labels with relative paths
+        _test_dir = str(subdir)
+        _test_label = "attach-dir:" + os.path.join(_test_dir, "main.py")
+        _inline_out = o._attach_inline(
+            [(os.path.join(td, "small.txt"), "small content")],
+            [(_test_label, "print('hello')\n")],
+            [_test_dir],
+            n_skipped=0)
+        check("FOLDER FILE 1:" in _inline_out and "ATTACHMENT 1:" in _inline_out,
+              "_attach_inline inlines both atts and dir_parts with correct labels",
+              repr(_inline_out[:300]))
+        check("not included" not in _inline_out.lower(),
+              "_attach_inline omits NOT-included NOTE when dir_parts are present",
+              repr(_inline_out[:300]))
+        check("main.py" in _inline_out and _test_dir not in _inline_out,
+              "_attach_inline uses relative paths (not absolute) for folder file labels",
+              repr(_inline_out[:300]))
 
     # ---- meters --------------------------------------------------------------------------------
     check("fetches if fetch_on else None" in src
