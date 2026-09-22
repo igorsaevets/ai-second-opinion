@@ -6108,6 +6108,41 @@ KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "he
 # API kinds are structurally absent: a remote endpoint cannot open this disk.
 REFS_KINDS = ("codex", "agy", "grokcli", "claudecli")
 
+
+def retryable_stream_death(r):
+    """True when a channel result looks like a transient stream death worth auto-retrying.
+
+    Criteria (ALL must hold):
+      - ok is False
+      - no answer text was produced
+      - the failure is transient: a provider error with 429/5xx code, finish_reason="error",
+        silent death (reasoning happened but no text), or HTTP 5xx/429 in the error string
+
+    The function is at module level so the selftest can exercise it directly.
+    """
+    if r.get("ok") or r.get("text"):
+        return False
+    pe = r.get("provider_error")
+    if isinstance(pe, dict):
+        for k in ("code", "status"):
+            try:
+                c = int(pe.get(k))
+                if c == 429 or 500 <= c < 600:
+                    return True
+            except (TypeError, ValueError):
+                pass
+    fin = r.get("finish_reason")
+    if fin == "error":
+        return True
+    if fin is None and (r.get("reasoning_chars") or 0) > 0:
+        return True
+    err_s = str(r.get("error") or "")
+    for code in (429, 500, 502, 503, 504):
+        if ("HTTP %d" % code) in err_s:
+            return True
+    return False
+
+
 # The degraded path only. When channels.json cannot be loaded there is no `kind` field to read,
 # so these are the names the harness has used, mapped to what they were. Both the historical
 # spellings and the current registry names are here: this table is consulted exactly when the
@@ -7869,6 +7904,9 @@ def main():
                     help="skip fetching the cited URLs at the end of the run. The check costs "
                          "nothing at any vendor and never changes the exit code; it is on by "
                          "default because it is the only citation check that works on Codex")
+    ap.add_argument("--no-panel-retry", dest="no_panel_retry", action="store_true",
+                    help="do not auto-retry channels that failed with a transient stream death "
+                         "(502/503/429, silent death with reasoning). Default: retry ONCE")
     ap.add_argument("--resolve-grounding-links", action="store_true",
                     help="follow google_search grounding Links to their destination pages during "
                          "the citation audit. OFF by default, and the reason is Google's terms, "
@@ -8655,6 +8693,144 @@ def main():
                 results[cname] = {"ok": False, "error": "channel raised: %r" % (exc,),
                                   "traceback": traceback.format_exc()}
     results.update(unlaunched)
+
+    # ---- Б-36: auto-retry transient stream deaths --------------------------------
+    # A transient stream death leaves ok=False, no answer text, and either a transient
+    # provider error (502/503/429), finish_reason="error", or a silent death (reasoning
+    # happened but no text and finish_reason is None). The retry is safe: no ANSWER text
+    # was generated, so re-sending the brief can only re-bill INPUT tokens. The failed
+    # attempt's cost is preserved and added to the retry's cost for correct totals.
+    _retryable = {cn: r for cn, r in results.items() if retryable_stream_death(r)}
+    if _retryable and not getattr(a, "no_panel_retry", False):
+        log("\n" + "-" * 78)
+        log("AUTO-RETRY: %d channel(s) had a transient stream death and will be retried "
+            "ONCE: %s" % (len(_retryable), ", ".join(sorted(_retryable))))
+        for _rcn, _rr in sorted(_retryable.items()):
+            _pe = _rr.get("provider_error")
+            log("  [%s] finish=%s  provider_code=%s  prior_cost=$%.4f"
+                % (_rcn, _rr.get("finish_reason"),
+                   _pe.get("code") if isinstance(_pe, dict) else None,
+                   _rr.get("usd") or 0))
+        with ThreadPoolExecutor(max_workers=max(4, len(_retryable))) as _rex:
+            _rjobs = {}
+            for cname in sorted(_retryable):
+                p = (plan or {}).get(cname) or _legacy_slot(cname)
+                p["_name"] = cname
+                kind = p.get("kind")
+                outfile = os.path.join(a.out, cname.upper() + ".md")
+                workdir = os.path.join(a.out, cname + "-ws")
+                use_refs = bool((atts or att_dirs) and kind in REFS_KINDS)
+                cbrief = brief_refs if use_refs else brief
+                att_parents = (sorted({os.path.dirname(pth) for pth, _t in atts}
+                                      | {sd for sd, _d in _snap_pairs})
+                               if use_refs else None)
+                if kind == "http":
+                    _rjobs[cname] = _rex.submit(
+                        call_http_reviewer, cbrief, _system_for(system, p),
+                        a.tier, a.marker, timeout=_seconds(p.get("timeout"), 2400),
+                        model=p.get("model"), name=cname, effort=p.get("effort"),
+                        fallback_model=p.get("fallback_model"),
+                        answer_cap=a.answer_cap if a.answer_cap and a.answer_cap > 0
+                        else None)
+                elif kind == "codex":
+                    _rjobs[cname] = _rex.submit(
+                        call_codex, cbrief, a.marker, workdir, outfile,
+                        model=p.get("model"), effort=p.get("effort"),
+                        timeout=p.get("timeout"), system=_system_for(system, p),
+                        bypass=bool(cli_bypass_active(cname, a, reg)))
+                elif kind == "agy":
+                    _rjobs[cname] = _rex.submit(
+                        call_agy, cbrief, a.marker, workdir, outfile,
+                        model=p.get("model"), effort=p.get("effort") or "high",
+                        timeout=p.get("timeout") or "25m",
+                        system=_system_for(system, p), add_dirs=att_parents,
+                        bypass=bool(cli_bypass_active(cname, a, reg)))
+                elif kind == "grokcli":
+                    _rjobs[cname] = _rex.submit(
+                        call_grokcli, cbrief, a.marker, workdir, outfile,
+                        model=p.get("model"), effort=p.get("effort"),
+                        timeout=p.get("timeout") or "40m",
+                        system=_system_for(system, p), name=cname,
+                        file_refs=use_refs,
+                        bypass=bool(cli_bypass_active(cname, a, reg)))
+                elif kind == "hermes":
+                    _rjobs[cname] = _rex.submit(
+                        call_hermes, cbrief, a.marker, outfile,
+                        model=p.get("model"), toolsets=p.get("toolsets"),
+                        system=_system_for(system, p),
+                        timeout=_seconds(p.get("timeout"), 2400))
+                elif kind in ("openrouter", "oai"):
+                    _rjobs[cname] = _rex.submit(
+                        call_oai_reviewer, cbrief, a.marker, outfile,
+                        model=p.get("model"), system=_system_for(system, p),
+                        web=p.get("web"), name=cname,
+                        reasoning=p.get("reasoning"),
+                        max_tokens=p.get("max_tokens"),
+                        fetch_tool=p.get("fetch_tool"),
+                        provider=p.get("provider") or "openrouter",
+                        provider_route=p.get("provider_route"),
+                        spend_guard=p.get("spend_guard"),
+                        fallback_models=p.get("fallback_models"),
+                        timeout=_seconds(p.get("timeout"), 2400))
+                elif kind == "xai":
+                    _rjobs[cname] = _rex.submit(
+                        call_xai_responses, cbrief, a.marker, outfile,
+                        model=p.get("model"), system=_system_for(system, p),
+                        name=cname, tools=p.get("tools"),
+                        timeout=_seconds(p.get("timeout"), 2400),
+                        max_tokens=p.get("max_tokens"))
+                elif kind == "gemini":
+                    _rjobs[cname] = _rex.submit(
+                        call_gemini_direct, cbrief, a.marker, outfile,
+                        model=p.get("model"), system=_system_for(system, p),
+                        name=cname, thinking_level=p.get("thinking_level"),
+                        tools=p.get("tools"), max_tokens=p.get("max_tokens"),
+                        timeout=_seconds(p.get("timeout"), 2400))
+                elif kind == "opencode":
+                    _rjobs[cname] = _rex.submit(
+                        call_opencode, cbrief, a.marker, outfile,
+                        model=p.get("model"), effort=p.get("effort"),
+                        system=_system_for(system, p),
+                        timeout=_seconds(p.get("timeout"), 2400), name=cname)
+                elif kind == "claudecli":
+                    _rjobs[cname] = _rex.submit(
+                        call_claudecli, cbrief, a.marker, outfile,
+                        model=p.get("model"), effort=p.get("effort"),
+                        system=_system_for(system, p),
+                        fallback_model=p.get("fallback_model"),
+                        timeout=_seconds(p.get("timeout"), 2400),
+                        max_turns=p.get("max_turns"), name=cname)
+                else:
+                    log("  [%s] cannot retry: unknown kind %r" % (cname, kind))
+            for cname, f in _rjobs.items():
+                try:
+                    _retry_r = f.result()
+                except BaseException as exc:
+                    log("  [%s] RETRY RAISED: %r" % (cname, exc))
+                    _retry_r = {"ok": False, "error": "retry raised: %r" % (exc,),
+                                "traceback": traceback.format_exc()}
+                _retry_r["panel_retry"] = True
+                _prior_usd = _retryable[cname].get("usd")
+                if _prior_usd is not None:
+                    _retry_r["panel_retry_prior_usd"] = round(_prior_usd, 6)
+                    if _retry_r.get("usd") is not None:
+                        _retry_r["usd"] = round(_retry_r["usd"] + _prior_usd, 6)
+                    else:
+                        _retry_r["usd"] = round(_prior_usd, 6)
+                _retry_r.setdefault("notes", []).append(
+                    "AUTO-RETRIED after transient stream death. First attempt: finish=%s, "
+                    "provider_code=%s, billed %s. That cost is included in this result."
+                    % (_retryable[cname].get("finish_reason"),
+                       _retryable[cname].get("provider_error", {}).get("code")
+                       if isinstance(_retryable[cname].get("provider_error"), dict)
+                       else None,
+                       ("$%.4f" % _prior_usd) if _prior_usd is not None else "nothing"))
+                _stat = "OK" if _retry_r.get("ok") else "STILL FAILED"
+                log("  [%s] retry %s%s" % (cname, _stat,
+                    (" - %s bytes" % _retry_r.get("bytes")) if _retry_r.get("text") else ""))
+                results[cname] = _retry_r
+        log("-" * 78)
+
     # One authoritative assignment beats twenty literals scattered through the return statements
     # of five functions, which is where the old per-channel `"channel": "http"` lived.
     for cname, r in results.items():

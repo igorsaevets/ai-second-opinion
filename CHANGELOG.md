@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.84.0 — 2026-09-22
+
+* **Б-36: Auto-retry for transient stream deaths.** When a channel fails with a provider
+  error (502/503/429), finish_reason=error, or silent death (reasoning delivered but no
+  answer text), the panel now automatically retries it ONCE after all other channels
+  complete. The failed attempt's billed cost is preserved and added to the retry's total.
+  Disable with `--no-panel-retry`. Motivated by ormimopro 502 mid-stream in P227
+  (830s, $0.014 billed, 0 bytes answer).
+* New module-level function `retryable_stream_death(r)` for detection logic.
+* +20 selftest checks (suite_r121_panel_retry).
+
 ## 1.80.0 — 2026-09-22
 
 * **Channel renamed: `ormimo25pro` → `ormimopro` (R119).** The old name carried the v2.5

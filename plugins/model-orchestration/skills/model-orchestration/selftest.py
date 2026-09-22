@@ -7002,7 +7002,8 @@ def main():
                   suite_r100_calibration_fixes,
                   suite_r103_ground_classify,
                   suite_r104_calibration_regression,
-                  suite_r109_snapshot_classifier):
+                  suite_r109_snapshot_classifier,
+                  suite_r121_panel_retry):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -10015,6 +10016,74 @@ def suite_r109_snapshot_classifier():
     check(_ret == 0,
           "R109 report_snapshots([]) returns 0 and produces no output",
           "ret=%r" % _ret)
+
+
+def suite_r121_panel_retry():
+    """Б-36: retryable_stream_death detection."""
+    section("R121 panel-level auto-retry detection (Б-36)")
+    from orchestrate import retryable_stream_death as rsd
+
+    # ---- positive: should be retried ----
+    check(rsd({"ok": False, "provider_error": {"code": 502, "message": "Network connection lost."},
+               "finish_reason": "error", "reasoning_chars": 39558}) is True,
+          "R121 P227 exact case: 502 provider_error + finish=error -> retryable")
+
+    check(rsd({"ok": False, "finish_reason": None, "reasoning_chars": 65632}) is True,
+          "R121 И9 exact case: silent death, no finish_reason, reasoning_chars > 0 -> retryable")
+
+    check(rsd({"ok": False, "provider_error": {"code": 503}, "finish_reason": "error"}) is True,
+          "R121 503 provider error -> retryable")
+
+    check(rsd({"ok": False, "provider_error": {"code": 429}, "finish_reason": None}) is True,
+          "R121 429 rate limit in provider_error -> retryable")
+
+    check(rsd({"ok": False, "error": "HTTP 502 from openrouter: upstream died"}) is True,
+          "R121 HTTP 502 in error string -> retryable")
+
+    check(rsd({"ok": False, "error": "HTTP 500 from provider: internal"}) is True,
+          "R121 HTTP 500 in error string -> retryable")
+
+    check(rsd({"ok": False, "provider_error": {"status": 504}}) is True,
+          "R121 status field (not code) with 504 -> retryable")
+
+    check(rsd({"ok": False, "finish_reason": "error"}) is True,
+          "R121 finish_reason=error alone (no provider_error) -> retryable")
+
+    # ---- negative: should NOT be retried ----
+    check(rsd({"ok": True, "text": "good review", "finish_reason": "stop"}) is False,
+          "R121 ok=True -> not retryable (success)")
+
+    check(rsd({"ok": False, "text": "partial answer here", "finish_reason": "error",
+               "provider_error": {"code": 502}}) is False,
+          "R121 has text -> not retryable (even with 502, text exists)")
+
+    check(rsd({"ok": False, "error": "channels.json gives this channel kind 'foo'"}) is False,
+          "R121 config error (not transient) -> not retryable")
+
+    check(rsd({"ok": False, "finish_reason": "stop"}) is False,
+          "R121 finish_reason=stop, no text -> not retryable (not a stream death)")
+
+    check(rsd({"ok": False, "finish_reason": None, "reasoning_chars": 0}) is False,
+          "R121 silent death with NO reasoning -> not retryable (nothing happened)")
+
+    check(rsd({"ok": False, "finish_reason": None, "reasoning_chars": None}) is False,
+          "R121 silent death with None reasoning_chars -> not retryable")
+
+    check(rsd({"ok": False, "error": "HTTP 400 from openrouter: bad request"}) is False,
+          "R121 HTTP 400 (client error) -> not retryable")
+
+    check(rsd({}) is False,
+          "R121 empty result -> not retryable")
+
+    check(rsd({"ok": False, "text": "", "provider_error": {"code": 502}}) is True,
+          "R121 empty string text with 502 -> retryable (empty string is falsy, same as absent)")
+
+    # ---- edge: provider_error with non-int code ----
+    check(rsd({"ok": False, "provider_error": {"code": "not_a_number"}}) is False,
+          "R121 provider_error with non-numeric code -> not retryable (ValueError)")
+
+    check(rsd({"ok": False, "provider_error": "raw string error"}) is False,
+          "R121 provider_error is a string, not dict -> not retryable")
 
 
 if __name__ == "__main__":
