@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.78.1 — 2026-09-22
+
+* **SKILL.md: binary-name-is-a-group guidance (R117).** `--only agy` is a GROUP — it returns
+  every agy channel, not one. When the user names CLIs individually, the AI should use specific
+  channel names for one-per-binary. Prevents two measured failures: ironmemo-web got 5 channels
+  (both agy) instead of expected 4; Plugins ironmemo ran a non-CLI channel.
+* **Trim: removed `quick` note from `--tier` line** to stay within the 5K-token SKILL.md budget.
+
+## 1.78.0 — 2026-09-22
+
+* **orgrok420 disabled by default (R116).** the operator: «OR Grok 4.20 - по дефолту надо отключить».
+  `channels.json` `enabled: true → false`. Only `--only orgrok420` (direct naming) starts it.
+* **Selftest: vendor bloc assertions use resolved plan.** After disabling orgrok420, the cheap
+  panel has 4 vendors × 1 seat each (post-cascade). The "largest bloc:" line is correctly
+  omitted. Assertions now derive from `resolve()` output, not from the raw registry.
+
 ## 1.77.0 — 2026-09-21
 
 * **HANDOFF "read the WHOLE answer" instruction (R115 И-4).** HANDOFF.md now tells the reader to

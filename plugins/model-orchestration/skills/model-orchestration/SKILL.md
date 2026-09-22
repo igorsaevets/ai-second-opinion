@@ -126,6 +126,9 @@ are the registry key, upper-cased.
 | `--dry-run` | full preflight (plan, payload, keys, gates), then exit — spends nothing |
 | `--strict-pii` | identifier gate **OFF by default since R45** (summary line, then send); `--warn-pii` itemises, `--strict-pii` refuses, `--allow-pii` is a no-op. **Secrets can never be sent, at any setting** |
 
+🔴 **`--only agy` is a GROUP — it returns EVERY agy channel.** When user names CLIs individually,
+use specific channel names for one-per-binary; `--dry-run` shows which names a word expands to.
+
 ### 0.1 Choosing channels and models without editing code
 
 Weekly limits run out on one model at a time, so the channel/model choice changes per request,
@@ -209,7 +212,7 @@ Moonshot, Alibaba, DeepSeek and Meta-Standard; the plan prints the vendor tally 
 `standard` adds — six Geminis agreeing is one opinion repeated.
 
 **`--tier` parses and chooses nothing.** One tier, `max`; `strategic`/`deep` are aliases so old
-commands work. `quick` is still an argparse error. Resolved depth is printed per channel.
+commands work. Resolved depth is printed per channel.
 
 **A below-floor note names its cause.** With the default `--answer-cap` a short FINAL answer is
 what was asked for; "under-allocated" means something only with the cap off.
