@@ -6120,7 +6120,7 @@ _LEGACY_KINDS = {"http": "http", "spark": "http", "spark11": "http", "spark12": 
                  "kimi": "openrouter", "qwen": "openrouter",
                  "kimik3": "openrouter", "qwen38max": "openrouter",
                  "orgemini36flash": "openrouter", "orgemini37flash": "openrouter", "orgemini38flash": "openrouter",
-                 "ormimo25pro": "openrouter",
+                 "ormimopro": "openrouter",
                  "orgrok420": "openrouter", "ornemotron3ultra": "openrouter",
                  "ordeepseekv4pro": "openrouter", "orglm53": "openrouter",
                  "orgpt56terrapro": "openrouter", "orgpt56solpro": "openrouter",

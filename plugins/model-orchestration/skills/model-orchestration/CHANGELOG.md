@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.80.0 — 2026-09-22
+
+* **Channel renamed: `ormimo25pro` → `ormimopro` (R119).** The old name carried the v2.5
+  version number and confused the operator into thinking v2.5 ran instead of v2.6. The new
+  name is version-free and won't need renaming on future model upgrades. `ormimo25pro`
+  remains a working alias. `--only ormimo25pro` still works; `--set ormimopro=xiaomi/mimo-v2.5-pro`
+  still works.
+
 ## 1.79.1 — 2026-09-22
 
 * **ormimo25pro reasoning budget 90K → 85K (R118 panel findings).** 3 live runs showed model

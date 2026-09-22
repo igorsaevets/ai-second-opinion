@@ -2931,7 +2931,7 @@ def suite_panels():
         "ordeepseekv4pro", "grok420", "orgrok420",
         "agy31pro", "agy36flash", "agy38flash",
         "goog36flash", "goog38flash", "orgemini36flash", "orgemini38flash",
-        "mimo25pro", "ormimo25pro", "ornemotron3ultra", "spark13cont",
+        "mimo25pro", "ormimopro", "ornemotron3ultra", "spark13cont",
     }
     # 🔴 THE DICTATED SET IS AN ANCHOR AND MUST NEVER SHRINK SILENTLY; growth is a SEPARATE,
     # NAMED list. Equating the two was right while the roster was frozen, and wrong the first
