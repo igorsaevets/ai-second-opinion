@@ -50,6 +50,14 @@ documents that hold the detail. It deliberately holds no channel list, no counts
   `[SNIPPET]` (search result only, page not opened), `[MEMORY]` (training data, unchecked).
   The system presets define them; expect them in answers, and use them yourself when you report
   findings to the person who asked.
+- **API channels cannot read files — attach them or they are invisible.** Channels served by
+  a remote API (OpenRouter, direct vendor endpoints) see ONLY the brief text and what
+  `fetch_tool` returns (limited to 5 calls). A GitHub URL in the brief does NOT give them the
+  code — they must guess paths, and a wrong path is a wasted fetch. Use `--attach <file>` or
+  `--attach-dir <dir>`: the harness automatically inlines file contents for API channels and
+  passes paths for CLI channels. For large files (>100KB), prefer `--attach` on selected files
+  over `--attach-dir` on the whole tree. Measured R119: without `--attach-dir`, an API channel
+  spent 2 of 5 fetches on 404s and tagged most findings `[UNVERIFIED]`.
 - **The PII line is the operator's job, not the tool's.** Secrets are blocked outright;
   identifiers can be itemised; **names and street addresses are not detected at all** —
   [PRIVACY.md](PRIVACY.md) has the exact boundary. Tokenize before sending; sent is sent.

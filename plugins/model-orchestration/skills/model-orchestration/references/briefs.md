@@ -68,9 +68,19 @@ Then verify: a review with zero URLs has verified nothing, whatever its exit cod
    not in its verdict. Read that field first when grading.
 9. Required output format, ending with the literal marker on its own last line.
 
-## Code-review briefs — three extra lines
+## Code-review briefs — four extra rules
 
-A code brief follows every rule above, plus three of its own, each paid for on a real round:
+A code brief follows every rule above, plus four of its own, each paid for on a real round:
+
+- 🔴 **Attach the source — a URL is NOT a substitute.** Use `--attach-dir <path>` or
+  `--attach <file> <file>` to give every channel the code. CLI channels (`agy`, `grokbuild`,
+  `codex`, `claudecli`) receive the **path** and read files themselves; API channels
+  (`ormimopro`, `orgrok420`, etc.) receive file contents **inline**. A GitHub URL alone leaves
+  API channels dependent on `fetch_tool` (5 calls, and a wrong path = 404 = wasted budget).
+  Measured R119: ormimopro got 5 fetches, 2 returned 404, it tagged most findings
+  `[UNVERIFIED]`. agy38flash read the same files locally via 147 tool calls. **For large files
+  (>100KB), use `--attach` on selected smaller files instead of `--attach-dir` on the whole
+  tree** — inline embedding is a token bomb for API channels.
 
 - Ask every reviewer: **"which INPUT makes this code return a wrong result SILENTLY?"** The crash
   they would have found anyway; the silent wrong answer is what the review is for. The first

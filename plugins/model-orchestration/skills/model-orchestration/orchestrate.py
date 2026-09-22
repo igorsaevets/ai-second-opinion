@@ -8326,6 +8326,20 @@ def main():
     for problem in preflight:
         log("  [preflight] " + problem)
 
+    # Warn when the brief references a repo URL but no files are attached — API channels
+    # will only see the brief text and fetch_tool (limited calls, wrong paths = 404).
+    # Measured R119: ormimopro wasted 2/5 fetches on 404, tagged most findings UNVERIFIED.
+    _has_repo_url = bool(re.search(r"https?://github\.com/\S+", brief))
+    _has_attach = bool(atts or att_dirs)
+    _has_api_chans = any(kinds.get(c) not in REFS_KINDS for c in want if kinds.get(c))
+    if _has_repo_url and not _has_attach and _has_api_chans:
+        _max_fetch = max((((plan or {}).get(c) or {}).get("fetch_tool") or {}).get(
+            "max_calls", 5) for c in want if kinds.get(c) not in REFS_KINDS) if want else 5
+        log("  ⚠ brief mentions a GitHub repo but no --attach / --attach-dir is set. "
+            "API channels cannot read files from a URL — they depend on fetch_tool "
+            "(%d calls). Consider --attach-dir <source-dir> so they receive file "
+            "contents INLINE." % _max_fetch)
+
     if a.dry_run:
         log("--dry-run: nothing was called")
         return 0
