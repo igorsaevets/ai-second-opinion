@@ -7744,14 +7744,14 @@ def main():
                          "INLINED as an ATTACHMENT block. The secrets scan covers the content "
                          "either way. Repeatable")
     ap.add_argument("--attach-dir", action="extend", nargs="*", default=[], metavar="DIR",
-                    help="a folder of supporting material, BY REFERENCE, for CLI channels only "
-                         "- API channels are told it exists and that they cannot read it. "
-                         "Read-only; text files inside are secrets-scanned (skips are printed "
-                         "by name). Repeatable")
+                    help="a folder of supporting material. Scanned text files are INLINED to "
+                         "all channels; CLI channels also get a VETTED COPY on disk and can "
+                         "read surrounding material. Binary/oversized files are excluded by the "
+                         "vetting scan (skips printed by name). Repeatable")
     ap.add_argument("--attach-budget", type=int, default=0, metavar="CHARS",
-                    help="max total chars for inline attachments (0 = unlimited). "
-                         "If --attach content exceeds this, the round is refused "
-                         "before any spend. Use to prevent token bombs")
+                    help="max total chars for inline content (0 = unlimited). "
+                         "If --attach files + --attach-dir scanned content exceeds "
+                         "this, the round is refused before any spend")
     # Igor, R72 (2026-08-31): the session that ordered a panel should usually read the answers
     # ITSELF, and what stopped it was sheer volume - so ask every reviewer to write the essence.
     # A prompt instruction, deliberately NOT max_tokens: a token ceiling cuts mid-sentence and
