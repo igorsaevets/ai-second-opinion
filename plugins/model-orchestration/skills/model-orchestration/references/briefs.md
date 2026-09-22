@@ -72,15 +72,17 @@ Then verify: a review with zero URLs has verified nothing, whatever its exit cod
 
 A code brief follows every rule above, plus four of its own, each paid for on a real round:
 
-- 🔴 **Attach the source — a URL is NOT a substitute.** Use `--attach-dir <path>` or
-  `--attach <file> <file>` to give every channel the code. CLI channels (`agy`, `grokbuild`,
-  `codex`, `claudecli`) receive the **path** and read files themselves; API channels
-  (`ormimopro`, `orgrok420`, etc.) receive file contents **inline**. A GitHub URL alone leaves
-  API channels dependent on `fetch_tool` (5 calls, and a wrong path = 404 = wasted budget).
-  Measured R119: ormimopro got 5 fetches, 2 returned 404, it tagged most findings
-  `[UNVERIFIED]`. agy38flash read the same files locally via 147 tool calls. **For large files
-  (>100KB), use `--attach` on selected smaller files instead of `--attach-dir` on the whole
-  tree** — inline embedding is a token bomb for API channels.
+- 🔴 **Attach the source — a URL is NOT a substitute.**
+  - `--attach <file>` sends file contents **inline** to every channel (API channels see
+    the text; CLI channels receive the **path** and read from disk, so they can also
+    consult surrounding material). ⚠ Large files are a token bomb — use `--attach-budget`
+    to cap inline content.
+  - `--attach-dir <dir>` gives CLI channels a **vetted copy** on disk; API channels
+    receive only a NOTE that folders exist but are NOT included. Measured R119: without
+    `--attach`, an API channel spent 2/5 fetches on 404s and tagged most findings
+    `[UNVERIFIED]`.
+  - For code review: `--attach` specific key files + `--attach-dir` for the full tree.
+    CLI channels read both; API channels see only the `--attach` content inline.
 
 - Ask every reviewer: **"which INPUT makes this code return a wrong result SILENTLY?"** The crash
   they would have found anyway; the silent wrong answer is what the review is for. The first

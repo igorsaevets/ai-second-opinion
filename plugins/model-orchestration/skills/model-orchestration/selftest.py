@@ -3638,6 +3638,26 @@ def suite_refs_and_meters():
         check(r7.returncode == 0 and "attachments: 1 file(s)" in blob_of(r7),
               "--attach accepts a UTF-16 file (BOM takes precedence over NUL sniff)",
               "exit=%d" % r7.returncode)
+        # R120 Layer 1: --attach-budget with content OVER budget -> refuse (exit 2)
+        r8 = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
+                      "--attach", str(bigf), "--attach-budget", "100000"])
+        check(r8.returncode == 2 and "exceeds --attach-budget" in blob_of(r8),
+              "--attach-budget refuses when inline content exceeds the limit",
+              "exit=%d" % r8.returncode)
+        # R120 Layer 1: --attach-budget with content UNDER budget -> success
+        smallf = Path(td) / "small.txt"
+        smallf.write_text("test data\n" * 100, encoding="utf-8")
+        r9 = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
+                      "--attach", str(smallf), "--attach-budget", "5000"])
+        check(r9.returncode == 0 and "attach-budget:" in blob_of(r9),
+              "--attach-budget passes when inline content is under the limit",
+              "exit=%d" % r9.returncode)
+        # R120 Layer 1: --attach-budget 0 (unlimited) does not refuse
+        r10 = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
+                       "--attach", str(bigf), "--attach-budget", "0"])
+        check(r10.returncode == 0,
+              "--attach-budget 0 (unlimited) does not refuse even large files",
+              "exit=%d" % r10.returncode)
 
     # ---- meters --------------------------------------------------------------------------------
     check("fetches if fetch_on else None" in src

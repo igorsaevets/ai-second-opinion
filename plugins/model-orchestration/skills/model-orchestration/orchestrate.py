@@ -7743,6 +7743,10 @@ def main():
                          "- API channels are told it exists and that they cannot read it. "
                          "Read-only; text files inside are secrets-scanned (skips are printed "
                          "by name). Repeatable")
+    ap.add_argument("--attach-budget", type=int, default=0, metavar="CHARS",
+                    help="max total chars for inline attachments (0 = unlimited). "
+                         "If --attach content exceeds this, the round is refused "
+                         "before any spend. Use to prevent token bombs")
     # Igor, R72 (2026-08-31): the session that ordered a panel should usually read the answers
     # ITSELF, and what stopped it was sheer volume - so ask every reviewer to write the essence.
     # A prompt instruction, deliberately NOT max_tokens: a token ceiling cuts mid-sentence and
@@ -8136,8 +8140,9 @@ def main():
             return 2
         att_dirs.append(p_abs)
     if atts or att_dirs:
+        _att_chars = sum(len(t) for _p, t in atts)
         log("attachments: %d file(s), %d chars total%s"
-            % (len(atts), sum(len(t) for _p, t in atts),
+            % (len(atts), _att_chars,
                ("; %d folder(s), as a vetted copy" % len(att_dirs)) if att_dirs else ""))
         log("  API channels receive the file(s) INLINE%s. CLI channels (codex, agy, grok build) "
             "receive ABSOLUTE PATHS and read from this disk themselves - read-only, no write or "
@@ -8150,6 +8155,18 @@ def main():
             "reviewer's read tools (grok build's read_file is not bounded by its cwd - "
             "measured) - and on cclopus46 its shell and edit tools as well. Attach material "
             "you authored or trust; send foreign documents inline in the brief instead.")
+        if a.attach_budget > 0 and atts:
+            if _att_chars > a.attach_budget:
+                _est_tok = _att_chars * 10 // 35
+                log("🔴 Inline attachment content (%d chars ≈ %dK tokens at 3.5 c/t) "
+                    "exceeds --attach-budget %d. Reduce attachments, raise the budget, "
+                    "or set --attach-budget 0 (unlimited, today's default)."
+                    % (_att_chars, _est_tok // 1000, a.attach_budget))
+                log("  Breakdown: --attach files %d chars." % _att_chars)
+                return 2
+            log("  attach-budget: %d / %d chars (%.0f%% used)"
+                % (_att_chars, a.attach_budget,
+                   _att_chars * 100.0 / a.attach_budget))
 
     # Attached FOLDERS are scanned file by file HERE, before the payload is assembled, because
     # the refs section must name the VETTED COPY and its skip manifest, not the original dir
@@ -8362,8 +8379,9 @@ def main():
             "max_calls", 5) for c in want if kinds.get(c) not in REFS_KINDS) if want else 5
         log("  ⚠ brief mentions a GitHub repo but no --attach / --attach-dir is set. "
             "API channels cannot read files from a URL — they depend on fetch_tool "
-            "(%d calls). Consider --attach-dir <source-dir> so they receive file "
-            "contents INLINE." % _max_fetch)
+            "(%d calls). Use --attach <file> to inline key files for API channels; "
+            "--attach-dir gives CLI channels a vetted copy but API channels only a "
+            "NOTE." % _max_fetch)
 
     if a.dry_run:
         log("--dry-run: nothing was called")
