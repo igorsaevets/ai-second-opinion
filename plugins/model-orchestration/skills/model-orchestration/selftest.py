@@ -3614,6 +3614,30 @@ def suite_refs_and_meters():
         check(r4.returncode == 2 and "file not found" in blob_of(r4),
               "--attach with a missing file refuses before anything runs",
               "exit=%d" % r4.returncode)
+        # R120 Layer -1: --attach with a BINARY file -> refuse (exit 2)
+        binf = Path(td) / "report.pdf"
+        binf.write_bytes(b"%PDF-1.4\x00\x01\x02" + b"\x00" * 100)
+        r5 = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
+                      "--attach", str(binf)])
+        check(r5.returncode == 2 and "binary file detected" in blob_of(r5),
+              "--attach refuses a binary file (NUL + non-text extension)",
+              "exit=%d" % r5.returncode)
+        # R120 Layer -1: --attach with a LARGE text file -> warning but success
+        bigf = Path(td) / "big.py"
+        bigf.write_text("x = 1\n" * 40_000, encoding="utf-8")
+        r6 = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
+                      "--attach", str(bigf)])
+        check(r6.returncode == 0 and "tokens per API channel" in blob_of(r6),
+              "--attach warns about a large file (>200KB) but does not refuse",
+              "exit=%d" % r6.returncode)
+        # R120 Layer -1: --attach with a UTF-16 file -> accepted (BOM beats NUL sniff)
+        u16f = Path(td) / "notes.dat"
+        u16f.write_bytes(b"\xff\xfe" + "test content".encode("utf-16-le"))
+        r7 = run_cli(["--dry-run", "--only", "spark11", "--marker", "X",
+                      "--attach", str(u16f)])
+        check(r7.returncode == 0 and "attachments: 1 file(s)" in blob_of(r7),
+              "--attach accepts a UTF-16 file (BOM takes precedence over NUL sniff)",
+              "exit=%d" % r7.returncode)
 
     # ---- meters --------------------------------------------------------------------------------
     check("fetches if fetch_on else None" in src

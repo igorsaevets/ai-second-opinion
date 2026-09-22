@@ -8097,13 +8097,38 @@ def main():
             log("--attach %s: file not found" % pth)
             return 2
         try:
-            # utf-8-sig: same BOM class as the brief read above - an attached file's BOM would
-            # otherwise ride into the payload as an inline U+FEFF.
-            with open(p_abs, encoding="utf-8-sig", errors="replace") as fh:
-                atts.append((p_abs, fh.read()))
+            _att_size = os.path.getsize(p_abs)
+            with open(p_abs, "rb") as fh:
+                _head = fh.read(4096)
         except OSError as exc:
             log("--attach %s: cannot read (%s)" % (pth, exc))
             return 2
+        _ext = os.path.splitext(p_abs)[1].lower()
+        if _head[:2] in (b"\xff\xfe", b"\xfe\xff"):
+            try:
+                with open(p_abs, "rb") as fh:
+                    _att_text = fh.read().decode("utf-16", "replace")
+            except OSError as exc:
+                log("--attach %s: cannot read (%s)" % (pth, exc))
+                return 2
+        elif _ext not in _ATT_TEXT_EXT and b"\x00" in _head:
+            log("--attach %s: binary file detected (NUL byte in first 4096 bytes, "
+                "extension '%s' not in the text allowlist). Use --attach-dir (which "
+                "skips binary files), convert to text, or rename with a text "
+                "extension (.txt, .md, .py)." % (pth, _ext or "(none)"))
+            return 2
+        else:
+            try:
+                with open(p_abs, encoding="utf-8-sig", errors="replace") as fh:
+                    _att_text = fh.read()
+            except OSError as exc:
+                log("--attach %s: cannot read (%s)" % (pth, exc))
+                return 2
+        if _att_size > 200_000:
+            _est_tok = len(_att_text) * 10 // 35
+            log("  ⚠ --attach %s: %d KB ≈ %d tokens per API channel (at ~3.5 "
+                "chars/token for code)." % (pth, _att_size // 1000, _est_tok))
+        atts.append((p_abs, _att_text))
     for pth in (a.attach_dir or []):
         p_abs = os.path.abspath(os.path.expanduser(pth))
         if not os.path.isdir(p_abs):
