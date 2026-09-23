@@ -227,7 +227,7 @@ OVERLAY_SHARP_HINT = (
 # `hermes` is future-proof - no channel of that kind ships today, but it is in KNOWN_KINDS and a
 # stranger's overlay could add one. Fail loud there rather than silently reinterpret.
 ALLOW_ARBITRARY_MODEL_KINDS = frozenset({
-    "http", "codex", "openrouter", "oai", "xai", "gemini", "claudecli", "grokcli",
+    "http", "codex", "openrouter", "oai", "xai", "gemini", "claudecli", "grokcli", "mimocli",
 })
 REFUSE_ARBITRARY_MODEL_KINDS = frozenset({"agy", "opencode", "hermes"})
 
@@ -1968,6 +1968,12 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                 p["timeout"] = t.get("grokcli_timeout", p.get("timeout") or "40m")
                 p["_tier_note"] = ("effort %s (clamped to this model's ceiling), timeout %s"
                                    % (p.get("effort"), p["timeout"]))
+            elif p.get("kind") == "mimocli":
+                p["effort"] = _clamp_effort(reg, cname, p["model"], p.get("effort"), p)
+                p["timeout"] = p.get("timeout") or "40m"
+                p["_tier_note"] = ("effort %s (--variant flag), timeout %s, "
+                                   "metered Xiaomi API via mimo CLI"
+                                   % (p.get("effort") or "default", p["timeout"]))
         # 🔴 THE TIER DID NOTHING TO THE SPARK CHANNELS, and it looked like it did. The tier
         # varied `thinking.budget_tokens`, but Meta documents that field as "accepted for
         # compatibility but not translated into an effort value" - depth on this endpoint is set
@@ -2232,6 +2238,10 @@ def _web_line(p):
                 "on purpose): the reviewer can run shell commands and edit files on this "
                 "machine; your deny rules and hooks still apply. Grounding is the agent's own "
                 "claim")
+    if kind == "mimocli":
+        return ("web: mimo CLI's built-in agent tools (fork of opencode) - the model runs "
+                "through Xiaomi's API which may include search. The harness does not control "
+                "which tools the agent uses; grounding is the agent's own claim")
     return None
 
 

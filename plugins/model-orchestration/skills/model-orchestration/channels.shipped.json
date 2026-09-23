@@ -113,8 +113,9 @@
       ]
     },
     "mimo": {
-      "label": "every MiMo, both transports",
+      "label": "every MiMo, all transports",
       "channels": [
+        "mimov26pro",
         "mimo25pro",
         "ormimopro"
       ],
@@ -142,9 +143,10 @@
       ]
     },
     "cli": {
-      "label": "every channel that runs through a local CLI binary (opencode, claude, codex, agy, grok)",
+      "label": "every channel that runs through a local CLI binary (opencode, mimo, claude, codex, agy, grok)",
       "channels": [
         "ocspark13free",
+        "mimov26pro",
         "cclopus46",
         "codex",
         "agy31pro",
@@ -152,7 +154,7 @@
         "agy38flash",
         "grokbuild"
       ],
-      "_added": "2026-09-21 (R115 И-2). Root cause of the Plugins ironmemo bug: user said «только CLI» but no group existed to express that. CLI kinds: opencode, claudecli, codex, agy, grokcli. The selftest structurally verifies that this group contains ALL channels whose kind is a CLI kind and NOTHING else - adding a new CLI channel without updating this list will fail the test.",
+      "_added": "2026-09-21 (R115 И-2). Root cause of the Plugins ironmemo bug: user said «только CLI» but no group existed to express that. CLI kinds: opencode, claudecli, codex, agy, grokcli, mimocli. The selftest structurally verifies that this group contains ALL channels whose kind is a CLI kind and NOTHING else - adding a new CLI channel without updating this list will fail the test.",
       "aliases": [
         "cli",
         "кли",
@@ -1121,6 +1123,52 @@
       ],
       "notes": "2,000,000 context. Its edge is auditable grounding plus a self-reported price: span-level citations, a list of pages xAI opened, and the dollar cost of the call. No depth knob - do not add one."
     },
+    "mimov26pro": {
+      "read_order": 2,
+      "kind": "mimocli",
+      "panel": "cheap",
+      "vendor": "xiaomi",
+      "enabled": false,
+      "bypass_permissions": true,
+      "_bypass_permissions": "R122 (2026-09-22). mimo CLI uses --dangerously-skip-permissions (alias --yolo). Same blast radius as other CLI channels: every built-in tool runs without prompts. the operator: «Не забудь как и другим дать bypass permission».",
+      "distribution": "local",
+      "_distribution": "LOCAL ONLY. The mimo CLI needs: (1) @mimo-ai/cli installed (npm), (2) Xiaomi API credentials in ~/.local/share/mimocode/auth.json. Kit users without these should use ormimopro (same model via OpenRouter, distribution:kit). package.py flips enabled to false in the kit tree.",
+      "label": "MiMo v2.6 Pro",
+      "cost": "metered",
+      "_cost": "Xiaomi API pricing. Probed 2026-09-22: $0.047 first call (107K agent overhead, no cache), $0.0005 second call (123K cached). The agent framework overhead makes this CLI expensive on first invocation per session; caching amortises subsequent calls.",
+      "model": "xiaomi/mimo-v2.6-pro",
+      "effort": "max",
+      "_effort": "mimo CLI --variant flag. the operator: «ставь максимально доступный reasoning effort». Probed 2026-09-22: 95 reasoning tokens on 2+2 without --variant; --variant max NOT YET PROBED (to be verified in live test).",
+      "supported_efforts": [
+        "max",
+        "high",
+        "minimal"
+      ],
+      "_supported_efforts": "From mimo run --help: '--variant model variant (provider-specific reasoning effort, e.g., high, max, minimal)'. Not probed on this model; inferred from help text. If max errors, fall back to high.",
+      "timeout": "40m",
+      "_timeout": "Matches other CLI channels. mimo CLI has no built-in timeout; caller-side via subprocess.run.",
+      "_no_spend_guard": "R122: the mimocli transport reports cost only AFTER the call completes (NDJSON step_finish), not mid-call. Spend-guard enforcement requires a streaming cost meter (only call_oai_reviewer has one). Removing the guard is honest; declaring one the transport cannot enforce is a promise in the plan that nothing keeps.",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "models": {
+        "xiaomi/mimo-v2.6-pro": {
+          "label": "MiMo v2.6 Pro (via mimo CLI)",
+          "data_policy": "Xiaomi's own API via the mimo CLI. Credentials in ~/.local/share/mimocode/auth.json. Data terms: Xiaomi's API terms apply — this project has NOT verified Xiaomi's data retention policy.",
+          "aliases": [
+            "mimo cli v2.6",
+            "мимо кли 2.6"
+          ],
+          "_alias_collision_avoided": "xiaomi/mimo-v2.6-pro is claimed by ormimopro. Two channels, same model slug — different transports. Channel aliases resolve the channel; model aliases resolve the model. The slug stays in `model` (what gets sent to the CLI) and is not repeated here."
+        }
+      },
+      "aliases": [
+        "mimov26pro",
+        "mimocli",
+        "мимо кли",
+        "мимокод"
+      ],
+      "_added": "2026-09-22 (R122), the operator: «Давай теперь добавим еще одну Cli по дефолту в cheap CLI. mimo clode cli, с модель MiMo 2.6 pro. mimi code cli поставь первой, а ormimopro как fallback». Binary: mimo v0.1.14 (@mimo-ai/cli). NDJSON output identical to opencode (fork). Brief via stdin pipe. Cascade: [mimov26pro, ormimopro] — CLI first, OpenRouter fallback.",
+      "notes": "MiMo v2.6 Pro via the mimo CLI (direct Xiaomi API). Primary MiMo voice — cascades with ormimopro (same model, OpenRouter fallback). 1.05M context. Metered: ~$0.05 first call due to agent overhead, ~$0.001 subsequent (cache). The mimo CLI is a fork of opencode; NDJSON format, stdin pipe, and bypass flags are structurally identical."
+    },
     "ormimopro": {
       "read_order": 2,
       "kind": "openrouter",
@@ -1544,6 +1592,10 @@
       "ocspark13free",
       "spark13cont",
       "orspark13cont"
+    ],
+    [
+      "mimov26pro",
+      "ormimopro"
     ],
     [
       "agy38flash",

@@ -375,7 +375,7 @@ def suite_routing():
 
     # R115: the `cli` group must contain EXACTLY the channels whose kind is a CLI binary transport,
     # and nothing else. Adding a new CLI channel without adding it to the group will fail here.
-    _CLI_KINDS = {"opencode", "claudecli", "codex", "agy", "grokcli"}
+    _CLI_KINDS = {"opencode", "claudecli", "codex", "agy", "grokcli", "mimocli"}
     _cli_by_kind = {c for c, ch in _RAW["channels"].items() if ch.get("kind") in _CLI_KINDS}
     _cli_group = set(GROUPS.get("cli", set()))
     check(_cli_group == _cli_by_kind,
@@ -721,6 +721,8 @@ def suite_dispatch():
         "o.call_hermes = stub('hermes')\n"
         "o.call_grokcli = stub('grokcli')\n"
         "o.call_opencode = stub('opencode')\n"
+        "o.call_claudecli = stub('claudecli')\n"
+        "o.call_mimocli = stub('mimocli')\n"
         # 🔴 THE STUBS MUST REPLACE SOMETHING THAT EXISTS. Found while renaming
         # call_openrouter_reviewer -> call_oai_reviewer on 2026-08-08: `o.old_name = stub(...)`
         # does not fail on a name the module no longer has, it CREATES it. The dispatcher then
@@ -729,7 +731,8 @@ def suite_dispatch():
         # no test. Asserted BEFORE assignment would need a different structure; asserted here it
         # still fires on the next rename, which is what matters.
         "for _n in ('call_http_reviewer','call_codex','call_agy','call_oai_reviewer',\n"
-        "           'call_xai_responses','call_gemini_direct','call_hermes','call_opencode'):\n"
+        "           'call_xai_responses','call_gemini_direct','call_hermes','call_opencode',\n"
+        "           'call_claudecli','call_mimocli'):\n"
         "    assert callable(getattr(o, _n, None)), 'stub target missing: ' + _n\n"
         "t = tempfile.mkdtemp(prefix='orchdisp-')\n"
         "b = os.path.join(t, 'b.md')\n"
@@ -818,8 +821,12 @@ def suite_dispatch():
         for c in webbed:
             check(any(r["name"] == c and r["web"] for r in launched),
                   "the registry's web setting reached the %s call" % c)
-        check(bool(webbed), "at least one launched channel has web search on",
-              "webbed=%s" % webbed)
+        _cli_web_kinds = {"agy", "codex", "grokcli", "opencode", "claudecli", "mimocli"}
+        cli_webbed = [c for c in _panel_en
+                      if (_reg_raw["channels"].get(c) or {}).get("kind") in _cli_web_kinds]
+        check(bool(webbed) or bool(cli_webbed),
+              "at least one launched channel has web search on",
+              "webbed=%s cli_webbed=%s" % (webbed, cli_webbed))
         # 🔴 R36 (2026-08-13): a registry `provider_route` block must REACH the call, not stay on
         # the printout. Same discipline as `web.enabled` above: the plan can print «provider pin»
         # and the dispatcher can still hand OpenRouter no `provider` field, which is the exact
@@ -923,6 +930,7 @@ def suite_dispatch():
         "    o.call_http_reviewer = ok; o.call_codex = ok; o.call_oai_reviewer = ok\n"
         "    o.call_hermes = ok; o.call_gemini_direct = ok; o.call_xai_responses = ok\n"
         "    o.call_grokcli = ok; o.call_opencode = ok\n"
+        "    o.call_claudecli = ok; o.call_mimocli = ok\n"
         "    o.call_agy = boom\n"
         "    t = tempfile.mkdtemp(); b = os.path.join(t, 'b.md')\n"
         "    open(b, 'w', encoding='utf-8').write('hi\\nREVIEW-COMPLETE\\n')\n"
@@ -2688,12 +2696,11 @@ def suite_spend_guard():
     src_all = inspect.getsource(o)
     check(".endswith(marker)" not in src_all and ".endswith(a.marker)" not in src_all,
           "R68 census: no raw marker-endswith anywhere in orchestrate.py")
-    # R82 bump 10 -> 11: call_claudecli (v1.52.0) verifies by the shared rule -
-    # a LEGITIMATE new site whose commit forgot the census update this comment
-    # demands. Verified by mapping every occurrence to its function before bumping.
+    # R82 bump 10 -> 11: call_claudecli (v1.52.0) verifies by the shared rule.
+    # R122 bump 11 -> 12: call_mimocli (v1.87.0) adds one more verification site.
     check(src_all.count("def _marker_on_last_line(") == 1 and
-          src_all.count("not _marker_on_last_line(") == 11,
-          "R68 census: 10 verification sites + 1 use inside _strip_marker_tail, one def",
+          src_all.count("not _marker_on_last_line(") == 12,
+          "R68 census: 11 verification sites + 1 use inside _strip_marker_tail, one def",
           "def=%d not_calls=%d" % (src_all.count("def _marker_on_last_line("),
                                    src_all.count("not _marker_on_last_line(")))
     check(src_all.count("_strip_marker_tail(") == 3,
@@ -3043,6 +3050,12 @@ def suite_panels():
          "to standard leaves agy38flash as the sole agy channel in cheap panel. The cheap "
          "panel ran BOTH agy channels before this; now cheap = agy38flash only. agy31pro is "
          "still enabled: true and still runs by name and on --panel standard."),
+        ("R122 2026-09-22", "ADD", "mimov26pro",
+         "Igor: «Давай теперь добавим еще одну Cli по дефолту в cheap CLI. mimo code cli, "
+         "с модель MiMo 2.6 pro. mimi code cli поставь первой, а ormimopro как fallback». "
+         "MiMo v2.6 Pro via mimo CLI (direct Xiaomi API). Cascades with ormimopro "
+         "(same model, OpenRouter fallback). distribution: local — kit users without the "
+         "mimo CLI binary use ormimopro instead."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because

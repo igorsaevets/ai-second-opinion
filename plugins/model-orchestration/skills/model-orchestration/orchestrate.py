@@ -1195,6 +1195,7 @@ CLI_BINARIES = (
     ("grokcli", "GROK_BIN", "grok.exe"),
     ("opencode", "OPENCODE_BIN", "opencode"),
     ("claudecli", "CLAUDECLI_BIN", "claude"),
+    ("mimocli", "MIMO_BIN", "mimo"),
 )
 CLI_ENV_VARS = " / ".join(env for _, env, _ in CLI_BINARIES)
 
@@ -3439,6 +3440,100 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                            input=text_in,
+                           timeout=_seconds(timeout, 2400))
+    except FileNotFoundError:
+        return {"channel": name, "ok": False, "error": "binary not found: " + binary}
+    except subprocess.TimeoutExpired:
+        return {"channel": name, "ok": False, "text": "",
+                "seconds": round(time.time() - t0, 1),
+                "error": "TIMEOUT after %s" % (timeout or "2400s"), "model": model,
+                "warnings": ["TIMEOUT"], "notes": []}
+
+    secs = time.time() - t0
+    raw = (p.stdout or "").strip()
+    warn, note = [], []
+    text = ""
+    tokens = {}
+    cost = None
+
+    for line in raw.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        otype = obj.get("type")
+        part = obj.get("part") or {}
+        if otype == "text":
+            text += part.get("text") or ""
+        elif otype == "step_finish":
+            tokens = part.get("tokens") or {}
+            cost = part.get("cost")
+
+    if p.returncode != 0 and not text:
+        warn.append("EXIT %d: %s" % (p.returncode, (p.stderr or raw or "")[:300]))
+    if text:
+        with open(outfile, "w", encoding="utf-8") as f:
+            f.write(text)
+    if marker and not _marker_on_last_line(text, marker):
+        warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
+    if not text.strip() and not warn:
+        warn.append("EMPTY OUTPUT despite exit 0")
+    record_refusal(refusal_check(text, marker), warn, note)
+
+    cache = tokens.get("cache") or {}
+    return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
+            "bytes": len(text.encode("utf-8")), "exit": p.returncode,
+            "model": model, "effort": effort,
+            "in_tokens": tokens.get("input"),
+            "out_tokens": tokens.get("output"),
+            "reasoning_tokens": tokens.get("reasoning"),
+            "cached_in_tokens": cache.get("read"),
+            "usd": cost if cost and cost > 0 else None,
+            "warnings": warn, "notes": note}
+
+
+# --- MiMo Code CLI channel (kind mimocli) --------------------------------------------------------
+
+
+def call_mimocli(brief, marker, outfile, model=None, effort=None, system=None,
+                 timeout=2400, name="mimov26pro"):
+    """MiMo Code CLI (Xiaomi) — direct Xiaomi API, metered.
+
+    Probed 2026-09-22 on mimo v0.1.14 (@mimo-ai/cli):
+      * NDJSON output IDENTICAL to opencode (step_start / text / step_finish).
+      * step_finish.part.tokens has input/output/reasoning/cache.read/cache.write + cost.
+      * Brief via stdin pipe (subprocess.run input=text_in) — same pattern as opencode.
+      * WITHOUT closed stdin the CLI HANGS FOREVER (same opencode trap).
+      * --dangerously-skip-permissions (alias --yolo) bypasses permissions.
+      * --variant sets reasoning effort (e.g. max, high, minimal).
+      * --dir flag TESTED and appears to hang; use subprocess cwd= instead.
+      * 107K input tokens on a trivial prompt — agent framework overhead.
+      * Second call on same machine: 123K cached, cost $0.0005 (cache kicks in).
+
+    Neutral cwd via Python cwd= to prevent loading any project's CLAUDE.md.
+    """
+    binary = mimo_bin()
+    text_in = ((system.strip() + "\n\n---\n\n") if system else "") + brief
+
+    base_model = model or "xiaomi/mimo-v2.6-pro"
+    cmd = [binary, "run",
+           "-m", base_model,
+           "--format", "json",
+           "--dangerously-skip-permissions"]
+    if effort:
+        cmd += ["--variant", effort]
+
+    ncwd = neutral_cwd()
+    log("  [%s] mimo CLI v0.1.14, metered Xiaomi API; brief via stdin (%d chars), model=%s%s"
+        % (name, len(text_in), base_model,
+           (", variant=%s" % effort) if effort else ""))
+    t0 = time.time()
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                           input=text_in, cwd=ncwd,
                            timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
@@ -6064,6 +6159,18 @@ def opencode_bin():
     ])
 
 
+def mimo_bin():
+    """MiMo Code CLI (Xiaomi) — npm install -g @mimo-ai/cli.
+
+    Binary is `mimo` (or `mimo.exe` on Windows), installed to ~/.mimocode/bin/.
+    Probed 2026-09-22: v0.1.14, NDJSON output identical to opencode (step_start/text/step_finish).
+    """
+    return _resolve_bin("MIMO_BIN", "mimo", [
+        os.path.join(os.environ.get("USERPROFILE", ""), ".mimocode", "bin", "mimo.exe"),
+        os.path.join(os.environ.get("USERPROFILE", ""), ".mimocode", "bin", "mimo"),
+    ])
+
+
 def claudecli_bin():
     """Claude Code CLI (Anthropic) — npm install -g @anthropic-ai/claude-code.
 
@@ -6090,6 +6197,7 @@ CLI_RESOLVERS = {
     "grokcli": grok_bin,
     "opencode": opencode_bin,
     "claudecli": claudecli_bin,
+    "mimocli": mimo_bin,
 }
 
 
@@ -6098,7 +6206,7 @@ CLI_RESOLVERS = {
 # same five literals, so a kind unknown to one was unknown to the other, and a misspelled kind
 # produced neither a preflight warning nor a result, only a log line that scrolls away.
 KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "hermes",
-               "grokcli", "opencode", "claudecli")
+               "grokcli", "opencode", "claudecli", "mimocli")
 
 # The kinds that run ON THIS MACHINE and can therefore read an attached document from disk
 # instead of receiving it inline (--attach / --attach-dir). Igor, R46: «CLI агентам не отправлять
@@ -8657,6 +8765,12 @@ def main():
                                         system=_system_for(system, p),
                                         timeout=_seconds(p.get("timeout"), 2400),
                                         name=cname)
+            elif kind == "mimocli":
+                jobs[cname] = ex.submit(call_mimocli, cbrief, a.marker, outfile,
+                                        model=p.get("model"), effort=p.get("effort"),
+                                        system=_system_for(system, p),
+                                        timeout=_seconds(p.get("timeout"), 2400),
+                                        name=cname)
             elif kind == "claudecli":
                 jobs[cname] = ex.submit(call_claudecli, cbrief, a.marker, outfile,
                                         model=p.get("model"), effort=p.get("effort"),
@@ -8789,6 +8903,12 @@ def main():
                 elif kind == "opencode":
                     _rjobs[cname] = _rex.submit(
                         call_opencode, cbrief, a.marker, outfile,
+                        model=p.get("model"), effort=p.get("effort"),
+                        system=_system_for(system, p),
+                        timeout=_seconds(p.get("timeout"), 2400), name=cname)
+                elif kind == "mimocli":
+                    _rjobs[cname] = _rex.submit(
+                        call_mimocli, cbrief, a.marker, outfile,
                         model=p.get("model"), effort=p.get("effort"),
                         system=_system_for(system, p),
                         timeout=_seconds(p.get("timeout"), 2400), name=cname)

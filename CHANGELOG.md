@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.87.0 — 2026-09-22
+
+* **New channel: `mimov26pro` — MiMo v2.6 Pro via mimo CLI (R122).** Kind `mimocli`
+  (12th dispatcher kind). the operator: «mimo code cli поставь первой, а ormimopro как fallback».
+  New `call_mimocli()` function with stdin pipe, NDJSON parse (opencode fork), `--variant`
+  for effort. Cascades with `ormimopro` (same model, OpenRouter fallback). Added to `mimo`
+  and `cli` groups. distribution: local (kit users use ormimopro). bypass_permissions: true.
+* **routing.py**: `_tier_note` for mimocli (effort + timeout + metered Xiaomi API),
+  `_web_line` for mimocli (agent tools via Xiaomi API), `mimocli` in
+  ALLOW_ARBITRARY_MODEL_KINDS.
+* **selftest.py**: dispatch probe stubs for `call_claudecli` and `call_mimocli` (missing
+  stubs caused the dispatch test to call the REAL CLI, hanging for 300s). R68 census
+  bump 11→12. `mimov26pro` in ADDED_TO_CHEAP_SINCE.
+* **channels.json**: removed unenforced `spend_guard` from mimov26pro — the mimocli
+  transport reports cost only after the call completes (NDJSON `step_finish`), with no
+  mid-call stop mechanism.
+
 ## 1.86.0 — 2026-09-22
 
 * **System prompts: panel adjudication fixes.** Applied 4 findings from cheap
