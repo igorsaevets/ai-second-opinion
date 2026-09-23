@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.86.0 — 2026-09-22
+
+* **System prompts: panel adjudication fixes.** Applied 4 findings from cheap
+  panel (3/3 channel convergence): fixed Russian grammar ("на количество" →
+  "в количестве"), removed "действия на усмотрение" (overbroad discretion),
+  replaced vague "10% probability" threshold with concrete search triggers
+  (dates, versions, prices, statuses, deadlines, regulatory acts), removed
+  "Adaptive thinking на полном бюджете" vendor jargon. In `legal-research.md`:
+  removed "серые" from the alternatives clause per `references/systems.md`
+  prohibition — the line now reads "альтернативные, неофициальные варианты"
+  without the grey-routes connotation.
+
 ## 1.85.0 — 2026-09-22
 
 * **System prompts: Russian amplifier + mandatory web search.** Both
