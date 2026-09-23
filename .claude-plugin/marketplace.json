@@ -9,7 +9,7 @@
       "name": "model-orchestration",
       "source": "./plugins/model-orchestration",
       "description": "Run one brief past every configured external reviewer model in parallel - the API and CLI channels declared in channels.json - and verify each one actually did the work.",
-      "version": "1.84.0"
+      "version": "1.85.0"
     }
   ]
 }

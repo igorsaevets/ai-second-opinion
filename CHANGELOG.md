@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.85.0 — 2026-09-22
+
+* **System prompts: Russian amplifier + mandatory web search.** Both
+  `base-depth.md` and `legal-research.md` now carry Russian-language directives:
+  adaptive thinking at full budget, "серые варианты" (alternative/unofficial
+  routes), and "иная информация на усмотрение". The Sources/tools section is
+  replaced with a Russian mandatory-web-search block: models MUST search before
+  answering verifiable claims, prefer primary sources, and report honestly when
+  a page cannot be opened. English citation discipline (provenance tags, two
+  layers, "allowed to not know") is retained.
+
 ## 1.84.0 — 2026-09-22
 
 * **Б-36: Auto-retry for transient stream deaths.** When a channel fails with a provider
