@@ -310,14 +310,13 @@ def suite_routing():
         """Which channels does a human word expand to, AND actually run? From the registry."""
         for g, v in _groups_raw.items():
             if word == g or word in (v.get("aliases") or []):
-                # 🔴 INTERSECTED WITH `ENABLED_ANY_PANEL`, NOT WITH `ALL`. `ALL` is the DEFAULT
-                # PANEL's enabled set, and naming a group is an explicit selection that overrides
-                # the panel - `--only spark` runs both Sparks even though spark11 is standard-only
-                # and the default panel is cheap. Using ALL here made this expect one Spark and
-                # get two, i.e. it called correct behaviour a failure. The exclusion cases are
-                # unaffected either way: `without()` subtracts from ALL, and subtracting a name
-                # that was never in ALL is a no-op.
-                return GROUPS[g] & ENABLED_ANY_PANEL
+                # 🔴 INTERSECTED WITH `ALL` (the DEFAULT PANEL's enabled set). A group word
+                # cannot override the panel exclusion — only naming a channel directly does.
+                # Before R124 this used ENABLED_ANY_PANEL, which let `--only agy` resurrect
+                # agy31pro despite it being panel:"standard" and the default panel being cheap.
+                # That was the --only/panel override bug (measured: agy31pro ran, hit expired
+                # OAuth, wasted 75s on a doomed auth prompt nobody could answer).
+                return GROUPS[g] & ALL
         raise AssertionError("no group answers to %r - this test names a word the registry lost"
                              % word)
 

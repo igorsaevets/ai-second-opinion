@@ -1770,16 +1770,18 @@ def apply_explicit_only(plan, reg, named):
         # panels and never carried across to groups, which had the identical shape. Naming the
         # channel still works, in both flag and prose form; only the GROUP word stops doing it.
         off_by_default = not p.get("default_enabled", True)
-        if not p.get("enabled") or not (hard or off_by_default):
+        panel_excluded = p.get("_panel_excluded", False)
+        if not p.get("enabled") or not (hard or off_by_default or panel_excluded):
             continue
         if cname in named:
             p["why"].append("named directly, which is the only way to start a channel that is "
-                            "off by default")
+                            "off by default or excluded by the panel")
             continue
         p["enabled"] = False
         p["why"].append(("explicit_only: " if hard else "")
-                        + "NOT named directly - a group, a panel or a default cannot start "
-                          "a channel that is off by default")
+                        + "NOT named directly - a group cannot override "
+                        + ("the panel exclusion" if panel_excluded and not off_by_default
+                           else "a default-off channel"))
         reg.setdefault("_explicit_only_blocked" if hard else "_default_off_blocked",
                        []).append(cname)
     return plan
@@ -1801,6 +1803,7 @@ def apply_panel(plan, reg, panel):
     for c, p in plan.items():
         if p["enabled"] and c not in members:
             p["enabled"] = False
+            p["_panel_excluded"] = True
             p["why"].append("outside the %r panel (this channel is declared %r)"
                             % (panel, p.get("panel")))
     return plan

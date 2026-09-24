@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.88.0 — 2026-09-24
+
+* **`--only <group>` no longer overrides panel exclusion (R124).** Before this fix,
+  `--only agy` resurrected `agy31pro` (panel: standard) even under the default cheap panel.
+  Now only naming a channel directly (`--only agy31pro`) overrides the panel; a group word
+  expands to the panel-eligible members only.
+* **routing.py**: `apply_panel` sets `_panel_excluded` flag; `apply_explicit_only` checks it
+  alongside `off_by_default`. Direct naming still overrides both.
+* **selftest.py**: `group_of()` intersects with `ALL` (default panel set) instead of
+  `ENABLED_ANY_PANEL`.
+
 ## 1.87.0 — 2026-09-22
 
 * **New channel: `mimov26pro` — MiMo v2.6 Pro via mimo CLI (R122).** Kind `mimocli`
