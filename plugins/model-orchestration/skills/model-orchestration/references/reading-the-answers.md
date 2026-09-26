@@ -111,6 +111,22 @@ the highest-value finding was not an answer to a question asked — it arrived u
 missing" or as a blind-spot flag. Now stated in the HANDOFF template (both the English reading
 order section and the Russian resume prompt).
 
+### v5 (R125, 2026-09-25): name the UNASKED section explicitly — "read everything" is not enough
+
+the operator: iron-note-backend panel session delegated reading to sub-agents; those sub-agents
+focused on answers to the brief's questions and **skipped the UNASKED sections entirely**. The v4
+instruction said "read the ENTIRE answer" — but the reader parsed "entire" as "all the Q&A
+sections", not as "all sections including ones that answer questions nobody asked."
+
+Fix: all three reader-facing instructions (HANDOFF English, HANDOFF Russian resume prompt,
+SKILL.md §10) now **name the UNASKED section by its literal heading** rather than describing it
+abstractly. The HANDOFF English section additionally says "Do NOT read only the answers to your
+questions" — the negative form, because the positive ("read everything") was already there and
+did not work.
+
+The channel-facing UNASKED instruction (`orchestrate.py`, appended to the system layer since R115)
+is unchanged — channels already produce the section reliably; the gap was on the reading side.
+
 ## Alternatives considered, and why they were not built
 
 **Have a model summarise the answers.** Rejected. The value of a panel is the *disagreement*

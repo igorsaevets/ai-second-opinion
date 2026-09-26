@@ -1647,9 +1647,10 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
               "rather than delegating to sub-agents: a sub-agent starts with none of this "
               "session's context and returns a summary, and the value of a panel is the "
               "disagreement between full answers.", "",
-              "🔴 **Read the ENTIRE answer**, including sections the brief did not ask about. "
-              "The highest-value finding in past rounds arrived under \"what are we missing\", "
-              "not as a direct answer to a question that was asked.", ""]
+              "🔴 **Read the ENTIRE answer**, including the UNASKED section and any other "
+              "findings the brief did not ask about. Do NOT read only the answers to your "
+              "questions — the UNASKED section and unsolicited observations are where the "
+              "highest-value findings arrive in practice.", ""]
         if any(f["must_read"] for f in fresh):
             L += ["**★ is the mandatory minimum.** Whatever the context pressure, the ★ "
                   "row(s) are read by the ordering session ITSELF — never delegated, never "
@@ -1696,8 +1697,9 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
               "суб-агентам чтение не отдавай.",
               "Строку со ★ прочитай САМ в любом случае — это обязательный минимум, даже "
               "если больше ни на что не хватит контекста.",
-              "Читай ВЕСЬ ответ целиком — не только ответы на вопросы брифа. Самая ценная "
-              "находка часто приходит в «что мы упускаем», а не в прямых ответах.",
+              "Читай ВЕСЬ ответ целиком — не только ответы на вопросы брифа, но и блок "
+              "UNASKED и всё иное, что пишут модели. Самая ценная находка часто приходит "
+              "именно там, а не в прямых ответах.",
               "По каждой находке: принял / отклонил с доказательством / в бэклог. "
               "Совпадения между каналами считай отдельно от одиночных мнений.",
               ("Маркер конца ответа: %s. Файл без него на последней строке — неполный."

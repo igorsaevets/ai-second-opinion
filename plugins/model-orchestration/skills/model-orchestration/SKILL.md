@@ -285,7 +285,9 @@ predictable from cost or from the last round** — four rounds, four winners. An
 independence: R49 had three channels agree on a Cyrillic token ratio that one measurement refuted.
 
 One shape recurs: the highest-value finding was **not an answer to a question that was asked**. It
-arrived under "what are we missing". Always include that question.
+arrived in the UNASKED section or under "what are we missing". Always include that question in the
+brief, and when reading results, **always read the UNASKED section and all other unsolicited
+observations** — not just the answers to the questions you asked.
 
 🔴 **`HANDOFF.md` is the reading list — a `listdir`, never built by hand — priced in tokens and
 sorted smart-first** (`read` 1 = frontier reasoners, 3 = flash-class and measured-weak; tiers in

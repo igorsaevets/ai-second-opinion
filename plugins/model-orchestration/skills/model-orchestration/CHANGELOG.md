@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.89.0 — 2026-09-25
+
+* **HANDOFF.md now names the UNASKED section explicitly (R125).** v4 said "read the ENTIRE
+  answer"; sessions still skipped the UNASKED block. Both the English reading-order section and
+  the Russian resume prompt now say "including the UNASKED section" by name, plus a negative
+  form: "Do NOT read only the answers to your questions." SKILL.md §10 updated to match.
+* **No code change to channels.** The UNASKED instruction appended to the system layer (since
+  R115) is unchanged — channels already produce the section; the gap was on the reading side.
+
 ## 1.88.0 — 2026-09-24
 
 * **`--only <group>` no longer overrides panel exclusion (R124).** Before this fix,
