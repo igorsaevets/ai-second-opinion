@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.90.0 — 2026-09-28
+
+* **mimocli safety prompt fix (R126).** `call_mimocli()` was the only CLI channel where
+  `--dangerously-skip-permissions` was active but `CLI_BYPASS_SAFETY_PROMPT` was not injected.
+  The model ran with full file/shell/web access but received no SAFETY DIRECTIVE steering
+  (no-delete rule, three-step backup ritual). Now prepends `_with_bypass_safety(brief, True)`,
+  matching the pattern used by claudecli and all other bypassed CLI channels.
+* **Proactive MCP discovery hint for CLI channels (R126).** The `mcp_fallback` hint previously
+  framed MCP tools only as a fallback for failed page fetches. Now opens with a "Tools and MCP
+  discovery" section instructing CLI channels to discover their available tools at the START of
+  work and use them PROACTIVELY — not only when a default tool fails.
+* **MCP hint added to cclopus46 and ocspark13free.** These two CLI channels had no
+  `fetch_fallback_hint_ref` and received no MCP guidance. Now 7 of 8 CLI channels get the hint
+  (grokbuild excluded — its MCP gateway is deliberately denied via `--disallowed-tools`).
+
 ## 1.89.0 — 2026-09-25
 
 * **HANDOFF.md now names the UNASKED section explicitly (R125).** v4 said "read the ENTIRE

@@ -3518,7 +3518,12 @@ def call_mimocli(brief, marker, outfile, model=None, effort=None, system=None,
     Neutral cwd via Python cwd= to prevent loading any project's CLAUDE.md.
     """
     binary = mimo_bin()
-    text_in = ((system.strip() + "\n\n---\n\n") if system else "") + brief
+    # R126 (2026-09-28): bypass is ALWAYS on for this channel (--dangerously-skip-permissions
+    # hardcoded below), so the SAFETY DIRECTIVE must ALWAYS be prepended — same pattern as
+    # claudecli line 3670. Previously missing: mimocli was the ONLY CLI channel where bypass
+    # was active but CLI_BYPASS_SAFETY_PROMPT was not injected.
+    text_in = ((system.strip() + "\n\n---\n\n") if system else "") \
+              + _with_bypass_safety(brief, True)
 
     base_model = model or "xiaomi/mimo-v2.6-pro"
     cmd = [binary, "run",
