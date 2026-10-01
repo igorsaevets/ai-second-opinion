@@ -1196,6 +1196,7 @@ CLI_BINARIES = (
     ("opencode", "OPENCODE_BIN", "opencode"),
     ("claudecli", "CLAUDECLI_BIN", "claude"),
     ("mimocli", "MIMO_BIN", "mimo"),
+    ("qwencli", "QWEN_BIN", "qwen"),
 )
 CLI_ENV_VARS = " / ".join(env for _, env, _ in CLI_BINARIES)
 
@@ -3824,6 +3825,276 @@ def call_claudecli(brief, marker, outfile, model=None, effort=None, system=None,
             "warnings": warn, "notes": note}
 
 
+# --- Qwen Code CLI channel (kind qwencli) -------------------------------------------------------
+# Qwen Code 0.24.7 (npm global, @qwen-ai/code). The CLI mirrors Claude Code's shape — same JSON
+# output envelope, same `-y`/--yolo flag semantics, same stdin pipe — but with Alibaba Cloud
+# Token Plan subscription auth (BAILIAN_TOKEN_PLAN_API_KEY lives in ~/.qwen/settings.json's env
+# block, read by the CLI itself). Measured 2026-09-30: a trivial 2+2 probe took 29 s, loaded
+# ~14 K tokens of QWEN.md context, and the final `type:"result"` element of the JSON array
+# carried { result, is_error, usage, stats.models.<model>.tokens.thoughts, permission_denials }.
+# The MCP stack from ~/.qwen/settings.json loads automatically — scrapling, crawl4ai,
+# cloakbrowser, playwright, jina, firecrawl, github, exa, tavily — matching the `mcp_fallback`
+# hint shared with every other CLI channel.
+QWENCLI_MAX_TURNS = 50
+# 🔴 R128 PANEL FINDING B (3/3 convergence 2026-09-30): qwen auth docs state precedence is
+# `CLI flag > process env > .env file > settings.json env` — the settings.json env block is the
+# LOWEST-priority fallback. mimov26pro observed `OPENAI_API_KEY is set in this process env` on
+# this very machine, which would silently REDIRECT the call to a different endpoint while the
+# plan line still prints Token Plan. Scrub the OpenAI-protocol variables the CLI reads.
+# Keep BAILIAN_TOKEN_PLAN_API_KEY — settings.json carries it anyway and the env form is the
+# documented way to point at a different Alibaba account on purpose.
+QWENCLI_SCRUB_ENV = (
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENAI_MODEL",
+    "QWEN_MODEL",
+    "DASHSCOPE_API_KEY",
+)
+
+
+def call_qwencli(brief, marker, outfile, model=None, effort=None, system=None,
+                 fallback_model=None, timeout=2400, name="qwen38maxcli", max_turns=None):
+    """Qwen Code CLI (Alibaba) — Token Plan subscription via BAILIAN_TOKEN_PLAN_API_KEY.
+
+    Measured 2026-09-30 on qwen 0.24.7:
+      - `--output-format json` emits a JSON ARRAY of event objects; the terminal element has
+        `type: "result"` and carries the summary (result text + usage + stats).
+      - `--model qwen3.8-max` context 1,000,000 (per ~/.qwen/settings.json modelProviders).
+      - Reasoning efforts for qwen3.8-max: `xhigh` (default), `medium`, `low` — NO `max`/`high`.
+      - `--yolo`/`-y` bypasses ALL approvals; headless default is Ask Permissions, which hangs
+        on any tool call since there is nobody to answer the prompt — so `-y` is passed always.
+      - `--max-wall-time` accepts raw seconds or units (`5m`, `1h`); exit 55 on overrun.
+      - `--bare` DISABLES settings.json auto-discovery → auth breaks ("No auth type is selected").
+        Do not pass it, even though it looks like the right lever for isolation.
+      - `~/.qwen/QWEN.md` loads unconditionally (~14 K tokens of context overhead). We DO NOT
+        pass `--append-system-prompt` (would only STACK on top of QWEN.md) and DO NOT pass
+        `--system-prompt` (would REPLACE QWEN.md but strip auth-adjacent context). The reviewer
+        role is inlined into the stdin text instead — same pattern every other CLI channel uses.
+      - `QWEN_CODE_SUPPRESS_YOLO_WARNING=1` silences a two-line stderr warning that would
+        otherwise show on every call ("running headless with --yolo and no sandbox").
+
+    PERMISSIONS: `--yolo` is always on (bypass_permissions:true in channels.json). YOLO
+    auto-approves every tool INCLUDING run_shell_command, write_file, edit, network, and every
+    MCP server. Blast radius identical to claudecli bypass. The SAFETY DIRECTIVE prepended via
+    _with_bypass_safety blocks delete-first behaviour at the model layer; the MCP stack and
+    cwd=neutral_cwd() shrink what the shell can reach.
+
+    AUTH: Subscription is key-based (unlike claudecli's OAuth login). Settings.json carries
+    `BAILIAN_TOKEN_PLAN_API_KEY` and the matching `baseUrl`
+    (https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1). No env
+    scrubbing. If a corporate proxy sets OPENAI_* vars they would override — not scrubbed by
+    this helper, but surfaced in the stderr tail of the result.
+
+    JSON output fields used (from the final `type:"result"` element of the array):
+      result               — the model's text answer
+      is_error             — boolean
+      subtype              — "success" / "error" / "cancelled"
+      duration_ms          — total wall time (ms)
+      num_turns            — how many turns the model took
+      usage.input_tokens   — billed input (CUMULATIVE across internal turns)
+      usage.output_tokens  — billed output
+      usage.cache_read_input_tokens — cached input
+      stats.models.<model>.tokens.thoughts — reasoning tokens
+      permission_denials   — list of denied tool calls (should be empty under --yolo)
+    """
+    binary = qwen_bin()
+    # Always-on YOLO: inject safety directive first, then any per-channel system layer, then
+    # the brief itself. Same composition pattern as call_claudecli.
+    text_in = ((system.strip() + "\n\n---\n\n") if system else "") \
+              + _with_bypass_safety(brief, True)
+    turns = int(max_turns or QWENCLI_MAX_TURNS)
+    wall_secs = _seconds(timeout, 2400)
+
+    cmd = [binary, "-y",
+           "--model", model or "qwen3.8-max",
+           "--output-format", "json",
+           "--max-wall-time", "%ds" % wall_secs,
+           "--max-session-turns", str(turns)]
+    # R128-F: cap tool loops. qwen --max-tool-calls accepts an integer; exit 55 on overrun. 50 is
+    # generous for a review (6-8 web fetches + 1-2 code reads) but caps the runaway case where
+    # the model loops on a 404 or redirect chain and exhausts the wall budget doing nothing.
+    cmd += ["--max-tool-calls", "50"]
+    # qwen3.8-max accepts effort via native reasoning_effort; qwen has no CLI flag for it, so
+    # the per-model `defaultEffort: "xhigh"` in ~/.qwen/settings.json governs. We leave `effort`
+    # in the channel config as advisory (printed in the plan line) and let the registry be the
+    # single source — mirroring the "ask the vendor's own config" rule for depth knobs.
+    # (If a `--effort`-equivalent appears in a future qwen release, add it here.)
+
+    # R128 FINDING A (2026-09-30 panel): qwen DOES have --fallback-model (verified live via
+    # `qwen --help` on 0.24.7 — the help text reads "Fallback model(s) for capacity errors
+    # (429/503/529), repeatable or comma-separated (max 3) [array]"). Pass it when the registry
+    # carries one. The prior claim in this file that no such flag existed was wrong — missed on
+    # first read, caught by the cheap panel.
+    if fallback_model:
+        cmd += ["--fallback-model", fallback_model]
+
+    cwd = neutral_cwd()
+    # Build env with QWENCLI_SCRUB_ENV applied (R128 FINDING B). Scrub BEFORE adding our own
+    # vars; order matters because dict() copies, then del strips, then our additions land.
+    env = dict(os.environ)
+    for k in QWENCLI_SCRUB_ENV:
+        env.pop(k, None)
+    env["QWEN_CODE_SUPPRESS_YOLO_WARNING"] = "1"
+
+    log("  [%s] Qwen Code CLI (qwen3.8-max via BAILIAN_TOKEN_PLAN_API_KEY); "
+        "brief via stdin (%d chars), effort=%s (vendor-side), --yolo auto-approve, "
+        "max_turns=%d, wall=%ds"
+        % (name, len(text_in), effort or "default", turns, wall_secs))
+    t0 = time.time()
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                           input=text_in, cwd=cwd, env=env,
+                           timeout=wall_secs + 60)  # subprocess ceiling slightly over wall-time
+    except FileNotFoundError:
+        return {"channel": name, "ok": False, "error": "binary not found: " + binary}
+    except subprocess.TimeoutExpired:
+        # R128 FINDING G (ocspark13free): the retry layer keyed on finish_reason="error" could
+        # never fire for qwencli because this return dict carried no such field. Set it so
+        # retryable_stream_death() can see the dead stream and dispatch a retry.
+        return {"channel": name, "ok": False, "text": "",
+                "seconds": round(time.time() - t0, 1),
+                "error": "TIMEOUT after %s" % (timeout or "2400s"), "model": model,
+                "finish_reason": "error",
+                "warnings": ["TIMEOUT"], "notes": []}
+
+    secs = time.time() - t0
+    raw = (p.stdout or "").strip()
+    warn, note = [], []
+    text = ""
+    tokens_in = None
+    tokens_out = None
+    tokens_reasoning = None
+    tokens_cached = None
+    model_served = model
+    finish_reason = None       # R128 FINDING G: set to "error" on retryable failures
+    provider_error = None      # R128 FINDING G: set to {code,status} on structured failures
+
+    stderr_tail = (p.stderr or "").strip()[-400:]
+
+    # qwen --output-format json emits a JSON ARRAY of event objects; the terminal event has
+    # type:"result" and carries the summary. Walk from the end since that is where it lives.
+    result_obj = {}
+    try:
+        arr = json.loads(raw)
+        if isinstance(arr, list):
+            for ev in reversed(arr):
+                if isinstance(ev, dict) and ev.get("type") == "result":
+                    result_obj = ev
+                    break
+        elif isinstance(arr, dict) and arr.get("type") == "result":
+            result_obj = arr                        # single-object form, defensive
+    except (ValueError, TypeError):
+        # R128 FINDING C (3/3): qwen emits {error:{type,message,code}} on STDERR with EMPTY
+        # stdout for exits 41 (auth), 53 (turn cap), 55 (wall/tool cap), 130 (SIGINT), plus
+        # OOM / SIGKILL. The prior code only surfaced the first 300 chars of empty stdout plus
+        # 400 chars of stderr tail — DROPPING the structured error entirely. Parse stderr as
+        # JSON when stdout is empty and stderr is non-empty.
+        structured = None
+        if not raw and p.stderr and p.stderr.strip():
+            try:
+                maybe = json.loads(p.stderr.strip())
+                if isinstance(maybe, dict) and isinstance(maybe.get("error"), dict):
+                    structured = maybe["error"]
+            except (ValueError, TypeError):
+                pass
+        if structured:
+            etype = structured.get("type") or "?"
+            emsg = str(structured.get("message") or "")[:300]
+            ecode = structured.get("code")
+            warn.append("QWEN STRUCTURED ERROR: type=%s code=%s message=%s"
+                        % (etype, ecode if ecode is not None else "?", emsg))
+            provider_error = {"code": ecode if ecode is not None else p.returncode,
+                              "status": etype}
+        elif p.returncode != 0:
+            warn.append("EXIT %d, non-JSON stdout: %s%s"
+                        % (p.returncode, raw[:300],
+                           (" | stderr: " + stderr_tail) if stderr_tail else ""))
+
+    # R128 FINDING G: mark RETRYABLE exits with finish_reason="error" so the retry layer sees
+    # them. 53 (turn cap) and 55 (wall-time / tool-cap) are both transient budget exhaustions;
+    # a retry at the same budget would still fail, but the retry layer may have a bigger budget
+    # or a reduced brief. Exit 41 (auth) is NOT retryable — bad key stays bad; exit 130 (SIGINT)
+    # was a user cancellation. Leave both to surface via `error`/warnings without triggering
+    # retry.
+    if p.returncode in (53, 55) and not result_obj:
+        finish_reason = "error"
+
+    if result_obj:
+        text = result_obj.get("result") or ""
+        is_err = result_obj.get("is_error", False)
+        subtype = result_obj.get("subtype", "")
+        num_turns = result_obj.get("num_turns")
+
+        usage = result_obj.get("usage") or {}
+        tokens_in = usage.get("input_tokens")
+        tokens_out = usage.get("output_tokens")
+        tokens_cached = usage.get("cache_read_input_tokens")
+
+        # Reasoning tokens live under stats.models.<model>.tokens.thoughts, keyed by the
+        # ACTUAL served model name (which the registry's `model` field matches). Pick the
+        # model with the largest `prompt` count as the one that answered — if multiple are
+        # present it is because a sub-agent or memory extractor also ran.
+        stats = result_obj.get("stats") or {}
+        models_map = (stats.get("models") or {})
+        if isinstance(models_map, dict) and models_map:
+            def _prompt_tokens(entry):
+                try:
+                    return int(((entry or {}).get("tokens") or {}).get("prompt") or 0)
+                except (TypeError, ValueError):
+                    return 0
+            best_name = max(models_map.keys(), key=lambda k: _prompt_tokens(models_map[k]),
+                            default=None)
+            if best_name:
+                model_served = best_name
+                tokens_reasoning = (models_map[best_name].get("tokens") or {}).get("thoughts")
+            if len(models_map) > 1:
+                others = [k for k in models_map if k != best_name]
+                note.append("helper model(s) also ran: %s" % ", ".join(sorted(others)))
+
+        if subtype == "cancelled":
+            warn.append("QWEN CLI CANCELLED (subtype=cancelled): %s"
+                        % (text[:300] if text else "no result text"))
+        elif is_err:
+            err_msg = text or subtype or "is_error=true"
+            warn.append("QWEN CLI ERROR: %s" % err_msg[:300])
+
+        if num_turns and num_turns > 1:
+            note.append("num_turns=%d" % num_turns)
+
+        denials = result_obj.get("permission_denials") or []
+        if isinstance(denials, list) and denials:
+            dnames = sorted({str(d.get("tool_name", "?")) for d in denials if isinstance(d, dict)})
+            # Under --yolo this list should be empty; a non-empty entry means a local hook or
+            # settings.json tool deny-list refused a call — the review ran without it.
+            note.append("%d tool call(s) DENIED under --yolo (%s) — a hook or local deny-list "
+                        "intercepted; review ran without them" % (len(denials), ", ".join(dnames)))
+
+    if fallback_model:
+        note.append("fallback_model=%s passed as --fallback-model (qwen 0.24.7 retries on "
+                    "capacity errors 429/503/529, repeatable, max 3)" % fallback_model)
+
+    if text:
+        with open(outfile, "w", encoding="utf-8") as f:
+            f.write(text)
+    if marker and not _marker_on_last_line(text, marker):
+        warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
+    if not text.strip() and not warn:
+        warn.append("EMPTY OUTPUT despite exit %d" % p.returncode)
+    record_refusal(refusal_check(text, marker), warn, note)
+
+    return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
+            "bytes": len(text.encode("utf-8")), "exit": p.returncode,
+            "model": model_served, "effort": effort,
+            "in_tokens": tokens_in,
+            "out_tokens": tokens_out,
+            "reasoning_tokens": tokens_reasoning,
+            "cached_in_tokens": tokens_cached,
+            "usd": None,                            # subscription — no per-call cost reported
+            "finish_reason": finish_reason,         # R128 FINDING G
+            "provider_error": provider_error,       # R128 FINDING G
+            "warnings": warn, "notes": note}
+
+
 def call_hermes(brief, marker, outfile, model=None, toolsets=None, system=None, timeout=2400):
     """
     Kimi K3 through the Hermes CLI. `-z/--oneshot` prints ONLY the final response text to
@@ -6193,6 +6464,25 @@ def claudecli_bin():
     ])
 
 
+def qwen_bin():
+    """Qwen Code CLI (Alibaba) — install script from qwen-code-assets.oss-cn-hangzhou.aliyuncs.com.
+
+    Uses Alibaba Cloud Token Plan subscription via BAILIAN_TOKEN_PLAN_API_KEY, read from
+    ~/.qwen/settings.json env block. OpenAI-compatible endpoint:
+    https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+    Installed to %APPDATA%\\npm\\qwen.cmd on Windows (npm global).
+
+    `--bare` DISABLES settings.json auto-discovery, which breaks auth ("No auth type is
+    selected"); do not pass it.
+    """
+    return _resolve_bin("QWEN_BIN", "qwen", [
+        os.path.join(os.environ.get("APPDATA", ""), "npm", "qwen.ps1"),
+        os.path.join(os.environ.get("APPDATA", ""), "npm", "qwen.cmd"),
+        os.path.join(os.environ.get("APPDATA", ""), "npm", "qwen"),
+        "/usr/local/bin/qwen", "/opt/homebrew/bin/qwen",
+    ])
+
+
 # The other half of CLI_BINARIES: kind -> the function that finds that binary. Split from the
 # tuple only because the resolvers carry per-platform search paths and have to be defined after
 # _resolve_bin. selftest asserts the two halves have identical keys, which is what stops the
@@ -6205,6 +6495,7 @@ CLI_RESOLVERS = {
     "opencode": opencode_bin,
     "claudecli": claudecli_bin,
     "mimocli": mimo_bin,
+    "qwencli": qwen_bin,
 }
 
 
@@ -6213,7 +6504,7 @@ CLI_RESOLVERS = {
 # same five literals, so a kind unknown to one was unknown to the other, and a misspelled kind
 # produced neither a preflight warning nor a result, only a log line that scrolls away.
 KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "hermes",
-               "grokcli", "opencode", "claudecli", "mimocli")
+               "grokcli", "opencode", "claudecli", "mimocli", "qwencli")
 
 # The kinds that run ON THIS MACHINE and can therefore read an attached document from disk
 # instead of receiving it inline (--attach / --attach-dir). Igor, R46: «CLI агентам не отправлять
@@ -6221,7 +6512,7 @@ KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "he
 # `hermes` is deliberately absent: its toolset grant is `web` only, so handing it a path would
 # name a capability it does not have - the model would report OUR gap as its own failure.
 # API kinds are structurally absent: a remote endpoint cannot open this disk.
-REFS_KINDS = ("codex", "agy", "grokcli", "claudecli")
+REFS_KINDS = ("codex", "agy", "grokcli", "claudecli", "qwencli")
 
 
 def retryable_stream_death(r):
@@ -6458,6 +6749,19 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
         else:
             yield ("%s: Claude Code CLI NOT FOUND. Install: npm install -g "
                    "@anthropic-ai/claude-code" % c)
+    for c in sorted(by_kind.get("qwencli", [])):
+        # R128 FINDING H (agy38flash): channel_preflight() printed a generic "binary not found"
+        # for qwen (via the CLI_RESOLVERS loop above) with no install hint. Mirror the
+        # claudecli / opencode style with the specific install command.
+        b = qwen_bin()
+        if os.path.isfile(b) or shutil.which(b):
+            yield ("%s: Qwen Code CLI present (%s); Alibaba Token Plan subscription "
+                   "(BAILIAN_TOKEN_PLAN_API_KEY in ~/.qwen/settings.json)" % (c, b))
+        else:
+            yield ("%s: Qwen Code CLI NOT FOUND. Install: npm install -g "
+                   "@qwen-code/qwen-code (or Alibaba install script at "
+                   "qwen-code-assets.oss-cn-hangzhou.aliyuncs.com); then put "
+                   "BAILIAN_TOKEN_PLAN_API_KEY in ~/.qwen/settings.json env block" % c)
 
 
 def _write_agy_agent(workdir):
@@ -7546,6 +7850,9 @@ def _channel_key_ready(ch):
         return bool(os.path.isfile(b) or shutil.which(b))
     if kind == "claudecli":
         b = claudecli_bin()
+        return bool(os.path.isfile(b) or shutil.which(b))
+    if kind == "qwencli":
+        b = qwen_bin()
         return bool(os.path.isfile(b) or shutil.which(b))
     return True                                          # codex / agy / grokcli / hermes
 
@@ -8786,6 +9093,14 @@ def main():
                                         timeout=_seconds(p.get("timeout"), 2400),
                                         max_turns=p.get("max_turns"),
                                         name=cname)
+            elif kind == "qwencli":
+                jobs[cname] = ex.submit(call_qwencli, cbrief, a.marker, outfile,
+                                        model=p.get("model"), effort=p.get("effort"),
+                                        system=_system_for(system, p),
+                                        fallback_model=p.get("fallback_model"),
+                                        timeout=_seconds(p.get("timeout"), 2400),
+                                        max_turns=p.get("max_turns"),
+                                        name=cname)
             else:
                 # Named in the registry, unknown to the code. A log line is NOT enough: a log
                 # line scrolls, and every downstream consumer - the "N/M channels returned"
@@ -8922,6 +9237,14 @@ def main():
                 elif kind == "claudecli":
                     _rjobs[cname] = _rex.submit(
                         call_claudecli, cbrief, a.marker, outfile,
+                        model=p.get("model"), effort=p.get("effort"),
+                        system=_system_for(system, p),
+                        fallback_model=p.get("fallback_model"),
+                        timeout=_seconds(p.get("timeout"), 2400),
+                        max_turns=p.get("max_turns"), name=cname)
+                elif kind == "qwencli":
+                    _rjobs[cname] = _rex.submit(
+                        call_qwencli, cbrief, a.marker, outfile,
                         model=p.get("model"), effort=p.get("effort"),
                         system=_system_for(system, p),
                         fallback_model=p.get("fallback_model"),

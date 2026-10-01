@@ -374,7 +374,7 @@ def suite_routing():
 
     # R115: the `cli` group must contain EXACTLY the channels whose kind is a CLI binary transport,
     # and nothing else. Adding a new CLI channel without adding it to the group will fail here.
-    _CLI_KINDS = {"opencode", "claudecli", "codex", "agy", "grokcli", "mimocli"}
+    _CLI_KINDS = {"opencode", "claudecli", "codex", "agy", "grokcli", "mimocli", "qwencli"}
     _cli_by_kind = {c for c, ch in _RAW["channels"].items() if ch.get("kind") in _CLI_KINDS}
     _cli_group = set(GROUPS.get("cli", set()))
     check(_cli_group == _cli_by_kind,
@@ -722,6 +722,7 @@ def suite_dispatch():
         "o.call_opencode = stub('opencode')\n"
         "o.call_claudecli = stub('claudecli')\n"
         "o.call_mimocli = stub('mimocli')\n"
+        "o.call_qwencli = stub('qwencli')\n"
         # 🔴 THE STUBS MUST REPLACE SOMETHING THAT EXISTS. Found while renaming
         # call_openrouter_reviewer -> call_oai_reviewer on 2026-08-08: `o.old_name = stub(...)`
         # does not fail on a name the module no longer has, it CREATES it. The dispatcher then
@@ -731,7 +732,7 @@ def suite_dispatch():
         # still fires on the next rename, which is what matters.
         "for _n in ('call_http_reviewer','call_codex','call_agy','call_oai_reviewer',\n"
         "           'call_xai_responses','call_gemini_direct','call_hermes','call_opencode',\n"
-        "           'call_claudecli','call_mimocli'):\n"
+        "           'call_claudecli','call_mimocli','call_qwencli'):\n"
         "    assert callable(getattr(o, _n, None)), 'stub target missing: ' + _n\n"
         "t = tempfile.mkdtemp(prefix='orchdisp-')\n"
         "b = os.path.join(t, 'b.md')\n"
@@ -929,7 +930,7 @@ def suite_dispatch():
         "    o.call_http_reviewer = ok; o.call_codex = ok; o.call_oai_reviewer = ok\n"
         "    o.call_hermes = ok; o.call_gemini_direct = ok; o.call_xai_responses = ok\n"
         "    o.call_grokcli = ok; o.call_opencode = ok\n"
-        "    o.call_claudecli = ok; o.call_mimocli = ok\n"
+        "    o.call_claudecli = ok; o.call_mimocli = ok; o.call_qwencli = ok\n"
         "    o.call_agy = boom\n"
         "    t = tempfile.mkdtemp(); b = os.path.join(t, 'b.md')\n"
         "    open(b, 'w', encoding='utf-8').write('hi\\nREVIEW-COMPLETE\\n')\n"
@@ -2697,9 +2698,10 @@ def suite_spend_guard():
           "R68 census: no raw marker-endswith anywhere in orchestrate.py")
     # R82 bump 10 -> 11: call_claudecli (v1.52.0) verifies by the shared rule.
     # R122 bump 11 -> 12: call_mimocli (v1.87.0) adds one more verification site.
+    # R128 bump 12 -> 13: call_qwencli (2026-09-30) adds one more verification site.
     check(src_all.count("def _marker_on_last_line(") == 1 and
-          src_all.count("not _marker_on_last_line(") == 12,
-          "R68 census: 11 verification sites + 1 use inside _strip_marker_tail, one def",
+          src_all.count("not _marker_on_last_line(") == 13,
+          "R68 census: 12 verification sites + 1 use inside _strip_marker_tail, one def",
           "def=%d not_calls=%d" % (src_all.count("def _marker_on_last_line("),
                                    src_all.count("not _marker_on_last_line(")))
     check(src_all.count("_strip_marker_tail(") == 3,
@@ -3055,6 +3057,17 @@ def suite_panels():
          "MiMo v2.6 Pro via mimo CLI (direct Xiaomi API). Cascades with ormimopro "
          "(same model, OpenRouter fallback). distribution: local — kit users without the "
          "mimo CLI binary use ormimopro instead."),
+        ("R128 2026-09-30", "ADD", "qwen38maxcli",
+         "Igor: «Надо добавить еще одну CLI: Qwen code cli. В панель CLI cheap. Модель в "
+         "ней qwen 3.8 Max Effort: Max (Но возможно максимум XHigh). Она использует "
+         "подписку: Token Plan Individual Plan Standard. Plan quota 45,000. Не забудь "
+         "добавить bypass permission Скорее всего называется YOLO». Qwen 3.8 Max via "
+         "Qwen Code CLI (direct Alibaba Cloud Token Plan subscription, BAILIAN_TOKEN_PLAN_API_KEY "
+         "in ~/.qwen/settings.json env block). YOLO/--yolo always on (bypass_permissions:true). "
+         "1M context, mandatory reasoning at xhigh ceiling (vendor's cap — 'max' and 'high' "
+         "are not accepted for qwen3.8-max). distribution: local — the kit does NOT ship this "
+         "channel because it needs the ~/.qwen/settings.json auth block that only the local "
+         "user has."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -3133,10 +3146,11 @@ def suite_panels():
         fb = ch.get("fallback_model")
         if not fb:
             continue
-        check(ch.get("kind") in ("http", "claudecli"),
+        check(ch.get("kind") in ("http", "claudecli", "qwencli"),
               "%s: fallback_model is only meaningful for kind:http (Meta API harness-level "
-              "retry) and kind:claudecli (CLI --fallback-model flag); OpenRouter channels "
-              "use fallback_models (plural) which the vendor handles"
+              "retry), kind:claudecli (CLI --fallback-model flag) and kind:qwencli (same CLI "
+              "flag, verified R128 2026-09-30 on qwen 0.24.7); OpenRouter channels use "
+              "fallback_models (plural) which the vendor handles"
               % cname, "kind=%s" % ch.get("kind"))
         check(fb in (ch.get("models") or {}),
               "%s: fallback_model %r must be in the channel's `models` table so it has a "

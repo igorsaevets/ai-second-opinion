@@ -1977,6 +1977,16 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                 p["_tier_note"] = ("effort %s (--variant flag), timeout %s, "
                                    "metered Xiaomi API via mimo CLI"
                                    % (p.get("effort") or "default", p["timeout"]))
+            elif p.get("kind") == "qwencli":
+                # qwen CLI has NO --effort flag. The vendor-side defaultEffort in
+                # ~/.qwen/settings.json governs (xhigh for qwen3.8-max). Advisory here only.
+                # Clamping still happens so the plan line names the ceiling the user chose.
+                p["effort"] = _clamp_effort(reg, cname, p["model"], p.get("effort"), p)
+                p["timeout"] = p.get("timeout") or "25m"
+                p["_tier_note"] = ("effort %s (ADVISORY — qwen CLI has no --effort flag; "
+                                   "vendor-side defaultEffort governs), timeout %s (--max-wall-time), "
+                                   "Alibaba Cloud Token Plan subscription"
+                                   % (p.get("effort") or "default", p["timeout"]))
         # 🔴 THE TIER DID NOTHING TO THE SPARK CHANNELS, and it looked like it did. The tier
         # varied `thinking.budget_tokens`, but Meta documents that field as "accepted for
         # compatibility but not translated into an effort value" - depth on this endpoint is set
@@ -2245,6 +2255,13 @@ def _web_line(p):
         return ("web: mimo CLI's built-in agent tools (fork of opencode) - the model runs "
                 "through Xiaomi's API which may include search. The harness does not control "
                 "which tools the agent uses; grounding is the agent's own claim")
+    if kind == "qwencli":
+        return ("web: Qwen Code CLI's built-in web_fetch and web_search PLUS every MCP server "
+                "in ~/.qwen/settings.json (scrapling, crawl4ai, cloakbrowser, playwright, jina, "
+                "firecrawl with 14 metered tools excluded, github, exa, tavily), ALL WITHOUT "
+                "PERMISSION PROMPTS (`--yolo`, on purpose): the reviewer can run shell commands "
+                "and edit files on this machine; your deny-lists and hooks still apply. "
+                "Grounding is the agent's own claim")
     return None
 
 

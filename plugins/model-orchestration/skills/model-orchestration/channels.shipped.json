@@ -143,7 +143,7 @@
       ]
     },
     "cli": {
-      "label": "every channel that runs through a local CLI binary (opencode, mimo, claude, codex, agy, grok)",
+      "label": "every channel that runs through a local CLI binary (opencode, mimo, claude, codex, agy, grok, qwen)",
       "channels": [
         "ocspark13free",
         "mimov26pro",
@@ -152,9 +152,10 @@
         "agy31pro",
         "agy36flash",
         "agy38flash",
-        "grokbuild"
+        "grokbuild",
+        "qwen38maxcli"
       ],
-      "_added": "2026-09-21 (R115 И-2). Root cause of the Plugins ironmemo bug: user said «только CLI» but no group existed to express that. CLI kinds: opencode, claudecli, codex, agy, grokcli, mimocli. The selftest structurally verifies that this group contains ALL channels whose kind is a CLI kind and NOTHING else - adding a new CLI channel without updating this list will fail the test.",
+      "_added": "2026-09-21 (R115 И-2). Root cause of the Plugins ironmemo bug: user said «только CLI» but no group existed to express that. CLI kinds: opencode, claudecli, codex, agy, grokcli, mimocli, qwencli. The selftest structurally verifies that this group contains ALL channels whose kind is a CLI kind and NOTHING else - adding a new CLI channel without updating this list will fail the test. qwen38maxcli added 2026-09-30 (the operator's request).",
       "aliases": [
         "cli",
         "кли",
@@ -1172,6 +1173,62 @@
       ],
       "_added": "2026-09-22 (R122), the operator: «Давай теперь добавим еще одну Cli по дефолту в cheap CLI. mimo clode cli, с модель MiMo 2.6 pro. mimi code cli поставь первой, а ormimopro как fallback». Binary: mimo v0.1.14 (@mimo-ai/cli). NDJSON output identical to opencode (fork). Brief via stdin pipe. Cascade: [mimov26pro, ormimopro] — CLI first, OpenRouter fallback.",
       "notes": "MiMo v2.6 Pro via the mimo CLI (direct Xiaomi API). Primary MiMo voice — cascades with ormimopro (same model, OpenRouter fallback). 1.05M context. Metered: ~$0.05 first call due to agent overhead, ~$0.001 subsequent (cache). The mimo CLI is a fork of opencode; NDJSON format, stdin pipe, and bypass flags are structurally identical."
+    },
+    "qwen38maxcli": {
+      "read_order": 1,
+      "kind": "qwencli",
+      "panel": "cheap",
+      "vendor": "alibaba",
+      "enabled": false,
+      "bypass_permissions": true,
+      "_bypass_permissions": "2026-09-30 (the operator's request). Qwen Code CLI uses --yolo (`-y`) to auto-approve all actions in headless mode. Without it, qwen -p defaults to Ask Permissions and hangs on any tool call (nobody to answer the prompt). Same blast radius as other bypassed CLI channels: every built-in tool (run_shell_command, write_file, edit, web_fetch) and every MCP server in ~/.qwen/settings.json runs without a prompt. Deny-lists and hooks still hold. The SAFETY DIRECTIVE prepended by _with_bypass_safety guards against delete-first behaviour; neutral_cwd() plus settings.json's own excludeTools list shrink what the shell and MCPs can reach.",
+      "distribution": "local",
+      "_distribution": "LOCAL ONLY. Needs (1) Qwen Code CLI installed (npm global or Alibaba install script → %APPDATA%\\npm\\qwen.cmd on Windows), (2) BAILIAN_TOKEN_PLAN_API_KEY in ~/.qwen/settings.json's env block (Token Plan Individual Standard subscription at home.qwencloud.com/analytics/token-plan/individual). Kit users without these should use orqwen38max or qwen38max channels via OpenRouter — this channel does NOT ship in the public kit.",
+      "label": "Qwen 3.8 Max CLI",
+      "cost": "subscription",
+      "_cost": "Alibaba Cloud Model Studio Token Plan Individual Standard. the operator 2026-09-30: Plan quota 45,000 (per home.qwencloud.com/analytics/token-plan/individual). Per-call cost not reported in CLI output; subscription covers it. On the Token Plan the model is reached at https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1 (OpenAI-compatible).",
+      "model": "qwen3.8-max",
+      "fallback_model": "qwen3.8-max-preview",
+      "_fallback_model_R128": "R128 FINDING A (panel 2026-09-30, convergence mimov26pro + ocspark13free, self-verified via `qwen --help`): the `--fallback-model` flag DOES exist on qwen 0.24.7 — help text: 'Fallback model(s) for capacity errors (429/503/529), repeatable or comma-separated (max 3) [array]'. Previous `_no_fallback_model_field` claim was a first-read miss, caught by the cheap panel. qwen3.8-max-preview is the newer preview of the same tier — semantically closest fallback, and shares the Token Plan subscription catalogue.",
+      "effort": "xhigh",
+      "_effort": "qwen3.8-max accepts reasoning_effort values low/medium/xhigh (verified 2026-09-30 against ~/.qwen/settings.json modelProviders[qwen3.8-max].capabilities.reasoning.efforts; defaultEffort is xhigh). NO 'max' or 'high' — the vendor's ceiling IS 'xhigh'. the operator 2026-09-30: «qwen 3.8 Max Effort: Max (Но возможно максимум XHigh)» — xhigh confirmed as the ceiling. qwen has no --effort CLI flag, so this is advisory (printed in the plan line); the vendor-side defaultEffort governs the actual call. Overriding requires edit in ~/.qwen/settings.json.",
+      "supported_efforts": [
+        "xhigh",
+        "medium",
+        "low"
+      ],
+      "_supported_efforts": "Three tiers per the Qwen Model Studio capability declaration. `thinkingMandatory:true` on qwen3.8-max — reasoning cannot be disabled, so there is no 'off' tier.",
+      "max_turns": 50,
+      "_max_turns": "Maps to --max-session-turns. Same ceiling as claudecli; qwen CLI exits with code 53 when exceeded (vs claudecli's exit 1).",
+      "max_tool_calls": 50,
+      "_max_tool_calls_R128F": "R128 FINDING F (self-finding, 2026-09-30): qwen3.8-max at xhigh goes into many-turn tool-use loops on complex briefs (TIMEOUT ×2 at 1500s during panel self-review). --max-tool-calls caps the cumulative tool-call count — not turns, each tool call separately — and exits cleanly at code 55 when exceeded. 50 is generous for a review (6-8 web fetches + a few code reads) but caps the runaway loop case.",
+      "timeout": "45m",
+      "_timeout": "Maps to --max-wall-time. Qwen CLI exits with code 55 (FatalBudgetExceededError) on overrun. R128 FINDING F raised from 25m → 45m after the panel self-review TIMED OUT twice at 1500s (reasoning-heavy xhigh with 15K+ tokens of QWEN.md context overhead). 45m matches the real tail of complex briefs; subprocess wrapper adds 60s. The --max-tool-calls cap handles unbounded tool-use loops independent of wall time.",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "_fetch_fallback_hint_ref": "2026-09-30. ~/.qwen/settings.json carries the same MCP stack as this machine's other CLI configs: scrapling, crawl4ai, cloakbrowser, playwright, jina-mcp-server, firecrawl (14 metered tools excluded), github, exa, tavily, gitlab. The generic mcp_fallback hint applies.",
+      "models": {
+        "qwen3.8-max": {
+          "label": "Qwen 3.8 Max (via Qwen Code CLI, Token Plan)",
+          "data_policy": "Alibaba Cloud Model Studio Token Plan subscription (ap-southeast-1 region, intl endpoint). Context 1,000,000 tokens, modalities text+image+video, reasoning MANDATORY (cannot be disabled). Vendor data terms: Alibaba Cloud API terms for Model Studio — this project has NOT verified Alibaba's data retention policy for the Token Plan tier. The key is in ~/.qwen/settings.json env block (do NOT echo).",
+          "_alias_collision_note": "The bare 'qwen' alias AND 'qwen-max' are claimed by the pre-existing OpenRouter qwen38max channel. Keep this channel's aliases disambiguated by '-cli' or by a specific Russian/Chinese alias — see the channel-level aliases below."
+        },
+        "qwen3.8-max-preview": {
+          "label": "Qwen 3.8 Max Preview (fallback for 429/503/529)",
+          "data_policy": "Same Alibaba Cloud Model Studio Token Plan subscription as qwen3.8-max — ap-southeast-1 region, intl endpoint, same data terms. Preview tier of the same model family; the subscription catalogue carries both. Reached only on capacity errors (429/503/529) via --fallback-model."
+        }
+      },
+      "aliases": [
+        "qwen38maxcli",
+        "qwencli",
+        "qwen3.8-cli",
+        "qwen 3.8 cli",
+        "qwen cli",
+        "цвень кли",
+        "кьювен кли",
+        "квен кли"
+      ],
+      "_added": "2026-09-30, the operator: «Надо добавить еще одну CLI: Qwen code cli. В панель CLI cheap. Модель в ней qwen 3.8 Max Effort: Max (Но возможно максимум XHigh). Она использует подписку: Token Plan Individual Plan Standard. Plan quota 45,000. Не забудь добавить bypass permission Скорее всего называется YOLO». Binary: qwen v0.24.7 (@qwen-ai/code, npm global, resolves to %APPDATA%\\npm\\qwen.cmd on Windows). JSON output = ARRAY of event objects; the final element with type:'result' carries the summary. Brief via stdin pipe (same pattern as claudecli). Live probe 2026-09-30: 29s on a 2+2 question (29 s was reasoning-heavy at xhigh), model_served=qwen3.8-max, tokens prompt 61K/output 473/thoughts 339/cached 16K, no error, marker verified.",
+      "notes": "Qwen 3.8 Max via the Qwen Code CLI (direct Alibaba Cloud Token Plan subscription). 1M context, mandatory reasoning at xhigh ceiling, multimodal (text+image+video). ~/.qwen/settings.json loads auth + full MCP stack unconditionally; QWEN.md adds ~14K tokens of context overhead on every call but reviewer role is injected via the `--append-system-prompt` the brief wraps. YOLO/--yolo mode always on (bypass_permissions:true). First live test 2026-09-30."
     },
     "ormimopro": {
       "read_order": 2,
