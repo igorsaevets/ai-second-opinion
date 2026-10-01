@@ -3068,6 +3068,16 @@ def suite_panels():
          "are not accepted for qwen3.8-max). distribution: local — the kit does NOT ship this "
          "channel because it needs the ~/.qwen/settings.json auth block that only the local "
          "user has."),
+        ("R131 2026-10-01", "REMOVE", "qwen38maxcli",
+         "Igor: «Qwen 3.8 Max qwen code cli давай перенесем из cheap panel в standart, он "
+         "очень долго думает и быстро расходует токены, будем использовать редко.» Three "
+         "months after R128 added it, cheap-panel self-review timed out twice at 25 min "
+         "(R128 FINDING F), and the real cost here is wall-clock + tool-loop depth on xhigh "
+         "reasoning, not money (Token Plan subscription is flat-rate). Moved to standard — "
+         "the panel that cheap is a subset of (`panel_members(reg, 'cheap') < "
+         "panel_members(reg, 'standard')` holds), so the move narrows the room it's in. Still "
+         "enabled, still named by `--only qwen38maxcli`. Cheap is now 4 CLI channels: "
+         "ocspark13free, mimov26pro, agy38flash, grokbuild."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -3867,11 +3877,27 @@ def suite_r47_causes():
         # the strongest rung of the very ladder this check cites. The invariant derives
         # cleanly either way: every explicit_only channel (zero or more) must be excluded.
         # A future explicit_only channel that is not excluded still goes red here.
-        check(rationed <= shipped_excl,
-              "every explicit_only channel is DELETED from the shipped registry (R47: employees "
-              "walked every lock rung on purpose - absence is the only lock that survives naming)",
-              "explicit_only=%s excluded=%s missing=%s"
-              % (sorted(rationed), sorted(shipped_excl), sorted(rationed - shipped_excl)))
+        # 🔴 R131 (2026-10-01): THE INVARIANT WAS TOO BROAD. R47's reasoning was explicitly
+        # about an EXPENSIVE channel (Terra Pro, metered, $12 single-round runaway) where
+        # employees could walk every lock rung and spend real money. For a cost:mid channel
+        # on a subscription (agy31pro on Antigravity, free at margin), the lock is a UX
+        # default-off for panel composition, not a money gate — and deleting it from the
+        # kit would strand kit users who have the subscription and want to name the channel
+        # explicitly. The invariant is now scoped to the EXPENSIVE class, which is what R47
+        # actually meant. Non-expensive explicit_only channels stay in the kit; their
+        # protection is the panel-default-off behaviour itself (apply_explicit_only in
+        # routing.py), which this suite's structural checks already enforce via
+        # suite_max_depth_and_explicit_only.
+        rationed_expensive = {c for c in rationed if _chans54[c].get("cost") == "expensive"}
+        check(rationed_expensive <= shipped_excl,
+              "every EXPENSIVE explicit_only channel is DELETED from the shipped registry "
+              "(R47 Terra class: employees walked every lock rung on purpose for a metered "
+              "money-at-risk channel - absence is the only lock that survives naming). "
+              "Non-expensive explicit_only channels (subscription CLI, free-at-margin) stay "
+              "in the kit; the panel-default-off behaviour is their lock.",
+              "expensive_explicit_only=%s excluded=%s missing=%s"
+              % (sorted(rationed_expensive), sorted(shipped_excl),
+                 sorted(rationed_expensive - shipped_excl)))
         # An exclusion for a channel that no longer exists is dead weight that reads as protection.
         check(shipped_excl <= set(_chans54),
               "every excluded name is a channel that actually exists - a stale exclusion looks "

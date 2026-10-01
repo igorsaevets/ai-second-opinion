@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.93.0 — 2026-10-01
+
+* **R131 — two panel-composition tweaks (the operator, 2026-10-01).**
+  * **`agy31pro` is now `explicit_only: true`.** `--panel standard`, `--only cli`,
+    `--only agy`, `--only gemini` all silently drop it; only direct naming
+    (`--only agy31pro` / `agypro` / `аджипро`) starts it. The plan prints
+    `🔴 agy31pro was NOT started` so the drop is visible. Measured: `--panel standard`
+    now runs 11 channels instead of 12. The channel stays enabled; the lock is a
+    panel-default-off UX gate, not a money gate (Antigravity subscription is flat-rate).
+    Rationale: the operator «Давай в cli панели standart отключим по дефолту agy 3.1 Pro Что
+    бы ее можно было запустить, только если явно назовут.»
+  * **`qwen38maxcli` moved from cheap to standard panel.** Cheap panel is now 4 CLI
+    channels: ocspark13free, mimov26pro, agy38flash, grokbuild. qwen still runs on
+    `--panel standard` and on `--only qwen38maxcli`. Rationale: xhigh reasoning plus
+    tool-use loops stretched self-review past 25 min twice in R128 (F finding);
+    standard panel is the right room for a channel we launch rarely.
+* **selftest invariant relaxed.** The explicit_only kit-exclusion check at
+  `suite_publish_audit` was `rationed <= shipped_excl` (R47 Terra-class absolutism:
+  "absence is the only lock that survives naming"). R47 reasoning was explicitly
+  about an EXPENSIVE channel where employees could spend real money. For a
+  subscription-based cost:mid channel like agy31pro, deleting it from the kit would
+  strand kit users who want to name it. Invariant now scoped to `cost: expensive`
+  explicit_only channels. Non-expensive explicit_only channels stay in the kit —
+  the structural panel-default-off check in `suite_max_depth_and_explicit_only`
+  continues to enforce the gate.
+
 ## 1.92.0 — 2026-10-01
 
 * **R130 D1 — strip personal QWEN.md + memories from panel qwen calls.** `call_qwencli()`

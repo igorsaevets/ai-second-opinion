@@ -524,6 +524,8 @@
       "kind": "agy",
       "panel": "standard",
       "_panel_changed_r114": "R114 (2026-09-21), the operator: «установим по дефолту на agy модель gemini 3.8 Flash High». Moving agy31pro to standard leaves agy38flash as the sole agy channel in cheap panel. Previously cheap ran BOTH agy channels; now cheap = agy38flash only, standard = agy31pro + agy38flash.",
+      "explicit_only": true,
+      "_explicit_only_r131": "R131 (2026-10-01), the operator: «Давай в cli панели standart отключим по дефолту agy 3.1 Pro Что бы ее можно было запустить, только если явно назовут.» With explicit_only:true, agy31pro NO LONGER runs via --panel standard, --only cli, --only agy, --only gemini — only when named directly (--only agy31pro / аджипро / agypro). The channel stays enabled and still runs on direct naming; groups and panel expansion silently drop it (visible in plan output: '🔴 agy31pro was NOT started'). 🔴 This is NOT the R47 Terra scenario (expensive-channel lock). agy31pro is cost:mid on an Antigravity subscription — zero per-call cost, no money-loss risk. The R47 'absence is the only lock' invariant on `rationed <= shipped_excl` was relaxed in selftest.py suite_publish_audit to cover ONLY `cost: expensive` channels (R47 Terra class). agy31pro STAYS in the public kit — kit users with an Antigravity subscription can still name it directly. The lock here is a UX default, not a money gate.",
       "vendor": "google",
       "enabled": true,
       "bypass_permissions": true,
@@ -1177,7 +1179,8 @@
     "qwen38maxcli": {
       "read_order": 1,
       "kind": "qwencli",
-      "panel": "cheap",
+      "panel": "standard",
+      "_panel_changed_r131": "R131 (2026-10-01), the operator: «Qwen 3.8 Max qwen code cli давай перенесем из cheap panel в standart, он очень долго думает и быстро расходует токены, будем использовать редко.» Moved out of cheap panel to standard. Cheap panel is now 4 CLI channels (ocspark13free, mimov26pro, agy38flash, grokbuild). qwen38maxcli still runs on --panel standard (standard ⊃ cheap on the panel ladder — this move narrows that cover) and on any direct naming. The reason is cost of time, not cost of money: Token Plan subscription is free at the margin, but xhigh reasoning + ~15K-token QWEN.md context (SUPERSEDED R130 D1: QWEN.md is now neutralised, so the latency reason is almost entirely the xhigh reasoning tier itself) + tool-use loops stretched self-review past 25 min twice during R128 (F finding). Standard panel is the right room for a channel we launch rarely.",
       "vendor": "alibaba",
       "enabled": false,
       "bypass_permissions": true,
