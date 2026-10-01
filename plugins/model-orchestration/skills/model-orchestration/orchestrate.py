@@ -3852,6 +3852,54 @@ QWENCLI_SCRUB_ENV = (
 )
 
 
+def _qwencli_panel_home():
+    """Build a stand-in QWEN_HOME for panel calls that EXCLUDES ~/.qwen/QWEN.md and
+    ~/.qwen/memories/ while PRESERVING ~/.qwen/settings.json (auth + MCP) and
+    ~/.qwen/mcp-oauth-tokens.json (OAuth MCP servers).
+
+    R130 D1 FIX (measured 2026-10-01):
+      - Baseline (no QWEN_HOME):      input_tokens=61 645 on "say OK"
+      - QWEN_HOME override + links:   input_tokens=37 673
+      - Savings: 23 972 tokens / call (-39%), ~11 s wall-clock
+    QWEN.md itself was ~14 K tokens, auto-memory recall from ~/.qwen/memories/ another ~10 K.
+    Both are off-topic bias for a panel review: the reviewer role is INLINED into the brief,
+    so the local persona doc is a tax on every call.
+
+    Mechanism: qwen reads `QWEN_HOME` env var (fallback to `~/.qwen`) via `resolveQwenHome()`
+    in cli-entry.js; `Storage.getGlobalQwenDir()` returns that path everywhere, so the global
+    QWEN.md load path becomes `<panel_home>/QWEN.md` which does not exist → skipped.
+    `~/.qwen/memories/` under global path similarly missing → auto-memory recall is empty.
+    settings.json + mcp-oauth-tokens.json are hardlinked (same inode as source) so Igor's
+    daily qwen use is untouched and the panel sees up-to-date auth + MCP.
+
+    Re-links on every call: Igor's save-and-rename pattern (editor atomic write + rename
+    over existing settings.json) would strand our hardlink pointing at the old inode. Pay
+    the ~1 ms re-link cost each call. Hardlink falls back to copy if the FS doesn't support
+    them (different volume, etc.).
+    """
+    import tempfile
+    import shutil
+    panel_home = os.path.join(tempfile.gettempdir(), "qwen-panel-home")
+    os.makedirs(panel_home, exist_ok=True)
+    real_home = os.path.expanduser("~/.qwen")
+    for name in ("settings.json", "mcp-oauth-tokens.json"):
+        src = os.path.join(real_home, name)
+        dst = os.path.join(panel_home, name)
+        if not os.path.exists(src):
+            continue  # OAuth tokens are optional — only present if an OAuth MCP was authed
+        try:
+            if os.path.exists(dst):
+                os.remove(dst)
+            os.link(src, dst)
+        except OSError:
+            # Different filesystem, insufficient perms, or file lock — fall back to a copy.
+            try:
+                shutil.copy2(src, dst)
+            except OSError:
+                pass  # Panel can still run without the auxiliary file; auth may be lost though
+    return panel_home
+
+
 def call_qwencli(brief, marker, outfile, model=None, effort=None, system=None,
                  fallback_model=None, timeout=2400, name="qwen38maxcli", max_turns=None):
     """Qwen Code CLI (Alibaba) — Token Plan subscription via BAILIAN_TOKEN_PLAN_API_KEY.
@@ -3866,10 +3914,15 @@ def call_qwencli(brief, marker, outfile, model=None, effort=None, system=None,
       - `--max-wall-time` accepts raw seconds or units (`5m`, `1h`); exit 55 on overrun.
       - `--bare` DISABLES settings.json auto-discovery → auth breaks ("No auth type is selected").
         Do not pass it, even though it looks like the right lever for isolation.
-      - `~/.qwen/QWEN.md` loads unconditionally (~14 K tokens of context overhead). We DO NOT
-        pass `--append-system-prompt` (would only STACK on top of QWEN.md) and DO NOT pass
-        `--system-prompt` (would REPLACE QWEN.md but strip auth-adjacent context). The reviewer
-        role is inlined into the stdin text instead — same pattern every other CLI channel uses.
+      - `~/.qwen/QWEN.md` would load unconditionally (~14 K tokens) and `~/.qwen/memories/`
+        auto-memory recall would add another ~10 K — both off-topic for a panel review.
+        R130 FIX (2026-10-01): we point QWEN_HOME at a tmp dir that hardlinks ONLY
+        settings.json + mcp-oauth-tokens.json (no QWEN.md, no memories/) → qwen's global
+        context lookup finds nothing to load. Measured delta: -23 972 input_tokens / call
+        (-39 %), ~11 s wall-clock saved. The reviewer role is inlined into the stdin text
+        — same pattern every other CLI channel uses. We DO NOT pass `--system-prompt`
+        (would REPLACE the auth-aware default) or `--append-system-prompt` (would stack
+        a second role on top of the main system prompt). See `_qwencli_panel_home` above.
       - `QWEN_CODE_SUPPRESS_YOLO_WARNING=1` silences a two-line stderr warning that would
         otherwise show on every call ("running headless with --yolo and no sandbox").
 
@@ -3935,6 +3988,9 @@ def call_qwencli(brief, marker, outfile, model=None, effort=None, system=None,
     for k in QWENCLI_SCRUB_ENV:
         env.pop(k, None)
     env["QWEN_CODE_SUPPRESS_YOLO_WARNING"] = "1"
+    # R130 D1 FIX: redirect QWEN_HOME so ~/.qwen/QWEN.md + ~/.qwen/memories/ do NOT load for
+    # this call. See _qwencli_panel_home() docstring above. Saves ~24 K input tokens / call.
+    env["QWEN_HOME"] = _qwencli_panel_home()
 
     log("  [%s] Qwen Code CLI (qwen3.8-max via BAILIAN_TOKEN_PLAN_API_KEY); "
         "brief via stdin (%d chars), effort=%s (vendor-side), --yolo auto-approve, "

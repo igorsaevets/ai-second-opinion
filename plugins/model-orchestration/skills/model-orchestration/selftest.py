@@ -7029,7 +7029,8 @@ def main():
                   suite_r103_ground_classify,
                   suite_r104_calibration_regression,
                   suite_r109_snapshot_classifier,
-                  suite_r121_panel_retry):
+                  suite_r121_panel_retry,
+                  suite_r130_qwen_home_override):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -10110,6 +10111,100 @@ def suite_r121_panel_retry():
 
     check(rsd({"ok": False, "provider_error": "raw string error"}) is False,
           "R121 provider_error is a string, not dict -> not retryable")
+
+
+def suite_r130_qwen_home_override():
+    """R130 D1 FIX: panel calls to qwen must redirect QWEN_HOME away from ~/.qwen so the
+    personal QWEN.md (~14 K tokens) + auto-memory recall from ~/.qwen/memories/ (~10 K tokens)
+    do not pre-pend to every brief as off-topic bias. Measured 2026-10-01:
+      baseline       input_tokens=61 645 on 'say OK'
+      with override  input_tokens=37 673
+      delta          -23 972 tokens / call, ~11 s wall-clock saved
+
+    Three invariants, each one would make the fix inert if it broke:
+      (a) `_qwencli_panel_home()` exists and is callable (the helper itself)
+      (b) `call_qwencli()` sets `env["QWEN_HOME"]` from that helper (the dispatch wires it)
+      (c) the helper hardlinks settings.json (auth survives) and does NOT create QWEN.md
+          (the whole point of the override)
+    """
+    section("R130 D1 qwen QWEN_HOME override (strip personal QWEN.md + memories)")
+    import orchestrate as o
+    import inspect
+
+    # (a) helper exists ---------------------------------------------------------------------
+    check(callable(getattr(o, "_qwencli_panel_home", None)),
+          "R130: orchestrate._qwencli_panel_home is a callable",
+          "found: %r" % type(getattr(o, "_qwencli_panel_home", None)).__name__)
+
+    # (b) call_qwencli wires it in -----------------------------------------------------------
+    src = inspect.getsource(o.call_qwencli)
+    check('env["QWEN_HOME"] = _qwencli_panel_home()' in src
+          or "env['QWEN_HOME'] = _qwencli_panel_home()" in src,
+          "R130: call_qwencli sets env['QWEN_HOME'] from the panel-home helper - without "
+          "this line the override is dead and QWEN.md loads from Igor's real ~/.qwen",
+          "QWEN_HOME line present: %s"
+          % ('env["QWEN_HOME"]' in src or "env['QWEN_HOME']" in src))
+
+    # (c) helper's effect: build a sandbox, point at a fake real-home, verify no QWEN.md is
+    #     written and settings.json surfaces when the source exists.
+    import tempfile
+    sandbox = tempfile.mkdtemp(prefix="r130-sb-")
+    fake_real_home = os.path.join(sandbox, "real-home")
+    os.makedirs(fake_real_home)
+    # Only create settings.json; mcp-oauth-tokens.json intentionally absent (optional case).
+    with open(os.path.join(fake_real_home, "settings.json"), "w", encoding="utf-8") as f:
+        f.write('{"stub": "r130-selftest"}')
+    with open(os.path.join(fake_real_home, "QWEN.md"), "w", encoding="utf-8") as f:
+        f.write("# this file must NOT be copied into the panel home")
+
+    # Monkey-patch expanduser to resolve ~/.qwen to our fake tree, then invoke the helper.
+    import os.path as _ospath
+    saved_expanduser = _ospath.expanduser
+    _ospath.expanduser = lambda p: fake_real_home if p == "~/.qwen" else saved_expanduser(p)
+    try:
+        # Also redirect tempfile.gettempdir() so we do not clobber a real panel-home.
+        import tempfile as _tf
+        saved_gettemp = _tf.gettempdir
+        tmp_root = tempfile.mkdtemp(prefix="r130-tmp-")
+        _tf.gettempdir = lambda: tmp_root
+        try:
+            panel_home = o._qwencli_panel_home()
+        finally:
+            _tf.gettempdir = saved_gettemp
+    finally:
+        _ospath.expanduser = saved_expanduser
+
+    check(os.path.isdir(panel_home) and panel_home.endswith("qwen-panel-home"),
+          "R130: helper returns a dir path with the fixed `qwen-panel-home` suffix - "
+          "never NULL, never varying per call (would defeat os.link idempotence)",
+          "returned: %r" % panel_home)
+    check(os.path.exists(os.path.join(panel_home, "settings.json")),
+          "R130: settings.json is linked into the panel home (auth source stays reachable)",
+          "exists: %s" % os.path.exists(os.path.join(panel_home, "settings.json")))
+    check(not os.path.exists(os.path.join(panel_home, "QWEN.md")),
+          "R130: QWEN.md is NOT created in the panel home - the whole point of the fix. If "
+          "this line goes red the panel still spends ~24 K tokens / call on QWEN.md context.",
+          "exists: %s" % os.path.exists(os.path.join(panel_home, "QWEN.md")))
+    check(not os.path.exists(os.path.join(panel_home, "memories")),
+          "R130: no memories/ directory copied either - auto-memory recall stays empty",
+          "exists: %s" % os.path.exists(os.path.join(panel_home, "memories")))
+
+    # Idempotence: calling again does not fail even though settings.json already exists.
+    _ospath.expanduser = lambda p: fake_real_home if p == "~/.qwen" else saved_expanduser(p)
+    _tf.gettempdir = lambda: tmp_root
+    try:
+        panel_home_2 = o._qwencli_panel_home()
+    finally:
+        _ospath.expanduser = saved_expanduser
+        _tf.gettempdir = saved_gettemp
+    check(panel_home_2 == panel_home,
+          "R130: second call returns the same path and does not raise on existing hardlink",
+          "first=%r second=%r" % (panel_home, panel_home_2))
+
+    # Cleanup
+    import shutil
+    shutil.rmtree(sandbox, ignore_errors=True)
+    shutil.rmtree(tmp_root, ignore_errors=True)
 
 
 if __name__ == "__main__":

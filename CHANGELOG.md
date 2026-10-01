@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.92.0 — 2026-10-01
+
+* **R130 D1 — strip personal QWEN.md + memories from panel qwen calls.** `call_qwencli()`
+  now points `QWEN_HOME` at a tmp directory that hardlinks only `settings.json` and
+  `mcp-oauth-tokens.json` (no `QWEN.md`, no `memories/`). Qwen's global context lookup
+  resolves to this tmp home and finds nothing to pre-pend. Measured 2026-10-01 on
+  qwen 0.24.7, model `qwen3.8-max`, trivial "say OK" prompt:
+  * Baseline (no `QWEN_HOME`): `input_tokens=61 645`, 24.4 s wall-clock
+  * With override:            `input_tokens=37 673`, 13.6 s wall-clock
+  * Delta: **-23 972 tokens / call (-39 %), ~11 s saved**. QWEN.md itself was ~14 K
+    tokens; `~/.qwen/memories/` auto-memory recall contributed another ~10 K.
+  * All 9 non-OAuth MCP servers continue to load (scrapling, crawl4ai, cloakbrowser,
+    playwright, jina, firecrawl, github, exa, tavily); the gitlab OAuth server was
+    already dead in the baseline and remains dead — unrelated. the operator's daily qwen use
+    is untouched: his terminal does not set `QWEN_HOME`, so he gets `~/.qwen` as before.
+* New selftest suite `suite_r130_qwen_home_override`: asserts `_qwencli_panel_home()`
+  exists and is callable, that `call_qwencli()` wires `env["QWEN_HOME"]` from it, and
+  that the helper hardlinks `settings.json` without creating a `QWEN.md`. 7 new checks
+  (1493 → 1500).
+
 ## 1.91.0 — 2026-10-01
 
 * **New channel: `qwen38maxcli` (R128).** Qwen Code CLI (`@qwen-code/qwen-code` 0.24.7+)
