@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.91.0 — 2026-10-01
+
+* **New channel: `qwen38maxcli` (R128).** Qwen Code CLI (`@qwen-code/qwen-code` 0.24.7+)
+  running Qwen 3.8 Max via an Alibaba Cloud Model Studio Token Plan key
+  (`BAILIAN_TOKEN_PLAN_API_KEY`). New kind `qwencli`. Panel: cheap, distribution: local
+  (ships with `enabled: false` — needs a vendor key beyond OpenRouter; use the
+  `--new-channel` overlay to enable it locally). The cheap panel is now 5 CLI channels:
+  ocspark13free, mimov26pro, agy38flash, grokbuild, qwen38maxcli.
+* **R128 hotfix — eight panel-driven corrections to `call_qwencli()`:**
+  * `--fallback-model` IS passed when the registry carries one (prior claim was wrong —
+    the flag exists on qwen 0.24.7, verified live). `channels.json` carries
+    `qwen3.8-max-preview` as the default fallback.
+  * Env scrub strips `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, `QWEN_MODEL`,
+    `DASHSCOPE_API_KEY` before launch (3/3 panel convergence on silent-redirect risk —
+    qwen honours stray OpenAI vars and silently answers from the wrong vendor).
+  * JSON parser reads stderr as a structured error on empty-stdout failures (previously
+    swallowed the signal).
+  * Selftest's must-exist tuple now includes `call_qwencli`; schema allows the new kind.
+  * Docstring no longer claims `--append-system-prompt`: qwen inlines the system prompt
+    into stdin like every other CLI channel; passing the flag would stack on top of
+    `QWEN.md`'s ~15K-token project-doc bias.
+  * Timeout `25m → 45m` and `--max-tool-calls 50` added (self-review timed out twice at
+    1500s on a repo-reading brief).
+  * `retryable_stream_death` now fires for qwencli: TIMEOUT and exits 53/55 set
+    `finish_reason=error`; structured errors populate `provider_error`. Exits 41 (auth)
+    and 130 (SIGINT) do NOT trigger retry.
+  * `channel_preflight()` carries a qwen install hint
+    (`npm install -g @qwen-code/qwen-code`) matching claudecli's style.
+
 ## 1.90.0 — 2026-09-28
 
 * **mimocli safety prompt fix (R126).** `call_mimocli()` was the only CLI channel where
