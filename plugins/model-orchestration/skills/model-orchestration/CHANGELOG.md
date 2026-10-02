@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.95.0 — 2026-10-02
+
+* **R133 — new cheap-panel channel: `ocmimo26flashfree`.**
+  * MiMo v2.6 Flash Free via opencode CLI. No API key needed. Same opencode transport
+    as `ocspark13free` (`call_opencode()`, stdin pipe, NDJSON output). Flash is the
+    lightweight sibling of MiMo v2.6 Pro (`mimov26pro`). `distribution: local` — the
+    kit does not ship this channel (opencode CLI not guaranteed on employee machines).
+  * Variants (effort) are **unavailable** on this free model — `effort: null`. The
+    `call_opencode()` `if effort:` guard correctly skips the `#variant` suffix.
+  * **selftest**: dispatch effort assertion now skips channels whose registry entry has
+    `effort: null` (was asserting truthy effort on ALL opencode channels, which would
+    fail for this channel). PANEL_EVENTS updated.
+  * Live tested 2026-10-02: `opencode/mimo-v2.6-flash-free` answered "OK" in 5.8s, $0.
+
 ## 1.94.0 — 2026-10-02
 
 * **R132 — ocspark13free effort fix (two bugs, one channel).**

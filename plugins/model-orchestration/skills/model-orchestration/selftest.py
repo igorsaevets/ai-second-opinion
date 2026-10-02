@@ -781,11 +781,15 @@ def suite_dispatch():
             check(len(models) == len(https),
                   "channels sharing one endpoint each ran their OWN model",
                   "models=%s" % sorted(models))
+        _reg_chans = json.loads(Path(HERE, "channels.json").read_text(encoding="utf-8"))["channels"]
         for kind, field in (("codex", "timeout"), ("agy", "effort"), ("opencode", "effort")):
             rows = [r for r in launched if r["kind"] == kind]
             if rows:
-                check(all(r[field] for r in rows),
-                      "the tier delivered %s to every %s channel" % (field, kind))
+                # R133: only assert on channels whose registry entry specifies this field.
+                # ocmimo26flashfree has effort=null (variants unavailable on this free model).
+                relevant = [r for r in rows if _reg_chans.get(r["name"], {}).get(field)]
+                check(all(r[field] for r in relevant),
+                      "the tier delivered %s to every %s channel that specifies it" % (field, kind))
         # 🔴 R66: timeout must reach EVERY kind, not just codex/agy/grokcli/xai. Until R66 four
         # dispatch paths (http, openrouter, oai, gemini, hermes) silently dropped the registry's
         # timeout and fell back to the function's default. The stub captures timeout from kwargs;
@@ -3078,6 +3082,13 @@ def suite_panels():
          "panel_members(reg, 'standard')` holds), so the move narrows the room it's in. Still "
          "enabled, still named by `--only qwen38maxcli`. Cheap is now 4 CLI channels: "
          "ocspark13free, mimov26pro, agy38flash, grokbuild."),
+        ("R133 2026-10-02", "ADD", "ocmimo26flashfree",
+         "Igor R133: «добавим mimo. Добавишь его в cli cheap панель.» MiMo v2.6 Flash Free "
+         "via opencode CLI (opencode.ai). No API key needed — opencode/ prefix models are "
+         "free. Same opencode transport as ocspark13free (call_opencode, stdin pipe, NDJSON). "
+         "Flash is the lightweight sibling of MiMo v2.6 Pro (mimov26pro channel, direct "
+         "Xiaomi API). Variants UNAVAILABLE — effort is null. distribution: local (opencode "
+         "CLI not guaranteed on employee machines). Live tested 2026-10-02: 5.8s, $0."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
