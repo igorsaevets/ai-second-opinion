@@ -374,7 +374,7 @@ def suite_routing():
 
     # R115: the `cli` group must contain EXACTLY the channels whose kind is a CLI binary transport,
     # and nothing else. Adding a new CLI channel without adding it to the group will fail here.
-    _CLI_KINDS = {"opencode", "claudecli", "codex", "agy", "grokcli", "mimocli", "qwencli"}
+    _CLI_KINDS = {"opencode", "claudecli", "codex", "agy", "grokcli", "mimocli", "qwencli", "kimicli"}
     _cli_by_kind = {c for c, ch in _RAW["channels"].items() if ch.get("kind") in _CLI_KINDS}
     _cli_group = set(GROUPS.get("cli", set()))
     check(_cli_group == _cli_by_kind,
@@ -723,6 +723,7 @@ def suite_dispatch():
         "o.call_claudecli = stub('claudecli')\n"
         "o.call_mimocli = stub('mimocli')\n"
         "o.call_qwencli = stub('qwencli')\n"
+        "o.call_kimicli = stub('kimicli')\n"
         # 🔴 THE STUBS MUST REPLACE SOMETHING THAT EXISTS. Found while renaming
         # call_openrouter_reviewer -> call_oai_reviewer on 2026-08-08: `o.old_name = stub(...)`
         # does not fail on a name the module no longer has, it CREATES it. The dispatcher then
@@ -732,7 +733,7 @@ def suite_dispatch():
         # still fires on the next rename, which is what matters.
         "for _n in ('call_http_reviewer','call_codex','call_agy','call_oai_reviewer',\n"
         "           'call_xai_responses','call_gemini_direct','call_hermes','call_opencode',\n"
-        "           'call_claudecli','call_mimocli','call_qwencli'):\n"
+        "           'call_claudecli','call_mimocli','call_qwencli','call_kimicli'):\n"
         "    assert callable(getattr(o, _n, None)), 'stub target missing: ' + _n\n"
         "t = tempfile.mkdtemp(prefix='orchdisp-')\n"
         "b = os.path.join(t, 'b.md')\n"
@@ -935,6 +936,7 @@ def suite_dispatch():
         "    o.call_hermes = ok; o.call_gemini_direct = ok; o.call_xai_responses = ok\n"
         "    o.call_grokcli = ok; o.call_opencode = ok\n"
         "    o.call_claudecli = ok; o.call_mimocli = ok; o.call_qwencli = ok\n"
+        "    o.call_kimicli = ok\n"
         "    o.call_agy = boom\n"
         "    t = tempfile.mkdtemp(); b = os.path.join(t, 'b.md')\n"
         "    open(b, 'w', encoding='utf-8').write('hi\\nREVIEW-COMPLETE\\n')\n"
@@ -2703,9 +2705,10 @@ def suite_spend_guard():
     # R82 bump 10 -> 11: call_claudecli (v1.52.0) verifies by the shared rule.
     # R122 bump 11 -> 12: call_mimocli (v1.87.0) adds one more verification site.
     # R128 bump 12 -> 13: call_qwencli (2026-09-30) adds one more verification site.
+    # R133 bump 13 -> 14: call_kimicli (2026-10-02) adds one more verification site.
     check(src_all.count("def _marker_on_last_line(") == 1 and
-          src_all.count("not _marker_on_last_line(") == 13,
-          "R68 census: 12 verification sites + 1 use inside _strip_marker_tail, one def",
+          src_all.count("not _marker_on_last_line(") == 14,
+          "R68 census: 13 verification sites + 1 use inside _strip_marker_tail, one def",
           "def=%d not_calls=%d" % (src_all.count("def _marker_on_last_line("),
                                    src_all.count("not _marker_on_last_line(")))
     check(src_all.count("_strip_marker_tail(") == 3,
@@ -3089,6 +3092,14 @@ def suite_panels():
          "Flash is the lightweight sibling of MiMo v2.6 Pro (mimov26pro channel, direct "
          "Xiaomi API). Variants UNAVAILABLE — effort is null. distribution: local (opencode "
          "CLI not guaranteed on employee machines). Live tested 2026-10-02: 5.8s, $0."),
+        ("R133 2026-10-02", "ADD", "kimik3free",
+         "Igor R133: «потом coding-kimi-k3-free через kimi CLI → отдельная итерация.» "
+         "Full K3 by Moonshot AI (1.05M context) via Kimi Code CLI v2.1.1 + AIHubMix "
+         "provider. New kind kimicli (call_kimicli, -p arg, NDJSON stream-json). Free on "
+         "AIHubMix (5 RPM, 100 RPD). -m flag crashes — model via default_model in "
+         "config.toml. effort=null (no effort control). distribution: local (kimi CLI + "
+         "AIHubMix key not guaranteed on employee machines). Live tested 2026-10-02: "
+         "8.3s, $0."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -3582,7 +3593,7 @@ def suite_panels():
     blob = blob_of(r)
     check(r.returncode == 0 and "panel: cheap" in blob,
           "orchestrate --dry-run --panel cheap resolves the cheap panel", "exit=%d" % r.returncode)
-    check("kimik3" not in blob.split("running")[-1],
+    check("qwen38maxcli" not in blob.split("running")[-1],
           "and the standard-only channels are not in its running list")
     r = run_cli(["--dry-run", "--panel", "nosuchpanel", "--marker", "X"])
     check(r.returncode != 0 and "invalid choice" in blob_of(r),

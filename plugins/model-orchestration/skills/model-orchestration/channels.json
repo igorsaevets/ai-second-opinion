@@ -143,10 +143,11 @@
       ]
     },
     "cli": {
-      "label": "every channel that runs through a local CLI binary (opencode, mimo, claude, codex, agy, grok, qwen)",
+      "label": "every channel that runs through a local CLI binary (opencode, mimo, claude, codex, agy, grok, qwen, kimi)",
       "channels": [
         "ocspark13free",
         "ocmimo26flashfree",
+        "kimik3free",
         "mimov26pro",
         "cclopus46",
         "codex",
@@ -394,6 +395,40 @@
         "opencode_mimo"
       ],
       "notes": "Free MiMo v2.6 Flash via opencode CLI. No API key needed. Flash is the lightweight sibling of MiMo v2.6 Pro (mimov26pro channel, direct Xiaomi API). Same opencode transport as ocspark13free — call_opencode(), stdin pipe, NDJSON output. Variants unavailable; runs at opencode's default reasoning depth. LIVE TESTED 2026-10-02: 'Say OK' answered 'OK' in 5.8s, cost=$0, model=opencode/mimo-v2.6-flash-free."
+    },
+    "kimik3free": {
+      "read_order": 1,
+      "kind": "kimicli",
+      "panel": "cheap",
+      "vendor": "moonshot",
+      "enabled": false,
+      "distribution": "local",
+      "label": "Kimi K3 Free",
+      "cost": "free",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "_added_r133": "R133 И-3 (2026-10-02), the operator's plan: «потом coding-kimi-k3-free через kimi CLI → отдельная итерация.» Full K3 by Moonshot AI, 1.05M context, free on AIHubMix (5 RPM, 100 RPD, 1M TPD). Kimi Code CLI v2.1.1 (@moonshot-ai/kimi-code), Claude Code fork. -p <text> for headless, --output-format stream-json for NDJSON. -m flag CRASHES (STATUS_STACK_BUFFER_OVERRUN) — must use default_model in ~/.kimi-code/config.toml. AIHubMix provider with AIHUBMIX_API_KEY. Live tested 2026-10-02: 8.3s, $0.",
+      "model": "aihubmix/coding-kimi-k3-free",
+      "effort": null,
+      "_effort": "No effort/variant control on this model through kimi CLI. The -p flag is non-interactive and does not support reasoning effort flags. The model runs at the provider's default reasoning level.",
+      "timeout": "40m",
+      "_timeout": "Same rationale as other free CLI channels: caller-side timeout via subprocess.run.",
+      "models": {
+        "aihubmix/coding-kimi-k3-free": {
+          "label": "Coding Kimi K3 Free (via Kimi Code CLI + AIHubMix)",
+          "data_policy": "AIHubMix gateway (OpenAI-compatible, their terms apply) relaying to Moonshot AI's K3 model. Free at point of use — AIHUBMIX_API_KEY needed but no billing on the free model.",
+          "aliases": [
+            "coding-kimi-k3-free",
+            "kimi k3 free",
+            "kimi free"
+          ]
+        }
+      },
+      "aliases": [
+        "kimik3free",
+        "kimi_k3_free",
+        "kimi_free"
+      ],
+      "notes": "Free Kimi K3 via Kimi Code CLI + AIHubMix. Full K3 model by Moonshot AI (NOT cut-down), 1.05M context. New kind kimicli — prompt as -p argument (not stdin), NDJSON output with role/content structure. No token metrics from stream-json (session DB only). -m flag crashes — model set via default_model in config.toml. distribution: local (kimi CLI + AIHubMix key not guaranteed for employees). LIVE TESTED 2026-10-02: 8.3s, $0."
     },
     "cclopus46": {
       "read_order": 1,

@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.96.0 — 2026-10-02
+
+* **R133 — new cheap-panel channel: `kimik3free` (new kind `kimicli`).**
+  * Coding Kimi K3 Free (Moonshot AI) via Kimi Code CLI v2.1.1. Full K3 model, 1.05M
+    context, free on AIHubMix (5 RPM, 100 RPD, 1M TPD). New kind `kimicli` with
+    `call_kimicli()` — prompt passed as `-p` argument (not stdin), `--output-format
+    stream-json` for NDJSON with `role`/`content` structure.
+  * `-m` flag **crashes** (STATUS_STACK_BUFFER_OVERRUN) — model set via `default_model`
+    in `~/.kimi-code/config.toml`. `effort: null` (no effort control). `distribution:
+    local` — kimi CLI + AIHubMix key not guaranteed on employee machines.
+  * New binary resolver `kimi_bin()`, new dispatch entries (main + retry), preflight
+    check, `kimicli` added to `KNOWN_KINDS`, `CLI_BINARIES`, `CLI_RESOLVERS`, `cli`
+    group. PANEL_EVENTS updated.
+  * Live tested 2026-10-02: 8.3s, $0.
+
 ## 1.95.0 — 2026-10-02
 
 * **R133 — new cheap-panel channel: `ocmimo26flashfree`.**

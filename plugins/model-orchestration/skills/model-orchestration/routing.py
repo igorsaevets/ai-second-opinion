@@ -1987,6 +1987,11 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                                    "vendor-side defaultEffort governs), timeout %s (--max-wall-time), "
                                    "Alibaba Cloud Token Plan subscription"
                                    % (p.get("effort") or "default", p["timeout"]))
+            elif p.get("kind") == "kimicli":
+                p["timeout"] = p.get("timeout") or "40m"
+                p["_tier_note"] = ("timeout %s only — no effort control on this free model, "
+                                   "Kimi Code CLI via AIHubMix, $0"
+                                   % p["timeout"])
         # 🔴 THE TIER DID NOTHING TO THE SPARK CHANNELS, and it looked like it did. The tier
         # varied `thinking.budget_tokens`, but Meta documents that field as "accepted for
         # compatibility but not translated into an effort value" - depth on this endpoint is set
@@ -2262,6 +2267,11 @@ def _web_line(p):
                 "PERMISSION PROMPTS (`--yolo`, on purpose): the reviewer can run shell commands "
                 "and edit files on this machine; your deny-lists and hooks still apply. "
                 "Grounding is the agent's own claim")
+    if kind == "kimicli":
+        return ("web: Kimi Code CLI's built-in tools (Claude Code fork) - non-interactive "
+                "`-p` mode, no tool approvals. The model may use search and page-reading "
+                "tools configured in ~/.kimi-code/config.toml. Grounding is the agent's "
+                "own claim")
     return None
 
 

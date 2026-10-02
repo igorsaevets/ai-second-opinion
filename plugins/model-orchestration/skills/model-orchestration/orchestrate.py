@@ -1197,6 +1197,7 @@ CLI_BINARIES = (
     ("claudecli", "CLAUDECLI_BIN", "claude"),
     ("mimocli", "MIMO_BIN", "mimo"),
     ("qwencli", "QWEN_BIN", "qwen"),
+    ("kimicli", "KIMI_BIN", "kimi"),
 )
 CLI_ENV_VARS = " / ".join(env for _, env, _ in CLI_BINARIES)
 
@@ -4153,6 +4154,97 @@ def call_qwencli(brief, marker, outfile, model=None, effort=None, system=None,
             "warnings": warn, "notes": note}
 
 
+# --- Kimi Code CLI channel (kind kimicli) --------------------------------------------------------
+
+
+def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
+                 timeout=2400, name="kimik3free"):
+    """Kimi Code CLI (Moonshot AI) — free via AIHubMix provider, AIHUBMIX_API_KEY.
+
+    Probed 2026-10-02 on kimi v2.1.1 (@moonshot-ai/kimi-code):
+      * Claude Code fork — same npm-installed binary shape, `-p` for prompt mode.
+      * `-p <text>` takes the prompt as an ARGUMENT (not stdin).
+      * `--output-format stream-json` emits NDJSON: role/type structure.
+        Lines with role:"assistant" carry content; role:"meta" carry events.
+      * `-m aihubmix/coding-kimi-k3-free` CRASHES (STATUS_STACK_BUFFER_OVERRUN).
+        Model must be set via default_model in ~/.kimi-code/config.toml.
+      * `--auto` CANNOT combine with `-p` (error).
+      * `-y`/`--yolo` is "ask when needed" mode — not relevant for `-p` (non-interactive).
+      * No token/usage data in stream-json output (session DB only).
+      * coding-kimi-k3-free: Moonshot AI K3, 1.05M context, free on AIHubMix
+        (5 RPM, 100 RPD, 1M TPD).
+      * Live tested 2026-10-02: 8.3s, $0.
+
+    AUTH: AIHubMix provider configured in ~/.kimi-code/config.toml with api_key directly.
+    AIHUBMIX_API_KEY also in process env but kimi reads from config.toml.
+
+    No bypass needed: `-p` is non-interactive, no tool approval prompts.
+    No env scrubbing needed: kimi reads auth from its own config.toml, not env vars.
+    Neutral cwd via Python cwd= to prevent loading any project's agent configs.
+    """
+    binary = kimi_bin()
+    text_in = ((system.strip() + "\n\n---\n\n") if system else "") + brief
+
+    cmd = [binary, "-p", text_in, "--output-format", "stream-json"]
+
+    ncwd = neutral_cwd()
+    log("  [%s] Kimi Code CLI v2.1.1, free via AIHubMix; prompt as -p arg (%d chars)"
+        % (name, len(text_in)))
+    t0 = time.time()
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                           cwd=ncwd,
+                           timeout=_seconds(timeout, 2400))
+    except FileNotFoundError:
+        return {"channel": name, "ok": False, "error": "binary not found: " + binary}
+    except subprocess.TimeoutExpired:
+        return {"channel": name, "ok": False, "text": "",
+                "seconds": round(time.time() - t0, 1),
+                "error": "TIMEOUT after %s" % (timeout or "2400s"), "model": model,
+                "warnings": ["TIMEOUT"], "notes": []}
+
+    secs = time.time() - t0
+    raw = (p.stdout or "").strip()
+    warn, note = [], []
+    text = ""
+
+    for line in raw.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        role = obj.get("role")
+        if role == "assistant":
+            content = obj.get("content")
+            if content:
+                text += content
+
+    if p.returncode != 0 and not text:
+        stderr_tail = (p.stderr or "").strip()[-400:]
+        warn.append("EXIT %d: %s" % (p.returncode, (stderr_tail or raw or "")[:300]))
+    if text:
+        with open(outfile, "w", encoding="utf-8") as f:
+            f.write(text)
+    if marker and not _marker_on_last_line(text, marker):
+        warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
+    if not text.strip() and not warn:
+        warn.append("EMPTY OUTPUT despite exit 0")
+    record_refusal(refusal_check(text, marker), warn, note)
+
+    return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
+            "bytes": len(text.encode("utf-8")), "exit": p.returncode,
+            "model": model, "effort": effort,
+            "in_tokens": None,
+            "out_tokens": None,
+            "reasoning_tokens": None,
+            "cached_in_tokens": None,
+            "usd": None,
+            "warnings": warn, "notes": note}
+
+
 def call_hermes(brief, marker, outfile, model=None, toolsets=None, system=None, timeout=2400):
     """
     Kimi K3 through the Hermes CLI. `-z/--oneshot` prints ONLY the final response text to
@@ -6541,6 +6633,20 @@ def qwen_bin():
     ])
 
 
+def kimi_bin():
+    """Kimi Code CLI (Moonshot AI) — npm install -g @moonshot-ai/kimi-code.
+
+    Uses AIHubMix provider (OpenAI-compatible) via config.toml with AIHUBMIX_API_KEY.
+    Model `coding-kimi-k3-free` is configured as default_model in ~/.kimi-code/config.toml.
+    Binary is `kimi` (or `kimi.cmd` on Windows), installed via npm globally.
+    """
+    return _resolve_bin("KIMI_BIN", "kimi", [
+        os.path.join(os.environ.get("APPDATA", ""), "npm", "kimi.cmd"),
+        os.path.join(os.environ.get("APPDATA", ""), "npm", "kimi"),
+        "/usr/local/bin/kimi", "/opt/homebrew/bin/kimi",
+    ])
+
+
 # The other half of CLI_BINARIES: kind -> the function that finds that binary. Split from the
 # tuple only because the resolvers carry per-platform search paths and have to be defined after
 # _resolve_bin. selftest asserts the two halves have identical keys, which is what stops the
@@ -6554,6 +6660,7 @@ CLI_RESOLVERS = {
     "claudecli": claudecli_bin,
     "mimocli": mimo_bin,
     "qwencli": qwen_bin,
+    "kimicli": kimi_bin,
 }
 
 
@@ -6562,7 +6669,7 @@ CLI_RESOLVERS = {
 # same five literals, so a kind unknown to one was unknown to the other, and a misspelled kind
 # produced neither a preflight warning nor a result, only a log line that scrolls away.
 KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "hermes",
-               "grokcli", "opencode", "claudecli", "mimocli", "qwencli")
+               "grokcli", "opencode", "claudecli", "mimocli", "qwencli", "kimicli")
 
 # The kinds that run ON THIS MACHINE and can therefore read an attached document from disk
 # instead of receiving it inline (--attach / --attach-dir). Igor, R46: «CLI агентам не отправлять
@@ -6820,6 +6927,15 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
                    "@qwen-code/qwen-code (or Alibaba install script at "
                    "qwen-code-assets.oss-cn-hangzhou.aliyuncs.com); then put "
                    "BAILIAN_TOKEN_PLAN_API_KEY in ~/.qwen/settings.json env block" % c)
+    for c in sorted(by_kind.get("kimicli", [])):
+        b = kimi_bin()
+        if os.path.isfile(b) or shutil.which(b):
+            yield ("%s: Kimi Code CLI present (%s); free via AIHubMix "
+                   "(AIHUBMIX_API_KEY + ~/.kimi-code/config.toml)" % (c, b))
+        else:
+            yield ("%s: Kimi Code CLI NOT FOUND. Install: npm install -g "
+                   "@moonshot-ai/kimi-code; configure AIHubMix provider in "
+                   "~/.kimi-code/config.toml" % c)
 
 
 def _write_agy_agent(workdir):
@@ -7911,6 +8027,9 @@ def _channel_key_ready(ch):
         return bool(os.path.isfile(b) or shutil.which(b))
     if kind == "qwencli":
         b = qwen_bin()
+        return bool(os.path.isfile(b) or shutil.which(b))
+    if kind == "kimicli":
+        b = kimi_bin()
         return bool(os.path.isfile(b) or shutil.which(b))
     return True                                          # codex / agy / grokcli / hermes
 
@@ -9159,6 +9278,12 @@ def main():
                                         timeout=_seconds(p.get("timeout"), 2400),
                                         max_turns=p.get("max_turns"),
                                         name=cname)
+            elif kind == "kimicli":
+                jobs[cname] = ex.submit(call_kimicli, cbrief, a.marker, outfile,
+                                        model=p.get("model"), effort=p.get("effort"),
+                                        system=_system_for(system, p),
+                                        timeout=_seconds(p.get("timeout"), 2400),
+                                        name=cname)
             else:
                 # Named in the registry, unknown to the code. A log line is NOT enough: a log
                 # line scrolls, and every downstream consumer - the "N/M channels returned"
@@ -9308,6 +9433,12 @@ def main():
                         fallback_model=p.get("fallback_model"),
                         timeout=_seconds(p.get("timeout"), 2400),
                         max_turns=p.get("max_turns"), name=cname)
+                elif kind == "kimicli":
+                    _rjobs[cname] = _rex.submit(
+                        call_kimicli, cbrief, a.marker, outfile,
+                        model=p.get("model"), effort=p.get("effort"),
+                        system=_system_for(system, p),
+                        timeout=_seconds(p.get("timeout"), 2400), name=cname)
                 else:
                     log("  [%s] cannot retry: unknown kind %r" % (cname, kind))
             for cname, f in _rjobs.items():
