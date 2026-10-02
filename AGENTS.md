@@ -50,6 +50,13 @@ documents that hold the detail. It deliberately holds no channel list, no counts
   `[SNIPPET]` (search result only, page not opened), `[MEMORY]` (training data, unchecked).
   The system presets define them; expect them in answers, and use them yourself when you report
   findings to the person who asked.
+- **Cheap-panel results can be read in the same prompt; standard-panel needs a fresh one.**
+  Cheap-panel channels (free and lightweight models) produce shorter reviews. If your context
+  window has enough remaining budget (~50K tokens or more), reading cheap-panel results in the
+  current prompt saves a round-trip. Standard-panel channels (expensive reasoning models) write
+  longer, more detailed reviews — always read those after a `/compact` or in a fresh context
+  window. Which channels belong to which tier: `python routing.py` or `--dry-run` with
+  `--panel cheap` / `--panel standard`.
 - **API channels cannot read files — attach them or they are invisible.** Channels served by
   a remote API (OpenRouter, direct vendor endpoints) see ONLY the brief text and what
   `fetch_tool` returns (limited to 5 calls). A GitHub URL in the brief does NOT give them the

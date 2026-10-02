@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.97.0 — 2026-10-02
+
+* **AGENTS.md — panel-tier reading guidance for AI consumers.**
+  * Cheap-panel results (free/lightweight models) produce shorter reviews and can be read
+    in the same prompt if the context window has ≥50K tokens remaining.
+  * Standard-panel results (expensive reasoning models) write longer reviews — always read
+    those after a `/compact` or in a fresh context window.
+  * Points to `routing.py` and `--dry-run --panel cheap/standard` for tier membership.
+
 ## 1.96.0 — 2026-10-02
 
 * **R133 — new cheap-panel channel: `kimik3free` (new kind `kimicli`).**
