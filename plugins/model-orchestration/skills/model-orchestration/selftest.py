@@ -781,7 +781,7 @@ def suite_dispatch():
             check(len(models) == len(https),
                   "channels sharing one endpoint each ran their OWN model",
                   "models=%s" % sorted(models))
-        for kind, field in (("codex", "timeout"), ("agy", "effort")):
+        for kind, field in (("codex", "timeout"), ("agy", "effort"), ("opencode", "effort")):
             rows = [r for r in launched if r["kind"] == kind]
             if rows:
                 check(all(r[field] for r in rows),

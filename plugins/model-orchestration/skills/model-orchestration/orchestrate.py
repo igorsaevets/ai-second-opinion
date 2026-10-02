@@ -3432,6 +3432,8 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     text_in = ((system.strip() + "\n\n---\n\n") if system else "") + brief
 
     base_model = model or "opencode/muse-spark-1.3-contributor-free"
+    if effort:
+        base_model += "#" + effort
     cmd = [binary, "run",
            "-m", base_model,
            "--format", "json",

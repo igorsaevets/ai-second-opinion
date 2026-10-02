@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.94.0 — 2026-10-02
+
+* **R132 — ocspark13free effort fix (two bugs, one channel).**
+  * **`effort` corrected from `max` to `xhigh`.** Live test 2026-10-02: opencode
+    `#max` variant returns `provider.no-route` for the free Spark 1.3 model.
+    `#xhigh` is the ceiling. `supported_efforts` updated: `["xhigh","high","minimal"]`.
+  * **`call_opencode()` now appends `#<effort>` to the model string.** Since the
+    opencode v1→v2 migration (2026-09-21, `--variant` flag removed), the effort
+    parameter was accepted but never passed to the CLI. Every ocspark13free panel
+    call since 2026-09-21 ran at opencode's DEFAULT effort, not the registry's.
+    Fix: `base_model += "#" + effort` when effort is not None.
+  * **selftest**: dispatch probe now checks that effort reaches opencode calls
+    (previously checked only for agy and codex kinds).
+
 ## 1.93.0 — 2026-10-01
 
 * **R131 — two panel-composition tweaks (the operator, 2026-10-01).**

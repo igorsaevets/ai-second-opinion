@@ -332,10 +332,10 @@
       "_fetch_fallback_hint_ref": "R126 (2026-09-28). opencode is the base that mimo CLI forks — it supports MCP servers via the same mimocode.jsonc / opencode config. Same generic hint as all other CLI channels.",
       "_added_r80": "R80 И5 (2026-09-04), the operator: «добавь канал opencode cli с моделью spark 1.3 contributor Free. Именно бесплатная модель. И поставить ее как основную вместо прямой api и вместо openrouter spark. Но fallback сделать не free на тех каналах.» Free Spark 1.3 Contributor via opencode CLI (opencode.ai). No API key needed — opencode/ prefix models are free. Same Spark 1.3 weights as spark13cont and orspark13cont. Primary in ask_default; fallback to the paid channels. Data policy: Contributor terms (Meta trains on what you send) PLUS opencode's own terms (the free tier routes through opencode's infrastructure). opencode CLI must be installed: npm install -g opencode-ai.",
       "model": "opencode/muse-spark-1.3-contributor-free",
-      "effort": "max",
-      "_effort": "opencode --variant flag. the operator 2026-09-04: «ставь максимально доступный reasoning effort - max». Free Spark 1.3 supports high/max/minimal.",
+      "effort": "xhigh",
+      "_effort": "opencode v2 model#variant suffix. the operator 2026-09-04: «ставь максимально доступный reasoning effort». R132 (2026-10-02): Free Spark 1.3 via opencode #max returns provider.no-route (live tested). xhigh is the ceiling for this free model. Paid Spark 1.3 Contributor via direct Meta API (spark13cont, kind http) may support max through output_config.effort — different transport.",
       "supported_efforts": [
-        "max",
+        "xhigh",
         "high",
         "minimal"
       ],
@@ -358,7 +358,7 @@
         "opencode",
         "opencode_spark"
       ],
-      "notes": "Free Spark 1.3 Contributor via opencode CLI. No API key needed. Primary --ask channel — if the CLI is installed, this fires before the paid spark13cont/orspark13cont. Same model weights, zero cost. Brief piped through stdin (solves both the hang bug and the 32KB cmdline limit). LIVE TESTED 2026-09-04: --ask '2+2' answered '4' in 9.2s, effort=max, marker verified, exit=0."
+      "notes": "Free Spark 1.3 Contributor via opencode CLI. No API key needed. Primary --ask channel — if the CLI is installed, this fires before the paid spark13cont/orspark13cont. Same model weights, zero cost. Brief piped through stdin (solves both the hang bug and the 32KB cmdline limit). LIVE TESTED 2026-09-04: --ask '2+2' answered '4' in 9.2s, effort=max (v1 --variant), marker verified, exit=0. R132 (2026-10-02): effort corrected to xhigh (max unavailable on free model via opencode)."
     },
     "cclopus46": {
       "read_order": 1,
