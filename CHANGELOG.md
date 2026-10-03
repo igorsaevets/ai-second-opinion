@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.100.1 — 2026-10-03
+
+- **Kimi Code CLI (`kimik3free`) works again.** 1.100.0 added `--auto`, which the Kimi CLI refuses
+  next to `-p` ("Cannot combine --prompt with --auto."), so the channel failed at once. The flag is
+  gone: Kimi's non-interactive mode already runs every tool without asking (its own docs), so the
+  harness now always adds the safety directive to Kimi's brief instead.
+
 ## 1.100.0 — 2026-10-03
 
 - **Grok Build reviewers can now actually check the work.** When `bypass_permissions` is on (the

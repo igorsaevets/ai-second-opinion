@@ -10435,7 +10435,7 @@ def suite_r137_kimi_argv():
                                                    "kimik3free"), "BRIEF.md")
         body = open(bpath, encoding="utf-8").read() if os.path.isfile(bpath) else ""
         check("--add-dir" in c2 and len(p2) < 400 and "\n" not in p2 and bpath in p2
-              and body == big,
+              and body.endswith(big) and body.startswith(o.CLI_BYPASS_SAFETY_PROMPT[:40]),
               "R137: past the 32K command-line cap the brief goes to BRIEF.md (whole) and -p "
               "is one line naming it", "p=%r body=%d" % (p2[:120], len(body)))
         o._kimi_node_argv = lambda b: None
@@ -10542,10 +10542,12 @@ def suite_r137_i2_cli_tools():
                        workdir=os.path.join(td, "k2"), bypass=False)
         k2 = seen[-1][0]
         kp = k1[k1.index("-p") + 1]
-        check("--auto" in k1 and "--auto" not in k2
-              and kp.startswith(o.CLI_BYPASS_SAFETY_PROMPT[:40]),
-              "R137 И-2: kimi under bypass runs --auto (Never Ask) with the SAFETY DIRECTIVE; "
-              "without bypass neither", repr(k1[:4])[:200])
+        kp2 = k2[k2.index("-p") + 1]
+        check("--auto" not in k1 and "--auto" not in k2
+              and kp.startswith(o.CLI_BYPASS_SAFETY_PROMPT[:40])
+              and kp2.startswith(o.CLI_BYPASS_SAFETY_PROMPT[:40]),
+              "R137 И-2 hotfix: kimi never gets --auto (the CLI refuses it next to -p) and the SAFETY "
+              "DIRECTIVE always rides the brief (-p is auto permission by default)", repr(k1[:4])[:200])
 
         o.opencode_bin = lambda: "opencode"
         o.subprocess.run = _fake(_GrokDone())
@@ -10560,7 +10562,7 @@ def suite_r137_i2_cli_tools():
     reg = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                       "channels.json"), encoding="utf-8"))
     note = reg["channels"]["grokbuild"].get("_bypass_permissions", "")
-    check(reg["channels"]["kimik3free"].get("bypass_permissions") is True
+    check("bypass_permissions" not in reg["channels"]["kimik3free"]
           and "NO `--tools` allowlist" in note and "R88 (2026-09-14) opt-in. Default off" not in note,
           "R137 И-2: the registry says what the code does (grok note, kimi field)", note[:120])
 

@@ -4280,12 +4280,13 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
     AUTH: AIHubMix provider configured in ~/.kimi-code/config.toml with api_key directly.
     AIHUBMIX_API_KEY also in process env but kimi reads from config.toml.
 
-    No bypass needed: `-p` is non-interactive, no tool approval prompts.
+    No bypass flag exists or is needed: `-p` runs in kimi's AUTO permission mode by default (vendor docs,
+    R137 И-2), i.e. every tool with no prompt - so the SAFETY DIRECTIVE is always prepended.
     No env scrubbing needed: kimi reads auth from its own config.toml, not env vars.
     Neutral cwd via Python cwd= to prevent loading any project's agent configs.
     """
     binary = kimi_bin()
-    text_in = ((system.strip() + "\n\n---\n\n") if system else "") + _with_bypass_safety(brief, bypass)
+    text_in = ((system.strip() + "\n\n---\n\n") if system else "") + _with_bypass_safety(brief, True)
 
     base = _kimi_node_argv(binary)
     cmd = (base or [binary]) + ["-p", text_in, "--output-format", "stream-json"]
@@ -4315,13 +4316,12 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
                                                  if base is None else "over the argv cap")
 
     ncwd = neutral_cwd()
-    if bypass:
-        # R137 И-2: Kimi Code 2.1.1 `--auto` = «Never Ask mode: never interrupts you; everything
-        # runs and is decided automatically» (kimi --help). `-p` alone left the approval policy at
-        # the CLI default, which nobody had measured for a headless run.
-        cmd.append("--auto")
-        log("  [%s] PERMISSIONS BYPASSED for this call: --auto (Never Ask mode) - every tool runs "
-            "without asking; SAFETY DIRECTIVE prepended to the brief." % name)
+    # R137 И-2 hotfix (v1.100.1): NO `--auto` here. kimi 2.1.1 refuses it next to -p («Cannot combine
+    # --prompt with --auto.», exit 1 - v1.100.0 shipped that and the panel caught it); its docs:
+    # «non-interactive mode uses auto permission by default». So every kimi -p run already has every
+    # tool with no prompt, and the SAFETY DIRECTIVE rides every brief (text_in above), like mimocli.
+    log("  [%s] -p runs in kimi's auto permission mode (vendor default): every tool, no prompts; "
+        "SAFETY DIRECTIVE prepended to the brief." % name)
     log("  [%s] Kimi Code CLI, free via AIHubMix; %s (%d chars)" % (name, how, len(text_in)))
     t0 = time.time()
     try:
