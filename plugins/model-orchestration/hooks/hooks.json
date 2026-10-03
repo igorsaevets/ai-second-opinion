@@ -1,6 +1,7 @@
 {
   "_doc": "R33-class duplicate-key guard for this plugin, shipped as a plugin hook (round-35 panel's preferred placement over machine-wide). Fires on Edit|Write|MultiEdit of .json files, warns Claude via exit 2 + stderr on duplicate keys. Fail-open on every internal error path. See tools/check_json_dup_keys_hook.py for the wrapper and CHANGELOG 1.12.0 for the panel that chose this over ~/.claude/settings.json.",
-  "_doc_sessionstart_r58": "R58/R86 update notifier, exec form (command + args; measured working on claude 2.1.268, 8/8 sessions). Two things in one JSON: (1) a ONE-TIME note when the plugin's VERSION changed since the last session (Claude Code updated it, or `update_check.py --apply` did), quoting the CHANGELOG section shipped inside the plugin; (2) the kit's weekly release check - one GET to api.github.com at most every 168 h (stamp outside the tree, ETag, 3 s timeout, backoff, kill switches MODEL_ORCH_UPDATE_CHECK=0 / NO_UPDATE_NOTIFIER / CI) - because Claude Code's own auto-update is OFF by default for third-party marketplaces, so without this nobody learns of a release. The notice names the ONE command that applies it (`update_check.py --apply`, which runs `claude plugin update` on this install path). Both `systemMessage` (user-visible) and `additionalContext` (model-visible) are emitted; #12151 is why both. Timeout 15 s: the weekly week pays two short GETs, every other session start returns in well under a second.",
+  "_doc_sessionstart_r136": "R136: SHELL form with an interpreter chain python3 || python || py -3. The R86 exec form ran a bare `python`, which macOS and most Linux do not have (`python3`) and Windows without «Add to PATH» has only as the Store stub - the hook could not start there and nobody saw a notice. Shell form runs in sh (macOS/Linux) or Git Bash (Windows; PowerShell 7 also knows `||`). `update_check.py --hook` always exits 0, so the chain moves on only when an interpreter is missing, never to repeat the check. The notice now also tells the assistant to mention it, and the check runs daily (24 h). Automatic updates for this install path are Claude Code's own marketplace auto-update: `update_check.py --auto-update on` / `--status`.",
+  "_doc_sessionstart_r58": "SUPERSEDED in part by _doc_sessionstart_r136 (shape, cadence). R58/R86 update notifier, exec form (command + args; measured working on claude 2.1.268, 8/8 sessions). Two things in one JSON: (1) a ONE-TIME note when the plugin's VERSION changed since the last session (Claude Code updated it, or `update_check.py --apply` did), quoting the CHANGELOG section shipped inside the plugin; (2) the kit's weekly release check - one GET to api.github.com at most every 168 h (stamp outside the tree, ETag, 3 s timeout, backoff, kill switches MODEL_ORCH_UPDATE_CHECK=0 / NO_UPDATE_NOTIFIER / CI) - because Claude Code's own auto-update is OFF by default for third-party marketplaces, so without this nobody learns of a release. The notice names the ONE command that applies it (`update_check.py --apply`, which runs `claude plugin update` on this install path). Both `systemMessage` (user-visible) and `additionalContext` (model-visible) are emitted; #12151 is why both. Timeout 15 s: the weekly week pays two short GETs, every other session start returns in well under a second.",
   "hooks": {
     "PostToolUse": [
       {
@@ -23,11 +24,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/skills/model-orchestration/update_check.py",
-              "--hook"
-            ],
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/model-orchestration/update_check.py\" --hook || python \"${CLAUDE_PLUGIN_ROOT}/skills/model-orchestration/update_check.py\" --hook || py -3 \"${CLAUDE_PLUGIN_ROOT}/skills/model-orchestration/update_check.py\" --hook",
             "timeout": 15
           }
         ]

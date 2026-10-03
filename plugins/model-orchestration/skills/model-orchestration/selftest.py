@@ -5443,10 +5443,13 @@ def suite_r74_panel_fixes():
             sp = os.path.join(home, ".claude", "settings.json")
             data = json.load(open(sp, encoding="utf-8"))
             hook = data["hooks"]["SessionStart"][0]["hooks"][0]
-            check(rc == 0 and "args" not in hook and "--hook" in hook.get("command", "")
-                  and '"' in hook.get("command", ""),
-                  "the installed hook is ONE command string (quoted path, --hook), never "
-                  "command+args - the old shape ran a bare `python` and hung", repr(hook))
+            # SUPERSEDED R136: was «ONE command string `python "<path>" --hook`» - the bare
+            # `python` is what macOS / most Linux lack. Now: exec form, ABSOLUTE interpreter.
+            check(rc == 0 and hook.get("args", [])[-1:] == ["--hook"]
+                  and os.path.isabs(hook.get("command", "")) and os.path.isfile(hook["command"])
+                  and hook.get("timeout") == uc.AUTO_HOOK_TIMEOUT_SECONDS,
+                  "the installed hook is exec form: an interpreter that EXISTS by absolute path "
+                  "+ [update_check.py, --hook], with the automatic-update ceiling", repr(hook))
             with open(sp, "w", encoding="utf-8") as f:
                 f.write("{broken json")
             with contextlib.redirect_stdout(io.StringIO()):
@@ -6679,8 +6682,9 @@ def suite_r86_self_update():
                 j = _json.loads(out)
             except ValueError:
                 j = {}
+            ctx = (j.get("hookSpecificOutput") or {}).get("additionalContext") or ""
             check(rc == 0 and j.get("systemMessage") == "NOTICE-86"
-                  and (j.get("hookSpecificOutput") or {}).get("additionalContext") == "NOTICE-86"
+                  and ctx.startswith("NOTICE-86") and uc.ASSISTANT_NOTE in ctx   # R136
                   and (j.get("hookSpecificOutput") or {}).get("hookEventName") == "SessionStart",
                   "--hook emits the notice as systemMessage AND additionalContext (SessionStart)",
                   out[:120])
@@ -6899,13 +6903,14 @@ def suite_r86_self_update():
                 rc = uc.cmd_install_hook(None)
             data = _json.load(open(uc._settings_path(), encoding="utf-8"))
             mine = [h for e in data["hooks"]["SessionStart"] for h in e["hooks"]
-                    if my_path in h.get("command", "")]
+                    if my_path in " ".join([h.get("command", "")] + list(h.get("args") or []))]
             others = [h for e in data["hooks"]["SessionStart"] for h in e["hooks"]
                       if h.get("command") == "echo other-tool"]
-            check(rc == 0 and len(mine) == 1 and mine[0]["timeout"] == uc.HOOK_TIMEOUT_SECONDS
-                  and mine[0]["command"].endswith("--hook") and len(others) == 1,
-                  "--install-hook replaces an entry with the old 5 s ceiling by one with %d s, "
-                  "keeps the co-tenant, and never leaves two of ours" % uc.HOOK_TIMEOUT_SECONDS,
+            check(rc == 0 and len(mine) == 1
+                  and mine[0]["timeout"] == uc.AUTO_HOOK_TIMEOUT_SECONDS
+                  and mine[0].get("args", [])[-1:] == ["--hook"] and len(others) == 1,
+                  "--install-hook replaces an old string-form entry (5 s) by the exec form (%d s), "
+                  "keeps the co-tenant, and never leaves two of ours" % uc.AUTO_HOOK_TIMEOUT_SECONDS,
                   repr(mine))
             before = open(uc._settings_path(), encoding="utf-8").read()
             buf = io.StringIO()
@@ -6924,10 +6929,90 @@ def suite_r86_self_update():
         if hj:
             hooks = _json.load(open(hj, encoding="utf-8"))
             ss = hooks["hooks"]["SessionStart"][0]["hooks"][0]
-            check(ss.get("command") == "python" and ss.get("args", [])[-1:] == ["--hook"]
+            cmd = ss.get("command", "")
+            alts = [c.strip().split(" ")[0] for c in cmd.split("||")]
+            check("args" not in ss and alts == ["python3", "python", "py"]
+                  and cmd.count("update_check.py\" --hook") == 3 and "py -3 " in cmd
                   and ss.get("timeout") == uc.HOOK_TIMEOUT_SECONDS,
-                  "the plugin's SessionStart hook runs update_check.py --hook (exec form) with "
-                  "the %d s ceiling the weekly check needs" % uc.HOOK_TIMEOUT_SECONDS, repr(ss))
+                  "R136: the plugin's SessionStart hook is a shell-form chain python3 || python "
+                  "|| py -3, each running update_check.py --hook, %d s" % uc.HOOK_TIMEOUT_SECONDS,
+                  repr(ss))
+            if os.name != "nt" and os.path.isfile("/bin/sh"):
+                # The chain must FALL THROUGH a missing interpreter: PATH holds only a `python`
+                # (no python3, no py) - the case of a Windows-style or python-only box.
+                with tempfile.TemporaryDirectory() as tb:
+                    with open(os.path.join(tb, "python"), "w") as f:
+                        f.write('#!/bin/sh\nexec "%s" "$@"\n' % sys.executable)
+                    os.chmod(os.path.join(tb, "python"), 0o755)
+                    env = dict(os.environ, PATH=tb, CLAUDE_PLUGIN_ROOT=os.path.join(tb, "nope"),
+                               MODEL_ORCH_UPDATE_CHECK="0")
+                    r = subprocess.run(["/bin/sh", "-c", cmd.replace("update_check.py\" --hook",
+                                        "update_check.py\" --hook").replace(
+                                        "${CLAUDE_PLUGIN_ROOT}/skills/model-orchestration",
+                                        HERE)], env=env, capture_output=True, text=True,
+                                       timeout=60)
+                    check(r.returncode == 0 and not r.stdout.strip(),
+                          "the chain runs under /bin/sh with ONLY `python` on PATH (python3 "
+                          "missing) and exits 0", "rc=%s err=%s" % (r.returncode, r.stderr[-200:]))
+            # R136: Claude Code's own auto-update flag - read, written, and a choice respected.
+            # The blockers are cleared from THIS process for the block: a run inside a Claude Code
+            # session inherits its settings `env` (DISABLE_AUTOUPDATER=1 on the author's machine).
+            _cc_saved = {k: os.environ.pop(k) for k in list(uc.CC_AUTOUPDATE_BLOCKERS) +
+                         [uc.CC_AUTOUPDATE_FORCE] if k in os.environ}
+            with tempfile.TemporaryDirectory() as cfg:
+                os.makedirs(os.path.join(cfg, "plugins"))
+                with open(os.path.join(cfg, "plugins", "known_marketplaces.json"), "w") as f:
+                    _json.dump({"mk": {"source": {"source": "github", "repo": "o/r"}}}, f)
+                info = {"config_dir": cfg, "marketplace": "mk", "plugin_id": "p@mk"}
+                st0 = uc.native_auto_update_state(info)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    rc1 = uc.set_native_auto_update(info, True)
+                s1 = _json.load(open(os.path.join(cfg, "settings.json"), encoding="utf-8"))
+                e1 = s1["extraKnownMarketplaces"]["mk"]
+                check(not st0["on"] and not st0["explicit"] and e1.get("autoUpdate") is True
+                      and e1.get("source") == {"source": "github", "repo": "o/r"}
+                      and uc.native_auto_update_state(info)["on"],
+                      "--auto-update on (plugin): OFF by default, then autoUpdate:true on the "
+                      "settings entry with the source copied verbatim", repr((st0, e1)))
+                with contextlib.redirect_stdout(io.StringIO()):
+                    uc.set_native_auto_update(info, False)
+                    rc2 = uc.set_native_auto_update(info, True, only_if_undecided=True)
+                check(uc.native_auto_update_state(info)["on"] is False and rc2 == 0,
+                      "a user's explicit OFF survives --apply / upgrade (only_if_undecided)")
+                s1 = _json.load(open(os.path.join(cfg, "settings.json"), encoding="utf-8"))
+                s1["env"] = {"DISABLE_AUTOUPDATER": "1"}
+                s1["extraKnownMarketplaces"]["mk"]["autoUpdate"] = True
+                with open(os.path.join(cfg, "settings.json"), "w", encoding="utf-8") as f:
+                    _json.dump(s1, f)
+                b = uc.native_auto_update_state(info)["blocked_by"]
+                s1["env"]["FORCE_AUTOUPDATE_PLUGINS"] = "1"
+                with open(os.path.join(cfg, "settings.json"), "w", encoding="utf-8") as f:
+                    _json.dump(s1, f)
+                check(b == ["DISABLE_AUTOUPDATER"] and rc1 == 0
+                      and uc.native_auto_update_state(info)["blocked_by"] == [],
+                      "DISABLE_AUTOUPDATER in settings env blocks it; FORCE_AUTOUPDATE_PLUGINS "
+                      "lifts the block", repr(b))
+            os.environ.update(_cc_saved)
+            # R136: upgrade.py moves backups OUT of a skills folder and keeps the newest three.
+            import upgrade as _up2
+            with tempfile.TemporaryDirectory() as root:
+                dst = os.path.join(root, "skills", "model-orchestration")
+                os.makedirs(dst)
+                for ts in ("20260101-000000", "20260102-000000", "20260103-000000",
+                           "20260104-000000"):
+                    os.makedirs(dst + ".bak." + ts)
+                store = _up2.backup_store(dst)
+                os.makedirs(store)
+                _up2.tidy_backups(dst, store)
+                left_in_skills = [n for n in os.listdir(os.path.join(root, "skills"))
+                                  if ".bak." in n]
+                check(store == os.path.join(root, "model-orchestration.backups")
+                      and not left_in_skills and sorted(os.listdir(store)) ==
+                      ["model-orchestration.bak.2026010%d-000000" % i for i in (2, 3, 4)]
+                      and _up2.backup_store(os.path.join(root, "elsewhere", "x")) is None,
+                      "backups leave skills/ (each was a second copy of the skill), newest 3 "
+                      "kept; a non-skills install keeps the old sibling layout",
+                      repr((store, left_in_skills, os.listdir(store))))
         else:
             check(False, "a hooks.json to inspect", "none of %r" % hooks_candidates)
         osrc = open(os.path.join(HERE, "orchestrate.py"), encoding="utf-8").read()

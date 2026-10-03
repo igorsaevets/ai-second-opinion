@@ -12,8 +12,10 @@ you and the files.
 
 Everything is plain Python using only the standard library. **There is nothing to `pip install`,
 nothing is compiled and nothing runs in the background.** The one thing the kit sends on its own
-is a version check against `api.github.com`, at most once a week, after a real round or at session
-start — so you learn about a release, and the notice names the one command that installs it.
+is a version check against `api.github.com`, at most once a day, after a real round or at session
+start — so you learn about a release, and the notice names the one command that installs it. With
+[automatic updates](#automatic-updates) on, a script install also downloads that release from
+github.com at session start.
 `python update_check.py --show-what-would-be-sent` prints that request verbatim;
 `MODEL_ORCH_UPDATE_CHECK=0` switches it off. Everything else leaves your machine only when you run
 a review, to the channels you chose.
@@ -43,8 +45,11 @@ This repository is itself a plugin marketplace. In Claude Code:
 
 Then restart the session, or run `/reload-plugins`.
 
-**Updates.** Once a week the kit checks GitHub and, when a release is out, tells you at session start
-(you and the assistant both see it) with the one command that installs it:
+**Updates.** Switch them to automatic once — `python <plugin folder>/update_check.py --auto-update on`,
+or `/plugin` → Marketplaces → `review-channels` → **Enable auto-update** (details:
+[Automatic updates](#automatic-updates)). Until then, once a day the kit checks GitHub and, when a
+release is out, tells you at session start (you and the assistant both see it) with the one
+command that installs it:
 
 ```
 python <plugin folder>/update_check.py --apply
@@ -72,7 +77,7 @@ plugin automatically:
       "autoUpdate": true
     }
   },
-  "enabledPlugins": ["model-orchestration@review-channels"]
+  "enabledPlugins": { "model-orchestration@review-channels": true }
 }
 ```
 
@@ -179,8 +184,34 @@ python ~/.claude/skills/model-orchestration/update_check.py --apply            #
 ```
 
 (Windows: `%USERPROFILE%\.claude\skills\model-orchestration\update_check.py`.) You do not have to
-remember it: once a week the kit checks for a release — at session start and after a real round —
-and prints exactly that command when there is one. `--dry-run` downloads and verifies, then shows
+remember it: once a day the kit checks for a release — at session start and after a real round —
+and prints exactly that command when there is one.
+
+### Automatic updates
+
+`--apply`, the installer and `upgrade.py` switch automatic updates **on** — unless you switched
+them off before (that choice is kept), or you pass `--no-auto-update`. From then on:
+
+* **Installer / manual copy**: a SessionStart hook in `~/.claude/settings.json` (it runs the Python
+  that installed it, by absolute path) checks once a day and, when a release is out, installs it at
+  session start — download, verify, back up, keep your settings — and says `updated automatically:
+  X -> Y`. A failure is reported once and retried the next day; the log is
+  `~/.claude/model-orchestration.updates/auto-update.log`.
+* **Plugin install**: Claude Code's own auto-update for the `review-channels` marketplace — the
+  `autoUpdate` flag on its entry in Claude Code's `settings.json`, the same switch as `/plugin` →
+  Marketplaces → `review-channels` → **Enable auto-update**. Claude Code installs a release during a
+  session (after your first message, within ~10 minutes) and shows `Plugin updated`; the next session
+  runs it. `DISABLE_AUTOUPDATER=1`, `DISABLE_UPDATES=1` or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+  switch that pass off unless `FORCE_AUTOUPDATE_PLUGINS=1` is also set.
+
+```
+python <your install>/update_check.py --status            # one VERDICT: OK or FAIL, each FAIL with its fix
+python <your install>/update_check.py --auto-update off   # or on
+```
+
+Backups of a script install no longer sit next to it in `~/.claude/skills/` (Claude Code loaded each
+one as another copy of the skill): they go to `~/.claude/model-orchestration.backups/`, newest three
+kept. `--dry-run` downloads and verifies, then shows
 the full upgrade report without changing anything; `--tag v1.62.0` picks a specific release. For a
 plugin install the same command goes through `claude plugin update` (restart the session after);
 for a git checkout it prints the `git pull` instead of overwriting anything.
@@ -200,7 +231,9 @@ python plugins/model-orchestration/skills/model-orchestration/upgrade.py        
 
 Either way the report names the version you had and the version you are getting, which channels
 are new and which are gone, and which of your settings it carried across; the old folder is copied
-to `<folder>.bak.<timestamp>` before anything is written, and the doctor runs at the end.
+to `~/.claude/model-orchestration.backups/<folder>.bak.<timestamp>` (outside `skills`, see above; a
+non-default folder keeps `<folder>.bak.<timestamp>` beside it) before anything is written, and the
+doctor runs at the end.
 
 A plugin install that Claude Code updates by itself (auto-update switched on) needs none of this
 **from 1.7.0 onward** — your settings live outside the folder it replaces.

@@ -886,9 +886,9 @@ def main():
         print("NOT READY. Fix the [FAIL] lines above first.")
     print('  python "%s" --brief BRIEF.md --marker DONE-01 --out reviews --dry-run'
           % os.path.join(HERE, "orchestrate.py"))
-    # R58/R86: the weekly release check runs from HERE because doctor is the one command every
+    # R58/R86: the daily release check runs from HERE because doctor is the one command every
     # install method tells the user to run (INSTALL.md §After installing). It is stamped
-    # (168 h), so this costs a network call at most once a week; the same check runs from the
+    # (24 h since R136), so this costs a network call at most once a day; the same check runs from the
     # plugin's SessionStart hook and at the end of a real orchestrate round. Anything it emits
     # is a normal print to stdout, ending in the ONE command that applies the update
     # (`update_check.py --apply`); a network failure is silent by design (its docstring).

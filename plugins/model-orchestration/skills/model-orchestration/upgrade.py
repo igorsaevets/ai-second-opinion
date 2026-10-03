@@ -30,8 +30,10 @@ Settings move OUT of the shipped tree, into `~/.claude/model-orchestration.local
 upgrade method can reach. After that the naive methods are correct too - which is the point. This
 script is the one-time migration plus a readable report of what changed between the two versions.
 
-It never deletes: the previous folder is copied to `<dir>.bak.<timestamp>` before anything is
-written, and the report ends with that path.
+The previous folder is copied to `<dir>.bak.<timestamp>` before anything is written, and the
+report ends with that path. R136: when the install sits in a Claude Code `skills` folder the copy
+goes to `<that folder's parent>/<name>.backups/` instead (a copy inside `skills` is loaded as a
+second skill), and only the newest three are kept there.
 """
 
 import argparse
@@ -60,6 +62,53 @@ AUTO_CARRY = ("enabled",)
 
 def default_dst():
     return os.path.join(os.path.expanduser("~"), ".claude", "skills", "model-orchestration")
+
+
+def is_default_install(dst):
+    return os.path.normcase(os.path.abspath(dst)) == os.path.normcase(os.path.abspath(default_dst()))
+
+
+BACKUPS_KEEP = 3
+
+
+def backup_store(dst):
+    """Where the previous copy goes. R136: NOT next to the install when the install sits in a
+    Claude Code `skills` folder - `skills/model-orchestration.bak.<ts>/SKILL.md` is a skill
+    directory, so every upgrade added one more copy of this skill to every session's skill list
+    (the frontmatter `name` is taken, the directory name then invokes it - docs «skills», read
+    2026-10-02). With automatic updates that is one more per release. Elsewhere: None, the old
+    sibling `<dst>.bak.<ts>`."""
+    parent = os.path.dirname(os.path.abspath(dst))
+    if os.path.basename(parent).lower() != "skills":
+        return None
+    return os.path.join(os.path.dirname(parent), os.path.basename(dst) + ".backups")
+
+
+def tidy_backups(dst, store, keep=BACKUPS_KEEP):
+    """Move old-style `<dst>.bak.<ts>` siblings out of the skills folder into `store`, then keep
+    the newest `keep` there. Only folders this script named; returns report lines."""
+    out, parent, base = [], os.path.dirname(os.path.abspath(dst)), os.path.basename(dst)
+    try:
+        siblings = [n for n in os.listdir(parent) if n.startswith(base + ".bak.")]
+    except OSError:
+        siblings = []
+    for n in siblings:
+        try:
+            shutil.move(os.path.join(parent, n), os.path.join(store, n))
+            out.append("  moved an older backup out of the skills folder: %s" % n)
+        except (OSError, shutil.Error) as exc:
+            out.append("  could not move %s out of the skills folder: %s" % (n, exc))
+    try:
+        mine = sorted(n for n in os.listdir(store) if n.startswith(base + ".bak."))
+    except OSError:
+        mine = []
+    for n in mine[:-keep] if keep else mine:
+        try:
+            shutil.rmtree(os.path.join(store, n))
+            out.append("  removed an old backup (keeping the newest %d): %s" % (keep, n))
+        except OSError as exc:
+            out.append("  could not remove old backup %s: %s" % (n, exc))
+    return out
 
 
 def overlay_file():
@@ -356,6 +405,9 @@ def main():
                     help="also apply the agy permission rules (patch_agy_permissions.py). Without "
                          "this the update only PRINTS the command, because that script writes "
                          "outside this tree and changes the interactive agy TUI as well")
+    ap.add_argument("--no-auto-update", action="store_true",
+                    help="do not switch automatic updates on (by default an install into the "
+                         "default folder switches them on, unless you switched them off before)")
     a = ap.parse_args()
 
     src, dst = os.path.abspath(a.src), os.path.abspath(a.dst)
@@ -489,8 +541,16 @@ def main():
 
     backup = None
     if not fresh and not a.dry_run:
-        backup = "%s.bak.%s" % (dst, datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+        stamp_ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        store = backup_store(dst)
+        backup = (os.path.join(store, "%s.bak.%s" % (os.path.basename(dst), stamp_ts)) if store
+                  else "%s.bak.%s" % (dst, stamp_ts))
+        if store:
+            os.makedirs(store, exist_ok=True)
         shutil.copytree(dst, backup, ignore=shutil.ignore_patterns(*SKIP_DIRS))
+        if store:
+            for line in tidy_backups(dst, store):
+                print(line)
     if not a.dry_run:
         # 🔴 A HALF-COPY IS THE ONE STATE WITH NO GOOD ENDING, so it does not end silently. A
         # read-only file, a full disk or a locked handle stops `copy2` partway and leaves a tree
@@ -532,6 +592,20 @@ def main():
     if a.dry_run:
         print("\nNothing was written. Re-run without --dry-run to apply.")
         return 0
+
+    # R136: an install into the default folder switches automatic updates on - unless the user
+    # chose before (on OR off; the choice lives outside this tree, in the update stamp) or passed
+    # --no-auto-update. The NEW tree's update_check.py does it: it knows the hook shape this
+    # release wants. A non-default --to (a test, a second copy) is left alone.
+    if not a.no_auto_update and is_default_install(dst):
+        uc = os.path.join(dst, "update_check.py")
+        if os.path.isfile(uc):
+            print("\nAutomatic updates")
+            try:
+                subprocess.call([sys.executable, uc, "--auto-update", "on", "--if-undecided"])
+            except OSError as exc:
+                print("  could not run %s (%s) - switch them on yourself: python \"%s\" "
+                      "--auto-update on" % (uc, exc, uc))
 
     # 🔴 THE BACKUP WAS TAKEN AND NEVER MENTIONED AGAIN. mimo25pro, reviewing this release: the
     # backup-then-copy pattern is the minimum viable safety net, and it leaves a user whose new

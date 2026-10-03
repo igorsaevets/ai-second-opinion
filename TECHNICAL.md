@@ -40,7 +40,7 @@ doctor.py                 "is this machine set up?"      - probes, never asserts
 selftest.py               "does the code still behave?"  - behavioural checks; prints its own count
 citecheck.py              citation grounding and existence checks
 upgrade.py                install/update in one path; migrates settings out of the tree
-update_check.py           the update cycle: weekly release check, the notice, `--apply` self-update
+update_check.py           the update cycle: daily release check, the notice, `--apply` self-update
 patch_agy_permissions.py  mandatory post-install step for the agy channel
 echocheck.py              proves a depth knob from the counter the vendor returns
 VERSION                   the release this tree is; generated at build time
@@ -392,7 +392,7 @@ marketplaces** — a stale plugin stayed stale across four sessions and `-p --ma
 
 | step | how |
 |---|---|
-| detect | `GET api.github.com/repos/igorsaevets/ai-second-opinion/tags` at most every 168 h (stamp outside the tree, ETag, 3 s timeout, backoff 1→16 h, kill switches `MODEL_ORCH_UPDATE_CHECK=0` / `NO_UPDATE_NOTIFIER` / `CI`); highest version tuple wins, never `/releases/latest` |
+| detect | `GET api.github.com/repos/igorsaevets/ai-second-opinion/tags` at most every 24 h (R136; was 168 h) (stamp outside the tree, ETag, 3 s timeout, backoff 1→16 h, kill switches `MODEL_ORCH_UPDATE_CHECK=0` / `NO_UPDATE_NOTIFIER` / `CI`); highest version tuple wins, never `/releases/latest` |
 | notify | at session start (the plugin's `SessionStart` hook, or the same entry `--install-hook` writes for other installs) and at the end of a real `orchestrate.py` round — never on `--dry-run`. The notice quotes the release notes (the release object by tag, else the CHANGELOG at the tag's commit) and names **one command** |
 | apply | `update_check.py --apply`: the archive at `github.com/igorsaevets/ai-second-opinion/archive/<commit>.zip`, pinned to the commit the tags API named; refused unless it has one top-level folder, the skill subtree, every required file, `VERSION` == tag, no path escaping the folder, no symlink; then the **incoming** release's `upgrade.py --from <extracted> --to <install>` (backup, settings carried, doctor). A plugin install runs `claude plugin marketplace update` + `claude plugin update` instead; a git checkout and the development tree are refused with the right command printed |
 

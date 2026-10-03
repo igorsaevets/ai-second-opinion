@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.99.0 — 2026-10-03
+
+* **R136 — automatic updates, and an update notice that reaches a person.**
+  * `update_check.py --auto-update on|off`. Plugin install: Claude Code's own auto-update for the
+    `review-channels` marketplace (`autoUpdate` on its entry in Claude Code's `settings.json` — the
+    same switch as `/plugin` → Marketplaces → **Enable auto-update**). Script / manual install: the
+    session-start hook installs a new release by itself (download, verify, backup, settings kept, no
+    doctor; a lock so two sessions never apply at once; a failure is reported and retried the next
+    day; log: `~/.claude/model-orchestration.updates/auto-update.log`).
+  * `--apply`, the installers and `upgrade.py` switch automatic updates **on** unless you switched them
+    off before (that choice is kept) or pass `--no-auto-update`.
+  * `update_check.py --status`: one `VERDICT: OK / FAIL` — install kind, newest release, automatic
+    updates (including `DISABLE_AUTOUPDATER` & co., which switch Claude Code's whole plugin pass off),
+    the session-start hook and whether its Python starts; every FAIL line carries its fix.
+  * The release check runs **daily** (was weekly: with several releases a day, a check made just
+    before one stayed silent for up to 7 days).
+  * The plugin's SessionStart hook no longer needs a bare `python`: `python3 || python || py -3`.
+    The script-install hook runs the Python that installed it, by absolute path (exec form, 120 s).
+  * The notice now asks the assistant to relay it in one line — additionalContext is read silently.
+  * Backups of a script install leave `~/.claude/skills/` (each one was loaded as one more copy of
+    this skill) for `~/.claude/model-orchestration.backups/`, newest three kept.
+  * INSTALL.md: the team-rollout example's `enabledPlugins` is an object, not a list (that is what
+    `claude plugin install` writes, measured on 2.1.285).
+
 ## 1.98.0 — 2026-10-02
 
 * **R135 — `prompt_suffix` restored on training-tier channels + stale comments fixed.**
