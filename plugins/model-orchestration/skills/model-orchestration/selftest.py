@@ -7194,7 +7194,7 @@ def main():
                   suite_r121_panel_retry,
                   suite_r130_qwen_home_override,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
-                  suite_r137_i3_attach_truth):
+                  suite_r137_i3_attach_truth, suite_r138_task_mode):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -10606,6 +10606,304 @@ def suite_r137_i3_attach_truth():
     check(set(o.TOOLS_ALWAYS_FULL_KINDS) & set(o.REFS_KINDS) == {"claudecli", "qwencli"},
           "R137 И-3: among refs kinds only claudecli and qwencli always run every tool; codex, grok "
           "and agy depend on bypass", repr(o.TOOLS_ALWAYS_FULL_KINDS))
+
+
+R138_GOLDEN_BEFORE = {
+    "attach_refs.tools_full=False": "2f4519cb67003c26",
+    "attach_refs.tools_full=True": "946c283132ad9b82",
+    "grok.argv.bypass=False.refs=False": "eca273eaed4488ef",
+    "grok.argv.bypass=False.refs=True": "ed9164f29f8f689c",
+    "grok.argv.bypass=True.refs=False": "dd80fbda2026865d",
+    "grok.argv.bypass=True.refs=True": "adeec9f8c6a4ead2",
+    "grok.prompt.bypass=False.refs=False": "7fd767f70586b77a",
+    "grok.prompt.bypass=False.refs=True": "57fe754bf739fcf1",
+    "grok.prompt.bypass=True.refs=False": "e313a10a15bf330e",
+    "grok.prompt.bypass=True.refs=True": "e313a10a15bf330e",
+    "main.brief": "b17e5d21bd0e7ab4",
+    "main.rc": 0,
+    "main.system": "59b505567b05ce0b",
+    "mimo.argv": "8226794c8ae1b663",
+    "mimo.cwd": "<TMP>",
+    "mimo.input": "8cdd557f5221d42a",
+    "opencode.argv": "8239e533b7bd61d0",
+    "opencode.cwd": "<TMP>",
+    "opencode.input": "5701b4262ff20506",
+    "with_bypass_safety.False": "b1762f76a9b4b006",
+    "with_bypass_safety.True": "495e91d0be92daa6",
+}
+
+
+def _r138_golden(o, tmp):
+    """Verbatim copy of runs/r138-task-mode/golden_review.py::compute (D:\\Claude Code) - the
+    function that produced R138_GOLDEN_BEFORE on v1.100.2, before --task existed."""
+    import contextlib
+    import hashlib
+    import io
+
+    def H(s):
+        return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
+
+    out = {}
+    bp = os.path.join(tmp, "brief.md")
+    with open(bp, "w", encoding="utf-8", newline="\n") as f:
+        f.write("R138-GOLDEN brief: no vendor is called by this check.\nSecond line.\n")
+    cap = {}
+
+    def gate(parts, *, strict_pii=False, warn_pii=False):
+        d = dict(parts)
+        cap["brief"], cap["system"] = d.get("brief", ""), d.get("system", "")
+        return 0
+    real_gate, real_argv = o.pii_gate, sys.argv[:]
+    o.pii_gate = gate
+    try:
+        sys.argv = ["orchestrate.py", "--brief", bp, "--out", os.path.join(tmp, "g1"),
+                    "--dry-run"]
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            out["main.rc"] = o.main()
+    finally:
+        o.pii_gate, sys.argv = real_gate, real_argv
+    out["main.brief"], out["main.system"] = H(cap.get("brief", "")), H(cap.get("system", ""))
+
+    atts = [("C:/fixture/doc.md", "hello attach")]
+    dirs = [("C:/fixture/vetted", "C:/fixture/orig")]
+    for tf in (False, True):
+        out["attach_refs.tools_full=%s" % tf] = H(o._attach_refs(atts, dirs, ["a.bin (binary)"],
+                                                                tools_full=tf))
+    for b in (False, True):
+        out["with_bypass_safety.%s" % b] = H(o._with_bypass_safety("BRIEF", b))
+
+    seen = []
+
+    class _Done:
+        returncode = 0
+        stderr = ""
+
+    def fake_with(stdout):
+        def run(cmd, **kw):
+            seen.append((list(cmd), dict(kw)))
+            r = _Done()
+            r.stdout = stdout
+            return r
+        return run
+
+    def norm(cmd):
+        return json.dumps([str(x).replace(tmp, "<TMP>").replace("\\", "/") for x in cmd[1:]])
+
+    grok_out = json.dumps({"text": "ok\nMARK", "stopReason": "end_turn"})
+    nd_out = "\n".join([json.dumps({"type": "text", "part": {"text": "ok\nMARK"}}),
+                        json.dumps({"type": "step_finish", "part": {"tokens": {}, "cost": 0}})])
+    saved = (o.subprocess.run, o.grok_bin, o.opencode_bin, o.mimo_bin, o.neutral_cwd)
+    try:
+        o.neutral_cwd = lambda: tmp
+        o.grok_bin, o.opencode_bin, o.mimo_bin = (lambda: "grok.exe"), (lambda: "opencode"), \
+            (lambda: "mimo")
+        o.subprocess.run = fake_with(grok_out)
+        for b in (False, True):
+            for fr in (False, True):
+                wd = os.path.join(tmp, "grok-%s-%s" % (b, fr))
+                o.call_grokcli("BRIEF", "MARK", wd, os.path.join(tmp, "G.md"), system="SYS",
+                               file_refs=fr, bypass=b)
+                pf = os.path.join(o._ascii_safe_workdir(os.path.abspath(wd), "grokbuild",
+                                                        "grokbuild"), "PROMPT.md")
+                with open(pf, encoding="utf-8") as f:
+                    out["grok.prompt.bypass=%s.refs=%s" % (b, fr)] = H(f.read())
+                out["grok.argv.bypass=%s.refs=%s" % (b, fr)] = H(norm(seen[-1][0]))
+        o.subprocess.run = fake_with(nd_out)
+        o.call_opencode("BRIEF", "MARK", os.path.join(tmp, "O.md"), system="SYS")
+        out["opencode.input"] = H(seen[-1][1].get("input") or "")
+        out["opencode.argv"] = H(norm(seen[-1][0]))
+        out["opencode.cwd"] = str(seen[-1][1].get("cwd")).replace(tmp, "<TMP>")
+        o.call_mimocli("BRIEF", "MARK", os.path.join(tmp, "M.md"), system="SYS")
+        out["mimo.input"] = H(seen[-1][1].get("input") or "")
+        out["mimo.argv"] = H(norm(seen[-1][0]))
+        out["mimo.cwd"] = str(seen[-1][1].get("cwd")).replace(tmp, "<TMP>")
+    finally:
+        o.subprocess.run, o.grok_bin, o.opencode_bin, o.mimo_bin, o.neutral_cwd = saved
+    return out
+
+
+def suite_r138_task_mode():
+    """R138 И-1 (2026-10-03): --task carries out a TASK; every review payload stays byte-identical.
+
+    (a) GOLDEN: every review payload the change could touch, fingerprinted on v1.100.2 BEFORE the
+        edit (main() brief + system at pii_gate, _attach_refs x2, _with_bypass_safety x2, grok
+        PROMPT.md + argv x4, opencode and mimo stdin + argv + cwd) must come out the same. A
+        deliberate change to review text updates R138_GOLDEN_BEFORE - that is the point.
+    (b) the --task payload: worker preset, TASK-COMPLETE + the task sentence, no review cap.
+    (c) _task_job: each kind starts in ITS workdir and reads the TASK DIRECTIVE; the review
+        safety directive and grok's READ-ONLY preamble are gone; the thread-local is cleared.
+    (d) _task_plan refuses, by name, kinds outside TASK_KINDS and grok without bypass.
+    (e) the remote clause: READ only by default; with --allow-remote, the named systems only.
+    (f) _task_finish reports created / changed / deleted from disk and copies a TEMP workdir.
+    (g) no auto-retry under --task; --workdir / --allow-remote without --task are refused.
+    """
+    section("R138 И-1. --task: a task to carry out; review payloads byte-identical")
+    import argparse
+    import contextlib
+    import inspect
+    import io
+    import orchestrate as o
+
+    td = tempfile.mkdtemp(prefix="orch-r138-")
+    gdir = os.path.join(td, "golden")
+    os.makedirs(gdir)
+    got = _r138_golden(o, gdir)
+    diff = sorted(k for k in set(got) | set(R138_GOLDEN_BEFORE)
+                  if got.get(k) != R138_GOLDEN_BEFORE.get(k))
+    check(not diff, "R138 (a): all %d review payload fingerprints equal the v1.100.2 values "
+          "measured before --task existed" % len(R138_GOLDEN_BEFORE), repr(diff)[:300])
+
+    bp = os.path.join(td, "task.md")
+    with open(bp, "w", encoding="utf-8") as f:
+        f.write("R138 task brief: write x.py in your workdir and run it.\n")
+    cap = {}
+
+    def gate(parts, *, strict_pii=False, warn_pii=False):
+        d = dict(parts)
+        cap["brief"], cap["system"] = d.get("brief", ""), d.get("system", "")
+        return 0
+    real_gate, real_argv = o.pii_gate, sys.argv[:]
+    o.pii_gate = gate
+    try:
+        sys.argv = ["orchestrate.py", "--brief", bp, "--task", "--out", os.path.join(td, "t1"),
+                    "--dry-run"]
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            o.main()
+    finally:
+        o.pii_gate, sys.argv = real_gate, real_argv
+    tb, ts = cap.get("brief", ""), cap.get("system", "")
+    check(tb.endswith("\n\n---\nWhen the task is finished and your TASK REPORT is written, end "
+                      "your reply with this exact line and nothing after it:\nTASK-COMPLETE\n")
+          and "ENTIRE review" not in tb and "TRUNCATED-BY-LIMIT" not in tb,
+          "R138 (b): --task ends the brief with the TASK-COMPLETE sentence and no review cap",
+          tb[-160:])
+    check(ts.startswith("# Task worker") and "independent reviewer" not in ts,
+          "R138 (b): --task loads the worker preset systems/task.md, not base-depth", ts[:80])
+
+    seen = []
+
+    class _Done:
+        returncode = 0
+        stderr = ""
+
+    def fake_with(stdout):
+        def run(cmd, **kw):
+            seen.append((list(cmd), dict(kw)))
+            r = _Done()
+            r.stdout = stdout
+            return r
+        return run
+
+    ns = argparse.Namespace(allow_remote=[], marker="TASK-COMPLETE", all_bypass=False,
+                            bypass_permissions=["grokbuild"], workdir=None, out=td)
+    reg = {"channels": {"grokbuild": {"bypass_permissions": False}}}
+    saved = (o.subprocess.run, o.grok_bin, o.opencode_bin, o.mimo_bin)
+    try:
+        o.grok_bin, o.opencode_bin, o.mimo_bin = (lambda: "grok.exe"), (lambda: "opencode"), \
+            (lambda: "mimo")
+        o.subprocess.run = fake_with(json.dumps({"text": "ok\nTASK-COMPLETE",
+                                                 "stopReason": "end_turn"}))
+        wg = os.path.join(td, "w", "grokbuild")
+        hw = os.path.join(td, "out", "grokbuild-ws")
+        o._task_job("grokcli", "grokbuild", {}, "TASKBRIEF", ns, reg, "SYS",
+                    os.path.join(td, "G.md"), hw, False, wg)
+        g = seen[-1][0]
+        pf = os.path.join(o._ascii_safe_workdir(os.path.abspath(hw), "grokbuild", "grokbuild"),
+                          "PROMPT.md")
+        gp = open(pf, encoding="utf-8").read()
+        check(g[g.index("--cwd") + 1] == wg and g[g.index("--permission-mode") + 1]
+              == "bypassPermissions" and not os.path.exists(os.path.join(wg, "PROMPT.md")),
+              "R138 (c): grok starts IN its workdir, bypassed, and the harness's PROMPT.md stays "
+              "out of it", repr(g)[:200])
+        check(gp.startswith(o.GROK_TASK_CONTEXT) and "TASK DIRECTIVE" in gp and wg in gp
+              and "SAFETY DIRECTIVE" not in gp and "Write the finished review" not in gp
+              and "READ ONLY: modify, create or delete nothing" not in gp,
+              "R138 (c): grok reads the task context + TASK DIRECTIVE, not the review preamble "
+              "or the TEMP-only safety directive", gp[:160])
+        nd = "\n".join([json.dumps({"type": "text", "part": {"text": "ok\nTASK-COMPLETE"}}),
+                        json.dumps({"type": "step_finish", "part": {"tokens": {}, "cost": 0}})])
+        o.subprocess.run = fake_with(nd)
+        wo, wm = os.path.join(td, "w", "oc"), os.path.join(td, "w", "mimo")
+        o._task_job("opencode", "ocspark13free", {}, "TASKBRIEF", ns, reg, "SYS",
+                    os.path.join(td, "O.md"), None, False, wo)
+        oc = seen[-1][1]
+        o._task_job("mimocli", "mimov26pro", {}, "TASKBRIEF", ns, reg, "SYS",
+                    os.path.join(td, "M.md"), None, False, wm)
+        mi = seen[-1][1]
+        check(oc.get("cwd") == wo and "TASK DIRECTIVE" in oc.get("input", "")
+              and mi.get("cwd") == wm and "TASK DIRECTIVE" in mi.get("input", "")
+              and "PERMISSION PROMPTS BYPASSED" not in mi.get("input", ""),
+              "R138 (c): opencode and mimo start in their own workdirs with the TASK DIRECTIVE "
+              "(mimo without the review safety directive)", repr((oc.get("cwd"), mi.get("cwd"))))
+        check(getattr(o._TASK, "workdir", None) is None and getattr(o._TASK, "ctx", None) is None
+              and o.neutral_cwd() not in (wg, wo, wm)
+              and o._with_bypass_safety("B", True).startswith("SAFETY DIRECTIVE"),
+              "R138 (c): after a task job the thread is a reviewer again (neutral cwd, review "
+              "safety directive)", o.neutral_cwd())
+    finally:
+        o.subprocess.run, o.grok_bin, o.opencode_bin, o.mimo_bin = saved
+
+    ns2 = argparse.Namespace(allow_remote=[], all_bypass=False, bypass_permissions=[],
+                             workdir=os.path.join(td, "wr"), out=td)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        keep, kinds2, dirs2, _root = o._task_plan(
+            {"codex", "grokbuild", "ocspark13free", "spark11"},
+            {"codex": "codex", "grokbuild": "grokcli", "ocspark13free": "opencode",
+             "spark11": "http"}, ns2, reg)
+        ns2.bypass_permissions = ["grokbuild"]
+        keep2, _k, _d, _r = o._task_plan({"grokbuild"}, {"grokbuild": "grokcli"}, ns2, reg)
+    check(keep == {"ocspark13free"} and keep2 == {"grokbuild"}
+          and dirs2 == {"ocspark13free": os.path.join(os.path.abspath(ns2.workdir), "ocspark13free")},
+          "R138 (d): --task keeps only TASK_KINDS, refuses grok without bypass, and gives each "
+          "channel <workdir>/<channel>", repr((keep, keep2)))
+
+    d0, d1 = o._task_directive("W0", []), o._task_directive("W1", ["GA4 property 1: audiences"])
+    check("READ only" in d0 and "Do NOT write to any remote system" in d0 and "W0" in d0
+          and "  - GA4 property 1: audiences\n" in d1 and "to no others" in d1
+          and "READ only" not in d1,
+          "R138 (e): remote writes are READ-only by default and limited to the named systems "
+          "with --allow-remote", d1[:80])
+    ta = o._attach_refs([("C:/fixture/doc.md", "x")], [], None, tools_full=True, task=True)
+    check("YOUR WORKDIR" in ta and "READ ONLY" in ta and "TEMP" not in ta,
+          "R138 (e): attached material in a task stays read-only; output goes to the workdir",
+          ta[-120:])
+
+    wd, outd = os.path.join(td, "fin", "ch"), os.path.join(td, "fin-out")
+    os.makedirs(wd)
+    os.makedirs(outd)
+    for n, body in (("a.txt", "one"), ("c.txt", "gone")):
+        with open(os.path.join(wd, n), "w", encoding="utf-8") as f:
+            f.write(body)
+    before = {"ch": o._dir_manifest(wd)}
+    with open(os.path.join(wd, "a.txt"), "w", encoding="utf-8") as f:
+        f.write("two")
+    with open(os.path.join(wd, "b.txt"), "w", encoding="utf-8") as f:
+        f.write("new")
+    os.remove(os.path.join(wd, "c.txt"))
+    res = {"ch": {"ok": True}}
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        o._task_finish(res, {"ch": wd}, before, outd, copy_out=True)
+    man = json.load(open(os.path.join(outd, "CH-WORKDIR.json"), encoding="utf-8"))
+    check(man["created"] == ["b.txt"] and man["changed"] == ["a.txt"]
+          and man["deleted"] == ["c.txt"] and res["ch"]["task_workdir"]["created"] == 1
+          and os.path.isfile(os.path.join(outd, "work", "ch", "b.txt")),
+          "R138 (f): the workdir manifest reports created / changed / deleted from disk and the "
+          "TEMP workdir is copied into <out>/work", repr(man.get("created")))
+
+    src = inspect.getsource(o.main)
+    rc = None
+    sys.argv = ["orchestrate.py", "--brief", bp, "--workdir", td, "--dry-run"]
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            o.main()
+    except SystemExit as exc:
+        rc = exc.code
+    finally:
+        sys.argv = real_argv
+    check("--task: no auto-retry" in src and "_task_finish(results" in src and rc == 2,
+          "R138 (g): no auto-retry under --task; --workdir without --task is refused (exit 2)",
+          "rc=%r" % rc)
+    shutil.rmtree(td, ignore_errors=True)
 
 
 if __name__ == "__main__":

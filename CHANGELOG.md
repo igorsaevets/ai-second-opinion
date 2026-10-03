@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.101.0 — 2026-10-03
+
+- **`--task`: hand a CLI a task to carry out, not a document to review.** Each channel runs in its
+  own workdir (`--workdir DIR`, default under TEMP and copied to `<out>/work/`), reads a worker
+  preset (`systems/task.md`) and a TASK DIRECTIVE at the front of the brief (write only in the
+  workdir; remote systems read-only unless named with `--allow-remote "<system: purpose>"`, which
+  the plan prints), and ends with a TASK REPORT and `TASK-COMPLETE`. The harness writes
+  `<CHANNEL>-WORKDIR.json` (what really changed on disk) and never auto-retries a task. Wired for
+  Grok Build (with bypass), opencode and MiMo; other kinds are refused by name in the plan.
+- Review briefs are unchanged byte for byte: a new selftest pins 21 fingerprints of the review
+  payloads measured on 1.100.2 before this change.
+
 ## 1.100.2 — 2026-10-03
 
 - **Reviewers that got files with `--attach` are no longer told to skip their shell.** The

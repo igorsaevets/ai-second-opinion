@@ -6,9 +6,9 @@ description: >
   maximum depth, with verification that each one actually did the work. `--ask` is the cheap
   one-shot form. Use this EVERY TIME the user asks for a "second opinion", «второе мнение», a
   review or verification of a document, plan or analysis by an external model, or names any of
-  those channels. Everything is already installed here; §0 is a single command. Also holds the
-  wire parameters, the CLI flag traps, the streaming and retry rules, and the checks that catch a
-  model which silently did nothing.
+  those channels; `--task` (references/tasks.md) when a CLI must DO a task («поручи CLI»). §0 is
+  one command. Also holds the wire parameters, CLI flag traps, retry rules, and the checks that
+  catch a model which silently did nothing.
 user_invocable: true
 ---
 
@@ -152,7 +152,7 @@ channel: `--new-channel NAME:KIND:SLUG` writes overlay. Free preflight: `--dry-r
 
 ### 0.2 System presets — one line each, detail in `references/systems.md`
 
-`--system <preset|path>` frames the reviewer. Two presets: **`base-depth`** (the default — the
+`--system <preset|path>` frames the reviewer. Presets: **`base-depth`** (the default — the
 maximum-depth amplifier) and **`legal-research`** (any legal / immigration / regulatory brief —
 read `references/legal-briefs.md` **before** writing it). All presets force English output.
 ⚠️ Not interchangeable and never merged — the legal one deliberately omits a clause; the why is

@@ -2374,6 +2374,10 @@ def _with_bypass_safety(brief, bypass):
     False or None (from `cli_bypass_active` on a kind with no `bypass_permissions` field);
     only True prepends.
     """
+    if getattr(_TASK, "ctx", None) is not None:
+        # R138 И-1: a --task job carries the TASK DIRECTIVE at the front of its brief instead.
+        # This one says «nothing outside a scratch workdir under TEMP», which contradicts it.
+        return brief
     if not bypass:
         return brief
     return CLI_BYPASS_SAFETY_PROMPT + "\n---\n\n" + brief
@@ -3162,7 +3166,9 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     # tells the agent it has NO file tools - which becomes a lie the moment refs mode grants
     # read_file/list_dir, and an agent told its tools will refuse does not use the tools it was
     # given. The refs variant grants reads and re-states the no-write contract.
-    if bypass:
+    if getattr(_TASK, "ctx", None) is not None:
+        NO_REPO = GROK_TASK_CONTEXT          # R138 И-1: --task (bypass is required there)
+    elif bypass:
         NO_REPO = (
             "OPERATING CONTEXT — read this first.\n"
             "Your working directory is deliberately empty; the material under review is named in "
@@ -3448,6 +3454,12 @@ def _ascii_safe_workdir(workdir, channel_name, tag_prefix):
         return mirrored
 
 
+# R138 И-1: per THREAD, because a panel runs its channels in parallel threads and each --task
+# channel needs its OWN workdir as cwd. Set only inside _task_job; every review leaves it unset,
+# so neutral_cwd(), _with_bypass_safety() and grok's preamble behave exactly as before.
+_TASK = threading.local()
+
+
 def neutral_cwd():
     """A directory containing none of your files, for any channel that reads its own cwd.
 
@@ -3471,6 +3483,9 @@ def neutral_cwd():
     changes nothing else. `codex` gets `-C workdir` and `agy` gets `cwd=workdir` for their own
     reasons; `hermes` had neither and inherited whatever directory the operator happened to be in.
     """
+    wd = getattr(_TASK, "workdir", None)
+    if wd:
+        return wd
     scratch = os.path.join(tempfile.gettempdir(), "orchestrate-neutral-cwd")
     os.makedirs(scratch, exist_ok=True)
     return scratch
@@ -8392,7 +8407,7 @@ def _tools_full(kind, name, args, reg):
     return kind in TOOLS_ALWAYS_FULL_KINDS or bool(cli_bypass_active(name, args, reg))
 
 
-def _attach_refs(atts, att_dirs, skipped=None, tools_full=False):
+def _attach_refs(atts, att_dirs, skipped=None, tools_full=False, task=False):
     """The attachment section CLI channels receive: absolute paths plus the read-only contract.
 
     The rules ride in the BRIEF, not only in a persona slot, because placement is load-bearing
@@ -8438,6 +8453,19 @@ def _attach_refs(atts, att_dirs, skipped=None, tools_full=False):
         if len(skipped) > len(shown):
             lines.append("- ... and %d more (the run log lists them all)"
                          % (len(skipped) - len(shown)))
+    if task:
+        # R138 И-1: in a --task run the attached material is INPUT. It stays read-only; what the
+        # CLI produces goes to its own workdir, not to the TEMP scratch the review text names.
+        lines.append(
+            "\nSTRICT RULES for these locations, non-negotiable:\n"
+            "- READ ONLY. Do not modify, create, delete, move or rename ANYTHING there or anywhere "
+            "else in that project.\n"
+            "- Read and verify with your tools: open the files, list and grep the folders, run "
+            "read-only commands.\n"
+            "- Everything you produce - scripts, data, notes - goes into YOUR WORKDIR (named in the "
+            "TASK DIRECTIVE), never next to these documents.\n"
+            "- If a path does not open, say so in your TASK REPORT.")
+        return "\n".join(lines)
     if tools_full:
         lines.append(
             "\nSTRICT RULES for these locations, non-negotiable:\n"
@@ -8523,6 +8551,225 @@ def _release_notice():
             log("\n" + msg)
     except Exception:                                    # noqa: BLE001 - see the docstring
         pass
+
+
+# --- R138 И-1: TASK MODE --------------------------------------------------------------------
+# Igor, 2026-10-03: «поручи выполнение какому-нибудь CLI ... а ты потом проверишь результат».
+# Measured BEFORE this mode existed (runs/r138-task-mode, grok + Spark, 2 runs each): the REVIEW
+# frame did not stop a short explicit task - both wrote the script into the folder the brief
+# named and ran it - but they did it AGAINST the frame: the safety directive said «nothing outside
+# a scratch folder under TEMP», the preset said «find what is wrong», the marker said REVIEW. A
+# task obeyed one instruction by breaking another, and which one breaks is the model's choice.
+# --task makes the instructions agree: a worker preset, a TASK DIRECTIVE at the front of the
+# brief (own workdir = cwd, read-only elsewhere, remote writes only to systems named on
+# --allow-remote and printed in the plan), a TASK REPORT, TASK-COMPLETE, a workdir manifest the
+# operator can check the report against, and no auto-retry (a task may have side effects).
+# Wired only for the kinds measured live in R138 (TASK_KINDS); everything else is refused by name.
+TASK_KINDS = ("grokcli", "opencode", "mimocli")
+TASK_MARKER = "TASK-COMPLETE"
+_TASK_COPY_CAP = 50 * 1024 * 1024
+
+GROK_TASK_CONTEXT = (
+    "OPERATING CONTEXT — read this first.\n"
+    "This run is a TASK, not a review. Your current working directory is your own workdir, named "
+    "in the TASK DIRECTIVE below: create, run and check your files there. You have your FULL "
+    "toolset with permission prompts bypassed: read_file / list_dir / grep at any absolute path, "
+    "run_terminal_command for shell commands, web_search / web_fetch, and this machine's MCP "
+    "servers through search_tool / use_tool (the metered firecrawl server is denied). Credential "
+    "files (.env*, .ssh, .gnupg, CLI configs) are denied by rule - do not try to read them. "
+    "Follow the TASK DIRECTIVE on where you may write, and end with the TASK REPORT it "
+    "describes.\n\n---\n\n")
+
+
+def _task_directive(workdir, remote):
+    """The rules of a --task run. They ride at the FRONT of the brief (R40: a rule in the brief
+    is obeyed, the same rule in a persona slot is not), where the review safety directive sits."""
+    if remote:
+        rem = ("REMOTE SYSTEMS: the operator allows remote WRITES to exactly these systems, for the "
+               "purpose named, and to no others:\n" + "".join("  - %s\n" % r for r in remote)
+               + "List every remote write you make in the TASK REPORT.\n")
+    else:
+        rem = ("REMOTE SYSTEMS: READ only. Searching, opening pages and read-only API calls are "
+               "fine. Do NOT write to any remote system: no push, merge, MR, issue or comment, no "
+               "API call that creates, changes or deletes anything (analytics, ads, cloud, mail, "
+               "chat, payments). If the task needs a remote write, stop before it and put the exact "
+               "request you would send into the TASK REPORT instead.\n")
+    return ("TASK DIRECTIVE - this run is a TASK to carry out, not a document to review\n"
+            "\n"
+            "Do the work with your tools, check that it worked, then report. A script you wrote "
+            "but did not run is not done when the brief asks for its result: run it and report "
+            "what it printed.\n"
+            "\n"
+            "YOUR WORKDIR: %s\n"
+            "It is your current working directory and it is yours: create, edit, run and delete "
+            "your own files there freely. Everything you produce goes there. If the brief names "
+            "an output path somewhere else, write the file in your workdir and say in the report "
+            "where it was meant to go.\n"
+            "\n"
+            "OUTSIDE YOUR WORKDIR: read whatever the task needs, but create, modify or delete "
+            "nothing. Never open credential files (any .env, ~/.ssh/, ~/.gnupg/, CLI configs, "
+            "token stores).\n"
+            "\n"
+            "%s"
+            "\n"
+            "Your permission prompts are OFF and nothing mechanical stops a mistake: these rules "
+            "are the operator's instruction, and the operator checks your workdir against your "
+            "report.\n"
+            "\n"
+            "End with a TASK REPORT:\n"
+            "  STATUS: DONE | PARTIAL | BLOCKED - one line why\n"
+            "  RESULT: what the task asked for (values, names, the lines the run printed)\n"
+            "  FILES: every file you created or changed, absolute path, one per line\n"
+            "  COMMANDS: every command you ran, with its exit code\n"
+            "  REMOTE WRITES: none, or system - what was written\n"
+            "  CHECK: one command the operator can run to verify the result\n"
+            % (workdir, rem))
+
+
+def _project_marker_above(path):
+    """The nearest folder at or above `path` that holds a project instruction file or a repo -
+    a CLI started below it loads that project's CLAUDE.md / AGENTS.md and sends it to its vendor."""
+    cur = os.path.abspath(path)
+    while True:
+        for m in ("CLAUDE.md", "AGENTS.md", ".git"):
+            if os.path.exists(os.path.join(cur, m)):
+                return os.path.join(cur, m)
+        up = os.path.dirname(cur)
+        if up == cur:
+            return None
+        cur = up
+
+
+def _task_plan(want, kinds, a, reg):
+    """Filter the round to channels that can run a task, give each its workdir, print the plan.
+    Free: runs on --dry-run too, and creates nothing."""
+    keep, dropped = [], []
+    for c in sorted(want):
+        k = kinds.get(c)
+        if k not in TASK_KINDS:
+            dropped.append((c, "kind %s is not wired for --task (wired and measured: %s)"
+                            % (k, ", ".join(TASK_KINDS))))
+        elif k == "grokcli" and not cli_bypass_active(c, a, reg):
+            dropped.append((c, "it runs web-only without bypass; pass --bypass-permissions %s" % c))
+        else:
+            keep.append(c)
+    root = (os.path.abspath(a.workdir) if a.workdir else
+            os.path.join(tempfile.gettempdir(), "orchestrate-task",
+                         time.strftime("%Y%m%d-%H%M%S") + "-%d" % os.getpid()))
+    dirs = {c: os.path.join(root, c) for c in keep}
+    log("\n" + "=" * 78)
+    log("TASK MODE (--task): these channels get a TASK to carry out, not a document to review.")
+    for c, why in dropped:
+        log("  🔴 %s was NOT started: %s" % (c, why))
+    for c in keep:
+        log("  [task] %-16s workdir (its cwd, the only place it may write): %s" % (c, dirs[c]))
+    if a.allow_remote:
+        log("  remote WRITES allowed, and only to: %s" % "; ".join(a.allow_remote))
+    else:
+        log("  remote writes: NONE allowed (reads are fine). --allow-remote \"<system: purpose>\" "
+            "names one.")
+    log("  This is steering written into the brief, not a sandbox: a CLI whose permission prompts "
+        "are off can reach anything this user can. Check each TASK REPORT against its "
+        "<CHANNEL>-WORKDIR.json.")
+    if not a.workdir:
+        log("  The workdirs live under TEMP while the CLIs run and are copied to %s at the end."
+            % os.path.join(a.out, "work"))
+    leak = _project_marker_above(root)
+    if leak:
+        log("  ⚠ %s is below %s: a CLI started there loads that project's instruction files and "
+            "sends them to its vendor. Use a folder outside any project." % (root, leak))
+    log("=" * 78)
+    if not keep:
+        log("--task: no channel in this round can run a task.")
+    return set(keep), {c: kinds[c] for c in keep}, dirs, root
+
+
+def _task_job(kind, cname, p, cbrief, a, reg, system, outfile, hwork, use_refs, wdir):
+    """Run ONE channel's task with its own workdir as cwd (thread-local, see _TASK)."""
+    _TASK.workdir, _TASK.ctx = wdir, {"remote": list(a.allow_remote or [])}
+    try:
+        tb = _task_directive(wdir, a.allow_remote) + "\n---\n\n" + cbrief
+        sysp = _system_for(system, p)
+        if kind == "grokcli":
+            return call_grokcli(tb, a.marker, hwork, outfile, model=p.get("model"),
+                                effort=p.get("effort"), timeout=p.get("timeout") or "40m",
+                                system=sysp, name=cname, file_refs=use_refs,
+                                bypass=bool(cli_bypass_active(cname, a, reg)))
+        if kind == "opencode":
+            return call_opencode(tb, a.marker, outfile, model=p.get("model"),
+                                 effort=p.get("effort"), system=sysp,
+                                 timeout=_seconds(p.get("timeout"), 2400), name=cname)
+        if kind == "mimocli":
+            return call_mimocli(tb, a.marker, outfile, model=p.get("model"),
+                                effort=p.get("effort"), system=sysp,
+                                timeout=_seconds(p.get("timeout"), 2400), name=cname)
+        return {"channel": cname, "ok": False, "error": "kind %r cannot run a task" % kind}
+    finally:
+        _TASK.workdir = _TASK.ctx = None
+
+
+def _dir_manifest(root, cap=2000):
+    """{relative path: {bytes, sha256_16}} - what is really in a workdir, for the report check."""
+    import hashlib              # local, like the module's other two uses (not imported at the top)
+    out = {}
+    for dp, _dns, fns in os.walk(root):
+        for fn in fns:
+            pth = os.path.join(dp, fn)
+            rel = os.path.relpath(pth, root)
+            try:
+                size = os.path.getsize(pth)
+                if size > _TASK_COPY_CAP:
+                    out[rel] = {"bytes": size, "sha256_16": "(over 50 MB, not hashed)"}
+                else:
+                    h = hashlib.sha256()
+                    with open(pth, "rb") as f:
+                        for chunk in iter(lambda: f.read(1 << 20), b""):
+                            h.update(chunk)
+                    out[rel] = {"bytes": size, "sha256_16": h.hexdigest()[:16]}
+            except OSError as exc:
+                out[rel] = {"error": str(exc)}
+            if len(out) >= cap:
+                out["(manifest cut at %d files)" % cap] = {}
+                return out
+    return out
+
+
+def _task_finish(results, task_dirs, before, out, copy_out):
+    """After the round: per channel, what its workdir gained, changed and lost - written to
+    <CHANNEL>-WORKDIR.json and printed - and, for a TEMP workdir, a copy into <out>/work/."""
+    for c, d in sorted(task_dirs.items()):
+        if c not in before:
+            continue
+        after = _dir_manifest(d) if os.path.isdir(d) else {}
+        b = before.get(c) or {}
+        created = sorted(set(after) - set(b))
+        changed = sorted(k for k in set(after) & set(b) if after[k] != b[k])
+        deleted = sorted(set(b) - set(after))
+        with open(os.path.join(out, c.upper() + "-WORKDIR.json"), "w", encoding="utf-8") as f:
+            json.dump({"workdir": d, "created": created, "changed": changed, "deleted": deleted,
+                       "files": after}, f, indent=1, ensure_ascii=False)
+        r = results.get(c)
+        if isinstance(r, dict):
+            r["task_workdir"] = {"path": d, "created": len(created), "changed": len(changed),
+                                 "deleted": len(deleted)}
+        log("  [%s] workdir %s: created %d%s, changed %d, deleted %d"
+            % (c, d, len(created),
+               (" (%s%s)" % (", ".join(created[:6]), " ..." if len(created) > 6 else ""))
+               if created else "", len(changed), len(deleted)))
+        if copy_out:
+            dst, skipped = os.path.join(out, "work", c), []
+            for rel, meta in sorted(after.items()):
+                src = os.path.join(d, rel)
+                if not os.path.isfile(src) or (meta.get("bytes") or 0) > _TASK_COPY_CAP:
+                    skipped.append(rel)
+                    continue
+                try:
+                    os.makedirs(os.path.dirname(os.path.join(dst, rel)), exist_ok=True)
+                    shutil.copy2(src, os.path.join(dst, rel))
+                except OSError as exc:
+                    skipped.append("%s (%s)" % (rel, exc))
+            log("  [%s] workdir copied to %s%s" % (c, dst, ("; NOT copied: %s"
+                                                          % ", ".join(skipped[:5])) if skipped else ""))
 
 
 def main():
@@ -8699,6 +8946,23 @@ def main():
     ap.add_argument("--no-panel-retry", dest="no_panel_retry", action="store_true",
                     help="do not auto-retry channels that failed with a transient stream death "
                          "(502/503/429, silent death with reasoning). Default: retry ONCE")
+    # R138 И-1: a TASK to carry out instead of a document to review (see _task_plan).
+    ap.add_argument("--task", action="store_true",
+                    help="the brief is a TASK to carry out, not a document to review: each CLI "
+                         "channel gets its own workdir as cwd, a worker preset, a TASK DIRECTIVE "
+                         "(write only in the workdir, remote writes only to --allow-remote "
+                         "systems), and ends with a TASK REPORT + TASK-COMPLETE. The harness "
+                         "writes <CHANNEL>-WORKDIR.json (what really changed) and never retries. "
+                         "Wired for the kinds measured live: grok build, opencode, mimo")
+    ap.add_argument("--workdir", default=None, metavar="DIR",
+                    help="--task only: root of the per-channel workdirs (<DIR>/<channel>). "
+                         "Default: a fresh folder under TEMP, copied to <out>/work at the end. "
+                         "Keep it outside any project: a CLI loads the instruction files above it")
+    ap.add_argument("--allow-remote", dest="allow_remote", action="extend", nargs="*",
+                    default=[], metavar="SYSTEM",
+                    help="--task only: a remote system the task may WRITE to, with its purpose, "
+                         "e.g. \"GA4 property 123: create audiences\". Repeatable. Printed in the "
+                         "plan. Without it the task directive allows remote READS only")
     ap.add_argument("--resolve-grounding-links", action="store_true",
                     help="follow google_search grounding Links to their destination pages during "
                          "the citation audit. OFF by default, and the reason is Google's terms, "
@@ -8753,6 +9017,18 @@ def main():
     # Everything downstream (routing, the secret gate, verification, the citation audit) is reused
     # rather than bypassed. A cheap path that skips the checks is how a cheap path becomes the one
     # that leaks - and the checks are what make an answer worth having.
+    task_mode = bool(a.task)
+    if task_mode:
+        if a.ask:
+            ap.error("--task takes a --brief (the task), not --ask")
+        if a.marker == "REVIEW-COMPLETE":
+            a.marker = TASK_MARKER
+        if a.answer_cap is None:
+            a.answer_cap = 0              # the TASK REPORT has its own shape; no review cap text
+    elif a.workdir or a.allow_remote:
+        ap.error("--workdir and --allow-remote only mean something with --task")
+    _done_what = ("the task is finished and your TASK REPORT is written" if task_mode
+                  else "the ENTIRE review is finished")
     ask_mode = bool(a.ask)
     if ask_mode:
         if a.brief:
@@ -9115,8 +9391,8 @@ def main():
                 "Every channel that obeys the brief will be graded «output is partial» over a "
                 "complete review. Pass --marker %s, or edit the brief's last line."
                 % (last, a.marker, last))
-        brief += ("\n\n---\nWhen the ENTIRE review is finished, end your reply with this exact "
-                  "line and nothing after it:\n%s\n" % a.marker)
+        brief += ("\n\n---\nWhen %s, end your reply with this exact "
+                  "line and nothing after it:\n%s\n" % (_done_what, a.marker))
     # Two payload variants from here on. `brief` (inline attachments) stays the canonical one -
     # it is what the gate scans, what the size line reports, and what every API channel gets;
     # `brief_refs` differs ONLY in the attachment section and goes to REFS_KINDS channels.
@@ -9125,7 +9401,7 @@ def main():
     # The answer-cap block rides the same splice (R74): [brief][attachments][cap][marker].
     _mk = ""
     if a.marker:
-        _pos = brief.rfind("\n\n---\nWhen the ENTIRE review is finished")
+        _pos = brief.rfind("\n\n---\nWhen " + _done_what)
         if _pos != -1:
             brief, _mk = brief[:_pos], brief[_pos:]
     if atts or att_dirs:
@@ -9134,6 +9410,9 @@ def main():
         # R137 И-3: the variant for channels whose shell is ON (see _tools_full).
         brief_refs_full = (brief + _attach_refs(atts, _snap_pairs, _skip_manifest, tools_full=True)
                            + _cap_block + _mk)
+        if task_mode:
+            brief_refs = brief_refs_full = (brief + _attach_refs(
+                atts, _snap_pairs, _skip_manifest, tools_full=True, task=True) + _cap_block + _mk)
         brief = (brief + _attach_inline(atts, dir_parts, att_dirs,
                                         n_skipped=len(dir_skipped))
                  + _cap_block + _mk)
@@ -9144,12 +9423,15 @@ def main():
     # source discipline and output language were therefore left to whatever each model defaults
     # to - which for a terminal-tuned CLI is "short, fast, few tool calls". base-depth.md is the
     # amplifier that used to be pasted by hand into briefs; it now ships and applies everywhere.
-    system = "You are an independent reviewer. You are NOT the author. Find what is wrong."
+    system = ("You are a task worker: carry out the task in the brief with your tools, then "
+              "report." if task_mode else
+              "You are an independent reviewer. You are NOT the author. Find what is wrong.")
     try:
         # utf-8-sig: the system layer rides in FRONT of the brief on CLI channels
         # (_with_system), so a BOM in a user-authored --system file would again be the
         # payload's leading character.
-        with open(_resolve_system(a.system or "base-depth"), encoding="utf-8-sig") as f:
+        with open(_resolve_system(a.system or ("task" if task_mode else "base-depth")),
+                  encoding="utf-8-sig") as f:
             system = f.read()
     except SystemExit:
         if a.system:                      # an explicitly named preset that does not exist is fatal
@@ -9214,6 +9496,11 @@ def main():
         log("every channel is disabled - nothing to run")
         return 2
     kinds = {c: ((plan or {}).get(c) or _legacy_slot(c)).get("kind") for c in want}
+    task_dirs, task_before = {}, {}
+    if task_mode:
+        want, kinds, task_dirs, _task_root = _task_plan(want, kinds, a, reg)
+        if not want:
+            return 2
 
     # Everything below is free and answers "will this round survive?" before it is launched.
     # It runs on --dry-run too: a preflight that skips the checks a real run needs is not a
@@ -9375,6 +9662,12 @@ def main():
             att_parents = (sorted({os.path.dirname(pth) for pth, _t in atts}
                                   | {sd for sd, _d in _snap_pairs})
                            if use_refs else None)
+            if task_mode:
+                os.makedirs(task_dirs[cname], exist_ok=True)
+                task_before[cname] = _dir_manifest(task_dirs[cname])
+                jobs[cname] = ex.submit(_task_job, kind, cname, p, cbrief, a, reg, system,
+                                        outfile, workdir, use_refs, task_dirs[cname])
+                continue
             if kind == "http":
                 jobs[cname] = ex.submit(call_http_reviewer, cbrief, _system_for(system, p),
                                         a.tier, a.marker,
@@ -9510,6 +9803,8 @@ def main():
                 results[cname] = {"ok": False, "error": "channel raised: %r" % (exc,),
                                   "traceback": traceback.format_exc()}
     results.update(unlaunched)
+    if task_mode:
+        _task_finish(results, task_dirs, task_before, a.out, copy_out=not a.workdir)
 
     # ---- Б-36: auto-retry transient stream deaths --------------------------------
     # A transient stream death leaves ok=False, no answer text, and either a transient
@@ -9518,6 +9813,10 @@ def main():
     # was generated, so re-sending the brief can only re-bill INPUT tokens. The failed
     # attempt's cost is preserved and added to the retry's cost for correct totals.
     _retryable = {cn: r for cn, r in results.items() if retryable_stream_death(r)}
+    if _retryable and task_mode:
+        log("  --task: no auto-retry for %s - a task may already have changed something; read "
+            "its report and workdir, then re-run by hand." % ", ".join(sorted(_retryable)))
+        _retryable = {}
     if _retryable and not getattr(a, "no_panel_retry", False):
         log("\n" + "-" * 78)
         log("AUTO-RETRY: %d channel(s) had a transient stream death and will be retried "
