@@ -1203,6 +1203,13 @@ CLI_ENV_VARS = " / ".join(env for _, env, _ in CLI_BINARIES)
 
 
 KNOWN_FAILURES = [
+    # R137 (2026-10-03): AIHubMix's free Kimi K3 refused 2 of 2 calls that day and once in R133,
+    # after the brief had reached it whole. A vendor capacity answer, not a harness defect.
+    ("cannot be served at the moment",
+     "The provider accepted the request and declined to serve this model right now (AIHubMix "
+     "says this about its free models when they are out of capacity).",
+     "Read the other channels; re-run only this one later (`--only <channel>`). Nothing in the "
+     "brief or the harness causes it, so rewriting the brief will not help."),
     ("MODEL_API_KEY not set",
      "The Spark channel has no API key.",
      "Set MODEL_API_KEY, or run with --skip spark to use the other channels only. The harness "
@@ -4157,8 +4164,35 @@ def call_qwencli(brief, marker, outfile, model=None, effort=None, system=None,
 # --- Kimi Code CLI channel (kind kimicli) --------------------------------------------------------
 
 
+KIMI_CMDLINE_LIMIT = 32000   # CreateProcess caps the whole command line at 32,767 chars
+
+
+def _kimi_node_argv(binary):
+    """The argv prefix that starts Kimi Code CLI WITHOUT cmd.exe, or None when it cannot.
+
+    🔴🔴 R137 (2026-10-03): on Windows npm installs `kimi.CMD`, and a .cmd runs through cmd.exe,
+    which did three things to the brief, measured with a shim of the same shape
+    (`runs/r137-kimi-grok/shim_probe.py`): refused any command line over 8,191 chars («The
+    command line is too long», every panel since R133 - the system preset alone is ~9.3K);
+    CUT the prompt at its first newline, so even a short brief would have reached the model as
+    its first line only; and EXPANDED `%NAME%` in the prompt into this machine's environment
+    values before it left for the vendor. node gets the argv straight from CreateProcess: no
+    8K cap, no line cut, no expansion.
+    """
+    if os.name != "nt" or not binary.lower().endswith((".cmd", ".bat")):
+        return [binary]
+    shim_dir = os.path.dirname(binary)
+    main = os.path.join(shim_dir, "node_modules", "@moonshot-ai", "kimi-code", "dist", "main.mjs")
+    if not os.path.isfile(main):
+        return None
+    node = os.path.join(shim_dir, "node.exe")
+    if not os.path.isfile(node):
+        node = shutil.which("node") or shutil.which("node.exe")
+    return [node, main] if node else None
+
+
 def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
-                 timeout=2400, name="kimik3free"):
+                 timeout=2400, name="kimik3free", workdir=None):
     """Kimi Code CLI (Moonshot AI) — free via AIHubMix provider, AIHUBMIX_API_KEY.
 
     Probed 2026-10-02 on kimi v2.1.1 (@moonshot-ai/kimi-code):
@@ -4185,11 +4219,35 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
     binary = kimi_bin()
     text_in = ((system.strip() + "\n\n---\n\n") if system else "") + brief
 
-    cmd = [binary, "-p", text_in, "--output-format", "stream-json"]
+    base = _kimi_node_argv(binary)
+    cmd = (base or [binary]) + ["-p", text_in, "--output-format", "stream-json"]
+    how = "prompt as -p arg"
+    # R137: past the CreateProcess cap - or when only the cmd.exe shim exists, which would cut
+    # the brief at its first newline - the brief goes to a file and -p carries one ASCII line
+    # naming it. Same route agy takes above AGY_ARGV_LIMIT. The cap is measured on the QUOTED
+    # command line, because list2cmdline escapes every `"` and a JSON-heavy brief grows.
+    if base is None or len(subprocess.list2cmdline(cmd)) > KIMI_CMDLINE_LIMIT:
+        wd = os.path.abspath(workdir or os.path.join(os.path.dirname(os.path.abspath(outfile)),
+                                                     name + "-ws"))
+        wd = _ascii_safe_workdir(wd, name, name)
+        os.makedirs(wd, exist_ok=True)
+        bpath = os.path.join(wd, "BRIEF.md")
+        if base is None and any(c in bpath for c in '%^&|<>"!'):
+            return {"channel": name, "ok": False,
+                    "error": "kimi.cmd could not be resolved to node + main.mjs, and the brief "
+                             "path %r holds a character cmd.exe would rewrite" % bpath}
+        with open(bpath, "w", encoding="utf-8") as f:
+            f.write(text_in)
+        cmd = (base or [binary]) + [
+            "-p", "Read the file %s from its first line to its last (it is long - keep reading "
+                  "until the end) and carry out the task it describes. Your reply is the "
+                  "finished answer that file asks for." % bpath,
+            "--add-dir", wd, "--output-format", "stream-json"]
+        how = "brief in %s (%s), -p names it" % (bpath, "no node path: cmd.exe shim"
+                                                 if base is None else "over the argv cap")
 
     ncwd = neutral_cwd()
-    log("  [%s] Kimi Code CLI v2.1.1, free via AIHubMix; prompt as -p arg (%d chars)"
-        % (name, len(text_in)))
+    log("  [%s] Kimi Code CLI, free via AIHubMix; %s (%d chars)" % (name, how, len(text_in)))
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
@@ -9283,7 +9341,7 @@ def main():
                                         model=p.get("model"), effort=p.get("effort"),
                                         system=_system_for(system, p),
                                         timeout=_seconds(p.get("timeout"), 2400),
-                                        name=cname)
+                                        name=cname, workdir=workdir)
             else:
                 # Named in the registry, unknown to the code. A log line is NOT enough: a log
                 # line scrolls, and every downstream consumer - the "N/M channels returned"
@@ -9438,7 +9496,8 @@ def main():
                         call_kimicli, cbrief, a.marker, outfile,
                         model=p.get("model"), effort=p.get("effort"),
                         system=_system_for(system, p),
-                        timeout=_seconds(p.get("timeout"), 2400), name=cname)
+                        timeout=_seconds(p.get("timeout"), 2400), name=cname,
+                        workdir=os.path.join(a.out, cname + "-ws"))
                 else:
                     log("  [%s] cannot retry: unknown kind %r" % (cname, kind))
             for cname, f in _rjobs.items():

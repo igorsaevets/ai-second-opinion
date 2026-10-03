@@ -432,7 +432,8 @@
         "kimi_free"
       ],
       "notes": "Free Kimi K3 via Kimi Code CLI + AIHubMix. Full K3 model by Moonshot AI (NOT cut-down), 1.05M context. New kind kimicli — prompt as -p argument (not stdin), NDJSON output with role/content structure. No token metrics from stream-json (session DB only). -m flag crashes — model set via default_model in config.toml. distribution: local (kimi CLI + AIHubMix key not guaranteed for employees). LIVE TESTED 2026-10-02: 8.3s, $0.",
-      "_prompt_suffix_restored_r135": "R135 (2026-10-02): added. Training-tier channel (kimi CLI free relay to Moonshot AI). package.py strips from kit (default distribution=local)."
+      "_prompt_suffix_restored_r135": "R135 (2026-10-02): added. Training-tier channel (kimi CLI free relay to Moonshot AI). package.py strips from kit (default distribution=local).",
+      "_argv_r137": "R137 (2026-10-03): 0 of 3 panels answered - «The command line is too long». The npm kimi.cmd shim runs through cmd.exe: 8,191-char cap (the system preset alone is ~9.3K), the prompt cut at its first newline, %NAME% expanded. call_kimicli now starts node + main.mjs directly; past the 32K CreateProcess cap the brief goes to <out>/kimik3free-ws/BRIEF.md and -p names it (--add-dir). Verified on the session wire: a 9.7K multi-line brief arrived whole with %USERNAME% literal. The file route reached the provider; the model's reading of a 42K file is UNVERIFIED (the free model answered 400 «cannot be served at the moment» both times)."
     },
     "cclopus46": {
       "read_order": 1,

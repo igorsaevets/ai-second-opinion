@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.99.2 — 2026-10-03
+
+* **The Kimi Code CLI channel gets the whole brief.** On Windows npm installs `kimi.cmd`, and a
+  `.cmd` runs through cmd.exe, which refused any command line over 8,191 characters («The
+  command line is too long» — every panel call, since the system preset alone is ~9.3K), cut
+  the prompt at its first newline, and expanded `%NAME%` in the prompt into environment values
+  before it left the machine. The harness now starts `node <package>/dist/main.mjs` directly;
+  past the 32K CreateProcess cap the brief goes to `<out>/<channel>-ws/BRIEF.md` and `-p`
+  names it. Measured: a 9.7K multi-line brief reached the CLI whole, `%USERNAME%` literal.
+* A provider answer «cannot be served at the moment» now gets a plain-language diagnosis
+  (the vendor is out of capacity for that model; re-run that channel later).
+
 ## 1.99.1 — 2026-10-03
 
 * **R136 I-3 — `--status` no longer delays the automatic update by a day.** Measured live on

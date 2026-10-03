@@ -7192,7 +7192,8 @@ def main():
                   suite_r104_calibration_regression,
                   suite_r109_snapshot_classifier,
                   suite_r121_panel_retry,
-                  suite_r130_qwen_home_override):
+                  suite_r130_qwen_home_override,
+                  suite_r137_kimi_argv):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -10367,6 +10368,88 @@ def suite_r130_qwen_home_override():
     import shutil
     shutil.rmtree(sandbox, ignore_errors=True)
     shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+def suite_r137_kimi_argv():
+    """R137 (2026-10-03): kimik3free answered 0 of 3 panels with «The command line is too long».
+
+    The npm `kimi.cmd` shim runs through cmd.exe, which refuses a command line over 8,191 chars,
+    cuts the prompt at its first newline and expands `%NAME%` (measured with a shim of the same
+    shape, runs/r137-kimi-grok/shim_probe.py). Three invariants, each one the fix depends on:
+      (a) on Windows the shim resolves to node + main.mjs, so cmd.exe never sees the brief;
+      (b) a multi-line brief under the cap rides -p WHOLE, system layer first;
+      (c) past the cap, or with no node path, the brief goes to a file and -p is one line.
+    """
+    section("R137 kimi brief reaches the CLI whole (no cmd.exe shim, file route past the cap)")
+    import orchestrate as o
+    import tempfile
+    td = tempfile.mkdtemp(prefix="r137-kimi-")
+    shim = os.path.join(td, "kimi.cmd")
+    with open(shim, "w") as f:
+        f.write("@echo off\n")
+    main_mjs = os.path.join(td, "node_modules", "@moonshot-ai", "kimi-code", "dist", "main.mjs")
+    os.makedirs(os.path.dirname(main_mjs))
+    with open(main_mjs, "w") as f:
+        f.write("")
+    base = o._kimi_node_argv(shim)
+    if os.name == "nt":
+        check(bool(base) and base[-1] == main_mjs
+              and not str(base[0]).lower().endswith((".cmd", ".bat")),
+              "R137: on Windows the kimi.cmd shim resolves to node + main.mjs (cmd.exe never "
+              "sees the brief)", repr(base))
+    else:
+        check(base == [shim], "R137: off Windows the kimi binary is used as is", repr(base))
+
+    seen = []
+
+    class _Done:
+        returncode = 0
+        stdout = '{"role": "assistant", "content": "ok\\nR137-DONE"}\n'
+        stderr = ""
+
+    def _fake_run(cmd, **_kw):
+        seen.append(list(cmd))
+        return _Done()
+
+    saved = (o.subprocess.run, o.kimi_bin, o._kimi_node_argv, o.neutral_cwd)
+    try:
+        o.subprocess.run = _fake_run
+        o.kimi_bin = lambda: shim
+        o.neutral_cwd = lambda: td
+        o._kimi_node_argv = lambda b: ["node", "main.mjs"]
+        brief = "first line\nsecond line %USERNAME%\n" + "y" * 9000
+        o.call_kimicli(brief, "R137-DONE", os.path.join(td, "K1.md"), system="SYS\nTWO",
+                       workdir=os.path.join(td, "ws1"))
+        c1 = seen[-1]
+        p1 = c1[c1.index("-p") + 1]
+        check(c1[:2] == ["node", "main.mjs"] and p1.startswith("SYS\nTWO")
+              and p1.endswith(brief) and "--add-dir" not in c1,
+              "R137: a 9K multi-line brief rides -p WHOLE through node (the old shim route "
+              "refused it, and cut a short one at its first newline)", repr(c1[:3])[:200])
+        big = "z" * 40000 + "\nNONCE-R137\n"
+        o.call_kimicli(big, "R137-DONE", os.path.join(td, "K2.md"),
+                       workdir=os.path.join(td, "ws2"))
+        c2 = seen[-1]
+        p2 = c2[c2.index("-p") + 1]
+        bpath = os.path.join(o._ascii_safe_workdir(os.path.join(td, "ws2"), "kimik3free",
+                                                   "kimik3free"), "BRIEF.md")
+        body = open(bpath, encoding="utf-8").read() if os.path.isfile(bpath) else ""
+        check("--add-dir" in c2 and len(p2) < 400 and "\n" not in p2 and bpath in p2
+              and body == big,
+              "R137: past the 32K command-line cap the brief goes to BRIEF.md (whole) and -p "
+              "is one line naming it", "p=%r body=%d" % (p2[:120], len(body)))
+        o._kimi_node_argv = lambda b: None
+        o.call_kimicli("short\nbrief", "R137-DONE", os.path.join(td, "K3.md"),
+                       workdir=os.path.join(td, "ws3"))
+        c3 = seen[-1]
+        p3 = c3[c3.index("-p") + 1]
+        check(c3[0] == shim and "\n" not in p3 and "BRIEF.md" in p3,
+              "R137: with no node path even a short brief never rides the cmd.exe shim - "
+              "a one-line -p names the file", repr(c3[:3])[:200])
+    finally:
+        o.subprocess.run, o.kimi_bin, o._kimi_node_argv, o.neutral_cwd = saved
+        shutil.rmtree(td, ignore_errors=True)
+
 
 
 if __name__ == "__main__":
