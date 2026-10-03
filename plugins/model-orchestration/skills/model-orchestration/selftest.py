@@ -6949,7 +6949,7 @@ def suite_r86_self_update():
                     r = subprocess.run(["/bin/sh", "-c", cmd.replace("update_check.py\" --hook",
                                         "update_check.py\" --hook").replace(
                                         "${CLAUDE_PLUGIN_ROOT}/skills/model-orchestration",
-                                        HERE)], env=env, capture_output=True, text=True,
+                                        str(HERE))], env=env, capture_output=True, text=True,
                                        timeout=60)
                     check(r.returncode == 0 and not r.stdout.strip(),
                           "the chain runs under /bin/sh with ONLY `python` on PATH (python3 "
