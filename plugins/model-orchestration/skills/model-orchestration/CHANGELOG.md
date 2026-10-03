@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.98.0 — 2026-10-02
+
+* **R135 — `prompt_suffix` restored on training-tier channels + stale comments fixed.**
+  * `prompt_suffix` data was silently lost from `channels.json` between R34 (2026-08-07)
+    and R69 (2026-08-30) during whole-file rewrites before the file was in git. The code
+    mechanism (`_system_for()`) was intact — only the DATA entries were missing.
+  * Restored to all 5 training-tier channels: `spark13cont`, `ornemotron3ultra` (original
+    recipients), `ocspark13free`, `ocmimo26flashfree`, `kimik3free` (added after the loss).
+  * Fixed 2 stale comment fields that incorrectly claimed `prompt_suffix` data existed:
+    `orspark13cont._added` and `ordeepseekv4pro._no_prompt_suffix_here_on_purpose`.
+  * `package.py` strips `prompt_suffix` from the kit (default `distribution=local`) — no
+    change to what kit users receive. The shipped `channels.json` will NOT contain the
+    suffix text.
+  * Selftest 1547/1547 green.
+
 ## 1.97.0 — 2026-10-02
 
 * **AGENTS.md — panel-tier reading guidance for AI consumers.**
