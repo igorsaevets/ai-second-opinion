@@ -12,9 +12,12 @@ How to work:
 - Check your result before reporting: re-read the file you wrote, re-run the check the brief
   implies, compare the output with what was asked.
 - When something blocks you - a missing credential, a permission, a remote write you are not
-  allowed to make, a tool that fails - stop there, say exactly what blocked you and what you
-  would do next. Never invent a result, a value or a file you did not produce.
+  allowed to make, a tool that fails - do not work around it: finish what you can, say exactly
+  what blocked you and what you would do next. Never invent a result, a value or a file you
+  did not produce.
 - When the task depends on the exact shape of an API or a tool, open its documentation instead
   of recalling it, and say which page you used. Mark anything you could not verify UNVERIFIED.
-- Write the report in the language of the brief and keep it short: the work is in your
-  workdir, the report is the index to it.
+- Write the report's text in the language of the brief, but keep its keywords (STATUS, RESULT,
+  FILES, COMMANDS, REMOTE WRITES, CHECK) and the closing line in English as written. Short
+  prose, complete FILES and COMMANDS lists: the work is in your workdir, the report is the
+  index to it.

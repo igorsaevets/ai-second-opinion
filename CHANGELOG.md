@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.101.1 — 2026-10-03
+
+`--task` hotfix from a five-model review of 1.101.0. Review runs are unchanged byte for byte.
+
+- **Two mechanical fences** in a task CLI's environment, measured before use: a network
+  `git push` fails before it connects (fetch, clone and local pushes still work; off when
+  `--allow-remote` names a system), and pip refuses to install outside a virtualenv.
+- **The workdir manifest no longer walks out of the workdir**: a junction or symlink is
+  recorded, never followed (Python 3.14 walked into a junction), hard-linked files are
+  flagged, the cap counts every file, and the copy into `<out>/work` takes every regular file.
+- **Tripwire**: attachments, `orchestrate.py` and `channels.json` are hash-checked after a
+  task round, and a change is printed in red.
+- **No review frame left on a task**: the plan and grok's log no longer claim the review
+  safety directive; no UNASKED section is asked of a task; inline attachment notes and the
+  diagnostics label are task-aware; the preflight checks the preset the run will load.
+- **Task directive wording**: a write is defined by its effect (whatever the method or tool)
+  and covers scripts, installs and repositories outside the workdir; files already in the
+  workdir are inputs; an unsent remote write is described without credentials and the rest
+  of the task still gets done; CHECK must be read-only; report keywords stay in English.
+- `--allow-remote` takes ONE quoted `"system: purpose"` per flag (an unquoted value used to
+  become one allowed system per word); `--answer-cap` is refused with `--task`.
+
 ## 1.101.0 — 2026-10-03
 
 - **`--task`: hand a CLI a task to carry out, not a document to review.** Each channel runs in its

@@ -3800,8 +3800,9 @@ def suite_refs_and_meters():
           "every round appends the UNASKED section to the system layer - «иная информация на "
           "твое усмотрение» is structural, not a brief-writing habit (R46's hand-written "
           "version returned four findings that shipped)")
-    check("if not ask_mode:" in src.split("titled UNASKED")[0][-1500:],
-          "and --ask (a lookup, not a review) does not get the UNASKED section")
+    check("if not ask_mode and not task_mode:" in src.split("titled UNASKED")[0][-1500:],
+          "and --ask (a lookup, not a review) and --task (a TASK REPORT, R138 И-2) do not get "
+          "the UNASKED section")
     check("_ENV_KEY_DIVERGENCE_WARNED" in src,
           "_env_key warns once per variable when the process env and HKCU disagree - a key "
           "rotated with setx is otherwise masked by the stale process copy (measured R47: a "
@@ -7194,7 +7195,8 @@ def main():
                   suite_r121_panel_retry,
                   suite_r130_qwen_home_override,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
-                  suite_r137_i3_attach_truth, suite_r138_task_mode):
+                  suite_r137_i3_attach_truth, suite_r138_task_mode,
+                  suite_r138_i2_hotfix):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -10858,9 +10860,9 @@ def suite_r138_task_mode():
           "channel <workdir>/<channel>", repr((keep, keep2)))
 
     d0, d1 = o._task_directive("W0", []), o._task_directive("W1", ["GA4 property 1: audiences"])
-    check("READ only" in d0 and "Do NOT write to any remote system" in d0 and "W0" in d0
-          and "  - GA4 property 1: audiences\n" in d1 and "to no others" in d1
-          and "READ only" not in d1,
+    check("READ only" in d0 and "Make none" in d0 and "W0" in d0
+          and "  - GA4 property 1: audiences\n" in d1 and "exactly these systems" in d1
+          and "Make none" not in d1,
           "R138 (e): remote writes are READ-only by default and limited to the named systems "
           "with --allow-remote", d1[:80])
     ta = o._attach_refs([("C:/fixture/doc.md", "x")], [], None, tools_full=True, task=True)
@@ -10903,6 +10905,226 @@ def suite_r138_task_mode():
     check("--task: no auto-retry" in src and "_task_finish(results" in src and rc == 2,
           "R138 (g): no auto-retry under --task; --workdir without --task is refused (exit 2)",
           "rc=%r" % rc)
+    shutil.rmtree(td, ignore_errors=True)
+
+
+def suite_r138_i2_hotfix():
+    """R138 И-2 (2026-10-03): the cheap panel's verified findings on --task (kit 1.101.1).
+
+    (a) _task_child_env: a task CLI gets PIP_REQUIRE_VIRTUALENV and, without --allow-remote, a
+        pushInsteadOf for every network URL scheme (appended after an existing GIT_CONFIG_COUNT);
+        outside a task the env object comes back untouched.
+    (b) live, when git exists: the fenced env fails a network push before it connects and still
+        pushes to a LOCAL bare repo.
+    (c) review identity the golden does not pin: grok's env is _posix_child_env(), opencode and
+        mimo inherit (env None); review neutral_cwd() is TEMP/orchestrate-neutral-cwd; the review
+        _attach_inline text equals its 1.101.0 fingerprint; the task variant has no review words.
+    (d) TASK_KINDS is exactly the three kinds whose cwd suite_r138_task_mode (c) asserts.
+    (e) the manifest never follows a link or junction out of the workdir, counts past its cap,
+        and the copy into <out>/work does not stop where the manifest was cut.
+    (f) argparse: --allow-remote is ONE quoted "system: purpose" per flag; --answer-cap is refused
+        with --task; the plan no longer claims the review safety directive on a task; no UNASKED
+        section is asked of a task; the directive keeps report keywords in English and CHECK
+        read-only, and describes an unsent remote write without credentials.
+    (g) the tripwire names a watched file that changed during the round.
+    """
+    section("R138 И-2. --task hotfix: env fences, link-safe manifest, task-only wording")
+    import contextlib
+    import hashlib
+    import io
+    import orchestrate as o
+
+    td = tempfile.mkdtemp(prefix="orch-r138i2-")
+    o._TASK.ctx = None
+    plain = {"A": "1"}
+    review_ok = o._task_child_env(None) is None and o._task_child_env(plain) is plain
+    o._TASK.ctx = {"remote": []}
+    e1 = o._task_child_env({"GIT_CONFIG_COUNT": "2", "PATH": "x"})
+    o._TASK.ctx = {"remote": ["GA4 property 1: audiences"]}
+    e2 = o._task_child_env({"PATH": "x"})
+    o._TASK.ctx = None
+    check(review_ok and e1.get("PIP_REQUIRE_VIRTUALENV") == "true" and e1.get("GIT_CONFIG_COUNT") == "7"
+          and e1.get("GIT_CONFIG_KEY_2") == "url.blocked-by-task-mode://.pushInsteadOf"
+          and e1.get("GIT_CONFIG_VALUE_2") == "https://" and e1.get("GIT_CONFIG_VALUE_6") == "git@"
+          and "GIT_CONFIG_COUNT" not in e2 and e2.get("PIP_REQUIRE_VIRTUALENV") == "true",
+          "R138 И-2 (a): a task CLI's env fences pip and network git push (not with --allow-remote); "
+          "a review env is untouched", repr(sorted(e1))[:200])
+
+    git = shutil.which("git")
+    if git:
+        repo, bare = os.path.join(td, "repo"), os.path.join(td, "bare.git")
+        os.makedirs(repo)
+
+        def g(*args, env=None, cwd=repo):
+            return subprocess.run([git] + list(args), cwd=cwd, env=env, capture_output=True,
+                                  text=True, encoding="utf-8", errors="replace", timeout=60)
+        g("init", "-q")
+        g("-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q",
+          "--allow-empty", "-m", "x")
+        g("init", "-q", "--bare", bare, cwd=td)
+        o._TASK.ctx = {"remote": []}
+        fenced = o._task_child_env(dict(os.environ, GIT_TERMINAL_PROMPT="0"))
+        o._TASK.ctx = None
+        r1 = g("push", "https://127.0.0.1:9/x.git", "HEAD:refs/heads/main", env=fenced)
+        r2 = g("push", bare, "HEAD:refs/heads/main", env=fenced)
+        check(r1.returncode != 0 and "blocked-by-task-mode" in (r1.stdout + r1.stderr)
+              and r2.returncode == 0,
+              "R138 И-2 (b): live git - the fenced env fails a network push before it connects and "
+              "pushes to a local bare repo", (r1.stdout + r1.stderr)[-160:])
+    else:
+        check(True, "R138 И-2 (b): git not installed here - live push fence not exercised")
+
+    seen = []
+
+    class _Done:
+        returncode = 0
+        stderr = ""
+
+    def fake_with(stdout):
+        def run(cmd, **kw):
+            seen.append(dict(kw))
+            r = _Done()
+            r.stdout = stdout
+            return r
+        return run
+    saved = (o.subprocess.run, o.grok_bin, o.opencode_bin, o.mimo_bin)
+    try:
+        o.grok_bin, o.opencode_bin, o.mimo_bin = (lambda: "grok.exe"), (lambda: "opencode"), \
+            (lambda: "mimo")
+        o.subprocess.run = fake_with(json.dumps({"text": "ok\nMARK", "stopReason": "end_turn"}))
+        o.call_grokcli("B", "MARK", os.path.join(td, "gw"), os.path.join(td, "G.md"), system="S",
+                       bypass=True)
+        ge = seen[-1].get("env", "absent")
+        o.subprocess.run = fake_with("\n".join([
+            json.dumps({"type": "text", "part": {"text": "ok\nMARK"}}),
+            json.dumps({"type": "step_finish", "part": {"tokens": {}, "cost": 0}})]))
+        o.call_opencode("B", "MARK", os.path.join(td, "O.md"), system="S")
+        oe = seen[-1].get("env", "absent")
+        o.call_mimocli("B", "MARK", os.path.join(td, "M.md"), system="S")
+        me = seen[-1].get("env", "absent")
+    finally:
+        o.subprocess.run, o.grok_bin, o.opencode_bin, o.mimo_bin = saved
+
+    def H(s):
+        return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
+    atts = [("C:/fixture/doc.md", "hello attach")]
+    parts = [("attach-dir:C:/fixture/vetted/a.md", "folder text")]
+    inline = {"inline.atts": H(o._attach_inline(atts)),
+              "inline.dir_skipped": H(o._attach_inline(atts, parts, ["C:/fixture/vetted"],
+                                                       n_skipped=2)),
+              "inline.dir_empty": H(o._attach_inline([], None, ["C:/fixture/vetted"]))}
+    task_inline = (o._attach_inline(atts, parts, ["C:/fixture/vetted"], n_skipped=2, task=True)
+                   + o._attach_inline([], None, ["C:/fixture/vetted"], task=True))
+    check(ge == o._posix_child_env() and oe is None and me is None
+          and o.neutral_cwd() == os.path.join(tempfile.gettempdir(), "orchestrate-neutral-cwd")
+          and inline == {"inline.atts": "05ce32bc661b313b", "inline.dir_skipped": "ff08c8a5417f218a",
+                         "inline.dir_empty": "c4438aeb3059cd4d"}
+          and "Reviewers" not in task_inline and "change nothing there" in task_inline,
+          "R138 И-2 (c): review env, review neutral cwd and review inline-attachment text are as "
+          "in 1.101.0; the task variant drops the review wording", repr((ge, oe, me, inline))[:240])
+
+    check(tuple(o.TASK_KINDS) == ("grokcli", "opencode", "mimocli"),
+          "R138 И-2 (d): TASK_KINDS are exactly the kinds whose cwd suite_r138_task_mode (c) "
+          "asserts - wire a new kind's cwd check there before adding it", repr(o.TASK_KINDS))
+
+    base = os.path.join(td, "m")
+    outside, wd, outd = os.path.join(base, "outside"), os.path.join(base, "wd"), \
+        os.path.join(base, "out")
+    for dd in (outside, wd, outd):
+        os.makedirs(dd)
+    with open(os.path.join(outside, "secret.txt"), "w", encoding="utf-8") as f:
+        f.write("S")
+    for i in range(5):
+        with open(os.path.join(wd, "f%d.txt" % i), "w", encoding="utf-8") as f:
+            f.write(str(i))
+    jl = os.path.join(wd, "jdir")
+    if os.name == "nt":
+        linked = subprocess.run(["cmd", "/c", "mklink", "/J", jl, outside],
+                                capture_output=True).returncode == 0
+    else:
+        try:
+            os.symlink(outside, jl)
+            linked = True
+        except OSError:
+            linked = False
+    man = o._dir_manifest(wd)
+    cutm = o._dir_manifest(wd, cap=3)
+    real_dm = o._dir_manifest
+    o._dir_manifest = lambda root, cap=3: real_dm(root, cap)
+    res = {"ch": {"ok": True}}
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            o._task_finish(res, {"ch": wd}, {"ch": {}}, outd, copy_out=True)
+    finally:
+        o._dir_manifest = real_dm
+    wj = json.load(open(os.path.join(outd, "CH-WORKDIR.json"), encoding="utf-8"))
+    copied = sorted(os.listdir(os.path.join(outd, "work", "ch")))
+    check((not linked or (man.get("jdir", {}).get("link") and not any("secret" in k for k in man)
+                          and "jdir" in wj.get("links", [])))
+          and any(k.startswith(o._MANIFEST_CUT) and "3 of 5" in k for k in cutm)
+          and wj.get("complete") is False and copied == ["f%d.txt" % i for i in range(5)],
+          "R138 И-2 (e): the manifest records a link or junction and never walks through it, counts "
+          "past its cap, and the copy takes every regular file whatever the cut (linked=%s)" % linked,
+          repr((sorted(man)[:6], copied)))
+    if linked:
+        try:
+            (os.rmdir if os.name == "nt" else os.unlink)(jl)
+        except OSError:
+            pass
+
+    bp = os.path.join(td, "task.md")
+    with open(bp, "w", encoding="utf-8") as f:
+        f.write("R138 И-2 task brief.\n")
+    cap = {}
+
+    def gate(parts_, *, strict_pii=False, warn_pii=False):
+        d = dict(parts_)
+        cap["brief"], cap["system"] = d.get("brief", ""), d.get("system", "")
+        return 0
+    real_gate, real_argv = o.pii_gate, sys.argv[:]
+
+    def rc_of(argv):
+        buf = io.StringIO()
+        sys.argv = ["orchestrate.py", "--brief", bp, "--task", "--dry-run",
+                    "--out", os.path.join(td, "o")] + argv
+        o.pii_gate = gate
+        try:
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                rc = o.main()
+        except SystemExit as exc:
+            rc = exc.code
+        finally:
+            o.pii_gate, sys.argv = real_gate, real_argv
+        return rc, buf.getvalue()
+    rcs = [rc_of(v)[0] for v in (["--allow-remote", "GA4", "property"], ["--allow-remote", "GA4"],
+                                 ["--answer-cap", "5000"])]
+    rc_ok, plan = rc_of(["--allow-remote", "GA4 property 1: audiences", "--only", "grokbuild",
+                         "--bypass-permissions", "grokbuild"])
+    tsys, tbrief = cap.get("system", ""), cap.get("brief", "")
+    d0 = o._task_directive("W0", [])
+    check(rcs == [2, 2, 2] and rc_ok == 0 and "GA4 property 1: audiences" in plan
+          and "safety directive: no-delete" not in plan
+          and "TASK DIRECTIVE replaces the review safety directive" in plan
+          and "titled UNASKED" not in tsys and "TASK DIRECTIVE" not in tsys
+          and "Keep the keywords below in English" in d0 and "READ-ONLY command" in d0
+          and "NOT SENT" in d0 and "never a token, key or password" in d0
+          and "put the exact request" not in d0,
+          "R138 И-2 (f): --allow-remote takes one quoted system:purpose, --answer-cap is refused, "
+          "the plan and system prompt carry no review frame, the directive pins English keywords, "
+          "a read-only CHECK and an unsent write without credentials",
+          repr((rcs, rc_ok, "titled UNASKED" in tsys, len(tbrief))))
+
+    w1 = os.path.join(td, "watched.txt")
+    with open(w1, "w", encoding="utf-8") as f:
+        f.write("before")
+    trip = o._hash_files([w1])
+    with open(w1, "w", encoding="utf-8") as f:
+        f.write("after")
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        bad = o._task_tripwire(trip)
+    check(bad == [w1] and set(o._task_watch_paths([])) >= {os.path.abspath(o.__file__)},
+          "R138 И-2 (g): the tripwire names a watched file changed during the round; it always "
+          "watches orchestrate.py", repr(bad))
     shutil.rmtree(td, ignore_errors=True)
 
 

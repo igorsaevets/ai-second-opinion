@@ -3302,8 +3302,11 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
         cmd += ["--reasoning-effort", effort]
     if bypass:
         log("  [%s] PERMISSIONS BYPASSED for this call: --permission-mode bypassPermissions "
-            "(replaces dontAsk); FULL toolset, no allowlist (R137 И-2). SAFETY DIRECTIVE "
-            "(no-delete + three-step ritual) is prepended to the brief." % name)
+            "(replaces dontAsk); FULL toolset, no allowlist (R137 И-2). %s" % (name, (
+                "--task: the TASK DIRECTIVE replaces the review SAFETY DIRECTIVE (the CLI may "
+                "delete files it made in its own workdir)."
+                if getattr(_TASK, "ctx", None) is not None else
+                "SAFETY DIRECTIVE (no-delete + three-step ritual) is prepended to the brief.")))
     log("  [%s] Grok Build CLI on the subscription (no API key); depth --reasoning-effort=%s, "
         "brief via --prompt-file (%d chars), neutral cwd, memory off%s"
         % (name, effort or "vendor default", len(text_in),
@@ -3312,7 +3315,7 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                            timeout=_seconds(timeout, 2400),
-                           env=_posix_child_env())
+                           env=_task_child_env(_posix_child_env()))
     except FileNotFoundError:
         # 🔴 WITHOUT THIS THE CHANNEL CRASHES ON EVERY MACHINE THAT DOES NOT HAVE THE CLI, which
         # is every machine except the author's. Measured 2026-08-16 by pointing GROK_BIN at a
@@ -3491,6 +3494,34 @@ def neutral_cwd():
     return scratch
 
 
+# R138 И-2: the two fences an environment variable can hold without touching a CLI's own login
+# (measured locally first, runs/r138-i2-panel-hotfix/fence_probe.py): every NETWORK `git push`
+# is rewritten to a scheme git cannot speak and fails before it connects (fetch, clone and a
+# push to a LOCAL path are untouched), and pip refuses to install outside a virtualenv (the
+# shared system Python stays as it was). The git fence is off when --allow-remote names a
+# system. gh / glab / MCP / curl / browser writes stay prose-only - see TASK MODE in the plan.
+_TASK_PUSH_BLOCK = "blocked-by-task-mode://"
+
+
+def _task_child_env(env=None):
+    """The child environment for a --task CLI; outside a task, `env` comes back unchanged."""
+    ctx = getattr(_TASK, "ctx", None)
+    if ctx is None:
+        return env
+    out = dict(os.environ if env is None else env)
+    out["PIP_REQUIRE_VIRTUALENV"] = "true"
+    if not ctx.get("remote"):
+        try:
+            n = int(out.get("GIT_CONFIG_COUNT") or 0)
+        except ValueError:
+            n = 0
+        for i, prefix in enumerate(("https://", "http://", "ssh://", "git://", "git@")):
+            out["GIT_CONFIG_KEY_%d" % (n + i)] = "url.%s.pushInsteadOf" % _TASK_PUSH_BLOCK
+            out["GIT_CONFIG_VALUE_%d" % (n + i)] = prefix
+        out["GIT_CONFIG_COUNT"] = str(n + 5)
+    return out
+
+
 def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
                   timeout=2400, name="ocspark13free"):
     """opencode CLI (opencode.ai) — free Spark 1.3 Contributor, no API key needed.
@@ -3535,7 +3566,7 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           input=text_in, cwd=neutral_cwd(),
+                           input=text_in, cwd=neutral_cwd(), env=_task_child_env(),
                            timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
@@ -3634,7 +3665,7 @@ def call_mimocli(brief, marker, outfile, model=None, effort=None, system=None,
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           input=text_in, cwd=ncwd,
+                           input=text_in, cwd=ncwd, env=_task_child_env(),
                            timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
@@ -8365,7 +8396,7 @@ def _scan_dir_texts(dirs, max_bytes=2_000_000, max_files=200):
     return parts, skipped
 
 
-def _attach_inline(atts, dir_parts=None, att_dirs=None, n_skipped=0):
+def _attach_inline(atts, dir_parts=None, att_dirs=None, n_skipped=0, task=False):
     """The attachment section all channels receive: files inline, folder files inline."""
     out = []
     for i, (p, text) in enumerate(atts, 1):
@@ -8380,13 +8411,17 @@ def _attach_inline(atts, dir_parts=None, att_dirs=None, n_skipped=0):
             out.append("\n\n---\n\nFOLDER FILE %d: %s\n\n%s" % (j, rel, text))
         if n_skipped:
             out.append("\n\n---\n\nNOTE: %d file(s) from the supporting folder(s) were excluded "
-                       "by the vetting scan (binary, oversized, or file cap). Reviewers running "
-                       "on the host machine receive a vetted copy and may read additional "
-                       "material in the same folders." % n_skipped)
+                       "by the vetting scan (binary, oversized, or file cap). %s" % (n_skipped, (
+                           "A CLI on the host machine may READ more material in the same "
+                           "folders; change nothing there." if task else
+                           "Reviewers running on the host machine receive a vetted copy and "
+                           "may read additional material in the same folders.")))
     elif att_dirs:
         out.append("\n\n---\n\nNOTE: %d supporting folder(s) accompany this brief but contained "
-                   "no readable text files after the vetting scan. Reviewers running on the "
-                   "host machine receive a vetted copy." % len(att_dirs))
+                   "no readable text files after the vetting scan. %s" % (len(att_dirs), (
+                       "A CLI on the host machine may READ them; change nothing there."
+                       if task else "Reviewers running on the host machine receive a vetted "
+                       "copy.")))
     return "".join(out)
 
 
@@ -8572,57 +8607,73 @@ _TASK_COPY_CAP = 50 * 1024 * 1024
 GROK_TASK_CONTEXT = (
     "OPERATING CONTEXT — read this first.\n"
     "This run is a TASK, not a review. Your current working directory is your own workdir, named "
-    "in the TASK DIRECTIVE below: create, run and check your files there. You have your FULL "
-    "toolset with permission prompts bypassed: read_file / list_dir / grep at any absolute path, "
+    "in the TASK DIRECTIVE: create, run and check your files there. Your tools run with "
+    "permission prompts bypassed: read_file / list_dir / grep at any absolute path, "
     "run_terminal_command for shell commands, web_search / web_fetch, and this machine's MCP "
-    "servers through search_tool / use_tool (the metered firecrawl server is denied). Credential "
-    "files (.env*, .ssh, .gnupg, CLI configs) are denied by rule - do not try to read them. "
-    "Follow the TASK DIRECTIVE on where you may write, and end with the TASK REPORT it "
-    "describes.\n\n---\n\n")
+    "servers through search_tool / use_tool (the metered firecrawl server is denied). Your read "
+    "tool refuses credential files (.env*, .ssh, .gnupg, CLI configs); do not read them any "
+    "other way either (no shell type, cat or copy). Follow the TASK DIRECTIVE on where you may "
+    "write, and end with the TASK REPORT it describes.\n\n---\n\n")
 
 
 def _task_directive(workdir, remote):
     """The rules of a --task run. They ride at the FRONT of the brief (R40: a rule in the brief
-    is obeyed, the same rule in a persona slot is not), where the review safety directive sits."""
+    is obeyed, the same rule in a persona slot is not), where the review safety directive sits.
+    R138 И-2 (cheap panel on 1.101.0): a write is defined by its EFFECT and covers the scripts a
+    CLI runs, installs and repositories; an unsent remote write is described without credentials
+    and the rest of the task still gets done; CHECK is read-only; report keywords stay English."""
     if remote:
-        rem = ("REMOTE SYSTEMS: the operator allows remote WRITES to exactly these systems, for the "
-               "purpose named, and to no others:\n" + "".join("  - %s\n" % r for r in remote)
-               + "List every remote write you make in the TASK REPORT.\n")
+        rem = ("REMOTE SYSTEMS: the operator allows remote WRITES to exactly these systems, and only "
+               "for the purpose named - anything else on them stays read-only:\n"
+               + "".join("  - %s\n" % r for r in remote)
+               + "Every other remote system is READ only. List each remote write you make under "
+                 "REMOTE WRITES.\n")
     else:
-        rem = ("REMOTE SYSTEMS: READ only. Searching, opening pages and read-only API calls are "
-               "fine. Do NOT write to any remote system: no push, merge, MR, issue or comment, no "
-               "API call that creates, changes or deletes anything (analytics, ads, cloud, mail, "
-               "chat, payments). If the task needs a remote write, stop before it and put the exact "
-               "request you would send into the TASK REPORT instead.\n")
+        rem = ("REMOTE SYSTEMS: READ only. Searching, opening pages and queries are fine. A WRITE "
+               "is anything that creates, changes, deletes or sends something on a remote system, "
+               "whatever the HTTP method or tool: push, merge, MR, issue, comment, upload, an API "
+               "call that changes analytics, ads, cloud, mail, chat or payments. Make none. If the "
+               "task needs one, do everything else, do NOT send it, and describe it under REMOTE "
+               "WRITES as `NOT SENT: system - operation - data` (never a token, key or password); "
+               "STATUS is then PARTIAL, or BLOCKED when that write was the whole task. A network "
+               "`git push` fails here on purpose.\n")
     return ("TASK DIRECTIVE - this run is a TASK to carry out, not a document to review\n"
             "\n"
             "Do the work with your tools, check that it worked, then report. A script you wrote "
             "but did not run is not done when the brief asks for its result: run it and report "
-            "what it printed.\n"
+            "what it printed - unless running it would change something outside your workdir; "
+            "then do not run it, and say why.\n"
             "\n"
             "YOUR WORKDIR: %s\n"
-            "It is your current working directory and it is yours: create, edit, run and delete "
-            "your own files there freely. Everything you produce goes there. If the brief names "
-            "an output path somewhere else, write the file in your workdir and say in the report "
-            "where it was meant to go.\n"
+            "It is your current working directory: create, edit, run and delete the files YOU make "
+            "there freely. Files that were already in it when you started are inputs: read them, "
+            "do not delete or overwrite them unless the brief says so. Everything you produce goes "
+            "there, including what the scripts you run write: if the brief names an output path "
+            "somewhere else, point the output into your workdir and say in the report where it was "
+            "meant to go.\n"
             "\n"
-            "OUTSIDE YOUR WORKDIR: read whatever the task needs, but create, modify or delete "
-            "nothing. Never open credential files (any .env, ~/.ssh/, ~/.gnupg/, CLI configs, "
-            "token stores).\n"
+            "OUTSIDE YOUR WORKDIR: read whatever the task needs, but change nothing - no file "
+            "created, edited or deleted, no package installed (pip, npm -g, winget; a venv or "
+            "node_modules INSIDE your workdir is fine), no git fetch, pull, checkout or commit in a "
+            "repository there (clone it into your workdir instead), no environment variable, "
+            "registry key, scheduled task or service. Never open credential files (any .env, "
+            "~/.ssh/, ~/.gnupg/, CLI configs, token stores), with any tool.\n"
             "\n"
             "%s"
             "\n"
-            "Your permission prompts are OFF and nothing mechanical stops a mistake: these rules "
-            "are the operator's instruction, and the operator checks your workdir against your "
-            "report.\n"
+            "Your permission prompts are OFF, so nothing asks before you act: you are the check. "
+            "These rules are the operator's instruction, and the operator compares your report "
+            "with what is on disk.\n"
             "\n"
-            "End with a TASK REPORT:\n"
-            "  STATUS: DONE | PARTIAL | BLOCKED - one line why\n"
+            "End with a TASK REPORT, then the closing line the brief asks for. Keep the keywords "
+            "below in English exactly as written, whatever language the brief is in:\n"
+            "  STATUS: DONE, PARTIAL or BLOCKED, and one line saying why\n"
             "  RESULT: what the task asked for (values, names, the lines the run printed)\n"
-            "  FILES: every file you created or changed, absolute path, one per line\n"
-            "  COMMANDS: every command you ran, with its exit code\n"
-            "  REMOTE WRITES: none, or system - what was written\n"
-            "  CHECK: one command the operator can run to verify the result\n"
+            "  FILES: every file you created or changed, absolute path, one per line, in full\n"
+            "  COMMANDS: every command you ran, with its exit code, in full\n"
+            "  REMOTE WRITES: none, or one line per write (system - what), or NOT SENT lines\n"
+            "  CHECK: one READ-ONLY command the operator can run to verify the result (it changes "
+            "nothing and sends nothing)\n"
             % (workdir, rem))
 
 
@@ -8667,10 +8718,12 @@ def _task_plan(want, kinds, a, reg):
         log("  remote WRITES allowed, and only to: %s" % "; ".join(a.allow_remote))
     else:
         log("  remote writes: NONE allowed (reads are fine). --allow-remote \"<system: purpose>\" "
-            "names one.")
+            "names one. Mechanically, a network `git push` fails (pushInsteadOf in the CLI's env).")
     log("  This is steering written into the brief, not a sandbox: a CLI whose permission prompts "
-        "are off can reach anything this user can. Check each TASK REPORT against its "
-        "<CHANNEL>-WORKDIR.json.")
+        "are off can reach anything this user can. Mechanical, and only this: the git fence above, "
+        "pip refuses to install outside a venv, and after the round the attachments, "
+        "orchestrate.py and channels.json are hash-checked. Check each TASK REPORT against its "
+        "<CHANNEL>-WORKDIR.json; read its CHECK command before you run it.")
     if not a.workdir:
         log("  The workdirs live under TEMP while the CLIs run and are copied to %s at the end."
             % os.path.join(a.out, "work"))
@@ -8686,8 +8739,8 @@ def _task_plan(want, kinds, a, reg):
 
 def _task_job(kind, cname, p, cbrief, a, reg, system, outfile, hwork, use_refs, wdir):
     """Run ONE channel's task with its own workdir as cwd (thread-local, see _TASK)."""
-    _TASK.workdir, _TASK.ctx = wdir, {"remote": list(a.allow_remote or [])}
     try:
+        _TASK.workdir, _TASK.ctx = wdir, {"remote": list(a.allow_remote or [])}
         tb = _task_directive(wdir, a.allow_remote) + "\n---\n\n" + cbrief
         sysp = _system_for(system, p)
         if kind == "grokcli":
@@ -8708,46 +8761,102 @@ def _task_job(kind, cname, p, cbrief, a, reg, system, outfile, hwork, use_refs, 
         _TASK.workdir = _TASK.ctx = None
 
 
-def _dir_manifest(root, cap=2000):
-    """{relative path: {bytes, sha256_16}} - what is really in a workdir, for the report check."""
+def _is_link(path):
+    """A symlink or a Windows junction. R138 И-2, measured: os.walk (Python 3.14) walks INTO a
+    junction and os.path.islink() is False for one, so a junction in a workdir led the manifest
+    and the copy out of it. Recorded, never followed."""
+    if os.path.islink(path):
+        return True
+    isj = getattr(os.path, "isjunction", None)                       # Python 3.12+
+    if isj is not None:
+        return bool(isj(path))
+    try:                                                             # older Pythons on Windows
+        return bool(getattr(os.lstat(path), "st_file_attributes", 0) & 0x400)
+    except OSError:
+        return False
+
+
+def _link_target(path):
+    try:
+        return os.readlink(path)
+    except (OSError, ValueError, NotImplementedError):
+        return "?"
+
+
+_MANIFEST_CUT = "(manifest cut: "
+
+
+def _dir_manifest(root, cap=20000):
+    """{relative path: {bytes, sha256_16}} - what is really in a workdir, for the report check.
+    R138 И-2: links and junctions are recorded as {"link": target}, never followed; a file that
+    shares its data with another path says `hard_links`; a file over 50 MB keeps its mtime, so a
+    same-size edit still shows as changed; past `cap` the walk keeps COUNTING and says so."""
     import hashlib              # local, like the module's other two uses (not imported at the top)
-    out = {}
-    for dp, _dns, fns in os.walk(root):
+    import stat
+    out, listed, total = {}, 0, 0
+    for dp, dns, fns in os.walk(root):
+        for dn in list(dns):
+            pth = os.path.join(dp, dn)
+            if _is_link(pth):
+                dns.remove(dn)
+                out[os.path.relpath(pth, root)] = {"link": _link_target(pth)}
         for fn in fns:
+            total += 1
+            if listed >= cap:
+                continue
+            listed += 1
             pth = os.path.join(dp, fn)
             rel = os.path.relpath(pth, root)
             try:
-                size = os.path.getsize(pth)
-                if size > _TASK_COPY_CAP:
-                    out[rel] = {"bytes": size, "sha256_16": "(over 50 MB, not hashed)"}
+                st = os.lstat(pth)
+                if _is_link(pth):
+                    out[rel] = {"link": _link_target(pth)}
+                    continue
+                if not stat.S_ISREG(st.st_mode):
+                    out[rel] = {"special": True}
+                    continue
+                meta = {"bytes": st.st_size}
+                if st.st_size > _TASK_COPY_CAP:
+                    meta.update(sha256_16="(over 50 MB, not hashed)", mtime_ns=st.st_mtime_ns)
                 else:
                     h = hashlib.sha256()
                     with open(pth, "rb") as f:
                         for chunk in iter(lambda: f.read(1 << 20), b""):
                             h.update(chunk)
-                    out[rel] = {"bytes": size, "sha256_16": h.hexdigest()[:16]}
+                    meta["sha256_16"] = h.hexdigest()[:16]
+                if getattr(st, "st_nlink", 1) > 1:
+                    meta["hard_links"] = st.st_nlink
+                out[rel] = meta
             except OSError as exc:
                 out[rel] = {"error": str(exc)}
-            if len(out) >= cap:
-                out["(manifest cut at %d files)" % cap] = {}
-                return out
+    if total > listed:
+        out["%s%d of %d files listed)" % (_MANIFEST_CUT, listed, total)] = {}
     return out
 
 
 def _task_finish(results, task_dirs, before, out, copy_out):
     """After the round: per channel, what its workdir gained, changed and lost - written to
-    <CHANNEL>-WORKDIR.json and printed - and, for a TEMP workdir, a copy into <out>/work/."""
+    <CHANNEL>-WORKDIR.json and printed - and, for a TEMP workdir, a copy into <out>/work/.
+    R138 И-2: the copy walks the folder itself (it used to stop where the manifest was cut) and
+    never follows a link; a cut manifest says that its lists cover the listed files only."""
+    import stat
     for c, d in sorted(task_dirs.items()):
         if c not in before:
             continue
-        after = _dir_manifest(d) if os.path.isdir(d) else {}
-        b = before.get(c) or {}
+        after_all = _dir_manifest(d) if os.path.isdir(d) else {}
+        b_all = before.get(c) or {}
+        cut = [k for k in list(after_all) + list(b_all) if k.startswith(_MANIFEST_CUT)]
+        after = {k: v for k, v in after_all.items() if not k.startswith(_MANIFEST_CUT)}
+        b = {k: v for k, v in b_all.items() if not k.startswith(_MANIFEST_CUT)}
         created = sorted(set(after) - set(b))
         changed = sorted(k for k in set(after) & set(b) if after[k] != b[k])
         deleted = sorted(set(b) - set(after))
+        links = sorted(k for k, m in after.items() if "link" in m)
+        shared = sorted(k for k, m in after.items() if m.get("hard_links"))
         with open(os.path.join(out, c.upper() + "-WORKDIR.json"), "w", encoding="utf-8") as f:
-            json.dump({"workdir": d, "created": created, "changed": changed, "deleted": deleted,
-                       "files": after}, f, indent=1, ensure_ascii=False)
+            json.dump({"workdir": d, "complete": not cut, "created": created, "changed": changed,
+                       "deleted": deleted, "links": links, "hard_linked": shared,
+                       "files": after_all}, f, indent=1, ensure_ascii=False)
         r = results.get(c)
         if isinstance(r, dict):
             r["task_workdir"] = {"path": d, "created": len(created), "changed": len(changed),
@@ -8756,20 +8865,73 @@ def _task_finish(results, task_dirs, before, out, copy_out):
             % (c, d, len(created),
                (" (%s%s)" % (", ".join(created[:6]), " ..." if len(created) > 6 else ""))
                if created else "", len(changed), len(deleted)))
+        if cut:
+            log("  [%s] ⚠ the manifest is cut (%s): created / changed / deleted cover the listed "
+                "files only" % (c, "; ".join(cut)))
+        if links or shared:
+            log("  [%s] ⚠ %d link(s) or junction(s), recorded and not followed, and %d hard-linked "
+                "file(s), whose data also lives elsewhere: %s"
+                % (c, len(links), len(shared), ", ".join((links + shared)[:5])))
         if copy_out:
-            dst, skipped = os.path.join(out, "work", c), []
-            for rel, meta in sorted(after.items()):
-                src = os.path.join(d, rel)
-                if not os.path.isfile(src) or (meta.get("bytes") or 0) > _TASK_COPY_CAP:
-                    skipped.append(rel)
-                    continue
-                try:
-                    os.makedirs(os.path.dirname(os.path.join(dst, rel)), exist_ok=True)
-                    shutil.copy2(src, os.path.join(dst, rel))
-                except OSError as exc:
-                    skipped.append("%s (%s)" % (rel, exc))
-            log("  [%s] workdir copied to %s%s" % (c, dst, ("; NOT copied: %s"
-                                                          % ", ".join(skipped[:5])) if skipped else ""))
+            dst, skipped, n = os.path.join(out, "work", c), [], 0
+            for dp, dns, fns in os.walk(d):
+                dns[:] = [x for x in dns if not _is_link(os.path.join(dp, x))]
+                for fn in fns:
+                    src = os.path.join(dp, fn)
+                    rel = os.path.relpath(src, d)
+                    try:
+                        st = os.lstat(src)
+                        if (_is_link(src) or not stat.S_ISREG(st.st_mode)
+                                or st.st_size > _TASK_COPY_CAP):
+                            skipped.append(rel)
+                            continue
+                        os.makedirs(os.path.dirname(os.path.join(dst, rel)), exist_ok=True)
+                        shutil.copy2(src, os.path.join(dst, rel), follow_symlinks=False)
+                        n += 1
+                    except OSError as exc:
+                        skipped.append("%s (%s)" % (rel, exc))
+            log("  [%s] workdir copied to %s (%d file(s))%s"
+                % (c, dst, n, ("; NOT copied (link, special or over 50 MB): %s%s"
+                               % (", ".join(skipped[:5]), " ..." if len(skipped) > 5 else ""))
+                   if skipped else ""))
+
+
+def _task_watch_paths(atts):
+    """Files a task must not change that the harness can check cheaply: the attached material and
+    the harness's own code and registry (a task that rewrites those steers the NEXT run)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    paths = {os.path.abspath(p) for p, _t in (atts or [])}
+    paths |= {os.path.join(here, n) for n in ("orchestrate.py", "channels.json")}
+    return sorted(p for p in paths if os.path.isfile(p))
+
+
+def _hash_files(paths):
+    import hashlib
+    out = {}
+    for p in paths:
+        try:
+            h = hashlib.sha256()
+            with open(p, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            out[p] = h.hexdigest()
+        except OSError:
+            out[p] = None
+    return out
+
+
+def _task_tripwire(before):
+    """After the round: name every watched file that changed. Detection after the fact, not a
+    guard - it catches a write the TASK REPORT may not mention."""
+    after = _hash_files(list(before))
+    bad = [p for p in sorted(before) if after.get(p) != before[p]]
+    if bad:
+        log("  🔴 CHANGED during the task round - attached material or the harness itself, which a "
+            "task must not write: %s" % ", ".join(bad))
+    elif before:
+        log("  tripwire: %d watched file(s) outside the workdirs unchanged (attachments, "
+            "orchestrate.py, channels.json)" % len(before))
+    return bad
 
 
 def main():
@@ -8958,11 +9120,12 @@ def main():
                     help="--task only: root of the per-channel workdirs (<DIR>/<channel>). "
                          "Default: a fresh folder under TEMP, copied to <out>/work at the end. "
                          "Keep it outside any project: a CLI loads the instruction files above it")
-    ap.add_argument("--allow-remote", dest="allow_remote", action="extend", nargs="*",
-                    default=[], metavar="SYSTEM",
-                    help="--task only: a remote system the task may WRITE to, with its purpose, "
-                         "e.g. \"GA4 property 123: create audiences\". Repeatable. Printed in the "
-                         "plan. Without it the task directive allows remote READS only")
+    ap.add_argument("--allow-remote", dest="allow_remote", action="append",
+                    default=None, metavar="SYSTEM:PURPOSE",
+                    help="--task only: ONE remote system the task may WRITE to and what for, "
+                         "quoted, e.g. \"GA4 property 123: create audiences\". Repeat the flag "
+                         "for another system. Printed in the plan. Without it the task directive "
+                         "allows remote READS only and a network `git push` fails")
     ap.add_argument("--resolve-grounding-links", action="store_true",
                     help="follow google_search grounding Links to their destination pages during "
                          "the citation audit. OFF by default, and the reason is Google's terms, "
@@ -9023,8 +9186,15 @@ def main():
             ap.error("--task takes a --brief (the task), not --ask")
         if a.marker == "REVIEW-COMPLETE":
             a.marker = TASK_MARKER
-        if a.answer_cap is None:
-            a.answer_cap = 0              # the TASK REPORT has its own shape; no review cap text
+        if a.answer_cap:
+            ap.error("--answer-cap bounds a REVIEW answer; a --task report has its own shape "
+                     "(drop the flag)")
+        a.answer_cap = 0                  # the TASK REPORT has its own shape; no review cap text
+        for _r in (a.allow_remote or []):
+            if ":" not in _r:
+                ap.error("--allow-remote takes ONE quoted \"<system>: <purpose>\" per flag, "
+                         "e.g. --allow-remote \"GA4 property 123: create audiences\"; got %r"
+                         % _r)
     elif a.workdir or a.allow_remote:
         ap.error("--workdir and --allow-remote only mean something with --task")
     _done_what = ("the task is finished and your TASK REPORT is written" if task_mode
@@ -9102,7 +9272,7 @@ def main():
 
     # Validate every input BEFORE the dry-run exit, so --dry-run is a real preflight. A mistyped
     # --system used to surface only after the expensive channels had already been launched.
-    _resolve_system(a.system or "base-depth")
+    _resolve_system(a.system or ("task" if task_mode else "base-depth"))
     if not a.brief:
         log("nothing to send: pass --brief <file> for a full round, or --ask \"<question>\" for "
             "a one-shot question on the cheapest channel.")
@@ -9186,8 +9356,12 @@ def main():
             log("permissions:")
             for _l in _bypass_lines:
                 log(_l)
-            log("  safety directive: no-delete + three-step ritual (BACKUP -> REASONING -> "
-                "DELETE), injected into the brief. See kit/SECURITY.md 'Bypass opt-in'.")
+            if task_mode:
+                log("  --task: the TASK DIRECTIVE replaces the review safety directive - a CLI "
+                    "may delete files it made in its OWN workdir; see TASK MODE below.")
+            else:
+                log("  safety directive: no-delete + three-step ritual (BACKUP -> REASONING -> "
+                    "DELETE), injected into the brief. See kit/SECURITY.md 'Bypass opt-in'.")
         if _bypass_bad:
             log("  warning: --bypass-permissions named channel(s) with no bypass_permissions "
                 "field in channels.json: %s. Ignored. Names known to take the flag: %s"
@@ -9414,7 +9588,7 @@ def main():
             brief_refs = brief_refs_full = (brief + _attach_refs(
                 atts, _snap_pairs, _skip_manifest, tools_full=True, task=True) + _cap_block + _mk)
         brief = (brief + _attach_inline(atts, dir_parts, att_dirs,
-                                        n_skipped=len(dir_skipped))
+                                        n_skipped=len(dir_skipped), task=task_mode)
                  + _cap_block + _mk)
     else:
         brief = brief + _cap_block + _mk
@@ -9453,7 +9627,7 @@ def main():
     # section cannot manufacture content to fill itself. Skipped for --ask: a lookup is not a
     # review, and padding a one-line answer with an essay section would make the cheap path
     # expensive to read.
-    if not ask_mode:
+    if not ask_mode and not task_mode:     # R138 И-2: a task ends with its TASK REPORT
         system += ("\n\nAfter the brief's own questions are answered, add one final section "
                    "titled UNASKED: anything important the brief did not ask about - a wrong "
                    "assumption, a risk you noticed, a better alternative, a thing worth "
@@ -9496,9 +9670,10 @@ def main():
         log("every channel is disabled - nothing to run")
         return 2
     kinds = {c: ((plan or {}).get(c) or _legacy_slot(c)).get("kind") for c in want}
-    task_dirs, task_before = {}, {}
+    task_dirs, task_before, task_trip = {}, {}, {}
     if task_mode:
         want, kinds, task_dirs, _task_root = _task_plan(want, kinds, a, reg)
+        task_trip = _hash_files(_task_watch_paths(atts))
         if not want:
             return 2
 
@@ -9805,6 +9980,7 @@ def main():
     results.update(unlaunched)
     if task_mode:
         _task_finish(results, task_dirs, task_before, a.out, copy_out=not a.workdir)
+        _task_tripwire(task_trip)
 
     # ---- Б-36: auto-retry transient stream deaths --------------------------------
     # A transient stream death leaves ok=False, no answer text, and either a transient
@@ -10522,7 +10698,9 @@ def main():
         "seconds": round(time.time() - started, 1),
         "ok_channels": ok_count,
         "total_channels": len(results),
-        "invocation": {"tier": a.tier, "marker": a.marker, "system": a.system or "base-depth",
+        "invocation": {"tier": a.tier, "marker": a.marker,
+                       "system": a.system or ("task" if getattr(a, "task", False)
+                                              else "base-depth"),
                        "only": a.only, "skip": a.skip, "route": a.route, "sets": a.sets,
                        "brief_chars": len(brief), "strict_pii": a.strict_pii,
                        "ask_mode": ask_mode,
