@@ -7193,7 +7193,8 @@ def main():
                   suite_r109_snapshot_classifier,
                   suite_r121_panel_retry,
                   suite_r130_qwen_home_override,
-                  suite_r137_kimi_argv, suite_r137_i2_cli_tools):
+                  suite_r137_kimi_argv, suite_r137_i2_cli_tools,
+                  suite_r137_i3_attach_truth):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -10565,6 +10566,46 @@ def suite_r137_i2_cli_tools():
     check("bypass_permissions" not in reg["channels"]["kimik3free"]
           and "NO `--tools` allowlist" in note and "R88 (2026-09-14) opt-in. Default off" not in note,
           "R137 И-2: the registry says what the code does (grok note, kimi field)", note[:120])
+
+
+def suite_r137_i3_attach_truth():
+    """R137 И-3 (2026-10-03): the --attach contract tells the truth about the channel's tools.
+
+    Every iron panel passes --attach; the refs block said «no write tools» and «do not run shell
+    commands» to channels whose shell is on - grok's own R137 И-2 preamble said the opposite in
+    the same brief. Asserted on the text the harness builds and on the dispatch source.
+    """
+    section("R137 И-3 attach contract: truthful per channel (tools on vs off)")
+    import orchestrate as o
+    import inspect
+    atts = [(r"C:\x\doc.md", "BODY")]
+    off = o._attach_refs(atts, [])
+    on = o._attach_refs(atts, [], tools_full=True)
+    check("no write tools" in off and "Do not run shell commands" in off,
+          "R137 И-3: the tools-OFF contract keeps the no-shell, no-write wording")
+    check("READ ONLY" in on and "no write tools" not in on and "Do not run shell commands" not in on
+          and "shell and file tools are ON" in on and "glab" in on and r"C:\x\doc.md" in on,
+          "R137 И-3: the tools-ON contract keeps READ ONLY, drops the false ban, invites read-only "
+          "verification commands, and still names the path", on[-300:])
+    reg = {"channels": {"g": {"kind": "grokcli", "bypass_permissions": True},
+                        "h": {"kind": "grokcli", "bypass_permissions": False}}}
+
+    class _A:
+        all_bypass = False
+        bypass_permissions = []
+    tf = [o._tools_full(k, n, _A(), reg) for k, n in (("grokcli", "g"), ("grokcli", "h"),
+                                                       ("qwencli", "x"), ("claudecli", "x"),
+                                                       ("mimocli", "x"), ("opencode", "x"),
+                                                       ("kimicli", "x"))]
+    check(tf == [True, False, True, True, True, True, True],
+          "R137 И-3: _tools_full = bypass resolved true, or a kind that always runs every tool",
+          repr(tf))
+    src = inspect.getsource(o.main)
+    check(src.count("brief_refs_full if _tools_full(kind, cname, a, reg) else brief_refs") == 2,
+          "R137 И-3: both dispatch sites (first pass and retry) pick the contract per channel")
+    check(set(o.TOOLS_ALWAYS_FULL_KINDS) & set(o.REFS_KINDS) == {"claudecli", "qwencli"},
+          "R137 И-3: among refs kinds only claudecli and qwencli always run every tool; codex, grok "
+          "and agy depend on bypass", repr(o.TOOLS_ALWAYS_FULL_KINDS))
 
 
 if __name__ == "__main__":

@@ -8375,7 +8375,24 @@ def _attach_inline(atts, dir_parts=None, att_dirs=None, n_skipped=0):
     return "".join(out)
 
 
-def _attach_refs(atts, att_dirs, skipped=None):
+# R137 И-3 (2026-10-03): CLI kinds that ALWAYS run every tool unprompted, whatever a registry
+# bypass field says: claudecli (bypassPermissions, R88), qwencli (-y), mimocli
+# (--dangerously-skip-permissions), opencode (--auto), kimicli (-p is auto mode, vendor docs).
+# The other CLI kinds (codex, grokcli, agy) have their shell ON only when bypass resolves true.
+TOOLS_ALWAYS_FULL_KINDS = ("claudecli", "qwencli", "mimocli", "opencode", "kimicli")
+
+
+def _tools_full(kind, name, args, reg):
+    """True when this CLI channel's shell and file tools are ON for this call.
+
+    Chooses the attachment contract a channel gets: telling a channel whose shell is on that it
+    has «no write tools» and must «not run shell commands» is the false sentence that made
+    reviewers skip the very checks the brief asked for (E-152 class; R137 И-3).
+    """
+    return kind in TOOLS_ALWAYS_FULL_KINDS or bool(cli_bypass_active(name, args, reg))
+
+
+def _attach_refs(atts, att_dirs, skipped=None, tools_full=False):
     """The attachment section CLI channels receive: absolute paths plus the read-only contract.
 
     The rules ride in the BRIEF, not only in a persona slot, because placement is load-bearing
@@ -8386,6 +8403,11 @@ def _attach_refs(atts, att_dirs, skipped=None):
     advertises write/exec tools behind `request-review` - in headless mode an attempt is
     auto-denied and the denial DISCARDS THE RUN, so its guarantee is enforcement by death of
     the turn, not absence of the capability. This text is the instruction layer on top.
+
+    R137 И-3: that paragraph is the NON-bypass picture. With `tools_full` (the channel's shell
+    is on: bypass resolved true, or a kind in TOOLS_ALWAYS_FULL_KINDS) the contract keeps READ
+    ONLY for the material and invites read-only verification commands instead of banning the
+    shell - the old text contradicted grok's full-toolset preamble inside the same brief.
 
     R75: a folder entry may be a (vetted_copy_path, original_path) pair - the path HANDED OUT
     is the vetted copy, and the original never appears in the payload, not even in the skip
@@ -8416,6 +8438,19 @@ def _attach_refs(atts, att_dirs, skipped=None):
         if len(skipped) > len(shown):
             lines.append("- ... and %d more (the run log lists them all)"
                          % (len(skipped) - len(shown)))
+    if tools_full:
+        lines.append(
+            "\nSTRICT RULES for these locations, non-negotiable:\n"
+            "- READ ONLY. Do not modify, create, delete, move or rename ANYTHING there or anywhere "
+            "else in that project.\n"
+            "- Your shell and file tools are ON in this run. Use them to verify, read-only: open the "
+            "files, list and grep the folders, run read-only commands (git log/show/diff/blame, glab "
+            "or gh view calls, the read-only wrappers the brief names). Temporary files go only into "
+            "a scratch folder under the system TEMP directory.\n"
+            "- Your deliverable is the review TEXT in your reply - the harness saves it to its own "
+            "output folder. You write no files into the project.\n"
+            "- If a path does not open, say so plainly and review what you could read.")
+        return "\n".join(lines)
     lines.append(
         "\nSTRICT RULES for these locations, non-negotiable:\n"
         "- READ ONLY. Do not modify, create, delete, move or rename ANYTHING there or anywhere "
@@ -9096,12 +9131,15 @@ def main():
     if atts or att_dirs:
         brief_refs = (brief + _attach_refs(atts, _snap_pairs, _skip_manifest)
                       + _cap_block + _mk)
+        # R137 И-3: the variant for channels whose shell is ON (see _tools_full).
+        brief_refs_full = (brief + _attach_refs(atts, _snap_pairs, _skip_manifest, tools_full=True)
+                           + _cap_block + _mk)
         brief = (brief + _attach_inline(atts, dir_parts, att_dirs,
                                         n_skipped=len(dir_skipped))
                  + _cap_block + _mk)
     else:
         brief = brief + _cap_block + _mk
-        brief_refs = brief
+        brief_refs = brief_refs_full = brief
     # The default used to be a single sentence, and it reached only the HTTPS channel. Depth,
     # source discipline and output language were therefore left to whatever each model defaults
     # to - which for a terminal-tuned CLI is "short, fast, few tool calls". base-depth.md is the
@@ -9330,7 +9368,8 @@ def main():
             # was passed; then REFS_KINDS read the documents from disk and everyone else gets
             # them inline. One variable per channel, chosen by capability, never by name.
             use_refs = bool((atts or att_dirs) and kind in REFS_KINDS)
-            cbrief = brief_refs if use_refs else brief
+            cbrief = (((brief_refs_full if _tools_full(kind, cname, a, reg) else brief_refs)
+                       if use_refs else brief))
             # Folder grants point at the VETTED COPY, never the original dir (R75): granting
             # the original would hand agy exactly the unscanned files the copy exists to fence.
             att_parents = (sorted({os.path.dirname(pth) for pth, _t in atts}
@@ -9498,7 +9537,8 @@ def main():
                 outfile = os.path.join(a.out, cname.upper() + ".md")
                 workdir = os.path.join(a.out, cname + "-ws")
                 use_refs = bool((atts or att_dirs) and kind in REFS_KINDS)
-                cbrief = brief_refs if use_refs else brief
+                cbrief = (((brief_refs_full if _tools_full(kind, cname, a, reg) else brief_refs)
+                           if use_refs else brief))
                 att_parents = (sorted({os.path.dirname(pth) for pth, _t in atts}
                                       | {sd for sd, _d in _snap_pairs})
                                if use_refs else None)

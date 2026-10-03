@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.100.2 — 2026-10-03
+
+- **Reviewers that got files with `--attach` are no longer told to skip their shell.** The
+  attachment section said "You have no write tools" and "Do not run shell commands on these
+  paths" to every CLI reviewer - also to the ones whose shell is on (bypass, or a CLI that always
+  runs every tool), while 1.100.0 told Grok the opposite in the same brief. Channels with their
+  tools on now get a contract that keeps the material read-only and asks them to verify with
+  read-only commands (git, glab/gh, the wrappers the brief names); channels without a shell keep
+  the old wording.
+
 ## 1.100.1 — 2026-10-03
 
 - **Kimi Code CLI (`kimik3free`) works again.** 1.100.0 added `--auto`, which the Kimi CLI refuses
