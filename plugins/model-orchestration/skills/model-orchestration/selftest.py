@@ -6993,6 +6993,35 @@ def suite_r86_self_update():
                       "DISABLE_AUTOUPDATER in settings env blocks it; FORCE_AUTOUPDATE_PLUGINS "
                       "lifts the block", repr(b))
             os.environ.update(_cc_saved)
+            # R136 I-3: --status that finds a newer release must leave it PENDING, so the next
+            # session start acts on it. Measured live on v1.99.0: --status refreshed the daily
+            # clock (resolve_target wrote last_check_utc) and recorded nothing, so the session
+            # start said nothing for up to a day - while --status promised the update «at the
+            # next session start».
+            _names = ("STAMP_PATH", "fetch_latest_tag", "check_agy_stale", "fetch_release_notes",
+                      "read_local_version", "_fetch_tags", "is_check_disabled")
+            _saved = {n: getattr(uc, n) for n in _names}
+            with tempfile.TemporaryDirectory() as td:
+                try:
+                    uc.STAMP_PATH = os.path.join(td, "stamp.json")
+                    uc.read_local_version = lambda: "1.0.0"
+                    uc.check_agy_stale = lambda: False
+                    uc.fetch_release_notes = lambda *a, **k: ""
+                    uc.is_check_disabled = lambda: False
+                    _tags = [{"name": "v1.1.0", "commit": {"sha": "a" * 40}}]
+                    uc._fetch_tags = lambda st, timeout, use_etag=True: (_tags, 200)
+                    uc.fetch_latest_tag = lambda st: ("v1.1.0", st)
+                    uc.write_stamp({"installed_version": "1.0.0", "last_check_utc": uc._iso_now()})
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        uc.cmd_status(None)
+                    _act = uc.do_check()[0]
+                    check(_act == "cached"
+                          and "1.1.0" in (uc.read_stamp().get("pending_message") or ""),
+                          "R136 I-3: --status that finds a newer release leaves it pending, so "
+                          "the next session start acts on it (not silent for a day)", repr(_act))
+                finally:
+                    for _n, _v in _saved.items():
+                        setattr(uc, _n, _v)
             # R136: upgrade.py moves backups OUT of a skills folder and keeps the newest three.
             import upgrade as _up2
             with tempfile.TemporaryDirectory() as root:

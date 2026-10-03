@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.99.1 — 2026-10-03
+
+* **R136 I-3 — `--status` no longer delays the automatic update by a day.** Measured live on
+  1.99.0: `--status` read the newest release and reset the daily check clock, but did not record
+  the waiting release. The next session start therefore stayed silent and installed nothing for up
+  to 24 hours, while `--status` itself promised the update «at the next session start». Now
+  `--status` records the waiting release, so the next session start installs it (script install)
+  or reports it (plugin install), and only the session-start check moves the daily clock.
+* Verified end to end on 1.99.0, against the real GitHub release with Claude Code 2.1.285:
+  * the session-start hook installed by `upgrade.py` updated a script install by itself;
+  * the person sees «updated automatically: X -> Y» in the interactive window;
+  * an install with Claude Code's auto-update on stays quiet and leaves the update to Claude Code.
+
 ## 1.99.0 — 2026-10-03
 
 * **R136 — automatic updates, and an update notice that reaches a person.**

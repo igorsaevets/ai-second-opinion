@@ -732,7 +732,8 @@ def resolve_target(tag=None, timeout=API_TIMEOUT_SECONDS):
     if not entry:
         return (None, None, "the tag list has no release-shaped tag")
     stamp["tags_latest"], stamp["tags_latest_sha"] = entry["name"], entry["sha"]
-    stamp["last_check_utc"] = _iso_now()
+    # R136 I-3: no `last_check_utc` here. Only do_check owns the daily clock: this read records
+    # no pending notice, so refreshing the clock from it silenced the session start for a day.
     stamp["consecutive_failures"], stamp["last_error"] = 0, None
     write_stamp(stamp)
     return (entry["name"], entry["sha"], None)
@@ -1609,6 +1610,14 @@ def cmd_status(args):
             "remove %s=0 / %s / %s from it" % (DISABLE_ENV, NO_UPDATE_NOTIFIER_ENV, CI_ENV))
     target, _sha, why = resolve_target()
     behind = bool(target and local and is_newer(target, local))
+    if target and not is_check_disabled():
+        # R136 I-3: record what was found the way the session-start check does (latest_seen, a
+        # pending notice), so «the automatic update brings it at the next session start» below
+        # is true. Measured on v1.99.0: without this the next session start stayed silent.
+        try:
+            do_check(force=True)
+        except Exception:                                # noqa: BLE001 - a status report never dies here
+            pass
     if not target:
         row("warn", "newest", "could not ask GitHub: %s" % why)
     elif not behind:
