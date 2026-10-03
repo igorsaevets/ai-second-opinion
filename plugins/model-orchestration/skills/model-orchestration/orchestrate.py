@@ -2388,9 +2388,9 @@ def cli_bypass_active(name, args, reg):
       2. `--bypass-permissions <name>` on the command line names this channel by canonical
          name -> True. A channel named on the flag but without the field is ignored (a
          warning is printed once at plan time by the caller, not here).
-      3. The channel's `bypass_permissions` value in `channels.json`. Registered as `true`
-         for cclopus46 (always-on since v1.61.0, see call_claudecli), `false` for the four
-         opt-in CLI channels (codex, grokbuild, three agy channels).
+      3. The channel's `bypass_permissions` value in `channels.json`. Read the live
+         values from the registry, never from this line (R137 И-2: it said `false` for
+         codex, grokbuild and agy while all three were `true`).
 
     Returns None when the channel's registry entry does NOT declare `bypass_permissions` at
     all - opencode's `run` subcommand is already YOLO by default and has no such flag, so
@@ -3042,6 +3042,49 @@ def hermes_bin():
 HERMES_TOOLSETS = "web"
 
 
+# R137 И-2 (2026-10-03): what Grok Build gets when bypass is on. MEASURED on grok 1.0.46
+# (`--output-format streaming-messages-json`, the `system/init` frame lists the toolset):
+#   * no `--tools` -> 27 tools, incl. read_file, list_dir, grep, run_terminal_command (shell),
+#     search_replace, write, web_search, web_fetch and the MCP gateway search_tool/use_tool over
+#     the 8 MCP servers this machine has (cloakbrowser, crawl4ai, firecrawl, github, gitlab, jina,
+#     playwright, scrapling - grok imports ~/.claude.json's servers by default);
+#   * the web-only allowlist this channel ran with since R45 -> 3 tools, no gateway. That is why
+#     it opened no file and no GitLab page in P278/P278b/P279 while the log said «every tool».
+#   * a `--deny` rule HIT is NOT fatal: the model gets «Denied by permission policy» and carries
+#     on (probe_deny.py: denied decoy unread, allowed nonce read, end_turn). A permission-mode
+#     denial under dontAsk WAS fatal in R45 - that is why the non-bypass mode stays web-only.
+#   * the docs call the shell tool `run_terminal_cmd`; the init frame says `run_terminal_command`.
+#     `--tools` accepts the docs spelling; the init spelling inside `--tools` silently widened the
+#     allowlist to 21 tools. Neither is used below: bypass passes NO allowlist at all.
+# 🔴 Remove a tool FAMILY whole: dropping scheduler_create/delete but keeping scheduler_list
+# killed session start (`Requirements unsatisfied ... GrokBuild:scheduler_list`, 0.8 s, R137 И-2).
+# Removed: tools with no use in an unattended review that can stall it (a question to a user who
+# is not there, plan mode), outlive it (scheduled jobs), leave the machine (feedback to xAI) or
+# spend the subscription on media. Denied by rule: the metered MCP server (the operator's own
+# Claude Code denies it too) and credential files - a reviewer that reads one ships it to a
+# vendor, which the payload gate refuses absolutely for the brief itself.
+GROK_BYPASS_REMOVED_TOOLS = ("ask_user_question", "enter_plan_mode", "exit_plan_mode",
+                             "scheduler_create", "scheduler_delete", "scheduler_list",
+                             "send_feedback",
+                             "image_gen", "image_edit", "image_to_video", "reference_to_video")
+GROK_BYPASS_DENY_RULES = ("MCPTool(firecrawl__*)", "Read(**/.env*)", "Read(**/.ssh/**)",
+                          "Read(**/.gnupg/**)", "Read(**/.grok/config.toml)",
+                          "Read(**/.codex/config.toml)")
+
+
+def _grok_tools_note(bypass, file_refs):
+    """The log line's account of the toolset - written from the same branch that builds argv."""
+    if bypass:
+        return (", tools: FULL (no allowlist: files at any path, grep, shell, web, MCP gateway); "
+                "removed %d, denied: %s" % (len(GROK_BYPASS_REMOVED_TOOLS),
+                                            ", ".join(GROK_BYPASS_DENY_RULES)))
+    if file_refs:
+        return (", tools: web + READ (read_file, list_dir) for the attached paths; "
+                "no shell, no grep, no MCP")
+    return (", tools: WEB ONLY (web_search, web_fetch, todo_write) - no files, no shell, no MCP; "
+            "bypass_permissions grants them")
+
+
 def grok_bin():
     return _resolve_bin("GROK_BIN", "grok.exe",
                         [os.path.join(os.environ.get("USERPROFILE", ""), ".grok", "bin")])
@@ -3119,7 +3162,22 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     # tells the agent it has NO file tools - which becomes a lie the moment refs mode grants
     # read_file/list_dir, and an agent told its tools will refuse does not use the tools it was
     # given. The refs variant grants reads and re-states the no-write contract.
-    if file_refs:
+    if bypass:
+        NO_REPO = (
+            "OPERATING CONTEXT — read this first.\n"
+            "Your working directory is deliberately empty; the material under review is named in "
+            "the brief below by ABSOLUTE paths, URLs and commands. In this run you have your FULL "
+            "toolset with permission prompts bypassed: read_file / list_dir / grep at any "
+            "absolute path, run_terminal_command for shell commands (git, glab, gh, ssh, python - "
+            "read-only use), web_search / web_fetch, and this machine's MCP servers through "
+            "search_tool / use_tool (the metered firecrawl server is denied). Credential files "
+            "(.env*, .ssh, .gnupg, CLI configs) are denied by rule - do not try to read them. "
+            "Verify claims yourself with these tools instead of reasoning from the brief alone, "
+            "and say which sources you could not open. READ ONLY: modify, create or delete "
+            "nothing outside a scratch folder under the system TEMP directory, and never write to "
+            "a remote system (no push, no merge, no MR or issue comments). Write the finished "
+            "review in a single reply.\n\n---\n\n")
+    elif file_refs:
         NO_REPO = (
             "OPERATING CONTEXT — read this first.\n"
             "You are NOT pointed at a repository; your working directory is deliberately empty. "
@@ -3221,19 +3279,29 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
            "--verbatim", "--output-format", "json",
            "--permission-mode", ("bypassPermissions" if bypass else "dontAsk"),
            "--allow", "WebFetch"]
+    if bypass:
+        # R137 И-2: the allowlist and the gateway removal above are the NON-bypass contract (an
+        # untrusted brief, prompts on, every denial fatal). Under bypass the operator has chosen
+        # to trust the run, and Igor 2026-10-03: «Надо что бы выдавались все типы инструментов,
+        # какие они захотят, включая любые MCP». Constants and measurements: GROK_BYPASS_*.
+        for flag in ("--tools", "--disallowed-tools"):
+            i = cmd.index(flag)
+            del cmd[i:i + 2]
+        cmd += ["--disallowed-tools", ",".join(GROK_BYPASS_REMOVED_TOOLS)]
+        for rule in GROK_BYPASS_DENY_RULES:
+            cmd += ["--deny", rule]
     if model:
         cmd += ["-m", model]
     if effort:
         cmd += ["--reasoning-effort", effort]
     if bypass:
         log("  [%s] PERMISSIONS BYPASSED for this call: --permission-mode bypassPermissions "
-            "(replaces dontAsk); every tool, incl. bash, runs without prompting. SAFETY DIRECTIVE "
+            "(replaces dontAsk); FULL toolset, no allowlist (R137 И-2). SAFETY DIRECTIVE "
             "(no-delete + three-step ritual) is prepended to the brief." % name)
     log("  [%s] Grok Build CLI on the subscription (no API key); depth --reasoning-effort=%s, "
         "brief via --prompt-file (%d chars), neutral cwd, memory off%s"
         % (name, effort or "vendor default", len(text_in),
-           ", file refs: READ tools granted (read_file, list_dir), no write tools"
-           if file_refs else ""))
+           _grok_tools_note(bypass, file_refs)))
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
@@ -3452,7 +3520,7 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           input=text_in,
+                           input=text_in, cwd=neutral_cwd(),
                            timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
@@ -4192,7 +4260,7 @@ def _kimi_node_argv(binary):
 
 
 def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
-                 timeout=2400, name="kimik3free", workdir=None):
+                 timeout=2400, name="kimik3free", workdir=None, bypass=False):
     """Kimi Code CLI (Moonshot AI) — free via AIHubMix provider, AIHUBMIX_API_KEY.
 
     Probed 2026-10-02 on kimi v2.1.1 (@moonshot-ai/kimi-code):
@@ -4217,7 +4285,7 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
     Neutral cwd via Python cwd= to prevent loading any project's agent configs.
     """
     binary = kimi_bin()
-    text_in = ((system.strip() + "\n\n---\n\n") if system else "") + brief
+    text_in = ((system.strip() + "\n\n---\n\n") if system else "") + _with_bypass_safety(brief, bypass)
 
     base = _kimi_node_argv(binary)
     cmd = (base or [binary]) + ["-p", text_in, "--output-format", "stream-json"]
@@ -4247,6 +4315,13 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
                                                  if base is None else "over the argv cap")
 
     ncwd = neutral_cwd()
+    if bypass:
+        # R137 И-2: Kimi Code 2.1.1 `--auto` = «Never Ask mode: never interrupts you; everything
+        # runs and is decided automatically» (kimi --help). `-p` alone left the approval policy at
+        # the CLI default, which nobody had measured for a headless run.
+        cmd.append("--auto")
+        log("  [%s] PERMISSIONS BYPASSED for this call: --auto (Never Ask mode) - every tool runs "
+            "without asking; SAFETY DIRECTIVE prepended to the brief." % name)
     log("  [%s] Kimi Code CLI, free via AIHubMix; %s (%d chars)" % (name, how, len(text_in)))
     t0 = time.time()
     try:
@@ -7269,6 +7344,31 @@ ENVIRONMENT CONSTRAINTS (from the harness, non-negotiable):
 # Select-String and died on the denial). Same asymmetry as July's "MCP tool descriptions
 # outrank the agent prompt": agent.md is the weak position, the user turn is the strong one.
 
+AGY_ENV_CONSTRAINT_BYPASS = """
+
+---
+
+ENVIRONMENT CONSTRAINTS (from the harness, non-negotiable):
+
+- This is a non-interactive run. No human is present and nothing can be approved. Never end
+  with an implementation plan or a request for confirmation - return the completed deliverable
+  itself. A plan with the end marker under it is still a failed run.
+- Permission prompts are BYPASSED in this run: terminal/shell commands, file reads at absolute
+  paths and your MCP tools all run without approval. Use them to verify claims yourself (read
+  the files, run the read-only commands the brief names, query GitLab or GitHub read-only)
+  instead of reasoning from the brief alone. READ ONLY: change, create or delete nothing outside
+  a scratch folder under the system TEMP directory, and never write to a remote system.
+"""
+# R137 И-2 (2026-10-03): AGY_ENV_CONSTRAINT says the shell is DENIED, and it rode EVERY brief -
+# including bypassed runs, where `--dangerously-skip-permissions` lets the shell run (R57). The
+# brief outranks everything (measured 2/2), so agy obeyed the false sentence: in P278b it ran no
+# glab and no read-only wrapper the brief named (E-152). The true sentence goes with the true flag.
+
+
+def _agy_constraint_for(bypass):
+    return AGY_ENV_CONSTRAINT_BYPASS if bypass else AGY_ENV_CONSTRAINT
+
+
 AGY_PLAN_ESCALATION = """
 
 ---
@@ -7708,7 +7808,7 @@ def _agy_once(brief, marker, workdir, outfile, model=None, effort="high", timeou
     # R88 (2026-09-14): bypass mode PREPENDS CLI_BYPASS_SAFETY_PROMPT before _with_system so the
     # safety rules sit at the very front of the payload, then the shared system layer, then the
     # brief. The env-constraint tail still lands after the brief, keeping the position rules.
-    brief = _with_system(_with_bypass_safety(brief, bypass), system) + AGY_ENV_CONSTRAINT
+    brief = _with_system(_with_bypass_safety(brief, bypass), system) + _agy_constraint_for(bypass)
     if marker:
         brief += ("\n\nReminder: the very LAST line of your reply must be exactly:\n%s\n"
                   % marker)
@@ -9341,7 +9441,8 @@ def main():
                                         model=p.get("model"), effort=p.get("effort"),
                                         system=_system_for(system, p),
                                         timeout=_seconds(p.get("timeout"), 2400),
-                                        name=cname, workdir=workdir)
+                                        name=cname, workdir=workdir,
+                                        bypass=bool(cli_bypass_active(cname, a, reg)))
             else:
                 # Named in the registry, unknown to the code. A log line is NOT enough: a log
                 # line scrolls, and every downstream consumer - the "N/M channels returned"
@@ -9497,7 +9598,8 @@ def main():
                         model=p.get("model"), effort=p.get("effort"),
                         system=_system_for(system, p),
                         timeout=_seconds(p.get("timeout"), 2400), name=cname,
-                        workdir=os.path.join(a.out, cname + "-ws"))
+                        workdir=os.path.join(a.out, cname + "-ws"),
+                        bypass=bool(cli_bypass_active(cname, a, reg)))
                 else:
                     log("  [%s] cannot retry: unknown kind %r" % (cname, kind))
             for cname, f in _rjobs.items():

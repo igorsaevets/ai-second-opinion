@@ -7193,7 +7193,7 @@ def main():
                   suite_r109_snapshot_classifier,
                   suite_r121_panel_retry,
                   suite_r130_qwen_home_override,
-                  suite_r137_kimi_argv):
+                  suite_r137_kimi_argv, suite_r137_i2_cli_tools):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -10450,6 +10450,119 @@ def suite_r137_kimi_argv():
         o.subprocess.run, o.kimi_bin, o._kimi_node_argv, o.neutral_cwd = saved
         shutil.rmtree(td, ignore_errors=True)
 
+
+
+def suite_r137_i2_cli_tools():
+    """R137 И-2 (2026-10-03): CLI reviewers get the tools their bypass flag promises.
+
+    grokbuild opened no file and no GitLab page in three iron panels: the allowlist was web-only
+    while the log said «every tool, incl. bash». agy was told «shell commands are DENIED» on runs
+    where bypass let the shell run. kimi ran `-p` at an unmeasured approval default; opencode
+    inherited the launch folder. Each invariant below is asserted on the argv / text the harness
+    actually builds, never on a description of it.
+    """
+    section("R137 И-2 CLI reviewers: full toolset under bypass, truthful text, neutral cwd")
+    import orchestrate as o
+    import inspect
+    import tempfile
+    td = tempfile.mkdtemp(prefix="r137i2-")
+    seen = []
+
+    class _GrokDone:
+        returncode = 0
+        stdout = '{"text": "ok\\nR137-DONE", "stopReason": "end_turn"}'
+        stderr = ""
+
+    class _KimiDone:
+        returncode = 0
+        stdout = '{"role": "assistant", "content": "ok\\nR137-DONE"}\n'
+        stderr = ""
+
+    def _fake(result):
+        def run(cmd, **kw):
+            seen.append((list(cmd), dict(kw)))
+            return result
+        return run
+
+    saved = (o.subprocess.run, o.grok_bin, o.kimi_bin, o._kimi_node_argv, o.neutral_cwd,
+             o.opencode_bin)
+    try:
+        o.neutral_cwd = lambda: td
+        o.grok_bin = lambda: "grok.exe"
+        o.subprocess.run = _fake(_GrokDone())
+        wd1 = os.path.join(td, "grok-bypass")
+        o.call_grokcli("BRIEF", "R137-DONE", wd1, os.path.join(td, "G1.md"), bypass=True)
+        c1 = seen[-1][0]
+        dis = c1[c1.index("--disallowed-tools") + 1] if "--disallowed-tools" in c1 else ""
+        denies = [c1[i + 1] for i, x in enumerate(c1) if x == "--deny"]
+        check("--tools" not in c1 and "search_tool" not in dis and "use_tool" not in dis
+              and dis == ",".join(o.GROK_BYPASS_REMOVED_TOOLS)
+              and denies == list(o.GROK_BYPASS_DENY_RULES)
+              and c1[c1.index("--permission-mode") + 1] == "bypassPermissions",
+              "R137 И-2: grok under bypass gets NO allowlist, keeps the MCP gateway, removes only "
+              "the unattended-run tools and denies firecrawl + credential paths",
+              repr(c1)[:300])
+        check("MCPTool(firecrawl__*)" in denies and "Read(**/.ssh/**)" in denies,
+              "R137 И-2: the metered MCP server and ~/.ssh stay denied under bypass", repr(denies))
+        p1 = open(os.path.join(o._ascii_safe_workdir(os.path.abspath(wd1), "grokbuild",
+                                                     "grokbuild"), "PROMPT.md"),
+                  encoding="utf-8").read()
+        check("FULL toolset" in p1 and "run_terminal_command" in p1
+              and "no write, edit or shell tools" not in p1 and "tools will refuse" not in p1,
+              "R137 И-2: the bypass preamble tells grok what it has (no «tools will refuse»)",
+              p1[:160])
+        wd2 = os.path.join(td, "grok-plain")
+        o.call_grokcli("BRIEF", "R137-DONE", wd2, os.path.join(td, "G2.md"), bypass=False)
+        c2 = seen[-1][0]
+        check(c2[c2.index("--tools") + 1] == "web_search,web_fetch,todo_write"
+              and c2[c2.index("--disallowed-tools") + 1] == "search_tool,use_tool"
+              and c2[c2.index("--permission-mode") + 1] == "dontAsk" and "--deny" not in c2,
+              "R137 И-2: grok WITHOUT bypass keeps the R45 web-only contract (every denial fatal)",
+              repr(c2)[:300])
+        check("WEB ONLY" in o._grok_tools_note(False, False)
+              and "FULL" in o._grok_tools_note(True, False)
+              and "READ" in o._grok_tools_note(False, True),
+              "R137 И-2: the grok log line names the toolset the same branch built",
+              o._grok_tools_note(False, False))
+
+        b = o._agy_constraint_for(True)
+        check("BYPASSED" in b and "DENIED here" not in b
+              and o._agy_constraint_for(False) is o.AGY_ENV_CONSTRAINT
+              and "_agy_constraint_for(bypass)" in inspect.getsource(o._agy_once),
+              "R137 И-2: agy is no longer told «shell DENIED» on a bypassed run (and still is "
+              "under --sandbox)", b[:120])
+
+        o.kimi_bin = lambda: "kimi"
+        o._kimi_node_argv = lambda bb: ["node", "main.mjs"]
+        o.subprocess.run = _fake(_KimiDone())
+        o.call_kimicli("BRIEF", "R137-DONE", os.path.join(td, "K1.md"),
+                       workdir=os.path.join(td, "k1"), bypass=True)
+        k1 = seen[-1][0]
+        o.call_kimicli("BRIEF", "R137-DONE", os.path.join(td, "K2.md"),
+                       workdir=os.path.join(td, "k2"), bypass=False)
+        k2 = seen[-1][0]
+        kp = k1[k1.index("-p") + 1]
+        check("--auto" in k1 and "--auto" not in k2
+              and kp.startswith(o.CLI_BYPASS_SAFETY_PROMPT[:40]),
+              "R137 И-2: kimi under bypass runs --auto (Never Ask) with the SAFETY DIRECTIVE; "
+              "without bypass neither", repr(k1[:4])[:200])
+
+        o.opencode_bin = lambda: "opencode"
+        o.subprocess.run = _fake(_GrokDone())
+        o.call_opencode("BRIEF", "R137-DONE", os.path.join(td, "O1.md"))
+        check(seen[-1][1].get("cwd") == td,
+              "R137 И-2: opencode starts in the neutral cwd like every other CLI kind",
+              repr(seen[-1][1].get("cwd")))
+    finally:
+        (o.subprocess.run, o.grok_bin, o.kimi_bin, o._kimi_node_argv, o.neutral_cwd,
+         o.opencode_bin) = saved
+
+    reg = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                      "channels.json"), encoding="utf-8"))
+    note = reg["channels"]["grokbuild"].get("_bypass_permissions", "")
+    check(reg["channels"]["kimik3free"].get("bypass_permissions") is True
+          and "NO `--tools` allowlist" in note and "R88 (2026-09-14) opt-in. Default off" not in note,
+          "R137 И-2: the registry says what the code does (grok note, kimi field)", note[:120])
 
 
 if __name__ == "__main__":

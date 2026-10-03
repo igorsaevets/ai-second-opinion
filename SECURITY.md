@@ -119,14 +119,16 @@ CLI bills that key instead of the claude.ai login, and this channel is subscript
 ## Bypass opt-in for the other CLI channels (R88, v1.63.0)
 
 Since v1.63.0 the four other CLI channels — `codex`, `grokbuild`, `agy31pro`, `agy36flash`,
-`agy38flash` — carry a `bypass_permissions` field in `channels.json` that ships **false**. When you
-set it to `true`, or pass `--bypass-permissions <name>` / `--all-bypass` on the command line, the
+`agy38flash` — carry a `bypass_permissions` field in `channels.json`. It shipped **false** at first and
+ships **true** since R114 (2026-09-21); read the live value in `channels.json`, not here. When it is
+`true`, or you pass `--bypass-permissions <name>` / `--all-bypass` on the command line, the
 channel launches with its vendor's own bypass flag:
 
 | Channel | Kind | Flag added under bypass | Flag replaced |
 |---|---|---|---|
 | `codex` | codex-cli 0.154.0 | `--dangerously-bypass-approvals-and-sandbox` | `--sandbox read-only` |
-| `grokbuild` | grok 1.0.30 | `--permission-mode bypassPermissions` | `--permission-mode dontAsk` |
+| `grokbuild` | grok 1.0.46 | `--permission-mode bypassPermissions`, and since v1.100.0 NO `--tools` allowlist (full toolset + MCP gateway; firecrawl MCP and credential files denied by rule) | `--permission-mode dontAsk` + the web-only allowlist |
+| `kimik3free` | kimi 2.1.1 | `--auto` (Never Ask mode, since v1.100.0) | — |
 | `agy31pro` / `36flash` / `38flash` | agy 1.2.2 | `--dangerously-skip-permissions` | `--sandbox` |
 | `cclopus46` | claude 2.1.270 | `--permission-mode bypassPermissions` (always on since v1.61.0) | — |
 | `ocspark13free` | opencode | (no field on purpose — `opencode run` is already YOLO by default) | — |
@@ -136,8 +138,9 @@ default, so the concept has no per-channel switch to toggle. The dispatcher pass
 to the channels that carry the field.
 
 **What bypass means on the machine that runs the call.** Every shell command, every file edit
-anywhere, every web fetch runs without a prompt. On `agy` and `cclopus46`, every MCP server in the
-user's config runs without a prompt too, with its credentials. On `grokbuild`, `read_file` is
+anywhere, every web fetch runs without a prompt. On `agy`, `cclopus46` and, since v1.100.0, `grokbuild`
+(through its `search_tool`/`use_tool` gateway; the metered firecrawl server denied), every MCP server
+in the user's config runs without a prompt too, with its credentials. On `grokbuild`, `read_file` is
 **not** bounded by `--cwd` (measured — it served files out of `~/.grok/skills/` with a neutral cwd
 in force), so bypass hands the model this machine's readable files. This is the operator's
 decision to trust the reviewer with the mechanical guard OFF, not a permission the tool grants

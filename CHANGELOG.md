@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.100.0 — 2026-10-03
+
+- **Grok Build reviewers can now actually check the work.** When `bypass_permissions` is on (the
+  default for `grokbuild`), the Grok Build CLI channel gets its full toolset: it can read files at
+  the paths a brief names, list and search folders, run shell commands (git, glab, gh, ssh,
+  python), search the web, fetch pages, and use the MCP servers configured on the machine. Until
+  now it had only web search and page fetching, so in code reviews it gave verdicts without
+  opening a single file, while the log claimed it had every tool. A few things stay blocked on
+  purpose: the paid Firecrawl MCP server, credential files (`.env*`, `.ssh`, `.gnupg`, CLI
+  configs), and tools that make no sense in an unattended run (asking the user a question, plan
+  mode, scheduled jobs, feedback to xAI, image and video generation). With bypass off, the channel
+  stays web-only as before, and the log now says so.
+- **Antigravity (agy) is no longer told that its shell is forbidden when bypass is on.** The brief
+  said "terminal commands are DENIED" even on runs that allowed them, so agy never ran the
+  commands a review asked for.
+- **Kimi Code CLI (`kimik3free`) runs in "Never Ask" mode (`--auto`) when bypass is on**, with the
+  same safety directive the other bypassed channels get, so its tools run without approval
+  prompts.
+- **opencode channels now start in a neutral empty folder**, like every other CLI channel. Before,
+  they started in whatever folder the panel was launched from, where a CLI can pick up that
+  project's instruction files.
+
 ## 1.99.2 — 2026-10-03
 
 * **The Kimi Code CLI channel gets the whole brief.** On Windows npm installs `kimi.cmd`, and a
