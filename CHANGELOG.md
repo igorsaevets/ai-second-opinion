@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.102.3 — 2026-10-04
+
+The session-start hook backlog from the R139 panel (MiMo v2.6 Flash).
+
+- **One test for «this hook is ours».** `--install-hook`, `--uninstall-hook`, `--status` and the session-start heal used three different tests (a path shape, a case-sensitive substring, a case-insensitive one). They disagreed: an entry spelled with another letter case, forward slashes or through a link to the folder got a duplicate on install and survived uninstall, and install removed a neighbouring hook that runs `update_check.py.bak`. Now one function decides, and "this very copy" compares resolved paths.
+- **install and uninstall no longer write over a concurrent change.** They read `settings.json` at the start and wrote it at the end. Install also runs from the automatic update at session start, while Claude Code is starting. Both now write only while the file still holds what they read; otherwise they read again (3 attempts), and a read that fails once (an antivirus scan) is retried.
+- **A hook whose Python is gone heals.** The hook starts Python by absolute path; when that Python was uninstalled, every session start printed an error and nothing fixed it. Any working copy at session start and the end of the next real round now point such an entry at the Python running at that moment, and say so. On Windows a deleted `C:\PythonXY\` counts as gone (a mounted drive root is enough); an unmounted drive or a network path is left alone.
+- `TMPDIR=$HOME` no longer makes the home folder "temporary" (it refused every install when `CLAUDE_CONFIG_DIR` was elsewhere). `--uninstall-hook` on an unreadable or broken `settings.json` refuses instead of saying "no settings.json". Settings writes are flushed to disk before the rename.
+- Selftest: `suite_r139_i3_hook_identity` (11 checks; behaviour first, each guard with a control that fails without it).
+
 ## 1.102.2 — 2026-10-04
 
 Hotfix from the rest of the cheap panel on 1.102.0 (MiMo v2.6 Pro, MiMo v2.6 Flash, Kimi K3 via NVIDIA), plus a live check of the 1.102.1 Kimi environment allowlist.

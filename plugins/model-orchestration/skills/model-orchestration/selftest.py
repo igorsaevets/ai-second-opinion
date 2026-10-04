@@ -7304,17 +7304,17 @@ def suite_r139_hook_hygiene():
         # ---- (d) changed under us -> no write; the uninstall path prunes too -----------------
         with open(sp, "w", encoding="utf-8") as f:
             json.dump({"hooks": {"SessionStart": [{"hooks": [ours(gone)]}]}}, f)
-        real_prune = ucl.prune_dead_hooks
+        real_prune = ucl.heal_dead_hooks
 
         def racing(settings, path):
             r = real_prune(settings, path)
             with open(sp, "w", encoding="utf-8") as f:
                 f.write('{"written": "by Claude Code meanwhile"}')
             return r
-        ucl.prune_dead_hooks = racing
-        r = ucl.prune_settings_file(sp)
-        ucl.prune_dead_hooks = real_prune
-        check(r == [] and "meanwhile" in open(sp, encoding="utf-8").read(),
+        ucl.heal_dead_hooks = racing
+        r = ucl.heal_settings_file(sp)
+        ucl.heal_dead_hooks = real_prune
+        check(r == ([], []) and "meanwhile" in open(sp, encoding="utf-8").read(),
               "a file that changed while we looked is NOT overwritten (the next start retries)")
         with open(sp, "w", encoding="utf-8") as f:
             json.dump({"hooks": {"SessionStart": [{"hooks": [ours(tmp_s), ours(gone),
@@ -7339,7 +7339,7 @@ def suite_r139_hook_hygiene():
         except (OSError, NotImplementedError):
             link = None                   # Windows without the symlink privilege: CI covers it
         if link:
-            r = ucl.prune_settings_file(link)
+            r = ucl.heal_settings_file(link)[0]
             check(len(r) == 1 and os.path.islink(link) and scripts(target) == [],
                   "a symlinked settings.json is written THROUGH the link - the link survives")
             with open(target, "w", encoding="utf-8") as f:
@@ -7454,6 +7454,300 @@ def suite_r139_hook_hygiene():
     check(roots and all(os.path.dirname(r) != r for r in roots),
           "a temp variable pointing at a drive / filesystem root is ignored (else every copy on "
           "that drive would count as temporary)", repr(roots))
+
+
+def suite_r139_i3_hook_identity():
+    """R139 И-3 (2026-10-04): the MiMo Flash backlog from the R139 panel. (1) ONE test for «this
+    hook is ours / is this very copy» (_hook_script, _is_this_copy): install, uninstall and
+    --status used three - a path shape, a case-sensitive substring, a case-insensitive one - and
+    disagreed on a path spelled another way, a link to the folder, a `.bak` beside the script.
+    (2) install and uninstall write under the changed-under-us guard the session-start prune
+    already had; install also runs from the automatic update at session start, beside Claude
+    Code. (3) a hook whose INTERPRETER is gone is re-pointed by any live copy at session start
+    and by the next real round. (4) TMPDIR=$HOME is not a temp folder. Behaviour checks come
+    first in each block and run on any version of the code; each guard has a control that shows
+    the same scenario failing without it."""
+    section("R139 И-3. one hook identity, guarded writes, a dead interpreter")
+    import importlib.util as _ilu
+    import types
+
+    def load(path, name):
+        spec = _ilu.spec_from_file_location(name, path)
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def write(path, data):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+    def hooks_of(path):
+        data = json.load(open(path, encoding="utf-8"))
+        return [h for e in (data.get("hooks") or {}).get("SessionStart") or []
+                for h in e.get("hooks") or []]
+
+    td = tempfile.mkdtemp(prefix="orch-r139i3-")
+    link = os.path.join(td, "link")
+    try:
+        live = os.path.join(td, "inst", "skills", "model-orchestration")
+        renamed = os.path.join(td, "inst2", "skills", "second-opinion")
+        other = os.path.join(td, "other", "skills", "model-orchestration")
+        cfg = os.path.join(td, "cfg")
+        for p in (live, renamed, other, cfg):
+            os.makedirs(p)
+        for p in (live, renamed, other):
+            shutil.copy2(os.path.join(HERE, "update_check.py"), p)
+        uc = load(os.path.join(live, "update_check.py"), "uc_r139i3_live")
+        ucr = load(os.path.join(renamed, "update_check.py"), "uc_r139i3_renamed")
+        sp = os.path.join(cfg, "settings.json")
+        uc._settings_path = ucr._settings_path = lambda: sp
+        me = os.path.abspath(os.path.join(live, "update_check.py"))
+        ren = os.path.abspath(os.path.join(renamed, "update_check.py"))
+        oth = os.path.join(other, "update_check.py")
+        bak = me + ".bak"
+        key = os.path.normcase(os.path.realpath(me))
+        py = uc._hook_python()
+
+        def ex(path, cmd=None):
+            return {"type": "command", "command": cmd or py, "args": [path, "--hook"],
+                    "timeout": uc.AUTO_HOOK_TIMEOUT_SECONDS}
+
+        def mine_in(path):
+            """This copy's entries, judged by the TEST (the resolved path), not by the module."""
+            out = []
+            for h in hooks_of(path):
+                cand = [str(x) for x in h.get("args") or []] + re.findall(
+                    r'"([^"]+)"', str(h.get("command") or ""))
+                if any(c.lower().endswith("update_check.py")
+                       and os.path.normcase(os.path.realpath(c)) == key for c in cand):
+                    out.append(h)
+            return out
+
+        def racing_json(times):
+            """The module's `json`, except that each of its first `times` parses is followed by
+            ANOTHER writer's change to settings.json - the moment between our read and our write,
+            on any version of the code."""
+            fired = []
+
+            def race(result):
+                if len(fired) < times:
+                    fired.append(1)
+                    d = json.load(open(sp, encoding="utf-8")) if os.path.exists(sp) else {}
+                    d.setdefault("env", {})["WRITTEN_MEANWHILE"] = str(len(fired))
+                    write(sp, d)
+                return result
+            ns = types.SimpleNamespace(dump=json.dump, dumps=json.dumps,
+                                       JSONDecodeError=json.JSONDecodeError)
+            ns.load = lambda *a, **k: race(json.load(*a, **k))
+            ns.loads = lambda *a, **k: race(json.loads(*a, **k))
+            return ns, fired
+
+        def identity():
+            spell = [("the legacy string form", {"type": "command", "timeout": 5,
+                                                 "command": 'python "%s" --hook' % me}),
+                     ("args with the path left in command", {"type": "command", "args": ["--hook"],
+                                                             "command": 'python "%s"' % me})]
+            if os.name == "nt":
+                spell += [("another letter case", ex(me.swapcase())),
+                          ("forward slashes", ex(me.replace("\\", "/")))]
+            try:
+                if os.name == "nt":
+                    import _winapi
+                    _winapi.CreateJunction(live, link)
+                else:
+                    os.symlink(live, link)
+                spell.append(("through a link to its folder",
+                              ex(os.path.join(link, "update_check.py"))))
+            except (OSError, ImportError, AttributeError):
+                pass                      # no link here: the message lists what did run
+            disagree = []
+            for name, h in spell:
+                write(sp, {"hooks": {"SessionStart": [
+                    {"matcher": "startup", "hooks": [h, {"type": "command", "command": "echo other"}]},
+                    {"hooks": [ex(bak)]}]}})
+                found = uc.find_my_hook()[0] == h
+                rc = uc.cmd_install_hook(None, out=lambda *_a: None)
+                now = mine_in(sp)
+                kept = any((x.get("args") or [""])[0] == bak for x in hooks_of(sp))
+                with contextlib.redirect_stdout(io.StringIO()):
+                    uc.cmd_uninstall_hook(None)
+                if not (found and rc == 0 and len(now) == 1 and now[0].get("args") == [me, "--hook"]
+                        and kept and not mine_in(sp)
+                        and any(x.get("command") == "echo other" for x in hooks_of(sp))):
+                    disagree.append((name, found, rc, len(now), kept, len(mine_in(sp))))
+            check(not disagree and len(spell) >= 2,
+                  "--status, --install-hook and --uninstall-hook agree on every spelling of this "
+                  "copy's path (%s): status finds the entry, install leaves exactly ONE current "
+                  "entry and keeps the `.bak` neighbour and the co-tenant, uninstall removes it"
+                  % "; ".join(n for n, _h in spell), repr(disagree)[:300])
+            bad = [n for n, h in spell if not uc._is_this_copy(h)]
+            check(not bad and uc._hook_script(ex(bak)) is None and uc._hook_script(ex(oth)) == oth
+                  and not uc._is_this_copy(ex(oth)) and ucr._is_this_copy(ex(ren))
+                  and uc._hook_script(ex(ren)) is None
+                  and uc._hook_script({"command": py, "args": [os.path.join(td, "t", "check.py")]})
+                  is None,
+                  "ONE test underneath (_hook_script / _is_this_copy): every spelling is this copy; "
+                  "`update_check.py.bak` is not ours; another copy is ours but not this one; a "
+                  "copy in a renamed folder knows its own hook; another tool's script never is",
+                  repr(bad))
+
+        def guard():
+            write(sp, {"env": {"KEEP": "1"}})
+            uc.json, fired = racing_json(1)
+            try:
+                rc = uc.cmd_install_hook(None, out=lambda *_a: None)
+            finally:
+                uc.json = json
+            env = json.load(open(sp, encoding="utf-8")).get("env", {})
+            ok = rc == 0 and fired and env.get("WRITTEN_MEANWHILE") == "1" and len(mine_in(sp)) == 1
+            # the control: the same race against a write without the guard loses the other change
+            write(sp, {"env": {"KEEP": "1"}})
+            uc.json, fired2 = racing_json(1)
+            real_guard = getattr(uc, "_write_settings_if_unchanged", None)
+            if real_guard:
+                uc._write_settings_if_unchanged = lambda p, raw, d: uc._write_json_atomic(p, d) or True
+            try:
+                uc.cmd_install_hook(None, out=lambda *_a: None)
+            finally:
+                uc.json = json
+                if real_guard:
+                    uc._write_settings_if_unchanged = real_guard
+            lost = "WRITTEN_MEANWHILE" not in json.load(open(sp, encoding="utf-8")).get("env", {})
+            check(ok and fired2 and lost,
+                  "--install-hook racing another writer (Claude Code, a second session) reads "
+                  "again and keeps BOTH changes; the control: the same race with the guard taken "
+                  "out loses the other write", repr((rc, env, lost)))
+            write(sp, {"env": {"KEEP": "1"}, "hooks": {"SessionStart": [{"hooks": [
+                ex(me), {"type": "command", "command": "echo other"}]}]}})
+            uc.json, fired = racing_json(1)
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    rc = uc.cmd_uninstall_hook(None)
+            finally:
+                uc.json = json
+            env = json.load(open(sp, encoding="utf-8")).get("env", {})
+            check(rc == 0 and fired and env.get("WRITTEN_MEANWHILE") == "1" and not mine_in(sp)
+                  and [x.get("command") for x in hooks_of(sp)] == ["echo other"],
+                  "--uninstall-hook under the same race: the other write survives, this copy's "
+                  "entry goes, the co-tenant stays", repr((rc, env)))
+            write(sp, {"env": {"KEEP": "1"}})
+            uc.json, fired = racing_json(99)
+            msgs = []
+            try:
+                rc = uc.cmd_install_hook(None, out=msgs.append)
+            finally:
+                uc.json = json
+            check(rc == 1 and not mine_in(sp) and any("kept changing" in m for m in msgs),
+                  "a file that changes on every attempt: install gives up, writes nothing of its "
+                  "own and says why", repr((rc, msgs[-1:]))[:200])
+            write(sp, {"env": {"KEEP": "1"}})
+            real_open, failed = open, []
+
+            def flaky(path, *a, **k):
+                mode = a[0] if a else k.get("mode", "r")
+                if os.path.abspath(str(path)) == os.path.abspath(sp) and "r" in mode and not failed:
+                    failed.append(1)
+                    raise PermissionError(13, "simulated sharing violation", sp)
+                return real_open(path, *a, **k)
+            uc.open = flaky               # module global shadows the builtin for uc only
+            try:
+                rc = uc.cmd_install_hook(None, out=lambda *_a: None)
+            finally:
+                del uc.open
+            check(rc == 0 and failed and len(mine_in(sp)) == 1
+                  and json.load(open(sp, encoding="utf-8")).get("env") == {"KEEP": "1"},
+                  "a read that fails ONCE (an antivirus scan, a writer holding the file) is tried "
+                  "again: the install goes through and keeps the file's content", repr(rc))
+
+        def interpreter():
+            dead_py = os.path.join(td, "py-gone", "python.exe" if os.name == "nt" else "python3")
+            tool = {"type": "command", "command": dead_py,
+                    "args": [os.path.join(td, "t", "check.py")]}
+            write(sp, {"hooks": {"SessionStart": [{"hooks": [ex(me, dead_py), ex(oth, dead_py),
+                                                             dict(tool)]}]}})
+            uc.hook_message = lambda: None
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = uc.cmd_hook(None)
+            out = json.loads(buf.getvalue() or "{}")
+            hl = hooks_of(sp)
+            check(rc == 0 and [h.get("command") for h in hl] == [py, py, dead_py]
+                  and [h.get("args") for h in hl] == [[me, "--hook"], [oth, "--hook"], tool["args"]]
+                  and "Python is gone" in out.get("systemMessage", ""),
+                  "a session start re-points OUR entries whose Python is gone (this copy's and "
+                  "another copy's) at the interpreter running now, SAYS so, and leaves another "
+                  "tool's dead interpreter alone", repr(([h.get("command") for h in hl], out))[:300])
+            before = open(sp, "rb").read()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                uc.cmd_hook(None)
+            check(open(sp, "rb").read() == before and not buf.getvalue(),
+                  "the control: the next session start finds every interpreter of ours alive and "
+                  "writes nothing")
+            write(sp, {"hooks": {"SessionStart": [{"hooks": [ex(me, dead_py)]}]}})
+            uc.do_check = lambda force=False: ("fresh", None)
+            note = uc.pending_notice()
+            check(hooks_of(sp)[0].get("command") == py and "Python is gone" in (note or ""),
+                  "the end of a real round re-points it too - with ONE tree install nothing else "
+                  "could: its own hook cannot start", repr(note))
+            if os.name == "nt":
+                drive = next((c + ":" for c in "QRSTUVWXYZ" if not os.path.exists(c + ":\\")), None)
+                unmounted = drive + "\\py\\python.exe" if drive else None
+            else:
+                unmounted = "/r139-no-such-volume/py/python3"
+            top = os.path.join(os.path.splitdrive(td)[0] + os.sep, "r139i3-none-%d" % os.getpid(),
+                               "python.exe")
+            fake_tmp = os.path.join(td, "fake-temp")
+            tmp_py = os.path.join(fake_tmp, "py", "python.exe")
+            os.makedirs(os.path.dirname(tmp_py))
+            open(tmp_py, "w").close()
+            real_hp, real_tr = uc._hook_python, uc._temp_roots
+            uc._hook_python = lambda: tmp_py
+            uc._temp_roots = lambda: [os.path.normcase(os.path.realpath(fake_tmp))]
+            try:
+                write(sp, {"hooks": {"SessionStart": [{"hooks": [ex(me, dead_py)]}]}})
+                in_temp = uc.heal_settings_file(sp)
+            finally:
+                uc._hook_python, uc._temp_roots = real_hp, real_tr
+            kept = hooks_of(sp)[0].get("command") == dead_py
+            left = True
+            if unmounted:
+                write(sp, {"hooks": {"SessionStart": [{"hooks": [ex(me, unmounted)]}]}})
+                before = open(sp, "rb").read()
+                left = uc.heal_settings_file(sp) == ([], []) and open(sp, "rb").read() == before
+            check(in_temp == ([], []) and kept and left and uc._gone(top) == (os.name == "nt"),
+                  "...but never at an interpreter in a temp folder the settings file is not in "
+                  "(the R139 rule); an interpreter on a volume that is not mounted is left alone; "
+                  "Windows: a Python straight under a mounted drive root (C:\\Python313) counts as "
+                  "gone, POSIX: `/` proves nothing", repr((in_temp, kept, left, top)))
+
+        def tmpdir_home():
+            saved = os.environ.get("TMPDIR")
+            os.environ["TMPDIR"] = os.path.expanduser("~")
+            try:
+                roots = uc._temp_roots()
+            finally:
+                if saved is None:
+                    os.environ.pop("TMPDIR", None)
+                else:
+                    os.environ["TMPDIR"] = saved
+            home = os.path.normcase(os.path.realpath(os.path.expanduser("~")))
+            check(bool(roots) and home not in roots,
+                  "a temp variable pointing at the home folder (TMPDIR=$HOME) is not a temp root - "
+                  "with CLAUDE_CONFIG_DIR elsewhere, every install under home was refused",
+                  repr(roots))
+
+        for block in (identity, guard, interpreter, tmpdir_home):
+            try:
+                block()
+            except Exception as exc:      # noqa: BLE001 - one broken block must not hide the rest
+                check(False, "R139 И-3 block %s raised" % block.__name__, repr(exc)[:160])
+    finally:
+        try:
+            (os.rmdir if os.name == "nt" else os.unlink)(link)   # the link, never its target
+        except OSError:
+            pass
+        shutil.rmtree(td, ignore_errors=True)
 
 
 def _file_digest(path):
@@ -7592,6 +7886,7 @@ def main():
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
+                  suite_r139_i3_hook_identity,
                   suite_r140_i2_nvkimik3, suite_r140_i3_panel_hotfix,
                   suite_r140_i4_env_fail_closed):
         try:

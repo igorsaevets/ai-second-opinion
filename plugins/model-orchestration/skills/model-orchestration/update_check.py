@@ -676,15 +676,19 @@ def do_check(force=False):
 
 
 def pending_notice():
-    """For callers that just finished real work (orchestrate.py at the end of a round): run the
-    stamped weekly check and return the notice text, or None. Never raises."""
+    """For callers that just finished real work (orchestrate.py at the end of a round): heal our
+    session-start hooks, then run the stamped weekly check. Returns the text to show, or None.
+    Never raises. R139 И-3: with ONE tree install, a hook whose Python was upgraded away has no
+    live copy left to heal it at session start - the next real round does."""
+    note = _heal_note(*heal_settings_file()) or None
     try:
         action, payload = do_check()
     except Exception:                                    # noqa: BLE001 - a notice never crashes a round
-        return None
+        return note
+    msg = None
     if action in ("update", "cached"):
-        return (payload or {}).get("message") or (payload or {}).get("pending_message")
-    return None
+        msg = (payload or {}).get("message") or (payload or {}).get("pending_message")
+    return "\n\n".join(x for x in (note, msg) if x) or None
 
 
 def do_local_delta():
@@ -1095,7 +1099,8 @@ def cmd_hook(args):
     # python fails before any code runs). Before the check, so a failing check cannot skip it.
     # Not gated on the update kill switch (R139 panel, grok): a user who switched update checks
     # off would keep the «can't open file» lines forever. It writes only when an entry is dead.
-    pruned = prune_settings_file()
+    # R139 И-3: an entry whose Python is gone is re-pointed at this one (heal_dead_hooks).
+    healed = heal_settings_file()
     try:
         msg = hook_message()
     except Exception:                                    # noqa: BLE001 - see below
@@ -1103,8 +1108,9 @@ def cmd_hook(args):
         # hooks.json falls back python3 -> python -> py on a non-zero exit, which must mean
         # "this interpreter is missing", not "run the whole check again" (R136).
         msg = None
-    if pruned:
-        msg = _prune_note(pruned) + ("\n\n" + msg if msg else "")
+    note = _heal_note(*healed)
+    if note:
+        msg = note + ("\n\n" + msg if msg else "")
     if not msg:
         return 0
     capped = msg[:8500]  # keep well under the 10 KB cap, with room for the note below
@@ -1199,7 +1205,10 @@ def _temp_roots():
             roots.add(os.environ[name])
     out = [os.path.normcase(os.path.realpath(r)) for r in roots if r]
     # R139 panel (grok): TEMP=C:\ would make a whole drive "temp" - a root is never a temp root.
-    return [r for r in out if os.path.dirname(r) != r]
+    # R139 И-3 (ocmimo26flashfree): nor is the home folder or anything above it - TMPDIR=$HOME
+    # with CLAUDE_CONFIG_DIR elsewhere refused every install under home.
+    home = os.path.expanduser("~")
+    return [r for r in out if os.path.dirname(r) != r and not _is_under(home, [r])]
 
 
 def _is_under(path, roots):
@@ -1207,58 +1216,108 @@ def _is_under(path, roots):
     return any(p == r or p.startswith(r.rstrip("\\/") + os.sep) for r in roots)
 
 
+def _path_key(p):
+    """How two spellings of one file compare (R139 И-3): letter case and separators the way the
+    OS compares them, symlinks / junctions / 8.3 names resolved. A network path is never probed (a
+    dead share can stall a session start) and a relative one is compared as written."""
+    p = str(p)
+    if p.startswith(("\\\\", "//")) or not os.path.isabs(p):
+        return os.path.normcase(os.path.normpath(p))
+    return os.path.normcase(os.path.realpath(p))
+
+
 def _hook_script(h):
-    """The update_check.py a SessionStart hook runs, if the hook is OURS (any copy, any of the
-    three shapes this kit ever wrote), else None. Ownership is the path shape this kit installs,
-    `.../model-orchestration/update_check.py`; a hook running any other script is never ours."""
+    """THE test for «this hook is ours» - install, uninstall, both heals and --status ask it,
+    directly or through _is_this_copy (R139 И-3: they used three different tests - a path shape,
+    a case-sensitive substring, a case-insensitive one - which disagreed on a path spelled
+    another way, a folder reached through a link, a `.bak` beside the script). Returns the
+    update_check.py a hook runs when the hook is OURS, else None. Ours = any copy of this script
+    (`.../model-orchestration/update_check.py`, any letter case) or THIS file under any spelling
+    of its path (a renamed folder), in any shape this kit ever wrote: exec form (`args`) or a
+    path inside a `command` string. A hook running any other script is never ours."""
     if not isinstance(h, dict):
         return None
     cands = [str(x) for x in h["args"]] if isinstance(h.get("args"), list) else []
-    if not cands:
-        cmd = str(h.get("command") or "")
-        cands = re.findall(r'"([^"]*update_check\.py)"', cmd) or re.findall(
-            r"(\S*update_check\.py)", cmd)
+    cmd = str(h.get("command") or "")
+    # R139 panel (ocmimo26flashfree): `args` present with the path left in `command` was missed
+    cands += re.findall(r'"([^"]*update_check\.py)"', cmd) or re.findall(
+        r"(\S*update_check\.py)(?!\S)", cmd)
+    me = None
     for c in cands:
         parts = os.path.normpath(c).replace("\\", "/").split("/")
-        if (len(parts) >= 2 and parts[-1].lower() == "update_check.py"
-                and parts[-2].lower() == "model-orchestration"):
+        if parts[-1].lower() != "update_check.py":
+            continue
+        if len(parts) >= 2 and parts[-2].lower() == "model-orchestration":
+            return c
+        me = me or _path_key(os.path.abspath(__file__))
+        if _path_key(c) == me:
             return c
     return None
 
 
+def _is_this_copy(h):
+    """Our hook, running this very file (any spelling of its path) - what install migrates,
+    uninstall removes and --status reports."""
+    s = _hook_script(h)
+    return bool(s) and _path_key(s) == _path_key(os.path.abspath(__file__))
+
+
+def _gone(path):
+    """An absolute local path that no longer exists while something above it still does. An
+    unmounted drive or share is not a deleted file, and a network path is never probed (R139
+    panel: a dead share can stall a session start). R139 И-3: on Windows an existing drive root
+    is enough - `C:\\Python313\\python.exe` has nothing else above it, and a drive that answers
+    for its root is mounted; on POSIX `/` always exists, so it proves nothing."""
+    if not os.path.isabs(path) or path.startswith(("\\\\", "//")):
+        return False
+    if os.path.exists(path):
+        return False
+    up = os.path.dirname(path)
+    while not os.path.isdir(up):
+        nxt = os.path.dirname(up)
+        if nxt == up:
+            return False                  # nothing above it exists: that volume is not there
+        up = nxt
+    return os.name == "nt" or os.path.dirname(up) != up
+
+
 def _dead_reason(script, settings_path, install=False):
-    """Why a hook of ours can never work again, or None. Missing counts only when something
-    above it still exists on that volume - an unmounted drive or share is not a deleted copy.
-    `install=True` (the refusal) also rejects a LIVE copy in a temp folder; the prune does not -
-    a working portable copy there keeps its hook until its file is really gone (R139 panel:
-    spark + agy). UNC paths are never probed: a dead share can stall a session start."""
+    """Why a hook of ours can never work again, or None (see _gone). `install=True` (the
+    refusal) also rejects a LIVE copy in a temp folder; the heal does not - a working portable
+    copy there keeps its hook until its file is really gone (R139 panel: spark + agy)."""
     if not os.path.isabs(script) or script.startswith(("\\\\", "//")):
         return None                       # ${CLAUDE_PLUGIN_ROOT} and friends: not ours to judge
     if install:
         roots = _temp_roots()
         if _is_under(script, roots) and not _is_under(settings_path, roots):
             return "lives in a temp folder"
-    if os.path.exists(script):
-        return None
-    up = os.path.dirname(os.path.dirname(script))
-    while up and not os.path.isdir(up):
-        nxt = os.path.dirname(up)
-        if nxt == up:
-            return None
-        up = nxt
-    if not up or os.path.dirname(up) == up:
-        return None                       # only the root is left: the volume is not there
-    return "file is gone"
+    return "file is gone" if _gone(script) else None
 
 
-def prune_dead_hooks(settings, settings_path):
-    """Drop OUR SessionStart hooks that cannot run (see _dead_reason) from `settings`, in place.
-    Returns [(script, reason)]. Other tools' entries and every live copy are kept."""
+def _live_hook_python(settings_path):
+    """_hook_python() when it may stand in for a dead interpreter: an absolute path to a file
+    that exists, and not in a temp folder unless the settings file is in one too (the rule the
+    install refusal keeps). '' otherwise."""
+    py = _hook_python()
+    if not (os.path.isabs(py) and os.path.isfile(py)):
+        return ""
+    roots = _temp_roots()
+    return "" if _is_under(py, roots) and not _is_under(settings_path, roots) else py
+
+
+def heal_dead_hooks(settings, settings_path):
+    """Fix OUR SessionStart hooks that cannot run, in `settings`, in place. Returns (removed,
+    repointed). removed = [(script, reason)]: the copy is gone (see _dead_reason), the entry
+    goes. repointed = [(old, new)]: the copy is alive but the INTERPRETER its exec-form entry
+    starts is gone - it now starts the one running this code (R139 И-3: upgrading Python away
+    killed the hook; every session start printed an error and nothing healed it, because a
+    missing interpreter runs no code - only another live copy or the next real round can).
+    Other tools' entries, other events and every working entry are kept."""
     hooks = settings.get("hooks") if isinstance(settings, dict) else None
     groups = hooks.get("SessionStart") if isinstance(hooks, dict) else None
     if not isinstance(groups, list):
-        return []
-    removed = []
+        return [], []
+    removed, repointed, new_py = [], [], None
     for e in groups:
         if not isinstance(e, dict) or not isinstance(e.get("hooks"), list):
             continue
@@ -1268,8 +1327,14 @@ def prune_dead_hooks(settings, settings_path):
             why = _dead_reason(s, settings_path) if s else None
             if why:
                 removed.append((s, why))
-            else:
-                keep.append(h)
+                continue
+            old = h.get("command") if s and isinstance(h.get("args"), list) else None
+            if isinstance(old, str) and _gone(old):
+                new_py = new_py if new_py is not None else _live_hook_python(settings_path)
+                if new_py and _path_key(old) != _path_key(new_py):
+                    h["command"] = new_py
+                    repointed.append((old, new_py))
+            keep.append(h)
         e["hooks"] = keep
     if removed:
         groups[:] = [e for e in groups if not (isinstance(e, dict) and e.get("hooks") == [])]
@@ -1277,7 +1342,7 @@ def prune_dead_hooks(settings, settings_path):
             hooks.pop("SessionStart", None)
         if not hooks:
             settings.pop("hooks", None)
-    return removed
+    return removed, repointed
 
 
 def _prune_note(removed):
@@ -1286,25 +1351,112 @@ def _prune_note(removed):
             % (BANNER_HEAD, len(removed), "y" if len(removed) == 1 else "ies"))
 
 
-def prune_settings_file(settings_path=None):
-    """The session-start self-heal: prune dead entries of ours from settings.json. Writes only
-    when something was removed AND the file did not change while we looked (Claude Code writes
-    this file too). Never raises; returns the removed list."""
+def _heal_note(removed, repointed):
+    """What a heal did, for the session start / the end of a round; '' when nothing."""
+    lines = [_prune_note(removed)] if removed else []
+    if repointed:
+        lines.append("%s the session-start hook's Python is gone (%s) - the hook now runs %s"
+                     % (BANNER_HEAD, ", ".join(sorted({o for o, _n in repointed})),
+                        repointed[-1][1]))
+    return "\n".join(lines)
+
+
+def _read_settings(path):
+    """(raw bytes, settings). A file that does not exist yet is (None, {}). One that exists but
+    cannot be read raises OSError and one that is not a JSON object raises ValueError: neither
+    may ever be taken for «no file» (R74, R139 panel)."""
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except FileNotFoundError:
+        return None, {}
+    data = json.loads(raw.decode("utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("the top level is not a JSON object")
+    return raw, data
+
+
+def _write_settings_if_unchanged(path, raw, data):
+    """The changed-under-us guard: write `data` only while the file still holds the bytes it was
+    parsed from (`raw` None: still absent). False = it changed, or could not be read again, and
+    nothing was written. What is left open is the moment between this read and the rename."""
+    try:
+        with open(path, "rb") as f:
+            now = f.read()
+    except FileNotFoundError:
+        now = None
+    except OSError:
+        return False
+    if now != raw:
+        return False
+    _write_json_atomic(path, data)
+    return True
+
+
+SETTINGS_EDIT_ATTEMPTS = 3
+
+
+def _edit_settings(path, edit, attempts=SETTINGS_EDIT_ATTEMPTS):
+    """Every read-modify-write of settings.json goes through here (R139 И-3). Claude Code writes
+    this file too, and an automatic update installs the hook FROM the session-start hook, beside
+    it; install and uninstall used to read at the top and write at the end, throwing away
+    whatever was written in between. `edit(settings)` changes the dict in place and returns its
+    result. The file is written only when the dict changed, and only while it still holds the
+    bytes it was parsed from; otherwise the whole edit runs again on the new content - as after
+    a failed read (an antivirus scan or a writer holding the file passes). Returns (result, None)
+    - written, or nothing to write - or (None, why) after the last attempt, `why` starting with
+    «unreadable», «invalid», «unwritable» or «changed»."""
+    why = "changed"
+    for i in range(attempts):
+        if i:
+            time.sleep(0.1 * i)
+        try:
+            raw, settings = _read_settings(path)
+        except OSError as exc:
+            why = "unreadable: %s" % exc
+            continue
+        except ValueError as exc:
+            why = "invalid: %s" % exc
+            continue
+        result = edit(settings)
+        if settings == (json.loads(raw.decode("utf-8")) if raw is not None else {}):
+            return result, None
+        try:
+            if _write_settings_if_unchanged(path, raw, settings):
+                return result, None
+            why = "changed while it was being edited"
+        except OSError as exc:            # Windows: the rename fails while a reader holds it
+            why = "unwritable: %s" % exc
+    return None, why
+
+
+def _settings_refusal(path, why, consequence):
+    """The REFUSING line for an _edit_settings failure; `consequence` ends the sentence."""
+    if why.startswith("invalid: "):
+        what, then = "is not valid JSON", "Fix the file first - "
+    elif why.startswith("unreadable: "):
+        # 🔴 R139 panel (ocmimo26flashfree): every read failure but «no file» - a sharing
+        # violation while an antivirus or Claude Code holds it, no permission - used to be taken
+        # for «no file», and the hook was then written over the user's WHOLE config.
+        what, then = "could not be read", "Try again in a moment - "
+    else:
+        return ("%s REFUSING: %s kept changing while the hook entry was being edited (%s) - "
+                "Claude Code or another session is writing it; nothing was written. Try again in "
+                "a moment." % (BANNER_HEAD, path, why))
+    return "%s REFUSING: %s exists but %s (%s). %s%s." % (
+        BANNER_HEAD, path, what, why.split(": ", 1)[1], then, consequence)
+
+
+def heal_settings_file(settings_path=None):
+    """The heal at a session start (cmd_hook) and at the end of a real round (pending_notice):
+    heal_dead_hooks on settings.json under the changed-under-us guard, one attempt - a file that
+    changed is healed by the next start or round. Never raises; returns (removed, repointed)."""
     sp = settings_path or _settings_path()
     try:
-        with open(sp, "rb") as f:
-            raw = f.read()
-        settings = json.loads(raw.decode("utf-8"))
-        removed = prune_dead_hooks(settings, sp)
-        if not removed:
-            return []
-        with open(sp, "rb") as f:
-            if f.read() != raw:
-                return []                 # changed under us - the next session start retries
-        _write_json_atomic(sp, settings)
-        return removed
+        result, _why = _edit_settings(sp, lambda s: heal_dead_hooks(s, sp), attempts=1)
+        return result or ([], [])
     except Exception:                                    # noqa: BLE001 - a hook never fails
-        return []
+        return [], []
 
 
 def cmd_install_hook(args, out=print):
@@ -1312,29 +1464,10 @@ def cmd_install_hook(args, out=print):
     hook (hooks.json); this is for script / manual installs, so a session start on those paths
     also gets the daily release check, the one-command notice and - automatic updates on - the
     update itself. R136: exec form (`command` = this interpreter's absolute path, `args` = the
-    script) - no shell, so no quoting, and the same entry works under Git Bash, PowerShell and sh."""
+    script) - no shell, so no quoting, and the same entry works under Git Bash, PowerShell and sh.
+    R139 И-3: written under the changed-under-us guard (_edit_settings) - this also runs from the
+    automatic update at session start, beside Claude Code."""
     settings_path = _settings_path()
-    try:
-        with open(settings_path, encoding="utf-8") as f:
-            settings = json.load(f)
-    except FileNotFoundError:
-        settings = {}                     # no file yet - a fresh install starts one
-    except OSError as exc:
-        # 🔴 R139 panel (ocmimo26flashfree): every OTHER read failure - a sharing violation
-        # while an antivirus or Claude Code holds the file, no permission - was taken for «no
-        # file», and the hook was then written over the user's WHOLE config (the R74 class).
-        out("%s REFUSING: %s exists but could not be read (%s) - installing would have "
-            "overwritten it. Try again in a moment." % (BANNER_HEAD, settings_path, exc))
-        return 1
-    except ValueError as exc:
-        # 🔴 R74 (goog36flash, R73): this used to fall through to `settings = {}` and WRITE
-        # that back - one malformed byte in settings.json and installing a hook silently
-        # replaced the user's entire Claude Code configuration with just the hook. A parse
-        # failure on an EXISTING file is the user's config being unreadable, not absent.
-        out("%s REFUSING: %s exists but is not valid JSON (%s). Fix the file first - "
-            "installing would have overwritten it wholesale."
-            % (BANNER_HEAD, settings_path, exc))
-        return 1
     my_path = os.path.abspath(__file__)
     reason = _dead_reason(my_path, settings_path, install=True)
     if reason:
@@ -1343,70 +1476,69 @@ def cmd_install_hook(args, out=print):
             "session start once the folder is cleaned. Run --install-hook from the installed "
             "copy instead." % (BANNER_HEAD, reason, os.path.dirname(my_path), settings_path))
         return 1
-    pruned = prune_dead_hooks(settings, settings_path)
-    hooks = settings.setdefault("hooks", {})
-    session_start = hooks.setdefault("SessionStart", [])
     # SUPERSEDED R136: R74 wrote ONE command string `python "<path>" --hook` - a bare `python`
     # that does not exist on macOS / most Linux. Exec form with the absolute interpreter now.
     py = _hook_python()
     my_args = [my_path, "--hook"]
-    my_hook = {"type": "command", "command": py, "args": my_args,
-               "timeout": AUTO_HOOK_TIMEOUT_SECONDS}
-    entry = {"matcher": "startup", "hooks": [my_hook]}
-
-    def _is_mine(h):
-        if not isinstance(h, dict):
-            return False
-        if isinstance(h.get("args"), list):        # the legacy shape this installer once wrote
-            return my_path in " ".join(str(x) for x in h["args"])
-        return my_path in str(h.get("command") or "")
 
     def _is_current(h):
         return (isinstance(h, dict) and h.get("command") == py and h.get("args") == my_args
                 and h.get("timeout") == AUTO_HOOK_TIMEOUT_SECONDS)
 
-    already = any(any(_is_current(h) for h in (e.get("hooks") or [])) for e in session_start)
-    migrated = False
-    for e in session_start:
-        hl = e.get("hooks") or []
-        inner = [h for h in hl if not (_is_mine(h) and not _is_current(h))]
-        if len(inner) != len(hl):
-            e["hooks"] = inner
-            migrated = True
-    session_start[:] = [e for e in session_start if e.get("hooks")]
-    if pruned:
-        out(_prune_note(pruned))
-    if already and not migrated and not pruned:
-        out("%s SessionStart hook already installed in %s"
-            % (BANNER_HEAD, settings_path))
-        return 0
+    def edit(settings):
+        healed = heal_dead_hooks(settings, settings_path)
+        session_start = settings.setdefault("hooks", {}).setdefault("SessionStart", [])
+        entries = [e for e in session_start if isinstance(e, dict)]
+        already = any(_is_current(h) for e in entries for h in e.get("hooks") or [])
+        migrated = False
+        for e in entries:
+            hl = e.get("hooks") or []
+            # an older entry for THIS file: another shape, interpreter, timeout or path spelling
+            inner = [h for h in hl if not (_is_this_copy(h) and not _is_current(h))]
+            if len(inner) != len(hl):
+                e["hooks"] = inner
+                migrated = True
+        if migrated:
+            session_start[:] = [e for e in session_start
+                                if not (isinstance(e, dict) and e.get("hooks") == [])]
+        if not already:
+            session_start.append({"matcher": "startup", "hooks": [{
+                "type": "command", "command": py, "args": list(my_args),
+                "timeout": AUTO_HOOK_TIMEOUT_SECONDS}]})
+        return healed, already, migrated
+
+    # 🔴 R74 (goog36flash, R73): a parse failure on an EXISTING file used to fall through to
+    # `settings = {}` and WRITE that back - the user's whole configuration replaced by the hook.
+    result, why = _edit_settings(settings_path, edit)
+    if result is None:
+        out(_settings_refusal(settings_path, why, "installing would have overwritten it"))
+        return 1
+    healed, already, migrated = result
+    note = _heal_note(*healed)
+    if note:
+        out(note)
     if already and not migrated:
-        _write_json_atomic(settings_path, settings)
         out("%s SessionStart hook already installed in %s" % (BANNER_HEAD, settings_path))
         return 0
-    if not already:
-        session_start.append(entry)
     if migrated:
-        out("%s replacing the older hook entry for this file (command shape, interpreter or "
-            "timeout changed)" % BANNER_HEAD)
-    _write_json_atomic(settings_path, settings)
+        out("%s replacing the older hook entry for this file (command shape, interpreter, path "
+            "spelling or timeout changed)" % BANNER_HEAD)
     out("%s SessionStart hook installed in %s" % (BANNER_HEAD, settings_path))
     out("  It runs the daily release check at session start (%s) and tells you (and the "
-        "assistant) what changed. Remove: python \"%s\" --uninstall-hook"
-        % (py, os.path.abspath(__file__)))
+        "assistant) what changed. Remove: python \"%s\" --uninstall-hook" % (py, my_path))
     return 0
 
 
 def find_my_hook():
-    """(hook dict or None, settings path, error) - our SessionStart entry in settings.json."""
+    """(hook dict or None, settings path, error) - the SessionStart entry for THIS copy, by the
+    test install and uninstall use (_is_this_copy)."""
     sp = _settings_path()
     settings, err = _load_json_file(sp)
-    my_path = os.path.normcase(os.path.abspath(__file__))
-    for e in ((settings or {}).get("hooks") or {}).get("SessionStart") or []:
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    groups = hooks.get("SessionStart") if isinstance(hooks, dict) else None
+    for e in groups if isinstance(groups, list) else []:
         for h in (e.get("hooks") or []) if isinstance(e, dict) else []:
-            blob = " ".join([str(h.get("command") or "")] + [str(x) for x in h.get("args") or []]
-                            ) if isinstance(h, dict) else ""
-            if my_path in os.path.normcase(blob):
+            if _is_this_copy(h):
                 return h, sp, err
     return None, sp, err
 
@@ -1438,6 +1570,9 @@ def _write_json_atomic(path, data):
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
             f.write("\n")
+            # R139 panel (ocmimo26flashfree): on disk before the rename publishes it
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     finally:
         if os.path.exists(tmp):
@@ -1659,52 +1794,47 @@ def auto_apply(latest, local):
 
 def cmd_uninstall_hook(args):
     settings_path = _settings_path()
-    try:
-        with open(settings_path, encoding="utf-8") as f:
-            settings = json.load(f)
-    except (OSError, ValueError):
-        print("%s no settings.json at %s — nothing to remove"
-              % (BANNER_HEAD, settings_path))
+    if not os.path.lexists(settings_path):
+        print("%s no settings.json at %s — nothing to remove" % (BANNER_HEAD, settings_path))
         return 0
-    hooks = settings.get("hooks") or {}
-    session_start = hooks.get("SessionStart") or []
-    my_path = os.path.abspath(__file__)
 
-    def _is_mine(h):
-        if not isinstance(h, dict):
-            return False
-        if isinstance(h.get("args"), list):        # the legacy command+args shape
-            return my_path in " ".join(str(x) for x in h["args"])
-        return my_path in str(h.get("command") or "")
+    def edit(settings):
+        hooks = settings.get("hooks")
+        groups = hooks.get("SessionStart") if isinstance(hooks, dict) else None
+        if not isinstance(groups, list):
+            return 0, []
+        # 🔴 Count removed HOOKS, not only emptied entries (R74; orgemini37flash, R73): when our
+        # hook shared a SessionStart entry with another tool's, the old counter stayed 0, the
+        # early return fired, and the filtered settings were never written - an uninstall that
+        # reported failure while silently doing nothing.
+        mine = 0
+        for e in groups:
+            if isinstance(e, dict) and isinstance(e.get("hooks"), list):
+                inner = [h for h in e["hooks"] if not _is_this_copy(h)]
+                mine += len(e["hooks"]) - len(inner)
+                e["hooks"] = inner
+        dead, repointed = heal_dead_hooks(settings, settings_path)   # R139: dead copies go too
+        if mine:
+            groups[:] = [e for e in groups if not (isinstance(e, dict) and e.get("hooks") == [])]
+            if not groups:
+                hooks.pop("SessionStart", None)
+            if not hooks:
+                settings.pop("hooks", None)
+        return mine + len(dead), repointed
 
-    # 🔴 Count removed HOOKS, not only emptied entries (R74; orgemini37flash, R73): when our
-    # hook shared a SessionStart entry with another tool's, the old counter stayed 0, the
-    # early return fired, and the filtered settings were never written - an uninstall that
-    # reported failure while silently doing nothing.
-    keep, removed = [], 0
-    for e in session_start:
-        hl = e.get("hooks") or []
-        inner = [h for h in hl if not _is_mine(h)]
-        removed += len(hl) - len(inner)
-        if inner:
-            e["hooks"] = inner
-            keep.append(e)
-    if keep:                              # R139: dead copies' entries go too
-        removed += len(prune_dead_hooks({"hooks": {"SessionStart": keep}}, settings_path))
-        keep = [e for e in keep if e.get("hooks")]
+    # R139 И-3: the changed-under-us guard; an unreadable or broken file is no longer reported
+    # as «no settings.json» (the hook stayed while the message said there was nothing).
+    result, why = _edit_settings(settings_path, edit)
+    if result is None:
+        print(_settings_refusal(settings_path, why, "nothing was removed"))
+        return 1
+    removed, repointed = result
+    if repointed:
+        print(_heal_note([], repointed))
     if not removed:
-        print("%s no matching SessionStart hook found in %s"
-              % (BANNER_HEAD, settings_path))
+        print("%s no matching SessionStart hook found in %s" % (BANNER_HEAD, settings_path))
         return 0
-    if keep:
-        hooks["SessionStart"] = keep
-    else:
-        hooks.pop("SessionStart", None)
-    if not hooks:
-        settings.pop("hooks", None)
-    _write_json_atomic(settings_path, settings)   # R139: through a symlink, unique temp name
-    print("%s removed %d SessionStart hook(s) from %s"
-          % (BANNER_HEAD, removed, settings_path))
+    print("%s removed %d SessionStart hook(s) from %s" % (BANNER_HEAD, removed, settings_path))
     return 0
 
 
