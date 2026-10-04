@@ -1069,6 +1069,9 @@ SECRET_PATTERNS = [
     # xAI keys have a stable `xai-` prefix; a whole vendor this gate sends to had no pattern
     # (grokbuild, R73). Prefix + 20 alnum is unambiguous - `xai-tools` and prose stay silent.
     ("XAI_KEY",           re.compile(r"\bxai-[A-Za-z0-9]{20,}")),
+    # NVIDIA API Catalog keys carry an `nvapi-` prefix. R140 И-2 made one a key this machine
+    # sends with (nvkimik3), and no pattern here knew its shape. Same rule as xai-: prefix + 20.
+    ("NVIDIA_KEY",        re.compile(r"\bnvapi-[A-Za-z0-9_\-]{20,}")),
     # Labelled assignment: catches .env lines and `Authorization: <token>` pasted into a brief.
     # `(?<![A-Za-z])` and not `\b`, because underscore counts as a word character: `\bapi_key`
     # never matches inside FIRECRAWL_API_KEY, which is the exact shape a real .env line has.
@@ -1219,6 +1222,25 @@ KNOWN_FAILURES = [
      "Read the other channels. Re-running in a few minutes will not help: the channel answers "
      "again only when the gateway restores the route (`--only <channel>` checks it). Nothing in "
      "the brief or the harness causes it."),
+    # R140 И-2, measured on NVIDIA's free endpoint through Kimi Code CLI: an output limit above
+    # the vendor's max_tokens range (65,536) comes back as a 400 with an EMPTY body after ~17 s,
+    # so the CLI's message names nothing.
+    (r"400 status code \(no body\)",                     # a regex: diagnose() uses re.search
+     "The endpoint refused the request's parameters without saying which. On the NVIDIA route "
+     "(a kimicli channel with `env_model`) the measured cause is an output limit above NVIDIA's "
+     "65,536: Kimi Code CLI sends the model's whole window as max_tokens unless "
+     "env_model.max_output_size caps it.",
+     "Compare the channel's env_model.max_output_size with the vendor's max_tokens range. "
+     "Re-running unchanged gives the same 400; nothing in the brief causes it."),
+    # The per-attempt text Kimi Code CLI records in its session wire (`APIEmptyResponseError`);
+    # it retries it itself, up to 10 attempts. R140 И-2: 2 of 4 NVIDIA requests came back this
+    # way and the retry answered. A run that ENDS with it exhausted the retries (not measured).
+    ("containing only thinking content",
+     "The endpoint returned reasoning but no answer and no tool call, on every retry the CLI "
+     "made. On NVIDIA's free endpoint this happened to 2 of 4 requests in one measured run; the "
+     "CLI's own retry recovered them.",
+     "Re-run the channel later (`--only <channel>`) and read the other channels meanwhile. It is "
+     "the endpoint's stream, not the brief."),
     ("MODEL_API_KEY not set",
      "The Spark channel has no API key.",
      "Set MODEL_API_KEY, or run with --skip spark to use the other channels only. The harness "
@@ -4314,8 +4336,43 @@ def _kimi_node_argv(binary):
     return [node, main] if node else None
 
 
+def _kimi_env_model(cname, reg=None):
+    """The channel's `env_model` block (R140 И-2), or None. routing.initial_plan copies a fixed
+    list of fields into the plan and this is not one of them, so it is read from the registry."""
+    try:
+        if reg is None:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import routing
+            reg = routing.load_registry()
+        em = ((reg.get("channels") or {}).get(cname) or {}).get("env_model")
+    except Exception:                                    # noqa: BLE001 - preflight never raises
+        return None
+    return em if isinstance(em, dict) else None
+
+
+def _kimi_model_env(env_model, effort, key):
+    """KIMI_MODEL_* for the CHILD only (main.mjs `applyEnvModelConfig`): with KIMI_MODEL_NAME set,
+    Kimi Code CLI adds this provider + model and makes it the default for the run, so
+    ~/.kimi-code/config.toml is never edited and the key never lands on disk."""
+    env = dict(os.environ)
+    env.update({
+        "KIMI_MODEL_NAME": str(env_model["model"]),
+        "KIMI_MODEL_API_KEY": key,
+        "KIMI_MODEL_BASE_URL": str(env_model["base_url"]),
+        "KIMI_MODEL_PROVIDER_TYPE": str(env_model.get("provider_type") or "kimi"),
+    })
+    for field, var in (("max_context_size", "KIMI_MODEL_MAX_CONTEXT_SIZE"),
+                       ("max_output_size", "KIMI_MODEL_MAX_OUTPUT_SIZE"),
+                       ("reasoning_key", "KIMI_MODEL_REASONING_KEY")):
+        if env_model.get(field) is not None:
+            env[var] = str(env_model[field])
+    if effort or env_model.get("thinking_effort"):
+        env["KIMI_MODEL_THINKING_EFFORT"] = str(effort or env_model["thinking_effort"])
+    return env
+
+
 def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
-                 timeout=2400, name="kimik3free", workdir=None, bypass=False):
+                 timeout=2400, name="kimik3free", workdir=None, bypass=False, env_model=None):
     """Kimi Code CLI (Moonshot AI) — free via AIHubMix provider, AIHUBMIX_API_KEY.
 
     Probed 2026-10-02 on kimi v2.1.1 (@moonshot-ai/kimi-code):
@@ -4339,8 +4396,23 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
     R137 И-2), i.e. every tool with no prompt - so the SAFETY DIRECTIVE is always prepended.
     No env scrubbing needed: kimi reads auth from its own config.toml, not env vars.
     Neutral cwd via Python cwd= to prevent loading any project's agent configs.
+
+    R140 И-2 `env_model` (nvkimik3): the same CLI routed elsewhere by KIMI_MODEL_* in the child's
+    env (see _kimi_model_env); the key comes from env_model.key_env via _env_key (process env,
+    then HKCU) and is never put on argv. Missing key -> a clean refusal before any process starts.
     """
     binary = kimi_bin()
+    child_env, route = None, "free via AIHubMix (default_model in config.toml)"
+    if env_model:
+        key = _env_key(env_model.get("key_env") or "")
+        if not key:
+            return {"channel": name, "ok": False, "text": "", "model": model,
+                    "error": "%s is not set (process env or HKCU\\Environment) - this channel "
+                             "routes Kimi Code CLI with it" % env_model.get("key_env"),
+                    "warnings": ["no key"], "notes": []}
+        child_env = _kimi_model_env(env_model, effort, key)
+        route = "env model override -> %s %s (config.toml untouched)" % (
+            env_model.get("base_url"), env_model.get("model"))
     text_in = ((system.strip() + "\n\n---\n\n") if system else "") + _with_bypass_safety(brief, True)
 
     base = _kimi_node_argv(binary)
@@ -4377,11 +4449,11 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
     # tool with no prompt, and the SAFETY DIRECTIVE rides every brief (text_in above), like mimocli.
     log("  [%s] -p runs in kimi's auto permission mode (vendor default): every tool, no prompts; "
         "SAFETY DIRECTIVE prepended to the brief." % name)
-    log("  [%s] Kimi Code CLI, free via AIHubMix; %s (%d chars)" % (name, how, len(text_in)))
+    log("  [%s] Kimi Code CLI, %s; %s (%d chars)" % (name, route, how, len(text_in)))
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           cwd=ncwd,
+                           cwd=ncwd, env=child_env,
                            timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
@@ -7015,6 +7087,11 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
             b = resolver()
             if not (os.path.isfile(b) or shutil.which(b)):
                 yield "%s: binary not found (%s). Install it or exclude the channel." % (c, b)
+    for c in sorted(by_kind.get("kimicli", [])):
+        em = _kimi_env_model(c)                          # R140 И-2: nvkimik3 needs its own key
+        if em and em.get("key_env") and not _env_key(em["key_env"]):
+            yield ("%s: %s is not set (process env or HKCU\\Environment). This channel will "
+                   "fail. Set it, or run with --skip %s." % (c, em["key_env"], c))
     for c in sorted(by_kind.get("grokcli", [])):
         # 🔴 A MACHINE-WIDE RULES DIRECTORY NO cwd CAN PROTECT AGAINST. This CLI scans
         # `~/.grok/rules/*.md` for EVERY project, on top of the CLAUDE.md/AGENTS.md discovery
@@ -7118,8 +7195,11 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
     for c in sorted(by_kind.get("kimicli", [])):
         b = kimi_bin()
         if os.path.isfile(b) or shutil.which(b):
-            yield ("%s: Kimi Code CLI present (%s); free via AIHubMix "
-                   "(AIHUBMIX_API_KEY + ~/.kimi-code/config.toml)" % (c, b))
+            em = _kimi_env_model(c)                      # R140 И-2: say THIS channel's route
+            yield ("%s: Kimi Code CLI present (%s); %s" % (c, b, (
+                "routed by env to %s %s (key %s, config.toml untouched)"
+                % (em.get("base_url"), em.get("model"), em.get("key_env")) if em else
+                "free via AIHubMix (AIHUBMIX_API_KEY + ~/.kimi-code/config.toml)")))
         else:
             yield ("%s: Kimi Code CLI NOT FOUND. Install: npm install -g "
                    "@moonshot-ai/kimi-code; configure AIHubMix provider in "
@@ -8243,7 +8323,15 @@ def _channel_key_ready(ch):
         return bool(os.path.isfile(b) or shutil.which(b))
     if kind == "kimicli":
         b = kimi_bin()
-        return bool(os.path.isfile(b) or shutil.which(b))
+        if not (os.path.isfile(b) or shutil.which(b)):
+            return False
+        # R140 И-2: a kimicli channel routed by `env_model` (nvkimik3 -> NVIDIA) also needs ITS
+        # key, or the cascade would pick it on a machine without one and kimik3free would never
+        # run there.
+        em = ch.get("env_model")
+        if isinstance(em, dict) and em.get("key_env"):
+            return bool(_env_key(em["key_env"]))
+        return True
     return True                                          # codex / agy / grokcli / hermes
 
 
@@ -9958,7 +10046,8 @@ def main():
                                         system=_system_for(system, p),
                                         timeout=_seconds(p.get("timeout"), 2400),
                                         name=cname, workdir=workdir,
-                                        bypass=bool(cli_bypass_active(cname, a, reg)))
+                                        bypass=bool(cli_bypass_active(cname, a, reg)),
+                                        env_model=_kimi_env_model(cname, reg))
             else:
                 # Named in the registry, unknown to the code. A log line is NOT enough: a log
                 # line scrolls, and every downstream consumer - the "N/M channels returned"
@@ -10123,7 +10212,8 @@ def main():
                         system=_system_for(system, p),
                         timeout=_seconds(p.get("timeout"), 2400), name=cname,
                         workdir=os.path.join(a.out, cname + "-ws"),
-                        bypass=bool(cli_bypass_active(cname, a, reg)))
+                        bypass=bool(cli_bypass_active(cname, a, reg)),
+                        env_model=_kimi_env_model(cname, reg))
                 else:
                     log("  [%s] cannot retry: unknown kind %r" % (cname, kind))
             for cname, f in _rjobs.items():

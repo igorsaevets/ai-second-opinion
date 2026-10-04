@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.102.0 — 2026-10-04
+
+A Kimi Code CLI channel can now be pointed at another endpoint without touching the CLI's own
+config, and an NVIDIA API key is treated as a secret.
+
+- **`env_model` for `kind: kimicli` channels.** The harness passes the route to Kimi Code CLI in
+  the child process's environment (`KIMI_MODEL_NAME`, `_BASE_URL`, `_API_KEY`, `_MAX_OUTPUT_SIZE`
+  and the rest, which the CLI itself reads), so `~/.kimi-code/config.toml` is never edited and the
+  key is never written to disk or put on the command line. The key comes from the variable the
+  block names (`key_env`). If it is missing, the channel stops with a message naming it, before
+  any process starts. The first user is a local channel, `nvkimik3`: Kimi K3 on NVIDIA's free
+  hosted endpoint. NVIDIA accepts at most 65,536 output tokens (the CLI's default is the model's
+  whole window, which NVIDIA refuses with an empty 400). It is off in the kit, because it needs an
+  NVIDIA key and the kimi CLI.
+- **One Kimi voice per run.** `nvkimik3` and `kimik3free` are one cascade group: when the NVIDIA
+  key is present, `nvkimik3` runs and `kimik3free` is skipped; without the key, `kimik3free` runs
+  as before. A kimicli channel with `env_model` counts as ready only when its key is present.
+- **NVIDIA API keys (`nvapi-…`) are secrets** to the payload gate (and so to `publish_audit`).
+- Two failure texts measured on NVIDIA's endpoint now get their own explanation:
+  - «400 status code (no body)»: an output limit above the vendor's range;
+  - «containing only thinking content»: the endpoint returned reasoning only, and the CLI retries
+    it by itself.
+
 ## 1.101.7 — 2026-10-04
 
 A wrong explanation for one error message is corrected.

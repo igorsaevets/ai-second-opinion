@@ -148,6 +148,7 @@
         "ocspark13free",
         "ocmimo26flashfree",
         "kimik3free",
+        "nvkimik3",
         "mimov26pro",
         "cclopus46",
         "codex",
@@ -435,6 +436,51 @@
       "notes": "Free Kimi K3 via Kimi Code CLI + AIHubMix. Full K3 model by Moonshot AI (NOT cut-down), 1.05M context. New kind kimicli — prompt as -p argument (not stdin), NDJSON output with role/content structure. No token metrics from stream-json (session DB only). -m flag crashes — model set via default_model in config.toml. distribution: local (kimi CLI + AIHubMix key not guaranteed for employees). LIVE TESTED 2026-10-02: 8.3s, $0.",
       "_prompt_suffix_restored_r135": "R135 (2026-10-02): added. Training-tier channel (kimi CLI free relay to Moonshot AI). package.py strips from kit (default distribution=local).",
       "_argv_r137": "R137 (2026-10-03): 0 of 3 panels answered - «The command line is too long». The npm kimi.cmd shim runs through cmd.exe: 8,191-char cap (the system preset alone is ~9.3K), the prompt cut at its first newline, %NAME% expanded. call_kimicli now starts node + main.mjs directly; past the 32K CreateProcess cap the brief goes to <out>/kimik3free-ws/BRIEF.md and -p names it (--add-dir). Verified on the session wire: a 9.7K multi-line brief arrived whole with %USERNAME% literal. The file route reached the provider; the model's reading of a 42K file is UNVERIFIED (the free model answered 400 «cannot be served at the moment» both times)."
+    },
+    "nvkimik3": {
+      "_permissions": "Same as kimik3free (R137 И-2): kimi `-p` already runs in AUTO permission mode, so there is no bypass field; CLI_BYPASS_SAFETY_PROMPT always rides the brief.",
+      "read_order": 1,
+      "kind": "kimicli",
+      "panel": "cheap",
+      "vendor": "moonshot",
+      "enabled": false,
+      "distribution": "local",
+      "label": "Kimi K3 (NVIDIA free)",
+      "cost": "free",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "_added_r140_i2": "R140 И-2 (2026-10-04). kimik3free has had no route since 2026-10-02 (AIHubMix `no_available_channel` for coding-kimi-k3 free AND paid, platform-wide, the second time in a month). The same Kimi Code CLI reaches NVIDIA's free hosted endpoint through its own env model override (main.mjs `applyEnvModelConfig`: KIMI_MODEL_NAME / _API_KEY / _BASE_URL / _PROVIDER_TYPE / _MAX_CONTEXT_SIZE / _MAX_OUTPUT_SIZE / _REASONING_KEY / _THINKING_EFFORT), so ~/.kimi-code/config.toml is never touched and the key never lands on disk. Measured live (runs/r140-i2-kimi-nvidia): «OK» in 81 s; a canary file read with the CLI's own tool in 194 s; the wire shows thinkingEffort max, thinkingKeep all, maxTokens 65536, 26 tools.",
+      "model": "nvidia/moonshotai/kimi-k3",
+      "effort": "max",
+      "_effort": "Sent as KIMI_MODEL_THINKING_EFFORT; the CLI puts it on the wire as thinkingEffort (seen in the session wire). NVIDIA's API reference: reasoning_effort low | high | max, default max, «Thinking is always enabled» - max IS the vendor ceiling.",
+      "env_model": {
+        "base_url": "https://integrate.api.nvidia.com/v1",
+        "model": "moonshotai/kimi-k3",
+        "key_env": "NVIDIA_NIM_API_KEY",
+        "provider_type": "kimi",
+        "max_context_size": 1048576,
+        "max_output_size": 65536,
+        "reasoning_key": "reasoning_content"
+      },
+      "_env_model": "call_kimicli turns this block into KIMI_MODEL_* variables for the child process only. max_output_size: NVIDIA's reference says max_tokens 1..65536; the CLI's own default is the model's whole window (1,048,576), which NVIDIA refuses as «400 status code (no body)» in ~17 s (measured). reasoning_key: K3 needs its reasoning_content passed back on every tool round («clients must pass back the complete assistant message, including reasoning_content and tool_calls», NVIDIA model card); the CLI keeps it (thinkingKeep all). The harness's own HTTP tool loop does NOT pass reasoning back, which is why this route is the CLI and not an `oai` provider.",
+      "timeout": "60m",
+      "_timeout": "Measured on the free endpoint: 45-56 s to the first token on EVERY step (a 20K-token prompt: system preset + 26 tool schemas; no prompt cache), and 2 of 4 requests came back with reasoning only (`APIEmptyResponseError`), which the CLI retries itself (up to 10 attempts). A repo-reading review of 15-30 steps needs more than kimik3free's 40m.",
+      "models": {
+        "nvidia/moonshotai/kimi-k3": {
+          "label": "Kimi K3 (via Kimi Code CLI + NVIDIA free endpoint)",
+          "data_policy": "NVIDIA API Catalog trial endpoint (integrate.api.nvidia.com), NVIDIA API Trial Terms of Service; serves Moonshot AI's open-weight K3 (2.8T MoE, 104B active, 1M context per the NVIDIA model card). Free, rate-limited (~40 RPM nominal; a daily cap is reported on NVIDIA's forum, not measured here).",
+          "aliases": [
+            "kimi k3 nvidia",
+            "nvidia kimi k3"
+          ]
+        }
+      },
+      "aliases": [
+        "nvkimik3",
+        "kimi_nvidia",
+        "kimi nvidia"
+      ],
+      "notes": "Kimi K3 through the same Kimi Code CLI as kimik3free, routed to NVIDIA's free endpoint by env vars (no config edit). In `_cascade_groups` BEFORE kimik3free: with NVIDIA_NIM_API_KEY present this channel runs and kimik3free is skipped (one voice per model); without the key kimik3free runs as before. distribution: local - the NVIDIA key and the kimi CLI are not guaranteed for employees.",
+      "_prompt_suffix": "Training-tier by the vendor's own terms: NVIDIA API Trial Terms of Service §3.3(iv), «User Content and Generated Content to improve NVIDIA products and services, including AI models» (read 2026-10-04). package.py strips it from the kit (default distribution=local), same as kimik3free."
     },
     "cclopus46": {
       "read_order": 1,
@@ -1741,6 +1787,10 @@
     [
       "agy38flash",
       "orgemini38flash"
+    ],
+    [
+      "nvkimik3",
+      "kimik3free"
     ]
   ],
   "_cascade_groups_doc": "Panel cascade: when several channels carry the SAME model through different transports, only the first READY one runs; the rest are skipped. Order matters - cheapest/free first. The panel runs independent VOICES in parallel; paying three transports for one voice is waste, not breadth. Added 2026-09-04 (the operator: 'незачем у одних и тех же моделей спрашивать').",

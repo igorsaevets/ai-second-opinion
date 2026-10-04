@@ -492,7 +492,9 @@ def check_pii_gate(r, mod):
              # upgrade.py's "checks did not pass" prompt on every healthy install. selftest now
              # holds the property literally, so a future kind added without a probe line reddens
              # this file rather than a stranger's install.
-             "xai xai-" + "e" * 20 + "\n")
+             "xai xai-" + "e" * 20 + "\n"
+             # R140 И-2: NVIDIA_KEY entered SECRET_PATTERNS with the nvkimik3 route.
+             "nvidia nv" + "api-" + "f" * 20 + "\n")
     secrets, pii = mod.scan_payload(probe, "selftest")
     kinds = {h.split(" at ")[0] for h in secrets + pii}
     expect = {k for k, _ in mod.SECRET_PATTERNS} | {k for k, _ in mod.PII_PATTERNS}

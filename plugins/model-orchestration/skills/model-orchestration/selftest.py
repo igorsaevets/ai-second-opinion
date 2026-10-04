@@ -401,7 +401,7 @@ def suite_routing():
         (["--only", "agy"], group_of("agy"), "--only agy (GROUP -> the subscription transport)"),
         (["--only", "gemini"], cascaded(group_of("gemini")), "--only gemini (GROUP -> the model family)"),
         (["--only", "spark"], cascaded(group_of("spark")), "--only spark (GROUP -> both Spark)"),
-        (["--only", "cli"], group_of("cli"), "--only cli (GROUP -> every CLI binary channel)"),
+        (["--only", "cli"], cascaded(group_of("cli")), "--only cli (GROUP -> every CLI binary channel)"),
         (["--skip", "spark"], cascaded(without(*group_of("spark"))), "--skip spark (GROUP)"),
         (["--skip", "cli"], cascaded(without(*group_of("cli"))), "--skip cli (GROUP)"),
         (["--skip", "codex", "agy"], cascaded(without("codex", *group_of("agy"))),
@@ -415,8 +415,8 @@ def suite_routing():
         (["--route", "не используй spark"], cascaded(without(*GROUPS["spark"])),
          "route: RU negation of a GROUP"),
         (["--route", "only codex"], {"codex"}, "route: EN only"),
-        (["--route", "только cli"], group_of("cli"), "route: только cli (the Plugins ironmemo fix)"),
-        (["--route", "только консоль"], group_of("cli"), "route: только консоль (RU alias of cli)"),
+        (["--route", "только cli"], cascaded(group_of("cli")), "route: только cli (the Plugins ironmemo fix)"),
+        (["--route", "только консоль"], cascaded(group_of("cli")), "route: только консоль (RU alias of cli)"),
         ([], cascaded(ALL), "no flags: every enabled channel runs"),
     ]
     if "orgpt56terrapro" in EXISTS:
@@ -3110,6 +3110,12 @@ def suite_panels():
          "config.toml. effort=null (no effort control). distribution: local (kimi CLI + "
          "AIHubMix key not guaranteed on employee machines). Live tested 2026-10-02: "
          "8.3s, $0."),
+        ("R140 И-2 2026-10-04", "ADD", "nvkimik3",
+         "Igor R140 И-2: «верни Kimi K3 в дешёвую панель через бесплатный маршрут». "
+         "kimik3free has had no route on AIHubMix since 2026-10-02 (no_available_channel); "
+         "the same Kimi Code CLI reaches NVIDIA's free endpoint through KIMI_MODEL_* env "
+         "(registry `env_model`). Cascade [nvkimik3, kimik3free]: one Kimi voice per run. "
+         "distribution: local. Live tested 2026-10-04: OK in 81 s, a tool round trip in 194 s."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -7581,7 +7587,8 @@ def main():
                   suite_r130_qwen_home_override,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
-                  suite_r138_i2_hotfix, suite_r139_hook_hygiene):
+                  suite_r138_i2_hotfix, suite_r139_hook_hygiene,
+                  suite_r140_i2_nvkimik3):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -10762,6 +10769,116 @@ def suite_r130_qwen_home_override():
     import shutil
     shutil.rmtree(sandbox, ignore_errors=True)
     shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+def suite_r140_i2_nvkimik3():
+    """R140 И-2 (2026-10-04): Kimi K3 back in the cheap panel through NVIDIA's free endpoint.
+
+    kimik3free has no route on AIHubMix (no_available_channel). nvkimik3 runs the SAME Kimi Code
+    CLI with KIMI_MODEL_* in the child's env (`env_model` in the registry) - no config edit, the
+    key never on argv or disk. Invariants: (a) every env_model channel is a kimicli channel with
+    a complete block, placed in a cascade group BEFORE a plain kimicli member; (b) the cascade
+    picks it only when its key is present, else the partner; (c) the call puts the route in the
+    child env and the key nowhere else, and refuses cleanly without a key; (d) an `nvapi-` key is
+    a secret to the payload gate; (e) the two measured NVIDIA failure texts get their own cause.
+    Channel names come from channels.json, never from this file."""
+    section("R140 И-2 nvkimik3: Kimi Code CLI routed to NVIDIA by env, one Kimi voice per run")
+    import orchestrate as o
+    import tempfile
+    reg = json.load(open(os.path.join(HERE, "channels.json"), encoding="utf-8"))
+    chans = reg.get("channels") or {}
+    nv = [c for c, ch in chans.items() if isinstance(ch.get("env_model"), dict)]
+    check(bool(nv), "R140 И-2: the registry has a kimicli channel routed by env_model", repr(nv))
+    pairs = []
+    for c in nv:
+        em = chans[c]["env_model"]
+        grp = next((g for g in reg.get("_cascade_groups") or [] if c in g), [])
+        rest = [m for m in grp[grp.index(c) + 1:] if (chans.get(m) or {}).get("kind") == "kimicli"
+                and not isinstance((chans.get(m) or {}).get("env_model"), dict)] if grp else []
+        check(chans[c].get("kind") == "kimicli"
+              and all(em.get(k) for k in ("base_url", "model", "key_env", "max_output_size"))
+              and bool(rest),
+              "R140 И-2: %s is kimicli with base_url/model/key_env/max_output_size, and a plain "
+              "kimicli partner follows it in a cascade group" % c, repr((grp, sorted(em)))[:200])
+        if rest:
+            pairs.append((c, rest[0], grp))
+
+    saved = (o._env_key, o.kimi_bin, o.subprocess.run, o._kimi_node_argv, o.neutral_cwd)
+    fake_key = "k" * 32
+    seen = []
+
+    class _Done:
+        returncode = 0
+        stdout = '{"role": "assistant", "content": "ok\\nR140-DONE"}\n'
+        stderr = ""
+
+    def _fake_run(cmd, **kw):
+        seen.append((list(cmd), kw))
+        return _Done()
+
+    td = tempfile.mkdtemp(prefix="r140i2-")
+    try:
+        o.kimi_bin = lambda: sys.executable               # a binary that exists everywhere
+        for c, partner, grp in pairs:
+            o._env_key = lambda _k: None
+            check(o._channel_key_ready(chans[c]) is False
+                  and o._channel_key_ready(chans[partner]) is True,
+                  "R140 И-2: without its key %s is NOT ready, %s still is" % (c, partner))
+            plan = {m: {"enabled": True, "why": []} for m in grp}
+            plan, _n = o._apply_cascade(plan, reg)
+            off_key = [m for m in grp if plan[m]["enabled"]]
+            o._env_key = lambda _k: fake_key
+            plan = {m: {"enabled": True, "why": []} for m in grp}
+            plan, _n = o._apply_cascade(plan, reg)
+            on_key = [m for m in grp if plan[m]["enabled"]]
+            check(off_key == [partner] and on_key == [c],
+                  "R140 И-2: the cascade runs %s when its key is present and %s when it is not "
+                  "(one Kimi voice either way)" % (c, partner), repr((off_key, on_key)))
+
+            o.subprocess.run = _fake_run
+            o._kimi_node_argv = lambda b: ["node", "main.mjs"]
+            o.neutral_cwd = lambda: td
+            em = chans[c]["env_model"]
+            r = o.call_kimicli("brief", "R140-DONE", os.path.join(td, c + ".md"), effort="max",
+                               name=c, workdir=os.path.join(td, "ws"), env_model=em)
+            cmd, kw = seen[-1]
+            env = kw.get("env") or {}
+            check(r.get("ok") and env.get("KIMI_MODEL_NAME") == em["model"]
+                  and env.get("KIMI_MODEL_BASE_URL") == em["base_url"]
+                  and env.get("KIMI_MODEL_MAX_OUTPUT_SIZE") == str(em["max_output_size"])
+                  and env.get("KIMI_MODEL_THINKING_EFFORT") == "max"
+                  and env.get("KIMI_MODEL_API_KEY") == fake_key
+                  and not any(fake_key in str(a) for a in cmd),
+                  "R140 И-2: %s puts the route and the key in the CHILD env only (never argv)"
+                  % c, repr(sorted(k for k in env if k.startswith("KIMI_MODEL"))))
+            o.call_kimicli("brief", "R140-DONE", os.path.join(td, "plain.md"), name=partner,
+                           workdir=os.path.join(td, "ws2"))
+            check(seen[-1][1].get("env") is None,
+                  "R140 И-2 control: a kimicli channel without env_model inherits the env "
+                  "unchanged (kimik3free still reads its own config)")
+            o._env_key = lambda _k: None
+            n_before = len(seen)
+            r = o.call_kimicli("brief", "R140-DONE", os.path.join(td, "nokey.md"), name=c,
+                               workdir=os.path.join(td, "ws3"), env_model=em)
+            check(not r.get("ok") and em["key_env"] in (r.get("error") or "")
+                  and len(seen) == n_before,
+                  "R140 И-2: no %s -> a clean refusal naming it, no process started"
+                  % em["key_env"], repr(r.get("error"))[:160])
+    finally:
+        (o._env_key, o.kimi_bin, o.subprocess.run, o._kimi_node_argv, o.neutral_cwd) = saved
+
+    rx = dict(o.SECRET_PATTERNS).get("NVIDIA_KEY")
+    sample = "nv" + "api-" + "Ab3_" * 10                  # built at run time: no key-shaped literal
+    check(bool(rx) and bool(rx.search("token " + sample)) and not rx.search("the nvapi- prefix"),
+          "R140 И-2: an NVIDIA API key (nvapi- + 20) is a secret to the payload gate; the bare "
+          "prefix in prose is not")
+    c400, f400 = o.diagnose("error: failed to run prompt: provider.api_error: 400 status code "
+                            "(no body)")
+    cthink, _ = o.diagnose("The API returned a response containing only thinking content without "
+                           "any text or tool calls.")
+    check("65,536" in (c400 or "") and bool(cthink) and cthink != c400,
+          "R140 И-2: the NVIDIA 400-with-no-body names the output limit; a reasoning-only reply "
+          "gets its own cause", repr((c400, cthink))[:200])
 
 
 def suite_r137_kimi_argv():
