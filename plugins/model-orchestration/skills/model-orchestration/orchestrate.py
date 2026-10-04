@@ -1181,6 +1181,52 @@ def scrub_deep(obj):
     return scrub(obj)
 
 
+# R140 И-4: the answer scan's second half. SECRET_PATTERNS know SHAPES, and the answer scan strips
+# code spans before using them (a review quoting a pattern fired them); a key an agent's shell
+# prints lands in exactly such a span. A VALUE has no false positive - only a real key equals a
+# real key - so the values of this machine's secret-named env vars are looked for in the whole
+# answer: this process's env and HKCU\Environment (setx-only keys). Paths and URLs are skipped.
+_SECRET_ENV_NAME = re.compile(r"(?i)(?:^|_)(?:API_?KEY|KEY|TOKEN|SECRET|PASSWORD|PASSWD|PAT)(?:_|$)")
+_SECRET_ENV_VALUE = re.compile(r"[A-Za-z0-9_\-.+/=:]{20,}$")
+
+
+def _known_secret_values():
+    """{NAME: {values}} of this machine's secret-named env vars. Values stay in memory; every
+    caller prints names only."""
+    pairs = list(os.environ.items())
+    if os.name == "nt":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg:
+                i = 0
+                while True:
+                    try:
+                        k, v, _t = winreg.EnumValue(reg, i)
+                    except OSError:
+                        break
+                    i += 1
+                    pairs.append((k, v))
+        except OSError:
+            pass
+    out = {}
+    for k, v in pairs:
+        if not (isinstance(k, str) and isinstance(v, str) and _SECRET_ENV_NAME.search(k)):
+            continue
+        v = v.strip()
+        if _SECRET_ENV_VALUE.match(v) and not v.startswith("/") and "://" not in v:
+            out.setdefault(k.upper(), set()).add(v)
+    return out
+
+
+def _known_secret_hits(text, values=None):
+    """Sorted NAMES whose value appears verbatim in `text`, code spans included."""
+    if not text:
+        return []
+    vals = _known_secret_values() if values is None else values
+    return sorted(n for n, vs in vals.items()
+                  if any(v and v in text for v in ({vs} if isinstance(vs, str) else vs)))
+
+
 # Signature -> (plain-language cause, what to actually do). Matched case-insensitively against
 # the error text. This is what turns diagnostics.json from a stack trace into something an
 # assistant - or a non-technical user pasting the file into a chat - can act on.
@@ -3392,7 +3438,7 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
         warn.append("CLI DID NOT RETURN JSON (exit=%d): %s"
                     % (p.returncode, (raw or p.stderr or "")[:300]))
     if p.returncode != 0 and not text:
-        warn.append("EXIT %d: %s" % (p.returncode, (p.stderr or raw or "")[:300]))
+        warn.append("EXIT %d: %s" % (p.returncode, scrub(p.stderr or raw or "")[:300]))
     if text:
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
@@ -3640,7 +3686,7 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
             cost = part.get("cost")
 
     if p.returncode != 0 and not text:
-        warn.append("EXIT %d: %s" % (p.returncode, (p.stderr or raw or "")[:300]))
+        warn.append("EXIT %d: %s" % (p.returncode, scrub(p.stderr or raw or "")[:300]))
     if text:
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
@@ -3739,7 +3785,7 @@ def call_mimocli(brief, marker, outfile, model=None, effort=None, system=None,
             cost = part.get("cost")
 
     if p.returncode != 0 and not text:
-        warn.append("EXIT %d: %s" % (p.returncode, (p.stderr or raw or "")[:300]))
+        warn.append("EXIT %d: %s" % (p.returncode, scrub(p.stderr or raw or "")[:300]))
     if text:
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
@@ -4346,17 +4392,62 @@ def _kimi_node_argv(binary):
 
 
 def _kimi_env_model(cname, reg=None):
-    """The channel's `env_model` block (R140 И-2), or None. routing.initial_plan copies a fixed
-    list of fields into the plan and this is not one of them, so it is read from the registry."""
+    """The channel's `env_model` block (R140 И-2) AS WRITTEN, or None when it has none.
+    routing.initial_plan copies a fixed list of fields into the plan and this is not one of them,
+    so it is read from the registry. R140 И-4 (grok, MiMo Pro, MiMo Flash): a block present but
+    unusable used to come back as None, and None IS the plain config.toml route - so a broken
+    NVIDIA block ran AIHubMix under the NVIDIA channel's name. Now every consumer asks
+    _env_model_problem, which fails it closed."""
     try:
         if reg is None:
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             import routing
             reg = routing.load_registry()
-        em = ((reg.get("channels") or {}).get(cname) or {}).get("env_model")
+        return ((reg.get("channels") or {}).get(cname) or {}).get("env_model")
     except Exception:                                    # noqa: BLE001 - preflight never raises
         return None
-    return em if isinstance(em, dict) else None
+
+
+_KIMI_ENV_ROUTE_SEEN = {}
+
+
+def _kimi_reads_env_model(main_path):
+    """True when this Kimi Code CLI bundle reads KIMI_MODEL_NAME (main.mjs `applyEnvModelConfig`,
+    measured on 2.1.1), False when it does not, None when that cannot be told (no main.mjs).
+    R140 И-4 (nvkimik3's own review): a CLI upgrade that stops reading the variables would run
+    config.toml's route under the env-routed channel's name. Cached per path and mtime."""
+    if not main_path or not os.path.isfile(main_path):
+        return None
+    try:
+        k = (main_path, os.path.getmtime(main_path))
+        if k not in _KIMI_ENV_ROUTE_SEEN:
+            with open(main_path, "rb") as f:
+                _KIMI_ENV_ROUTE_SEEN[k] = b"KIMI_MODEL_NAME" in f.read()
+        return _KIMI_ENV_ROUTE_SEEN[k]
+    except OSError:
+        return None
+
+
+def _env_model_problem(em):
+    """None when an `env_model` block can route a kimicli child, else why not (R140 И-4).
+    Required: base_url (http/https), model, key_env (a variable name); the sizes, when given, are
+    positive integers. A channel whose block fails this refuses to run and is never ready for its
+    cascade - it never falls back to config.toml under its own name."""
+    if not isinstance(em, dict):
+        return "env_model is %s, not an object" % type(em).__name__
+    miss = [f for f in ("base_url", "model", "key_env")
+            if not (isinstance(em.get(f), str) and em[f].strip())]
+    if miss:
+        return "env_model has no %s" % ", ".join(miss)
+    if not re.match(r"(?i)https?://\S+$", em["base_url"]):
+        return "env_model.base_url is not an http(s) URL"
+    if not re.match(r"[A-Za-z_][A-Za-z0-9_]*$", em["key_env"]):
+        return "env_model.key_env is not an environment variable name"
+    for f in ("max_output_size", "max_context_size"):
+        v = em.get(f)
+        if v is not None and (isinstance(v, bool) or not isinstance(v, int) or v <= 0):
+            return "env_model.%s is not a positive integer" % f
+    return None
 
 
 # R140 И-3: what a kimicli child routed by `env_model` inherits - an ALLOWLIST, not this process's
@@ -4441,20 +4532,28 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
 
     R140 И-2 `env_model` (nvkimik3): the same CLI routed elsewhere by KIMI_MODEL_* in the child's
     env (see _kimi_model_env); the key comes from env_model.key_env via _env_key (process env,
-    then HKCU) and is never put on argv. Missing key -> a clean refusal before any process starts.
+    then HKCU) and is never put on argv. Missing key, or a block _env_model_problem rejects
+    (R140 И-4) -> a clean refusal before any process starts.
     """
     binary = kimi_bin()
     child_env, route = None, "free via AIHubMix (default_model in config.toml)"
     # R140 И-3 (grok, panel): a KIMI_MODEL_NAME already in THIS process's env would reroute
     # the plain channel too (main.mjs keeps the file config only when it is unset), so the
     # plain call drops inherited KIMI_MODEL_* - and changes nothing when there are none.
-    if not env_model and any(k.upper().startswith("KIMI_MODEL_") for k in os.environ):
+    if env_model is None and any(k.upper().startswith("KIMI_MODEL_") for k in os.environ):
         child_env = {k: v for k, v in os.environ.items()
                      if not k.upper().startswith("KIMI_MODEL_")}
         log("  [%s] dropped inherited KIMI_MODEL_* from the child: this channel's route "
             "is config.toml" % name)
-    if env_model:
-        key = _env_key(env_model.get("key_env") or "")
+    if env_model is not None:
+        # R140 И-4: a block present but unusable refuses here, never the config.toml route.
+        prob = _env_model_problem(env_model)
+        if prob:
+            return {"channel": name, "ok": False, "text": "", "model": model,
+                    "error": "%s - this channel is routed by env, so it refuses rather than run "
+                             "the config.toml route under its own name" % prob,
+                    "warnings": ["env_model unusable"], "notes": []}
+        key = _env_key(env_model["key_env"])
         if not key:
             return {"channel": name, "ok": False, "text": "", "model": model,
                     "error": "%s is not set (process env or HKCU\\Environment) - this channel "
@@ -4468,6 +4567,12 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
     text_in = ((system.strip() + "\n\n---\n\n") if system else "") + _with_bypass_safety(brief, True)
 
     base = _kimi_node_argv(binary)
+    if env_model is not None and base and _kimi_reads_env_model(base[-1]) is False:
+        return {"channel": name, "ok": False, "text": "", "model": model,
+                "error": "this Kimi Code CLI (%s) does not read KIMI_MODEL_* - it would run the "
+                         "config.toml route under this channel's name, so it refuses (the env "
+                         "route was measured on 2.1.1)" % base[-1],
+                "warnings": ["CLI ignores env_model"], "notes": []}
     cmd = (base or [binary]) + ["-p", text_in, "--output-format", "stream-json"]
     how = "prompt as -p arg"
     # R137: past the CreateProcess cap - or when only the cmd.exe shim exists, which would cut
@@ -4537,7 +4642,8 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
 
     if p.returncode != 0 and not text:
         stderr_tail = (p.stderr or "").strip()[-400:]
-        warn.append("EXIT %d: %s" % (p.returncode, (stderr_tail or raw or "")[:300]))
+        # R140 И-4 (MiMo Pro): scrub BEFORE the cut - a key split at 300 chars matches no pattern.
+        warn.append("EXIT %d: %s" % (p.returncode, scrub(stderr_tail or raw or "")[:300]))
     if text:
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
@@ -7142,7 +7248,12 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
                 yield "%s: binary not found (%s). Install it or exclude the channel." % (c, b)
     for c in sorted(by_kind.get("kimicli", [])):
         em = _kimi_env_model(c)                          # R140 И-2: nvkimik3 needs its own key
-        if em and em.get("key_env") and not _env_key(em["key_env"]):
+        prob = None if em is None else _env_model_problem(em)
+        if prob:
+            yield ("%s: %s. This channel will refuse to run (it never falls back to the "
+                   "config.toml route); fix its block in the registry, or run with --skip %s."
+                   % (c, prob, c))
+        elif em is not None and not _env_key(em["key_env"]):
             yield ("%s: %s is not set (process env or HKCU\\Environment). This channel will "
                    "fail. Set it, or run with --skip %s." % (c, em["key_env"], c))
     for c in sorted(by_kind.get("grokcli", [])):
@@ -7250,16 +7361,18 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
         if os.path.isfile(b) or shutil.which(b):
             em = _kimi_env_model(c)                      # R140 И-2: say THIS channel's route
             yield ("%s: Kimi Code CLI present (%s); %s" % (c, b, (
+                "free via AIHubMix (AIHUBMIX_API_KEY + ~/.kimi-code/config.toml)" if em is None
+                else "%s - it will refuse to run" % _env_model_problem(em)
+                if _env_model_problem(em) else
                 "routed by env to %s %s (key %s, config.toml untouched)"
-                % (em.get("base_url"), em.get("model"), em.get("key_env")) if em else
-                "free via AIHubMix (AIHUBMIX_API_KEY + ~/.kimi-code/config.toml)")))
+                % (em.get("base_url"), em.get("model"), em.get("key_env")))))
         else:
             em = _kimi_env_model(c)                      # R140 И-3 (agy): THIS route
             yield ("%s: Kimi Code CLI NOT FOUND. Install: npm install -g "
                    "@moonshot-ai/kimi-code; %s" % (c, (
-                       "this channel is routed by env (key %s) and needs no config.toml"
-                       % em.get("key_env") if em else
-                       "configure AIHubMix provider in ~/.kimi-code/config.toml")))
+                       "configure AIHubMix provider in ~/.kimi-code/config.toml" if em is None
+                       else "this channel is routed by env (key %s) and needs no config.toml"
+                       % (em.get("key_env") if isinstance(em, dict) else "?"))))
 
 
 def _write_agy_agent(workdir):
@@ -8386,8 +8499,8 @@ def _channel_key_ready(ch):
         # key, or the cascade would pick it on a machine without one and kimik3free would never
         # run there.
         em = ch.get("env_model")
-        if isinstance(em, dict) and em.get("key_env"):
-            return bool(_env_key(em["key_env"]))
+        if em is not None:                               # R140 И-4: present = must be usable
+            return not _env_model_problem(em) and bool(_env_key(em["key_env"]))
         return True
     return True                                          # codex / agy / grokcli / hermes
 
@@ -8448,9 +8561,13 @@ def _cascade_ready(reg):
         ch = chans.get(name) or {}
         if _channel_key_ready(ch):
             return True
-        em = ch.get("env_model") if isinstance(ch.get("env_model"), dict) else {}
-        if em.get("key_env") and not _env_key(em["key_env"]):
-            return "%s is not set" % em["key_env"]
+        em = ch.get("env_model")
+        if em is not None:
+            prob = _env_model_problem(em)
+            if prob:
+                return prob
+            if not _env_key(em["key_env"]):
+                return "%s is not set" % em["key_env"]
         return "%s: its key or CLI is missing" % (ch.get("kind") or "unknown kind")
     return ready
 
@@ -10335,6 +10452,16 @@ def main():
                     "diagnostics and this console are scrubbed. If it is real: ROTATE it - "
                     "deleting the file does not un-send the review."
                     % ", ".join(sorted({h.split(" at ")[0] for h in _leak})))
+        # R140 И-4 (panel gap): the shape scan above strips code spans, and a key an agent's
+        # shell prints lands in one. The VALUE scan has no such blind spot and no false positive.
+        if r.get("text"):
+            _known = _known_secret_hits(r["text"])
+            if _known:
+                r.setdefault("notes", []).append(
+                    "THE ANSWER CONTAINS THE VALUE OF %s (an environment variable on this "
+                    "machine). A reviewer's tool read it and wrote it into the review; the saved "
+                    ".md holds it RAW. ROTATE it - deleting the file does not un-send the review."
+                    % ", ".join(_known))
         if r.get("text"):
             _answer_path = os.path.join(a.out, name.upper() + ".md")
             # 🔴 `newline="\n"` ADDED R49. Without it Python translates every \n to \r\n on

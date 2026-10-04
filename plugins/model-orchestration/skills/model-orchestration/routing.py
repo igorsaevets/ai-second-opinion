@@ -1850,6 +1850,11 @@ def _apply_cascade(plan, reg, ready=None):
                     "cascade: not ready here (%s), so %s runs instead (same model)"
                     % (verdict[c] if isinstance(verdict[c], str) and verdict[c]
                        else "its key or CLI is missing", winner))
+            elif verdict[winner] is not True:
+                # R140 И-4 (MiMo Pro): «X takes priority» hid that nothing here is ready.
+                plan[c]["why"].append(
+                    "cascade: no member of this group is ready here, so %s runs first and its "
+                    "preflight says what is missing (same model)" % winner)
             else:
                 plan[c]["why"].append("cascade: %s takes priority (same model)" % winner)
     return plan

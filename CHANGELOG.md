@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.102.2 — 2026-10-04
+
+Hotfix from the rest of the cheap panel on 1.102.0 (MiMo v2.6 Pro, MiMo v2.6 Flash, Kimi K3 via NVIDIA), plus a live check of the 1.102.1 Kimi environment allowlist.
+
+- **A broken `env_model` block fails closed.** A `kimicli` channel whose `env_model` is present but unusable (not an object; no `base_url`, `model` or `key_env`; a size that is not a positive integer) was read as "no block", which is the plain `config.toml` route: `nvkimik3` would have run the AIHubMix route under its own name, and an empty `{}` did the same. It now refuses before starting a process, is never ready for its cascade (the plan prints the problem and the next member runs), and the preflight names it. Only a channel with no `env_model` at all takes the `config.toml` route.
+- **The CLI side of the same gap.** An env-routed channel also refuses when the installed Kimi Code CLI bundle no longer reads `KIMI_MODEL_*` (a content check of its `main.mjs`), instead of quietly running `config.toml`'s route after an upgrade.
+- **The answer scan looks for real values.** Besides the pattern scan, which skips code spans so that reviews quoting a pattern do not trip it, every answer is searched for the values of this machine's secret-named environment variables (process environment and, on Windows, `HKCU\Environment`), code blocks included. Only the variable's name is printed. A placeholder never equals a real key, so this adds no false positives.
+- **stderr is scrubbed before it is cut.** The `EXIT n: ...` warning of a failed CLI kept the first 300 characters and scrubbed them afterwards, so a key split by the cut matched no pattern. Four call sites.
+- **Cascade wording.** When no member of a group is ready, the plan says so instead of "X takes priority".
+- **Live check of the 1.102.1 allowlist** (`--only nvkimik3`, Kimi Code CLI 2.1.1 to NVIDIA, 200 s): the harness passed 38 of 99 variables; the agent's shell saw 50, with `KIMI_MODEL_API_KEY` set (the CLI reads its key from it, so an agent can always see its own channel's key) and none of the six other vendor keys the launching process held; its file read and web fetch worked.
+- Selftest: `suite_r140_i4_env_fail_closed`.
+
 ## 1.102.1 — 2026-10-04
 
 Hotfix from the cheap panel on 1.102.0 (Spark, Gemini 3.8 Flash, Grok 4.7; all three found the first item).

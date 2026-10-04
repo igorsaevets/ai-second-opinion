@@ -7592,7 +7592,8 @@ def main():
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
-                  suite_r140_i2_nvkimik3, suite_r140_i3_panel_hotfix):
+                  suite_r140_i2_nvkimik3, suite_r140_i3_panel_hotfix,
+                  suite_r140_i4_env_fail_closed):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -11849,6 +11850,188 @@ def suite_r138_i2_hotfix():
           "R138 И-2 (g): the tripwire names a watched file changed during the round; it always "
           "watches orchestrate.py", repr(bad))
     shutil.rmtree(td, ignore_errors=True)
+
+
+def suite_r140_i4_env_fail_closed():
+    """R140 И-4 (2026-10-04): the rest of the cheap panel on kit 1.102.0 (MiMo Pro, MiMo Flash).
+
+    (a) AN env_model BLOCK THAT IS PRESENT BUT UNUSABLE FAILS CLOSED. It used to read as None,
+        and None is the plain config.toml route, so a broken NVIDIA block ran AIHubMix under the
+        NVIDIA channel's name (grok, MiMo Pro, MiMo Flash). Now: a refusal naming the problem and
+        no process, never ready for its cascade, and the preflight says so.
+    (b) the answer scan looks for the VALUE of this machine's secret-named env vars in the whole
+        answer, code spans included (the shape scan strips them); names only, never values.
+    (c) a failed CLI's stderr is scrubbed BEFORE the 300-char cut, so a key split by the cut
+        cannot slip past its pattern (MiMo Pro).
+    (d) a cascade with no ready member says so, not «X takes priority» (MiMo Pro).
+    (e) --only names one member of a cascade group and it runs alone; nvkimik3's output cap stays
+        at NVIDIA's measured ceiling (MiMo Pro).
+    Channel names come from channels.json, never from this file."""
+    section("R140 И-4: env_model fails closed, answer value scan, stderr scrub, cascade text")
+    import copy
+    import inspect
+    import tempfile
+    import orchestrate as o
+    import routing
+    raw = json.load(open(os.path.join(HERE, "channels.json"), encoding="utf-8"))
+    chans = raw.get("channels") or {}
+    env_routed = sorted(c for c, ch in chans.items()
+                        if ch.get("kind") == "kimicli" and isinstance(ch.get("env_model"), dict))
+    plain = sorted(c for c, ch in chans.items()
+                   if ch.get("kind") == "kimicli" and "env_model" not in ch)
+    check(bool(env_routed and plain),
+          "R140 И-4: the registry has an env-routed and a plain kimicli channel",
+          repr((env_routed, plain)))
+    if not (env_routed and plain):
+        return
+    nv, kf = env_routed[0], plain[0]
+    good = chans[nv]["env_model"]
+    src = Path(HERE, "orchestrate.py").read_text(encoding="utf-8")
+
+    # (a) the validator, on the shipped block and on broken ones
+    check(o._env_model_problem(good) is None,
+          "R140 И-4: the shipped %s env_model block is usable" % nv, repr(o._env_model_problem(good)))
+    for blk, why in (({}, "no base_url"), ("nvidia", "not an object"), ([], "not an object"),
+                     (dict(good, model=""), "no model"),
+                     (dict(good, key_env="NOT A NAME"), "variable name"),
+                     (dict(good, base_url="integrate.api.nvidia.com/v1"), "http(s)"),
+                     (dict(good, max_output_size="65536"), "positive integer"),
+                     (dict(good, max_output_size=True), "positive integer")):
+        prob = o._env_model_problem(blk)
+        check(bool(prob) and why in prob,
+              "R140 И-4: an env_model block with %s is refused" % why, repr(prob))
+    check(o._kimi_env_model(kf, raw) is None and o._kimi_env_model(nv, raw) == good,
+          "R140 И-4: _kimi_env_model returns the block as written, None only when there is none")
+    bad = copy.deepcopy(raw)
+    bad["channels"][nv]["env_model"] = "nvidia"
+    check(o._kimi_env_model(nv, bad) == "nvidia",
+          "R140 И-4: a malformed block is NOT read as «no block» (that is the plain route)")
+
+    saved = (o._env_key, o.kimi_bin, o.subprocess.run, o._kimi_node_argv, o.neutral_cwd)
+    started = []
+
+    class _Fail:
+        returncode = 1
+        stdout = ""
+        stderr = "x" * 279 + " nvapi-" + "A" * 64
+
+    try:
+        o._env_key = lambda v: "k" * 32
+        o.kimi_bin = lambda: sys.executable
+        o._kimi_node_argv = lambda b: [b, "main.mjs"]
+        o.neutral_cwd = lambda: tempfile.gettempdir()
+        o.subprocess.run = lambda cmd, **kw: started.append(list(cmd)) or _Fail()
+        out = os.path.join(tempfile.gettempdir(), "r140i4-%d.md" % os.getpid())
+        for blk in ({}, "nvidia", dict(good, model="")):
+            del started[:]
+            r = o.call_kimicli("brief", "R140-DONE", out, name=nv, env_model=blk)
+            check(not r.get("ok") and "refuses" in (r.get("error") or "") and not started,
+                  "R140 И-4: call_kimicli refuses an unusable env_model and starts no process",
+                  repr(r.get("error"))[:200])
+        for blk in ({}, dict(good, key_env=""), "nvidia"):
+            ch = dict(chans[nv], env_model=blk)
+            check(o._channel_key_ready(ch) is False,
+                  "R140 И-4: a kimicli channel with an unusable env_model is never ready")
+            reg2 = copy.deepcopy(raw)
+            reg2["channels"][nv]["env_model"] = blk
+            why = o._cascade_ready(reg2)(nv)
+            check(isinstance(why, str) and "env_model" in why,
+                  "R140 И-4: the cascade prints the env_model problem as the reason", repr(why))
+        check(o._channel_key_ready(chans[kf]) is True and o._channel_key_ready(chans[nv]) is True,
+              "R140 И-4 control: the plain channel and the shipped block are ready (binary + key)")
+        check(inspect.getsource(o.channel_preflight).count("_env_model_problem(") >= 2,
+              "R140 И-4: the preflight names an unusable env_model (present and missing CLI)")
+
+        # (c) stderr: scrubbed before the cut (functional on kimi, source on the other three)
+        del started[:]
+        r = o.call_kimicli("brief", "R140-DONE", out, name=kf, env_model=None)
+        w = " ".join(r.get("warnings") or [])
+        check(started and "EXIT 1" in w and "nvapi-" not in w,
+              "R140 И-4: a key split by the 300-char stderr cut is scrubbed first", w[-80:])
+    finally:
+        (o._env_key, o.kimi_bin, o.subprocess.run, o._kimi_node_argv, o.neutral_cwd) = saved
+    check(src.count('scrub(p.stderr or raw or "")[:300]') == 3
+          and src.count('(p.stderr or raw or "")[:300]') == 3,
+          "R140 И-4: every EXIT warning scrubs stderr before cutting it")
+
+    # (b) the answer value scan
+    val = "Zq9" + "w" * 29
+    vals = {"R140I4_TEST_API_KEY": {val}}
+    check(o._known_secret_hits("see:\n```\nKEY=%s\n```\n" % val, vals) == ["R140I4_TEST_API_KEY"],
+          "R140 И-4: a machine secret's value inside a code block is found (name only)")
+    check(o._known_secret_hits("`nvapi-%s` and `%s`" % ("X" * 40, "Zq9" + "w" * 28), vals) == [],
+          "R140 И-4: a placeholder or a near-miss value never matches")
+    os.environ["R140I4_PROBE_TOKEN"] = "A1b2" * 6
+    os.environ["R140I4_PROBE_PATH"] = "A1b2" * 6
+    os.environ["R140I4_PROBE2_KEY"] = "C:\\Users\\someone\\key-file-path.pem"
+    try:
+        kv = o._known_secret_values()
+        check("R140I4_PROBE_TOKEN" in kv and "R140I4_PROBE_PATH" not in kv
+              and "R140I4_PROBE2_KEY" not in kv,
+              "R140 И-4: values are collected for secret-named vars only, paths skipped",
+              repr(sorted(k for k in kv if k.startswith("R140I4"))))
+    finally:
+        for k in ("R140I4_PROBE_TOKEN", "R140I4_PROBE_PATH", "R140I4_PROBE2_KEY"):
+            os.environ.pop(k, None)
+    at = src.find("_known = _known_secret_hits(r[\"text\"])")
+    check(src.count("_known_secret_hits(r[\"text\"])") == 1
+          and src.find("_leak, _pii2 = scan_payload(_t2, name)") < at < src.find("_answer_path ="),
+          "R140 И-4: the value scan runs at the answer choke point, before the .md is written")
+
+    # (d) + (e) the cascade, through routing.resolve
+    reg = routing.load_registry(str(Path(HERE, "channels.json")), overlay=False)
+    base = routing.resolve(copy.deepcopy(reg))
+    groups = [g for g in reg.get("_cascade_groups") or [] if isinstance(g, list) and len(g) >= 2]
+    for g in groups:
+        pre = [c for c in g if c in base and (base[c]["enabled"] or any(
+            str(x).startswith("cascade:") for x in base[c]["why"]))]
+        if len(pre) < 2:
+            continue
+        p2 = routing.resolve(copy.deepcopy(reg), ready=lambda c: "none ready")
+        check(any("no member of this group is ready here" in str(x) for x in p2[pre[1]]["why"]),
+              "R140 И-4: with no member of %s ready the plan says so" % "/".join(pre),
+              repr(p2[pre[1]]["why"])[-160:])
+        break
+    on_reg = copy.deepcopy(reg)
+    for name in (nv, kf):                # the kit ships nvkimik3 OFF (distribution: local)
+        on_reg["channels"][name]["enabled"] = True
+    for name in (nv, kf):
+        p = routing.resolve(copy.deepcopy(on_reg), only=[name],
+                            ready=lambda c: "probe: absent")
+        on = sorted(c for c in p if p[c]["enabled"])
+        check(on == [name], "R140 И-4: --only %s runs it alone, ready or not" % name, repr(on))
+    mo = good.get("max_output_size")
+    check(isinstance(mo, int) and 0 < mo <= 65536,
+          "R140 И-4: %s's max_output_size stays within NVIDIA's measured 65,536 (1,048,576 -> "
+          "400 no body, R140 И-2); raise it only with a new measurement" % nv, repr(mo))
+
+    # (f) the CLI side of the same fail-open (nvkimik3's own review): a bundle that does not read
+    # KIMI_MODEL_* is refused before a process starts; an unknown bundle is not.
+    tmpd = tempfile.mkdtemp(prefix="r140i4-")
+    old_mjs, new_mjs = os.path.join(tmpd, "old.mjs"), os.path.join(tmpd, "new.mjs")
+    open(old_mjs, "w").write("const m = process.env.OTHER_NAME;")
+    open(new_mjs, "w").write("const m = process.env.KIMI_MODEL_NAME;")
+    check(o._kimi_reads_env_model(new_mjs) is True and o._kimi_reads_env_model(old_mjs) is False
+          and o._kimi_reads_env_model(os.path.join(tmpd, "absent.mjs")) is None,
+          "R140 И-4: the CLI-side marker reads True / False / unknown")
+    saved = (o._env_key, o.kimi_bin, o.subprocess.run, o._kimi_node_argv, o.neutral_cwd)
+    started = []
+    try:
+        o._env_key = lambda v: "k" * 32
+        o.kimi_bin = lambda: sys.executable
+        o._kimi_node_argv = lambda b: [b, old_mjs]
+        o.neutral_cwd = lambda: tempfile.gettempdir()
+        o.subprocess.run = lambda cmd, **kw: started.append(list(cmd)) or None
+        r = o.call_kimicli("brief", "R140-DONE", out, name=nv, env_model=good)
+        check(not r.get("ok") and "does not read KIMI_MODEL_" in (r.get("error") or "")
+              and not started,
+              "R140 И-4: a Kimi CLI that ignores KIMI_MODEL_* is refused for an env-routed "
+              "channel, no process started", repr(r.get("error"))[:160])
+    finally:
+        (o._env_key, o.kimi_bin, o.subprocess.run, o._kimi_node_argv, o.neutral_cwd) = saved
+        for f in (old_mjs, new_mjs):
+            os.remove(f)
+        os.rmdir(tmpd)
 
 
 if __name__ == "__main__":
