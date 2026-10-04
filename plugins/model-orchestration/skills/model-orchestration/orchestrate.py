@@ -1222,25 +1222,6 @@ KNOWN_FAILURES = [
      "Read the other channels. Re-running in a few minutes will not help: the channel answers "
      "again only when the gateway restores the route (`--only <channel>` checks it). Nothing in "
      "the brief or the harness causes it."),
-    # R140 И-2, measured on NVIDIA's free endpoint through Kimi Code CLI: an output limit above
-    # the vendor's max_tokens range (65,536) comes back as a 400 with an EMPTY body after ~17 s,
-    # so the CLI's message names nothing.
-    (r"400 status code \(no body\)",                     # a regex: diagnose() uses re.search
-     "The endpoint refused the request's parameters without saying which. On the NVIDIA route "
-     "(a kimicli channel with `env_model`) the measured cause is an output limit above NVIDIA's "
-     "65,536: Kimi Code CLI sends the model's whole window as max_tokens unless "
-     "env_model.max_output_size caps it.",
-     "Compare the channel's env_model.max_output_size with the vendor's max_tokens range. "
-     "Re-running unchanged gives the same 400; nothing in the brief causes it."),
-    # The per-attempt text Kimi Code CLI records in its session wire (`APIEmptyResponseError`);
-    # it retries it itself, up to 10 attempts. R140 И-2: 2 of 4 NVIDIA requests came back this
-    # way and the retry answered. A run that ENDS with it exhausted the retries (not measured).
-    ("containing only thinking content",
-     "The endpoint returned reasoning but no answer and no tool call, on every retry the CLI "
-     "made. On NVIDIA's free endpoint this happened to 2 of 4 requests in one measured run; the "
-     "CLI's own retry recovered them.",
-     "Re-run the channel later (`--only <channel>`) and read the other channels meanwhile. It is "
-     "the endpoint's stream, not the brief."),
     ("MODEL_API_KEY not set",
      "The Spark channel has no API key.",
      "Set MODEL_API_KEY, or run with --skip spark to use the other channels only. The harness "
@@ -1402,6 +1383,34 @@ KNOWN_FAILURES = [
      "The harness already re-ran this channel once with a source-discipline escalation. Treat "
      "every URL in the answer as unverified: run citecheck.py --answer <file> --resolve-urls "
      "before repeating any of them."),
+    # R140 И-2, measured on NVIDIA's free endpoint through Kimi Code CLI: an output limit above
+    # the vendor's max_tokens range (65,536) comes back as a 400 with an EMPTY body after ~17 s,
+    # so the CLI's message names nothing. R140 И-3 (grok + Spark, panel): the text is the CLI's
+    # generic empty-body format (`${status} status code (no body)`), NOT a mark of NVIDIA -
+    # kimik3free prints it too - and these two rows moved DOWN here, below every row a combined
+    # error string should match first (key rejected, key limit, binary, output budget, 429).
+    (r"400 status code \(no body\)",                     # a regex: diagnose() uses re.search
+     "The endpoint refused the request's parameters without saying which (Kimi Code CLI prints "
+     "this for ANY empty-bodied 400). Measured once, on the NVIDIA route (a kimicli channel with "
+     "`env_model`): an output limit above NVIDIA's 65,536 - the CLI sends the model's whole "
+     "window as max_tokens unless env_model.max_output_size caps it. On another channel this "
+     "text names no cause by itself.",
+     "NVIDIA route: compare env_model.max_output_size with the vendor's max_tokens range; "
+     "re-running unchanged gives the same 400. Any other channel: compare what it sends "
+     "(output limit, effort, temperature) with that vendor's documented ranges."),
+    # The per-attempt text Kimi Code CLI records in its session wire (`APIEmptyResponseError`);
+    # it retries it itself, up to 10 attempts. R140 И-2: 2 of 4 NVIDIA requests came back this
+    # way and the retry answered. A run that ENDS with it exhausted the retries (not measured).
+    # R140 И-3 (grok): the CLI's own sentence names TWO causes - a cut stream, or a reasoning
+    # that used the whole output budget (on NVIDIA reasoning + answer share 65,536 at max).
+    ("containing only thinking content",
+     "The endpoint returned reasoning but no answer and no tool call, on every retry the CLI "
+     "made. Two causes give this text: the stream was cut, or the reasoning used the whole "
+     "output budget (env_model.max_output_size; reasoning and answer share it). One measured "
+     "NVIDIA run: 2 of 4 requests, recovered by the CLI's retry - the cut kind.",
+     "Re-run the channel later (`--only <channel>`) and read the other channels meanwhile. If "
+     "it ends this way again on the same brief, suspect the budget: the cap is the vendor's "
+     "ceiling and effort stays at max by policy, so a narrower brief is the lever."),
     ("timed out|timeout",
      "The channel took longer than its allotted time.",
      "Raise that channel's timeout in the tier block, or split the brief into smaller questions. "
@@ -4350,11 +4359,43 @@ def _kimi_env_model(cname, reg=None):
     return em if isinstance(em, dict) else None
 
 
+# R140 И-3: what a kimicli child routed by `env_model` inherits - an ALLOWLIST, not this process's
+# whole environment. Measured on kimi 2.1.1 (D:/Claude Code/runs/r140-i3-panel-hotfix/
+# kimi_env_reads.log): its shell tool spawns with the CLI's own process.env, unfiltered (node-pty
+# `globalThis.process.env`, `env: noninteractiveEnv`), and its bundled SDKs read OPENAI_*,
+# ANTHROPIC_*, GEMINI_*, AWS_* defaults - so an agent in auto mode could print every key the
+# harness was started with. Kept: what Windows and Node need (home, temp, SystemRoot, the shell),
+# a proxy or CA the user set, and the CLI's own KIMI_* namespace minus any inherited KIMI_MODEL_*
+# (this channel's are set after). The selftest world's dead proxy is kept too, by construction.
+_KIMI_ENV_KEEP = frozenset((
+    "PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "OS",
+    "TEMP", "TMP", "TMPDIR", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "HOME",
+    "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "ALLUSERSPROFILE", "PUBLIC",
+    "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES",
+    "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432", "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER", "USERNAME", "USERDOMAIN",
+    "COMPUTERNAME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE",
+    "TZ", "TERM", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
+    "NODE_EXTRA_CA_CERTS", "NODE_OPTIONS", "SSL_CERT_FILE", "SSL_CERT_DIR",
+    "PYTHONIOENCODING", "PYTHONUTF8",
+))
+
+
+def _kimi_min_env(base=None):
+    """The allowlisted copy of `base` (default: this process's env) for a kimicli child."""
+    src = os.environ if base is None else base
+    return {k: v for k, v in src.items()
+            if k.upper() in _KIMI_ENV_KEEP
+            or (k.upper().startswith("KIMI_") and not k.upper().startswith("KIMI_MODEL_"))}
+
+
 def _kimi_model_env(env_model, effort, key):
     """KIMI_MODEL_* for the CHILD only (main.mjs `applyEnvModelConfig`): with KIMI_MODEL_NAME set,
     Kimi Code CLI adds this provider + model and makes it the default for the run, so
-    ~/.kimi-code/config.toml is never edited and the key never lands on disk."""
-    env = dict(os.environ)
+    ~/.kimi-code/config.toml is never edited. R140 И-3: on an ALLOWLISTED env (_KIMI_ENV_KEEP),
+    so the agent's shell sees this key and no other vendor's; the CLI's data dir held this key
+    0 times in 286 files after the R140 runs (kimi_env_reads.log)."""
+    env = _kimi_min_env()
     env.update({
         "KIMI_MODEL_NAME": str(env_model["model"]),
         "KIMI_MODEL_API_KEY": key,
@@ -4394,7 +4435,8 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
 
     No bypass flag exists or is needed: `-p` runs in kimi's AUTO permission mode by default (vendor docs,
     R137 И-2), i.e. every tool with no prompt - so the SAFETY DIRECTIVE is always prepended.
-    No env scrubbing needed: kimi reads auth from its own config.toml, not env vars.
+    Env: the plain route reads auth from config.toml and inherits this process's env minus any
+    KIMI_MODEL_*; the env_model route runs on an allowlist (_KIMI_ENV_KEEP, R140 И-3).
     Neutral cwd via Python cwd= to prevent loading any project's agent configs.
 
     R140 И-2 `env_model` (nvkimik3): the same CLI routed elsewhere by KIMI_MODEL_* in the child's
@@ -4403,6 +4445,14 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
     """
     binary = kimi_bin()
     child_env, route = None, "free via AIHubMix (default_model in config.toml)"
+    # R140 И-3 (grok, panel): a KIMI_MODEL_NAME already in THIS process's env would reroute
+    # the plain channel too (main.mjs keeps the file config only when it is unset), so the
+    # plain call drops inherited KIMI_MODEL_* - and changes nothing when there are none.
+    if not env_model and any(k.upper().startswith("KIMI_MODEL_") for k in os.environ):
+        child_env = {k: v for k, v in os.environ.items()
+                     if not k.upper().startswith("KIMI_MODEL_")}
+        log("  [%s] dropped inherited KIMI_MODEL_* from the child: this channel's route "
+            "is config.toml" % name)
     if env_model:
         key = _env_key(env_model.get("key_env") or "")
         if not key:
@@ -4411,8 +4461,10 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
                              "routes Kimi Code CLI with it" % env_model.get("key_env"),
                     "warnings": ["no key"], "notes": []}
         child_env = _kimi_model_env(env_model, effort, key)
-        route = "env model override -> %s %s (config.toml untouched)" % (
-            env_model.get("base_url"), env_model.get("model"))
+        route = ("env model override -> %s %s (config.toml untouched; allowlisted env: "
+                 "%d of %d variables, no other vendor's key)"
+                 % (env_model.get("base_url"), env_model.get("model"), len(child_env),
+                    len(os.environ)))
     text_in = ((system.strip() + "\n\n---\n\n") if system else "") + _with_bypass_safety(brief, True)
 
     base = _kimi_node_argv(binary)
@@ -4452,8 +4504,9 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
     log("  [%s] Kimi Code CLI, %s; %s (%d chars)" % (name, route, how, len(text_in)))
     t0 = time.time()
     try:
+        # R140 И-3 (grok, panel): a --task run gets the git/pip fence the other CLIs get.
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           cwd=ncwd, env=child_env,
+                           cwd=ncwd, env=_task_child_env(child_env),
                            timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
@@ -7201,9 +7254,12 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
                 % (em.get("base_url"), em.get("model"), em.get("key_env")) if em else
                 "free via AIHubMix (AIHUBMIX_API_KEY + ~/.kimi-code/config.toml)")))
         else:
+            em = _kimi_env_model(c)                      # R140 И-3 (agy): THIS route
             yield ("%s: Kimi Code CLI NOT FOUND. Install: npm install -g "
-                   "@moonshot-ai/kimi-code; configure AIHubMix provider in "
-                   "~/.kimi-code/config.toml" % c)
+                   "@moonshot-ai/kimi-code; %s" % (c, (
+                       "this channel is routed by env (key %s) and needs no config.toml"
+                       % em.get("key_env") if em else
+                       "configure AIHubMix provider in ~/.kimi-code/config.toml")))
 
 
 def _write_agy_agent(workdir):
@@ -8298,8 +8354,9 @@ def _channel_key_ready(ch):
     """
     True when the env var this channel's transport needs is present; True unconditionally for
     the subscription CLIs, whose reachability is a binary on PATH, not a key - preflight checks
-    that separately and this function must not duplicate it. Used only to RANK `ask_default`
-    candidates; it never gates a run.
+    that separately and this function must not duplicate it. Used to RANK `ask_default`
+    candidates and, since R140 И-3, to pick the cascade member that runs (_cascade_ready);
+    it never gates a run - a channel named alone still starts and fails in its own preflight.
     """
     kind = ch.get("kind")
     if kind == "http":
@@ -8374,39 +8431,28 @@ def _ask_default_channel():
     return _pick_ask_channel(reg, _channel_key_ready)
 
 
-def _apply_cascade(plan, reg):
+def _cascade_ready(reg):
     """
-    For each cascade group in the registry, keep only the first member whose
-    transport is ready on this machine. The rest are disabled for this run.
+    routing.resolve's `ready` callback (R140 И-3): for a cascade member, True when it can run on
+    this machine, else a short reason the plan prints. Built on _channel_key_ready - the key a
+    channel's transport needs and, for the CLI kinds it knows, the binary.
 
-    The panel runs independent VOICES in parallel; three transports to one model
-    are not three voices. Igor 2026-09-04: 'незачем у одних и тех же моделей
-    спрашивать'. The cascade order is defined in channels.json `_cascade_groups`,
-    cheapest/free transport first, and mirrors the --ask chain for Spark.
+    Igor 2026-09-04: «незачем у одних и тех же моделей спрашивать» - one voice per model, the
+    cheapest READY transport first (`_cascade_groups`). This replaces orchestrate._apply_cascade,
+    a ready-aware copy of routing's cascade that existed from v1.48.0 to v1.102.0 and was never
+    called (R140 И-2 panel, 3 of 3 reviewers).
     """
-    groups = reg.get("_cascade_groups") or []
-    notes = []
-    for group in groups:
-        if not isinstance(group, list) or len(group) < 2:
-            continue
-        members = [c for c in group if c in plan and plan[c]["enabled"]]
-        if len(members) <= 1:
-            continue
-        chans = reg.get("channels") or {}
-        winner = None
-        for c in members:
-            if _channel_key_ready(chans.get(c) or {}):
-                winner = c
-                break
-        if winner is None:
-            winner = members[0]
-        skipped = [c for c in members if c != winner]
-        for c in skipped:
-            plan[c]["enabled"] = False
-            plan[c]["why"].append("cascade: %s is ready and takes priority (same model)" % winner)
-        notes.append("%s selected; %s skipped (same model, different transport)"
-                     % (winner, ", ".join(skipped)))
-    return plan, notes
+    chans = reg.get("channels") or {}
+
+    def ready(name):
+        ch = chans.get(name) or {}
+        if _channel_key_ready(ch):
+            return True
+        em = ch.get("env_model") if isinstance(ch.get("env_model"), dict) else {}
+        if em.get("key_env") and not _env_key(em["key_env"]):
+            return "%s is not set" % em["key_env"]
+        return "%s: its key or CLI is missing" % (ch.get("kind") or "unknown kind")
+    return ready
 
 
 # Extensions treated as scannable text inside --attach-dir. Anything else is sniffed for a NUL
@@ -9412,8 +9458,11 @@ def main():
     if routing is not None:
         try:
             reg = routing.load_registry()
+            # R140 И-3: the cascade asks THIS machine which member can run (key, CLI). The
+            # ready-aware copy that used to sit in this file was never called.
             plan = routing.resolve(reg, route=a.route, only=a.only, skip=a.skip,
-                                   sets=a.sets, tier=a.tier, panel=a.panel)
+                                   sets=a.sets, tier=a.tier, panel=a.panel,
+                                   ready=_cascade_ready(reg))
             log(routing.format_plan(plan, reg))
         except routing.RouteError as e:          # ambiguity must stop the run, never guess
             log("ROUTE ERROR: %s" % e)

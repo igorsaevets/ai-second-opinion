@@ -323,18 +323,22 @@ def suite_routing():
         raise AssertionError("no group answers to %r - this test names a word the registry lost"
                              % word)
 
+    # R140 И-3: a run's cascade asks THIS machine (orchestrate._cascade_ready: keys, CLIs), and
+    # the cases below run `orchestrate.py --dry-run` in a child of this world - so the expectation
+    # asks the same predicate here, through the same function (no second copy of the rule). The
+    # cascade itself is pinned with fake predicates in suite_r140_i3_panel_hotfix.
+    import routing as _routing
+    try:
+        import orchestrate as _o
+        _ready = _o._cascade_ready(_RAW)
+    except Exception:                                    # noqa: BLE001 - reported by its own suite
+        _ready = None
+
     def cascaded(enabled_set):
-        """Apply _cascade_groups: for each group, keep only the first enabled member."""
-        result = set(enabled_set)
-        for group in _RAW.get("_cascade_groups") or []:
-            if not isinstance(group, list):
-                continue
-            members = [c for c in group if c in result]
-            if len(members) <= 1:
-                continue
-            for c in members[1:]:
-                result.discard(c)
-        return result
+        """Apply _cascade_groups the way a run does: per group, the first READY member stays."""
+        plan = {c: {"enabled": True, "why": []} for c in enabled_set}
+        plan = _routing._apply_cascade(plan, _RAW, _ready)
+        return {c for c, p in plan.items() if p["enabled"]}
 
     def group_members_all(word):
         """Every member the group NAMES, enabled or not - for the non-resurrection assertion."""
@@ -7588,7 +7592,7 @@ def main():
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
-                  suite_r140_i2_nvkimik3):
+                  suite_r140_i2_nvkimik3, suite_r140_i3_panel_hotfix):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -10784,6 +10788,7 @@ def suite_r140_i2_nvkimik3():
     Channel names come from channels.json, never from this file."""
     section("R140 И-2 nvkimik3: Kimi Code CLI routed to NVIDIA by env, one Kimi voice per run")
     import orchestrate as o
+    import routing
     import tempfile
     reg = json.load(open(os.path.join(HERE, "channels.json"), encoding="utf-8"))
     chans = reg.get("channels") or {}
@@ -10825,11 +10830,11 @@ def suite_r140_i2_nvkimik3():
                   and o._channel_key_ready(chans[partner]) is True,
                   "R140 И-2: without its key %s is NOT ready, %s still is" % (c, partner))
             plan = {m: {"enabled": True, "why": []} for m in grp}
-            plan, _n = o._apply_cascade(plan, reg)
+            plan = routing._apply_cascade(plan, reg, o._cascade_ready(reg))   # R140 И-3: live one
             off_key = [m for m in grp if plan[m]["enabled"]]
             o._env_key = lambda _k: fake_key
             plan = {m: {"enabled": True, "why": []} for m in grp}
-            plan, _n = o._apply_cascade(plan, reg)
+            plan = routing._apply_cascade(plan, reg, o._cascade_ready(reg))
             on_key = [m for m in grp if plan[m]["enabled"]]
             check(off_key == [partner] and on_key == [c],
                   "R140 И-2: the cascade runs %s when its key is present and %s when it is not "
@@ -10879,6 +10884,199 @@ def suite_r140_i2_nvkimik3():
     check("65,536" in (c400 or "") and bool(cthink) and cthink != c400,
           "R140 И-2: the NVIDIA 400-with-no-body names the output limit; a reasoning-only reply "
           "gets its own cause", repr((c400, cthink))[:200])
+
+
+def suite_r140_i3_panel_hotfix():
+    """R140 И-3 (2026-10-04): what the cheap panel on kit 1.102.0 found, pinned.
+
+    (a) THE LIVE CASCADE ASKS THE MACHINE. A run takes ONE path, routing.resolve, whose cascade
+        kept the first enabled member; the ready-aware copy in orchestrate.py was never called
+        (v1.48.0..v1.102.0; 3 of 3 reviewers). Pinned on routing.resolve itself, plus the wire
+        that was missing: main() passes _cascade_ready, and no second cascade exists.
+    (b) a kimicli child routed by env_model gets an ALLOWLISTED env (another vendor's planted
+        key is absent, the basics pass); the plain call drops an inherited KIMI_MODEL_*.
+    (c) a --task run wraps the kimi env like the other CLIs (_task_child_env).
+    (d) the two NVIDIA rows sit BELOW the rows a combined error string should match first, and
+        the 400 row says the text is not a mark of NVIDIA.
+    (e) doctor names the key an enabled env_model channel needs.
+    Channel names come from channels.json, never from this file."""
+    section("R140 И-3 panel hotfix: live cascade readiness, kimi child env, diagnosis order")
+    import copy
+    import tempfile
+    import doctor
+    import orchestrate as o
+    import routing
+    raw = json.load(open(os.path.join(HERE, "channels.json"), encoding="utf-8"))
+    chans = raw.get("channels") or {}
+
+    # (a) the wire that was missing, and one implementation
+    src = Path(HERE, "orchestrate.py").read_text(encoding="utf-8")
+    at = src.find("plan = routing.resolve(")
+    window = src[at:at + 400] if at >= 0 else ""
+    check(src.count("plan = routing.resolve(") == 1 and "ready=_cascade_ready(reg)" in window
+          and "def _apply_cascade" not in src,
+          "R140 И-3: main() hands routing.resolve this machine's readiness, and orchestrate.py "
+          "keeps no second cascade", window[:160])
+
+    reg = routing.load_registry(str(Path(HERE, "channels.json")), overlay=False)
+    groups = [g for g in reg.get("_cascade_groups") or [] if isinstance(g, list) and len(g) >= 2]
+    base = routing.resolve(copy.deepcopy(reg))
+    tested = 0
+    for g in groups:
+        pre = [c for c in g if c in base and (base[c]["enabled"] or any(
+            str(w).startswith("cascade:") for w in base[c]["why"]))]
+        if len(pre) < 2:
+            continue
+        first, second = pre[0], pre[1]
+        p1 = routing.resolve(copy.deepcopy(reg),
+                             ready=lambda c, f=first: "probe: absent" if c == f else True)
+        check(not p1[first]["enabled"] and p1[second]["enabled"]
+              and any("not ready here (probe: absent)" in str(w) for w in p1[first]["why"]),
+              "R140 И-3: routing.resolve skips %s when it is not ready and runs %s, saying why"
+              % (first, second), repr(p1[first]["why"])[-200:])
+        p2 = routing.resolve(copy.deepcopy(reg), ready=lambda c: "none ready")
+        check(p2[first]["enabled"] and not p2[second]["enabled"],
+              "R140 И-3: none of %s ready -> the first still runs, so its preflight names what "
+              "is missing" % "/".join(pre))
+
+        def _boom(_c):
+            raise RuntimeError("probe")
+        p3 = routing.resolve(copy.deepcopy(reg), ready=_boom)
+        check(p3[first]["enabled"] and not p3[second]["enabled"],
+              "R140 И-3: a readiness callback that raises counts as ready (registry order), so a "
+              "bad predicate cannot empty a panel (%s)" % first)
+        tested += 1
+    check(tested >= 1, "R140 И-3: some cascade group has two members in the default plan",
+          repr(groups)[:160])
+
+    saved = (o._env_key, o.kimi_bin, o.subprocess.run, o._kimi_node_argv, o.neutral_cwd)
+    saved_ctx = getattr(o._TASK, "ctx", None)
+    fake_key = "k" * 32
+    seen = []
+
+    class _Done:
+        returncode = 0
+        stdout = '{"role": "assistant", "content": "ok\\nR140-DONE"}\n'
+        stderr = ""
+
+    def _fake_run(cmd, **kw):
+        seen.append((list(cmd), kw))
+        return _Done()
+
+    planted = {"OPENROUTER" + "_API_KEY": "planted", "GH" + "_TOKEN": "planted",
+               "KIMI_MODEL_" + "NAME": "stale/model", "KIMI_CLI_NO_AUTO_UPDATE": "1"}
+    before = {k: os.environ.get(k) for k in planted}
+
+    def _unplant():
+        for k, v in before.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    nv = [c for c, ch in chans.items() if isinstance(ch.get("env_model"), dict)]
+    check(bool(nv), "R140 И-3: the registry still has an env_model channel to test", repr(nv))
+    td = tempfile.mkdtemp(prefix="r140i3-")
+    try:
+        o.kimi_bin = lambda: sys.executable               # a binary that exists everywhere
+        o.subprocess.run = _fake_run
+        o._kimi_node_argv = lambda b: ["node", "main.mjs"]
+        o.neutral_cwd = lambda: td
+        for c in nv:
+            em = chans[c]["env_model"]
+            g = next((g for g in groups if c in g), [])
+            partner = next((m for m in g if m != c and (chans.get(m) or {}).get("kind") == "kimicli"
+                            and not isinstance((chans.get(m) or {}).get("env_model"), dict)), None)
+            if (chans[c].get("enabled", True) and partner
+                    and (chans.get(partner) or {}).get("enabled", True)):
+                o._env_key = lambda _k: None
+                pl = routing.resolve(copy.deepcopy(reg), ready=o._cascade_ready(reg))
+                o._env_key = lambda _k: fake_key
+                pk = routing.resolve(copy.deepcopy(reg), ready=o._cascade_ready(reg))
+                check(not pl[c]["enabled"] and pl[partner]["enabled"]
+                      and any(em["key_env"] in str(w) for w in pl[c]["why"])
+                      and pk[c]["enabled"] and not pk[partner]["enabled"],
+                      "R140 И-3: with this machine's readiness, no %s -> %s runs and the plan "
+                      "names the key; with it -> %s" % (em["key_env"], partner, c),
+                      repr((pl[c]["why"][-1:], pk[partner]["why"][-1:]))[:220])
+            # (b) the allowlist, and the plain call
+            os.environ.update(planted)
+            o._env_key = lambda _k: fake_key
+            env = o._kimi_model_env(em, "max", fake_key)
+            basics = [k for k in ("PATH", "SYSTEMROOT", "TEMP", "TMP", "HOME", "USERPROFILE",
+                                  "APPDATA") if os.environ.get(k)]
+            check(bool(basics) and all(env.get(k) == os.environ.get(k) for k in basics)
+                  and "OPENROUTER" + "_API_KEY" not in env and "GH" + "_TOKEN" not in env
+                  and env.get("KIMI_MODEL_NAME") == em["model"]
+                  and env.get("KIMI_MODEL_API_KEY") == fake_key
+                  and env.get("KIMI_CLI_NO_AUTO_UPDATE") == "1",
+                  "R140 И-3: %s's child env is an allowlist - %s and the CLI's own KIMI_* pass, "
+                  "another vendor's key does not, a stale KIMI_MODEL_NAME is replaced"
+                  % (c, "/".join(basics)), repr(sorted(env))[:220])
+            if partner:
+                o.call_kimicli("brief", "R140-DONE", os.path.join(td, "plain.md"), name=partner,
+                               workdir=os.path.join(td, "ws-plain"))
+                penv = seen[-1][1].get("env") or {}
+                check("KIMI_MODEL_NAME" not in penv and penv.get("PATH") == os.environ.get("PATH")
+                      and penv.get("OPENROUTER" + "_API_KEY") == "planted",
+                      "R140 И-3: the plain call (%s) drops an inherited KIMI_MODEL_* and keeps the "
+                      "rest of its env as before" % partner, repr(sorted(penv))[:160])
+            _unplant()
+            # (c) a --task run wraps it
+            o._TASK.ctx = {"remote": False}
+            o.call_kimicli("brief", "R140-DONE", os.path.join(td, "task.md"), effort="max",
+                           name=c, workdir=os.path.join(td, "ws-task"), env_model=em)
+            tenv = seen[-1][1].get("env") or {}
+            o._TASK.ctx = saved_ctx
+            check(tenv.get("PIP_REQUIRE_VIRTUALENV") == "true" and "GIT_CONFIG_COUNT" in tenv
+                  and tenv.get("KIMI_MODEL_API_KEY") == fake_key,
+                  "R140 И-3: a --task run of %s gets the git/pip fence on top of its env" % c,
+                  repr(sorted(k for k in tenv if k.startswith(("PIP_", "GIT_CONFIG_C")))))
+    finally:
+        (o._env_key, o.kimi_bin, o.subprocess.run, o._kimi_node_argv, o.neutral_cwd) = saved
+        o._TASK.ctx = saved_ctx
+        _unplant()
+
+    # (d) diagnosis: scope and order
+    nv400 = "error: failed to run prompt: provider.api_error: 400 status code (no body)"
+    nvth = ("The API returned a response containing only thinking content without any text or "
+            "tool calls.")
+    c400, _ = o.diagnose(nv400)
+    cth, _ = o.diagnose(nvth)
+    check("ANY empty-bodied 400" in (c400 or "") and "On another channel" in (c400 or "")
+          and "output budget" in (cth or ""),
+          "R140 И-3: the 400 row says it is not a mark of NVIDIA; the reasoning-only row names "
+          "the output budget as a second cause", repr((c400, cth))[:220])
+    for probe in ("binary not found: kimi", "authentication failed", "OUTPUT BUDGET EXHAUSTED"):
+        alone, _ = o.diagnose(probe)
+        for nvt in (nv400, nvth):
+            both, _ = o.diagnose(probe + "; " + nvt)
+            check(alone is not None and both == alone and alone not in (c400, cth),
+                  "R140 И-3: %r next to an NVIDIA text keeps its own diagnosis" % probe,
+                  repr(both)[:160])
+
+    # (e) doctor names an enabled env_model channel's key
+    class _Rec:
+        def __init__(self):
+            self.names = []
+
+        def ok(self, name, *a, **k):
+            self.names.append(name)
+
+        def warn(self, name, *a, **k):
+            self.names.append(name)
+    rec = _Rec()
+    try:
+        doctor.check_key(rec, o)
+    except Exception as e:                                # noqa: BLE001 - reported below
+        rec.names.append("error %r" % e)
+    want = sorted({ch["env_model"]["key_env"] for ch in chans.values()
+                   if isinstance(ch, dict) and ch.get("enabled", True)
+                   and isinstance(ch.get("env_model"), dict) and ch["env_model"].get("key_env")})
+    check(all(("key %s" % k) in rec.names for k in want)
+          and not any(str(n).startswith("error") for n in rec.names),
+          "R140 И-3: doctor checks the key each enabled env_model channel needs (%s)"
+          % (", ".join(want) or "none enabled in this registry"), repr(rec.names)[:200])
 
 
 def suite_r137_kimi_argv():

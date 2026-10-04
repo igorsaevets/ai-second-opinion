@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.102.1 — 2026-10-04
+
+Hotfix from the cheap panel on 1.102.0 (Spark, Gemini 3.8 Flash, Grok 4.7; all three found the first item).
+
+- **The cascade now asks the machine.** `_cascade_groups` were applied by `routing._apply_cascade`, which kept the first enabled member; the copy that checked keys and CLIs lived in `orchestrate.py` and was never called (since 1.48.0). On a machine without `NVIDIA_NIM_API_KEY`, `nvkimik3` ran into its refusal and `kimik3free` was silenced. `routing.resolve(..., ready=)` now takes a readiness callback, `orchestrate.py` passes this machine's (`_cascade_ready`: the key a transport needs and, for opencode / qwen / claude / kimi, the CLI binary), and the plan says why a member was skipped. Behaviour change: in the Spark group, a machine without the opencode CLI now runs the next ready member (`spark13cont` with `MODEL_API_KEY`, else `orspark13cont` with an OpenRouter key) instead of failing on `ocspark13free`. With none ready, the first member still runs and its preflight names what is missing. `routing.py` run on its own still prints registry order.
+- **Kimi child environment.** A `kimicli` channel routed by `env_model` (`nvkimik3`) starts on an allowlist: what Windows and Node need, proxy and CA settings, and the CLI's own `KIMI_*` — no other vendor's key. Measured on Kimi Code CLI 2.1.1: its shell tool inherits the CLI's whole environment unfiltered, so an agent in auto mode could print every key the harness had. The plain `kimicli` call drops an inherited `KIMI_MODEL_*` (it would reroute `kimik3free`). A `--task` run of a kimi channel now gets the same git/pip fence as the other CLIs.
+- **Diagnosis.** `400 status code (no body)` is Kimi Code CLI's text for any empty-bodied 400, not a mark of NVIDIA: the row now says so. It and the reasoning-only row moved below the rows a combined error should match first (key rejected, key limit, binary, output budget, 429). The reasoning-only row names the second cause the CLI itself gives: the reasoning used the whole output budget.
+- **doctor** checks the key an enabled `env_model` channel needs. Preflight's "Kimi Code CLI NOT FOUND" no longer tells an env-routed channel to configure AIHubMix.
+
 ## 1.102.0 — 2026-10-04
 
 A Kimi Code CLI channel can now be pointed at another endpoint without touching the CLI's own

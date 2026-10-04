@@ -234,6 +234,11 @@ def check_key(r, mod=None):
         if c.get("kind") in ("openrouter", "oai"):
             var = ((prov_tab.get(c.get("provider") or "openrouter") or {}).get("key_env")
                    or "OPENROUTER_API_KEY")
+        # R140 И-3 (agy, panel): a CLI channel routed by `env_model` (nvkimik3 -> NVIDIA)
+        # needs THAT key; the CLI kinds are keyless here, so doctor stayed green without it.
+        em = c.get("env_model")
+        if isinstance(em, dict) and em.get("key_env"):
+            var = em["key_env"]
         if var:
             wanted.setdefault(var, []).append(n)
     # R47 panel (spark12cont + orglm52, convergent): a kind this derivation does not know gets

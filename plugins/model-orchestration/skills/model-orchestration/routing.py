@@ -1809,12 +1809,24 @@ def apply_panel(plan, reg, panel):
     return plan
 
 
-def _apply_cascade(plan, reg):
+def _apply_cascade(plan, reg, ready=None):
     """
-    For each cascade group, keep only the first enabled member; disable the rest.
+    For each cascade group, keep one enabled member; disable the rest.
 
     Three transports to one model are not three voices — they are one voice with
     fallback. The order in each group is cheapest/free first, mirroring --ask.
+
+    `ready(name)` says whether a member can run on THIS machine: True, or a short reason it
+    cannot (its key, its CLI). orchestrate.py passes it (_cascade_ready); the first ready member
+    wins, and when none is ready the first one runs, so that its own preflight names what is
+    missing. Without `ready` (routing.py on its own, the selftest tables) registry order decides.
+
+    🔴 R140 И-3: from v1.48.0 (2026-09-04) to v1.102.0 a ready-aware copy of this function lived
+    in orchestrate.py and NOTHING called it, while this one - the live one - never asked. A
+    machine without NVIDIA's key ran nvkimik3 into its refusal and silenced kimik3free, and the
+    selftest was green because it tested the dead copy (3 of 3 panel reviewers). One
+    implementation, here. A callback that raises counts as ready (the old behaviour), so a bad
+    predicate cannot empty a panel.
     """
     for group in reg.get("_cascade_groups") or []:
         if not isinstance(group, list) or len(group) < 2:
@@ -1822,14 +1834,29 @@ def _apply_cascade(plan, reg):
         members = [c for c in group if c in plan and plan[c]["enabled"]]
         if len(members) <= 1:
             continue
-        winner = members[0]
-        for c in members[1:]:
+        verdict = {}
+        for c in members:
+            try:
+                verdict[c] = True if ready is None else ready(c)
+            except Exception:                            # noqa: BLE001 - see the docstring
+                verdict[c] = True
+        winner = next((c for c in members if verdict[c] is True), members[0])
+        for c in members:
+            if c == winner:
+                continue
             plan[c]["enabled"] = False
-            plan[c]["why"].append("cascade: %s takes priority (same model)" % winner)
+            if verdict[c] is not True and members.index(c) < members.index(winner):
+                plan[c]["why"].append(
+                    "cascade: not ready here (%s), so %s runs instead (same model)"
+                    % (verdict[c] if isinstance(verdict[c], str) and verdict[c]
+                       else "its key or CLI is missing", winner))
+            else:
+                plan[c]["why"].append("cascade: %s takes priority (same model)" % winner)
     return plan
 
 
-def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=None):
+def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=None,
+            ready=None):
     # Before anything else: the reserved name points OUTSIDE this registry, so its
     # answer must not depend on what the registry contains (or whether it has panels).
     if panel == PREMIUM_PANEL_NAME:
@@ -1915,7 +1942,7 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
     # than inside apply_flags/apply_route so that adding a THIRD selection path later cannot
     # reopen the hole - the gate does not care which path enabled the channel.
     plan = apply_explicit_only(plan, reg, named_directly)
-    plan = _apply_cascade(plan, reg)
+    plan = _apply_cascade(plan, reg, ready)          # R140 И-3: `ready` from orchestrate.py
 
     # 🔴 DECORATE BEFORE APPLYING THE TIER, not after. The tier now SCALES per-channel values
     # (`reasoning.max_tokens`, `fetch_tool.max_calls`) and OVERRIDES one (`thinking_level`), and
