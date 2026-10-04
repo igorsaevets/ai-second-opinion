@@ -3120,6 +3120,11 @@ def suite_panels():
          "the same Kimi Code CLI reaches NVIDIA's free endpoint through KIMI_MODEL_* env "
          "(registry `env_model`). Cascade [nvkimik3, kimik3free]: one Kimi voice per run. "
          "distribution: local. Live tested 2026-10-04: OK in 81 s, a tool round trip in 194 s."),
+        ("R142 2026-10-04", "ADD", "mimov26flash",
+         "Igor R142: «сделай mimo 2.6 Flash как fallback, модели mimo 2.6 Pro». Declared cheap "
+         "but enabled:false - NOT a seat: it runs only as mimov26pro's run-time fallback (when "
+         "Pro leaves no answer text and ocmimo26flashfree, the same model, did not answer) or "
+         "when named. mimo CLI, same Xiaomi key; live probe 4/4 OK."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -7889,7 +7894,8 @@ def main():
                   suite_r139_i3_hook_identity,
                   suite_r140_i2_nvkimik3, suite_r140_i3_panel_hotfix,
                   suite_r140_i4_env_fail_closed,
-                  suite_r141_codex_sol, suite_r139_i4_hook_hotfix):
+                  suite_r141_codex_sol, suite_r139_i4_hook_hotfix,
+                  suite_r142_mimo_flash_fallback):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -12763,6 +12769,131 @@ def suite_r139_i4_hook_hotfix():
                 check(False, "R139 И-4 block %s raised" % block.__name__, repr(exc)[:160])
     finally:
         shutil.rmtree(td, ignore_errors=True)
+
+
+def suite_r142_mimo_flash_fallback():
+    """R142: MiMo 2.6 Flash is mimov26pro's RUN-TIME fallback (same mimo CLI, same Xiaomi key).
+
+    Plan side: routing.apply_fallback arms it or says why not, format_plan prints it before any
+    spend. Run side: orchestrate.run_fallbacks with a fake dispatcher - it runs only when Pro left
+    NO answer text and the Flash voice (ocmimo26flashfree) did not answer either. The wire: main()
+    calls run_fallbacks (E-215). And call_mimocli sums every step_finish (it kept the last one).
+    """
+    section("R142 mimov26pro -> mimov26flash run-time fallback")
+    import concurrent.futures as cf
+    import inspect
+    import json as _json
+    import subprocess as _sp
+    import tempfile as _tf
+    import orchestrate as o
+    import routing as rt
+
+    reg = rt.load_registry()
+    ch = reg["channels"]
+    fl = ch.get("mimov26flash") or {}
+    check(fl.get("kind") == "mimocli" and fl.get("model") == "xiaomi/mimo-v2.6-flash"
+          and fl.get("enabled") is False,
+          "R142 (a) mimov26flash: mimocli, xiaomi/mimo-v2.6-flash, enabled:false (no panel seat)")
+    check(ch["mimov26pro"].get("fallback") == "mimov26flash", "R142 (a) mimov26pro.fallback")
+    check(any(set(g) == {"ocmimo26flashfree", "mimov26flash"}
+              for g in reg.get("_cascade_groups") or []),
+          "R142 (a) one Flash voice: cascade group [ocmimo26flashfree, mimov26flash]")
+    mimo = reg["groups"]["mimo"]["channels"]
+    check("mimov26flash" in mimo and "ocmimo26flashfree" in mimo,
+          "R142 (a) group `mimo` holds both Flash transports, so --skip mimo also forbids the fallback")
+
+    def yes(_n):
+        return True
+
+    plan = rt.resolve(rt.load_registry(), only=["mimov26pro", "ocmimo26flashfree"], ready=yes)
+    fb = plan["mimov26pro"].get("fallback")
+    check(fb == {"channel": "mimov26flash", "off": None}, "R142 (b) Pro + the free Flash named: armed",
+          "got %r" % (fb,))
+    running = sorted(c for c, p in rt.resolve(rt.load_registry(), panel="cheap", ready=yes).items()
+                     if p["enabled"])
+    check("mimov26flash" not in running, "R142 (b) the cheap panel does not seat mimov26flash",
+          "running: %s" % running)
+    reg2 = rt.load_registry()
+    txt = rt.format_plan(rt.resolve(reg2, only=["mimov26pro", "ocmimo26flashfree"], ready=yes), reg2)
+    check("NO answer text, mimov26flash" in txt and "not if ocmimo26flashfree" in txt,
+          "R142 (b) the plan prints the fallback and its same-voice condition before any spend")
+    p3 = rt.resolve(rt.load_registry(), only=["mimov26pro", "ocmimo26flashfree"], skip=["mimov26flash"], ready=yes)
+    off3 = (p3["mimov26pro"].get("fallback") or {}).get("off") or ""
+    check("excluded" in off3 and "--skip" in off3, "R142 (c) --skip mimov26flash turns it OFF", off3)
+    p4 = rt.resolve(rt.load_registry(), only=["mimov26pro"], ready=yes)
+    check((p4["mimov26pro"].get("fallback") or {}).get("off", "x") is None,
+          "R142 (c) --only mimov26pro keeps it (a MiMo answer is still wanted)")
+
+    def not_here(n):
+        return "mimocli: its key or CLI is missing" if n == "mimov26flash" else True
+
+    p5 = rt.resolve(rt.load_registry(), only=["mimov26pro", "ocmimo26flashfree"], ready=not_here)
+    check("cannot run here" in ((p5["mimov26pro"].get("fallback") or {}).get("off") or ""),
+          "R142 (c) a fallback that cannot run on this machine is OFF, with the reason")
+
+    calls = []
+
+    def fake_submit(_ex, name):
+        calls.append(name)
+        f = cf.Future()
+        f.set_result({"ok": True, "text": "flash answer", "bytes": 12})
+        return f
+
+    dead = {"ok": False, "text": "", "error": "TIMEOUT after 40m", "warnings": ["TIMEOUT"]}
+    good = {"ok": True, "text": "answer"}
+
+    def go(pro, free, the_plan=plan, **kw):
+        del calls[:]
+        res = {"mimov26pro": dict(pro), "ocmimo26flashfree": dict(free)}
+        o.run_fallbacks(res, the_plan, reg, ["mimov26pro", "ocmimo26flashfree"],
+                        submit=fake_submit, same_voice=rt.same_voice, **kw)
+        return res
+
+    res = go(dead, good)
+    check(calls == [] and any("ocmimo26flashfree" in n for n in res["mimov26pro"].get("notes", [])),
+          "R142 (d) Pro timed out, the Flash voice answered via ocmimo26flashfree: NOT run again",
+          "calls=%r" % calls)
+    res = go(dead, dead)
+    check(calls == ["mimov26flash"] and res.get("mimov26flash", {}).get("fallback_for") == "mimov26pro",
+          "R142 (d) Pro AND the free Flash gave nothing: mimov26flash runs once, fallback_for=mimov26pro",
+          "calls=%r" % calls)
+    check(any("FALLBACK: mimov26flash ran" in n for n in res["mimov26pro"].get("notes", [])),
+          "R142 (d) the primary's record names the fallback that ran")
+    go(good, dead)
+    check(calls == [], "R142 (e) Pro answered: no fallback")
+    go({"ok": False, "text": "a whole review", "warnings": ["END MARKER NOT ON LAST LINE"]}, dead)
+    check(calls == [], "R142 (e) a partial answer is left to the reader (E-73): no fallback")
+    go(dead, dead, no_fallback=True)
+    check(calls == [], "R142 (e) --no-fallback")
+    go(dead, dead, task_mode=True)
+    check(calls == [], "R142 (e) --task never falls back")
+    go(dead, dead, the_plan=p3)
+    check(calls == [], "R142 (e) a fallback OFF in the plan stays off at run time")
+
+    msrc = inspect.getsource(o.main)
+    check("run_fallbacks(results, plan, reg, want" in msrc and "submit=_submit_again" in msrc,
+          "R142 (f) main() calls run_fallbacks with the dispatcher the auto-retry uses (the wire)")
+
+    nd = "\n".join(_json.dumps(x) for x in [
+        {"type": "step_finish", "part": {"tokens": {"input": 100, "output": 10, "reasoning": 5,
+                                                    "cache": {"read": 0}}, "cost": 0.0172}},
+        {"type": "text", "part": {"text": "answer\nR142-MARK"}},
+        {"type": "step_finish", "part": {"tokens": {"input": 3, "output": 2, "reasoning": 1,
+                                                    "cache": {"read": 90}}, "cost": 0.0004}}])
+    real_run, real_bin = o.subprocess.run, o.mimo_bin
+    tmp = _tf.mkdtemp(prefix="r142-")
+    o.subprocess.run = lambda *a, **k: _sp.CompletedProcess(a[0] if a else [], 0, nd, "")
+    o.mimo_bin = lambda: "mimo"
+    try:
+        r = o.call_mimocli("brief", "R142-MARK", os.path.join(tmp, "M.md"),
+                           model="xiaomi/mimo-v2.6-flash", name="mimov26flash", timeout=5)
+    finally:
+        o.subprocess.run, o.mimo_bin = real_run, real_bin
+    check(abs((r.get("usd") or 0) - 0.0176) < 1e-9 and r.get("in_tokens") == 103
+          and r.get("cached_in_tokens") == 90 and r.get("reasoning_tokens") == 6,
+          "R142 (g) call_mimocli sums tokens and cost over EVERY step (it reported the last step)",
+          "usd=%r in=%r cached=%r reasoning=%r" % (r.get("usd"), r.get("in_tokens"),
+                                                  r.get("cached_in_tokens"), r.get("reasoning_tokens")))
 
 
 if __name__ == "__main__":

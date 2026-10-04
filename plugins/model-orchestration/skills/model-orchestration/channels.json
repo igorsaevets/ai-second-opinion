@@ -116,9 +116,12 @@
       "label": "every MiMo, all transports",
       "channels": [
         "mimov26pro",
+        "mimov26flash",
+        "ocmimo26flashfree",
         "mimo25pro",
         "ormimopro"
       ],
+      "_membership_updated_r142": "R142 (2026-10-04): mimov26flash added (the run-time fallback of mimov26pro), and ocmimo26flashfree, which R133 left out - so «--skip mimo» did not skip a MiMo voice and «--only mimo» did not run it. A group word never starts mimov26flash as a voice (enabled:false, see apply_explicit_only); it is here so that «--skip mimo» also forbids the fallback.",
       "aliases": [
         "mimo",
         "мимо",
@@ -150,6 +153,7 @@
         "kimik3free",
         "nvkimik3",
         "mimov26pro",
+        "mimov26flash",
         "cclopus46",
         "codex",
         "agy31pro",
@@ -1315,6 +1319,8 @@
       "_supported_efforts": "From mimo run --help: '--variant model variant (provider-specific reasoning effort, e.g., high, max, minimal)'. Not probed on this model; inferred from help text. If max errors, fall back to high.",
       "timeout": "40m",
       "_timeout": "Matches other CLI channels. mimo CLI has no built-in timeout; caller-side via subprocess.run.",
+      "fallback": "mimov26flash",
+      "_fallback": "R142 (2026-10-04), the operator: «сделай mimo 2.6 Flash как fallback, модели mimo 2.6 Pro». A RUN-TIME fallback, unlike `_cascade_groups` (plan time, one model over several transports): when this channel ends the round with NO answer text - a timeout (E-137: 40 min and no file, twice), an error, an empty output; a partial answer is left to the reader, because the end-marker check also flags whole answers (E-73) - orchestrate.py runs `mimov26flash` once on the same brief after the round, through the same mimo CLI and the same Xiaomi key, so the brief reaches no vendor that was not already chosen. Not run when the Flash voice already answered in this round (mimov26flash's cascade group: ocmimo26flashfree), when mimov26flash was excluded (--skip / --only / route), in --task mode, or with --no-fallback. The plan prints this before any spend; the fallback answers into its own file (MIMOV26FLASH.md) with `fallback_for` in its record, never under this channel's name.",
       "_no_spend_guard": "R122: the mimocli transport reports cost only AFTER the call completes (NDJSON step_finish), not mid-call. Spend-guard enforcement requires a streaming cost meter (only call_oai_reviewer has one). Removing the guard is honest; declaring one the transport cannot enforce is a promise in the plan that nothing keeps.",
       "fetch_fallback_hint_ref": "mcp_fallback",
       "models": {
@@ -1336,6 +1342,50 @@
       ],
       "_added": "2026-09-22 (R122), the operator: «Давай теперь добавим еще одну Cli по дефолту в cheap CLI. mimo clode cli, с модель MiMo 2.6 pro. mimi code cli поставь первой, а ormimopro как fallback». Binary: mimo v0.1.14 (@mimo-ai/cli). NDJSON output identical to opencode (fork). Brief via stdin pipe. Cascade: [mimov26pro, ormimopro] — CLI first, OpenRouter fallback.",
       "notes": "MiMo v2.6 Pro via the mimo CLI (direct Xiaomi API). Primary MiMo voice — cascades with ormimopro (same model, OpenRouter fallback). 1.05M context. Metered: ~$0.05 first call due to agent overhead, ~$0.001 subsequent (cache). The mimo CLI is a fork of opencode; NDJSON format, stdin pipe, and bypass flags are structurally identical."
+    },
+    "mimov26flash": {
+      "read_order": 1,
+      "kind": "mimocli",
+      "panel": "cheap",
+      "vendor": "xiaomi",
+      "enabled": false,
+      "_enabled": "R142: OFF on purpose. This channel is not a seat in any panel - the Flash voice there is ocmimo26flashfree (free, opencode). It runs (1) as mimov26pro's run-time `fallback` and (2) when named directly (`--only mimov26flash`). enabled:false keeps every group word and panel from starting it as a second Flash voice (apply_explicit_only blocks a default-off channel a group woke).",
+      "bypass_permissions": true,
+      "distribution": "local",
+      "_distribution": "LOCAL ONLY, like mimov26pro: needs the mimo CLI and Xiaomi credentials.",
+      "label": "MiMo v2.6 Flash",
+      "cost": "metered",
+      "_cost": "MEASURED R142 (2026-10-04, `D:/Claude Code/runs/r142-mimo-flash-fallback/probe_flash_cli.log`): 4 calls on a one-line puzzle, all exit 0 and correct; $0.0004 per call with the CLI's ~122K-token prompt cached, $0.015 on a cache miss. A review costs more: every tool step bills again.",
+      "model": "xiaomi/mimo-v2.6-flash",
+      "_model": "MEASURED R142: the Xiaomi API's /v1/models lists mimo-v2.6-flash (9 ids, also mimo-v2.6-pro-ultraspeed) and `mimo models xiaomi` lists xiaomi/mimo-v2.6-flash, window 1.05M (`runs/r142-mimo-flash-fallback/probe_models.py`).",
+      "effort": "max",
+      "_effort": "MEASURED R142, and the knob is NOT shown to act: --variant max/none/minimal all exit 0, but reasoning tokens came back 161 (max), 233 (none), 601 (minimal) on the same puzzle - no order, n=1-2. Kept at max because it is the CLI's top variant and costs nothing; do not read effort=max in the plan as measured depth.",
+      "supported_efforts": [
+        "max",
+        "high",
+        "minimal"
+      ],
+      "timeout": "30m",
+      "_timeout": "Shorter than mimov26pro's 40m: this channel usually runs AFTER a 40-minute Pro timeout, so its own limit decides how late the round ends (40 + 30 min worst case). The first probe call took 201 s on a puzzle, the next three 26-33 s.",
+      "_no_spend_guard": "Same as mimov26pro: the mimocli transport reports cost only after the call.",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "models": {
+        "xiaomi/mimo-v2.6-flash": {
+          "label": "MiMo v2.6 Flash (via mimo CLI)",
+          "data_policy": "Xiaomi's own API via the mimo CLI - the same vendor, key and terms as mimov26pro. This project has NOT verified Xiaomi's data retention policy.",
+          "aliases": [
+            "mimo flash cli",
+            "мимо флеш кли"
+          ]
+        }
+      },
+      "aliases": [
+        "mimov26flash",
+        "mimocli flash",
+        "мимо флеш"
+      ],
+      "_added": "2026-10-04 (R142), the operator: «Потом сделай mimo 2.6 Flash как fallback, модели mimo 2.6 Pro». The run-time fallback of mimov26pro (its `fallback` field) - same mimo CLI and Xiaomi key, the lighter model. Cascade group with ocmimo26flashfree: one Flash voice, two transports.",
+      "notes": "MiMo v2.6 Flash via the mimo CLI (direct Xiaomi API, metered). Not a panel seat: it answers when mimov26pro gives no usable answer and the Flash voice did not already answer through ocmimo26flashfree, or when named directly."
     },
     "qwen38maxcli": {
       "read_order": 1,
@@ -1822,6 +1872,10 @@
     [
       "mimov26pro",
       "ormimopro"
+    ],
+    [
+      "ocmimo26flashfree",
+      "mimov26flash"
     ],
     [
       "agy38flash",

@@ -3781,8 +3781,19 @@ def call_mimocli(brief, marker, outfile, model=None, effort=None, system=None,
         if otype == "text":
             text += part.get("text") or ""
         elif otype == "step_finish":
-            tokens = part.get("tokens") or {}
-            cost = part.get("cost")
+            # R142: ONE step_finish PER STEP, each with that step's own tokens and cost - measured
+            # (runs/r142-mimo-flash-fallback, max-1: a bash tool step $0.0172, then the answer step
+            # $0.0004). This kept the LAST one, so a 30-step review reported one step's cost.
+            st = part.get("tokens") or {}
+            for k in ("input", "output", "reasoning"):
+                if isinstance(st.get(k), (int, float)):
+                    tokens[k] = tokens.get(k, 0) + st[k]
+            sc = st.get("cache") or {}
+            if isinstance(sc.get("read"), (int, float)):
+                tokens.setdefault("cache", {})
+                tokens["cache"]["read"] = tokens["cache"].get("read", 0) + sc["read"]
+            if isinstance(part.get("cost"), (int, float)):
+                cost = (cost or 0) + part["cost"]
 
     if p.returncode != 0 and not text:
         warn.append("EXIT %d: %s" % (p.returncode, scrub(p.stderr or raw or "")[:300]))
@@ -7099,6 +7110,81 @@ KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "he
 REFS_KINDS = ("codex", "agy", "grokcli", "claudecli", "qwencli")
 
 
+def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, submit=None,
+                  same_voice=None):
+    """R142: run each failed channel's armed `fallback` once, after the round; mutates `results`.
+
+    A channel that ends the round with NO ANSWER TEXT and declares a `fallback` (channels.json;
+    routing.apply_fallback armed it and the plan printed it) gets that other channel run ONCE
+    on the same brief. Igor 2026-10-04: MiMo 2.6 Flash for MiMo 2.6 Pro (E-137: 40 minutes, no
+    file, twice). Not when the fallback's VOICE already answered here (routing.same_voice: its
+    cascade group), so no round pays twice for one voice; not for a partial answer (E-73: the
+    end-marker check flags whole answers too - the reader judges those); after the auto-retry,
+    so a transient death is retried on the primary first; never in --task mode.
+
+    `submit(executor, name)` dispatches one channel (main passes _submit_again); `same_voice(reg,
+    name)` is routing.same_voice. The fallback's record carries `fallback_for`; both records get
+    a note, so HANDOFF and REPORT say which model answered and why.
+    """
+    _fb_jobs = {}
+    if not task_mode:
+        for cname in sorted(want):
+            r = results.get(cname) or {}
+            fbk = (plan.get(cname) or {}).get("fallback")
+            if not fbk or r.get("ok") or (r.get("text") or "").strip():
+                continue
+            fb = fbk["channel"]
+            failed = (r.get("error") or "; ".join(r.get("warnings") or []) or "no answer text")
+            if fbk.get("off"):
+                why_not = "OFF in this run - %s" % fbk["off"]
+            elif no_fallback:
+                why_not = "--no-fallback"
+            elif fb in results:
+                why_not = "%s already ran in this round" % fb
+            elif fb in _fb_jobs.values():
+                why_not = "%s is already the fallback of another channel here" % fb
+            else:
+                voiced = [s for s in same_voice(reg, fb)
+                          if (results.get(s) or {}).get("ok")]
+                why_not = ("the same model already answered here through %s"
+                           % ", ".join(voiced)) if voiced else None
+            if why_not:
+                log("  [%s] fallback %s not run: %s" % (cname, fb, why_not))
+                r.setdefault("notes", []).append("FALLBACK %s not run: %s." % (fb, why_not))
+                continue
+            log("  [%s] ended with no answer (%s) -> FALLBACK %s runs the same brief once"
+                % (cname, scrub(str(failed))[:160], fb))
+            _fb_jobs[cname] = fb
+    if _fb_jobs:
+        log("\n" + "-" * 78)
+        log("FALLBACK: %s" % ", ".join("%s -> %s" % kv for kv in sorted(_fb_jobs.items())))
+        with ThreadPoolExecutor(max_workers=max(4, len(_fb_jobs))) as _fex:
+            _ffuts = {}
+            for cname, fb in sorted(_fb_jobs.items()):
+                _fut = submit(_fex, fb)
+                if _fut is not None:
+                    _ffuts[fb] = (cname, _fut)
+            for fb, (cname, f) in _ffuts.items():
+                try:
+                    _fr = f.result()
+                except BaseException as exc:                # noqa: BLE001 - same as phase 1
+                    log("  [%s] FALLBACK RAISED: %r" % (fb, exc))
+                    _fr = {"ok": False, "error": "fallback raised: %r" % (exc,),
+                           "traceback": traceback.format_exc()}
+                _fr["fallback_for"] = cname
+                _fr.setdefault("notes", []).append(
+                    "FALLBACK for %s, which ended the round with no answer: %s"
+                    % (cname, scrub(str(results[cname].get("error") or "no answer text"))[:160]))
+                results[fb] = _fr
+                results[cname].setdefault("notes", []).append(
+                    "FALLBACK: %s ran the same brief after the round - %s."
+                    % (fb, "it answered (%s)" % (fb.upper() + ".md") if _fr.get("ok")
+                       else "it failed too"))
+                log("  [%s] fallback for %s: %s" % (fb, cname, ("OK - %s bytes" % _fr.get("bytes"))
+                                                    if _fr.get("ok") else "FAILED too"))
+        log("-" * 78)
+
+
 def retryable_stream_death(r):
     """True when a channel result looks like a transient stream death worth auto-retrying.
 
@@ -9370,6 +9456,11 @@ def main():
     ap.add_argument("--no-panel-retry", dest="no_panel_retry", action="store_true",
                     help="do not auto-retry channels that failed with a transient stream death "
                          "(502/503/429, silent death with reasoning). Default: retry ONCE")
+    # R142: a channel's run-time `fallback` (channels.json; mimov26pro -> mimov26flash).
+    ap.add_argument("--no-fallback", dest="no_fallback", action="store_true",
+                    help="do not run a channel's `fallback` (another model, once, after the "
+                         "round) when the channel ends with no usable answer. The plan prints "
+                         "each fallback before anything is spent")
     # R138 И-1: a TASK to carry out instead of a document to review (see _task_plan).
     ap.add_argument("--task", action="store_true",
                     help="the brief is a TASK to carry out, not a document to review: each CLI "
@@ -10254,6 +10345,125 @@ def main():
     # happened but no text and finish_reason is None). The retry is safe: no ANSWER text
     # was generated, so re-sending the brief can only re-bill INPUT tokens. The failed
     # attempt's cost is preserved and added to the retry's cost for correct totals.
+    def _submit_again(_rex, cname):
+        """Dispatch ONE channel again on an open executor; the future, or None for an unknown kind.
+
+        R142: the auto-retry below and the fallback phase after it share this one chain, so the
+        two cannot drift (phase 1's own chain above still differs: --task and unknown kinds).
+        """
+        p = (plan or {}).get(cname) or _legacy_slot(cname)
+        p["_name"] = cname
+        kind = p.get("kind")
+        outfile = os.path.join(a.out, cname.upper() + ".md")
+        workdir = os.path.join(a.out, cname + "-ws")
+        use_refs = bool((atts or att_dirs) and kind in REFS_KINDS)
+        cbrief = (((brief_refs_full if _tools_full(kind, cname, a, reg) else brief_refs)
+                   if use_refs else brief))
+        att_parents = (sorted({os.path.dirname(pth) for pth, _t in atts}
+                              | {sd for sd, _d in _snap_pairs})
+                       if use_refs else None)
+        if kind == "http":
+            return _rex.submit(
+                call_http_reviewer, cbrief, _system_for(system, p),
+                a.tier, a.marker, timeout=_seconds(p.get("timeout"), 2400),
+                model=p.get("model"), name=cname, effort=p.get("effort"),
+                fallback_model=p.get("fallback_model"),
+                answer_cap=a.answer_cap if a.answer_cap and a.answer_cap > 0
+                else None)
+        elif kind == "codex":
+            return _rex.submit(
+                call_codex, cbrief, a.marker, workdir, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                timeout=p.get("timeout"), system=_system_for(system, p),
+                bypass=bool(cli_bypass_active(cname, a, reg)))
+        elif kind == "agy":
+            return _rex.submit(
+                call_agy, cbrief, a.marker, workdir, outfile,
+                model=p.get("model"), effort=p.get("effort") or "high",
+                timeout=p.get("timeout") or "25m",
+                system=_system_for(system, p), add_dirs=att_parents,
+                bypass=bool(cli_bypass_active(cname, a, reg)))
+        elif kind == "grokcli":
+            return _rex.submit(
+                call_grokcli, cbrief, a.marker, workdir, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                timeout=p.get("timeout") or "40m",
+                system=_system_for(system, p), name=cname,
+                file_refs=use_refs,
+                bypass=bool(cli_bypass_active(cname, a, reg)))
+        elif kind == "hermes":
+            return _rex.submit(
+                call_hermes, cbrief, a.marker, outfile,
+                model=p.get("model"), toolsets=p.get("toolsets"),
+                system=_system_for(system, p),
+                timeout=_seconds(p.get("timeout"), 2400))
+        elif kind in ("openrouter", "oai"):
+            return _rex.submit(
+                call_oai_reviewer, cbrief, a.marker, outfile,
+                model=p.get("model"), system=_system_for(system, p),
+                web=p.get("web"), name=cname,
+                reasoning=p.get("reasoning"),
+                max_tokens=p.get("max_tokens"),
+                fetch_tool=p.get("fetch_tool"),
+                provider=p.get("provider") or "openrouter",
+                provider_route=p.get("provider_route"),
+                spend_guard=p.get("spend_guard"),
+                fallback_models=p.get("fallback_models"),
+                timeout=_seconds(p.get("timeout"), 2400))
+        elif kind == "xai":
+            return _rex.submit(
+                call_xai_responses, cbrief, a.marker, outfile,
+                model=p.get("model"), system=_system_for(system, p),
+                name=cname, tools=p.get("tools"),
+                timeout=_seconds(p.get("timeout"), 2400),
+                max_tokens=p.get("max_tokens"))
+        elif kind == "gemini":
+            return _rex.submit(
+                call_gemini_direct, cbrief, a.marker, outfile,
+                model=p.get("model"), system=_system_for(system, p),
+                name=cname, thinking_level=p.get("thinking_level"),
+                tools=p.get("tools"), max_tokens=p.get("max_tokens"),
+                timeout=_seconds(p.get("timeout"), 2400))
+        elif kind == "opencode":
+            return _rex.submit(
+                call_opencode, cbrief, a.marker, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                system=_system_for(system, p),
+                timeout=_seconds(p.get("timeout"), 2400), name=cname)
+        elif kind == "mimocli":
+            return _rex.submit(
+                call_mimocli, cbrief, a.marker, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                system=_system_for(system, p),
+                timeout=_seconds(p.get("timeout"), 2400), name=cname)
+        elif kind == "claudecli":
+            return _rex.submit(
+                call_claudecli, cbrief, a.marker, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                system=_system_for(system, p),
+                fallback_model=p.get("fallback_model"),
+                timeout=_seconds(p.get("timeout"), 2400),
+                max_turns=p.get("max_turns"), name=cname)
+        elif kind == "qwencli":
+            return _rex.submit(
+                call_qwencli, cbrief, a.marker, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                system=_system_for(system, p),
+                fallback_model=p.get("fallback_model"),
+                timeout=_seconds(p.get("timeout"), 2400),
+                max_turns=p.get("max_turns"), name=cname)
+        elif kind == "kimicli":
+            return _rex.submit(
+                call_kimicli, cbrief, a.marker, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                system=_system_for(system, p),
+                timeout=_seconds(p.get("timeout"), 2400), name=cname,
+                workdir=os.path.join(a.out, cname + "-ws"),
+                bypass=bool(cli_bypass_active(cname, a, reg)),
+                env_model=_kimi_env_model(cname, reg))
+        log("  [%s] cannot dispatch again: unknown kind %r" % (cname, kind))
+        return None
+
     _retryable = {cn: r for cn, r in results.items() if retryable_stream_death(r)}
     if _retryable and task_mode:
         log("  --task: no auto-retry for %s - a task may already have changed something; read "
@@ -10272,118 +10482,9 @@ def main():
         with ThreadPoolExecutor(max_workers=max(4, len(_retryable))) as _rex:
             _rjobs = {}
             for cname in sorted(_retryable):
-                p = (plan or {}).get(cname) or _legacy_slot(cname)
-                p["_name"] = cname
-                kind = p.get("kind")
-                outfile = os.path.join(a.out, cname.upper() + ".md")
-                workdir = os.path.join(a.out, cname + "-ws")
-                use_refs = bool((atts or att_dirs) and kind in REFS_KINDS)
-                cbrief = (((brief_refs_full if _tools_full(kind, cname, a, reg) else brief_refs)
-                           if use_refs else brief))
-                att_parents = (sorted({os.path.dirname(pth) for pth, _t in atts}
-                                      | {sd for sd, _d in _snap_pairs})
-                               if use_refs else None)
-                if kind == "http":
-                    _rjobs[cname] = _rex.submit(
-                        call_http_reviewer, cbrief, _system_for(system, p),
-                        a.tier, a.marker, timeout=_seconds(p.get("timeout"), 2400),
-                        model=p.get("model"), name=cname, effort=p.get("effort"),
-                        fallback_model=p.get("fallback_model"),
-                        answer_cap=a.answer_cap if a.answer_cap and a.answer_cap > 0
-                        else None)
-                elif kind == "codex":
-                    _rjobs[cname] = _rex.submit(
-                        call_codex, cbrief, a.marker, workdir, outfile,
-                        model=p.get("model"), effort=p.get("effort"),
-                        timeout=p.get("timeout"), system=_system_for(system, p),
-                        bypass=bool(cli_bypass_active(cname, a, reg)))
-                elif kind == "agy":
-                    _rjobs[cname] = _rex.submit(
-                        call_agy, cbrief, a.marker, workdir, outfile,
-                        model=p.get("model"), effort=p.get("effort") or "high",
-                        timeout=p.get("timeout") or "25m",
-                        system=_system_for(system, p), add_dirs=att_parents,
-                        bypass=bool(cli_bypass_active(cname, a, reg)))
-                elif kind == "grokcli":
-                    _rjobs[cname] = _rex.submit(
-                        call_grokcli, cbrief, a.marker, workdir, outfile,
-                        model=p.get("model"), effort=p.get("effort"),
-                        timeout=p.get("timeout") or "40m",
-                        system=_system_for(system, p), name=cname,
-                        file_refs=use_refs,
-                        bypass=bool(cli_bypass_active(cname, a, reg)))
-                elif kind == "hermes":
-                    _rjobs[cname] = _rex.submit(
-                        call_hermes, cbrief, a.marker, outfile,
-                        model=p.get("model"), toolsets=p.get("toolsets"),
-                        system=_system_for(system, p),
-                        timeout=_seconds(p.get("timeout"), 2400))
-                elif kind in ("openrouter", "oai"):
-                    _rjobs[cname] = _rex.submit(
-                        call_oai_reviewer, cbrief, a.marker, outfile,
-                        model=p.get("model"), system=_system_for(system, p),
-                        web=p.get("web"), name=cname,
-                        reasoning=p.get("reasoning"),
-                        max_tokens=p.get("max_tokens"),
-                        fetch_tool=p.get("fetch_tool"),
-                        provider=p.get("provider") or "openrouter",
-                        provider_route=p.get("provider_route"),
-                        spend_guard=p.get("spend_guard"),
-                        fallback_models=p.get("fallback_models"),
-                        timeout=_seconds(p.get("timeout"), 2400))
-                elif kind == "xai":
-                    _rjobs[cname] = _rex.submit(
-                        call_xai_responses, cbrief, a.marker, outfile,
-                        model=p.get("model"), system=_system_for(system, p),
-                        name=cname, tools=p.get("tools"),
-                        timeout=_seconds(p.get("timeout"), 2400),
-                        max_tokens=p.get("max_tokens"))
-                elif kind == "gemini":
-                    _rjobs[cname] = _rex.submit(
-                        call_gemini_direct, cbrief, a.marker, outfile,
-                        model=p.get("model"), system=_system_for(system, p),
-                        name=cname, thinking_level=p.get("thinking_level"),
-                        tools=p.get("tools"), max_tokens=p.get("max_tokens"),
-                        timeout=_seconds(p.get("timeout"), 2400))
-                elif kind == "opencode":
-                    _rjobs[cname] = _rex.submit(
-                        call_opencode, cbrief, a.marker, outfile,
-                        model=p.get("model"), effort=p.get("effort"),
-                        system=_system_for(system, p),
-                        timeout=_seconds(p.get("timeout"), 2400), name=cname)
-                elif kind == "mimocli":
-                    _rjobs[cname] = _rex.submit(
-                        call_mimocli, cbrief, a.marker, outfile,
-                        model=p.get("model"), effort=p.get("effort"),
-                        system=_system_for(system, p),
-                        timeout=_seconds(p.get("timeout"), 2400), name=cname)
-                elif kind == "claudecli":
-                    _rjobs[cname] = _rex.submit(
-                        call_claudecli, cbrief, a.marker, outfile,
-                        model=p.get("model"), effort=p.get("effort"),
-                        system=_system_for(system, p),
-                        fallback_model=p.get("fallback_model"),
-                        timeout=_seconds(p.get("timeout"), 2400),
-                        max_turns=p.get("max_turns"), name=cname)
-                elif kind == "qwencli":
-                    _rjobs[cname] = _rex.submit(
-                        call_qwencli, cbrief, a.marker, outfile,
-                        model=p.get("model"), effort=p.get("effort"),
-                        system=_system_for(system, p),
-                        fallback_model=p.get("fallback_model"),
-                        timeout=_seconds(p.get("timeout"), 2400),
-                        max_turns=p.get("max_turns"), name=cname)
-                elif kind == "kimicli":
-                    _rjobs[cname] = _rex.submit(
-                        call_kimicli, cbrief, a.marker, outfile,
-                        model=p.get("model"), effort=p.get("effort"),
-                        system=_system_for(system, p),
-                        timeout=_seconds(p.get("timeout"), 2400), name=cname,
-                        workdir=os.path.join(a.out, cname + "-ws"),
-                        bypass=bool(cli_bypass_active(cname, a, reg)),
-                        env_model=_kimi_env_model(cname, reg))
-                else:
-                    log("  [%s] cannot retry: unknown kind %r" % (cname, kind))
+                _fut = _submit_again(_rex, cname)
+                if _fut is not None:
+                    _rjobs[cname] = _fut
             for cname, f in _rjobs.items():
                 try:
                     _retry_r = f.result()
@@ -10412,6 +10513,11 @@ def main():
                     (" - %s bytes" % _retry_r.get("bytes")) if _retry_r.get("text") else ""))
                 results[cname] = _retry_r
         log("-" * 78)
+
+    # ---- R142: run-time fallback (run_fallbacks: the rules are in its docstring) ----------------
+    if plan and routing is not None:
+        run_fallbacks(results, plan, reg, want, no_fallback=getattr(a, "no_fallback", False),
+                      task_mode=task_mode, submit=_submit_again, same_voice=routing.same_voice)
 
     # One authoritative assignment beats twenty literals scattered through the return statements
     # of five functions, which is where the old per-channel `"channel": "http"` lived.

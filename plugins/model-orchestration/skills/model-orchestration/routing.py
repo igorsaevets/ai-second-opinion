@@ -1700,6 +1700,7 @@ def apply_flags(plan, reg, only=None, skip=None, sets=None):
     for c in skip:
         plan[c]["enabled"] = False
         plan[c]["why"].append("--skip")
+        plan[c]["_user_off"] = "--skip names it"      # R142: a fallback may not undo this
     return plan
 
 
@@ -1875,6 +1876,57 @@ def _apply_cascade(plan, reg, ready=None):
     return plan
 
 
+def same_voice(reg, name):
+    """The channels that carry `name`'s model over another transport: its cascade group(s)."""
+    out = []
+    for group in reg.get("_cascade_groups") or []:
+        if isinstance(group, list) and name in group:
+            out += [c for c in group if c != name and c not in out]
+    return out
+
+
+def apply_fallback(plan, reg, ready=None):
+    """
+    R142: arm each RUNNING channel's run-time `fallback` (channels.json), or record why it is off.
+
+    Not a cascade. _apply_cascade picks ONE transport for ONE model before the round; a fallback
+    is ANOTHER model that orchestrate.py runs once AFTER the round, and only for a channel that
+    ended with no usable answer. Igor 2026-10-04: MiMo 2.6 Flash for MiMo 2.6 Pro, whose
+    40-minute timeouts lost whole rounds (E-137). The verdict goes into the slot as
+    `fallback = {"channel": name, "off": None | reason}`, so the printed plan and the dispatcher
+    read ONE answer. Off when the fallback is not in this registry, already runs as its own voice,
+    was excluded by the human in this run (--skip, a route; `--only` does not exclude it, because
+    `--only mimov26pro` still wants a MiMo answer), or cannot run here (`ready`, the cascade's
+    predicate). Whether its VOICE already answered is a run-time question: orchestrate.py asks it
+    of same_voice() after the round.
+    """
+    chans = reg.get("channels") or {}
+    for cname, p in plan.items():
+        fb = (chans.get(cname) or {}).get("fallback")
+        p.pop("fallback", None)
+        if not fb or not p.get("enabled"):
+            continue
+        off = None
+        if fb not in chans or fb not in plan:
+            off = "%s is not in this registry" % fb
+        elif fb == cname:
+            off = "a channel cannot be its own fallback"
+        elif plan[fb].get("enabled"):
+            off = "%s already runs in this round as its own voice" % fb
+        elif plan[fb].get("_user_off"):
+            off = "%s is excluded in this run (%s)" % (fb, plan[fb]["_user_off"])
+        elif ready is not None:
+            try:
+                verdict = ready(fb)
+            except Exception:                            # noqa: BLE001 - same rule as the cascade
+                verdict = True
+            if verdict is not True:
+                off = "%s cannot run here (%s)" % (fb, verdict if isinstance(verdict, str)
+                                                    and verdict else "its key or CLI is missing")
+        p["fallback"] = {"channel": fb, "off": off}
+    return plan
+
+
 def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=None,
             ready=None):
     # Before anything else: the reserved name points OUTSIDE this registry, so its
@@ -1948,7 +2000,14 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
     # and printed "route: excluded by name" on the line above "[RUN ] codex". Neither source
     # outranks the other, so a genuine contradiction stops the run and names both sides. This is
     # the same rule as an unparseable route: never guess which one was meant.
-    clash = [c for c, p in plan.items() if p.pop("_route_off", False) and p["enabled"]]
+    clash = []
+    for c, p in plan.items():
+        if p.pop("_route_off", False):
+            # R142: kept past this check, so a run-time fallback cannot start what the prose
+            # excluded (apply_fallback reads it; the marker used to die here).
+            p["_user_off"] = "your route text excludes it"
+            if p["enabled"]:
+                clash.append(c)
     if clash:
         raise RouteError(
             "the route and the flags contradict each other on: %s. The route excluded %s; a "
@@ -1963,6 +2022,7 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
     # reopen the hole - the gate does not care which path enabled the channel.
     plan = apply_explicit_only(plan, reg, named_directly)
     plan = _apply_cascade(plan, reg, ready)          # R140 И-3: `ready` from orchestrate.py
+    plan = apply_fallback(plan, reg, ready)          # R142: after the cascade picked the voices
 
     # 🔴 DECORATE BEFORE APPLYING THE TIER, not after. The tier now SCALES per-channel values
     # (`reasoning.max_tokens`, `fetch_tool.max_calls`) and OVERRIDES one (`thinking_level`), and
@@ -2513,6 +2573,22 @@ def format_plan(plan, reg):
             lines.append("           - fallback: if %s errors, OpenRouter tries %s and bills for "
                          "whichever answers. `model_served` in the report says which one did."
                          % (p.get("model"), " then ".join(p["fallback_models"])))
+        # R142: the HARNESS-side fallback - another channel, another model, run once after the
+        # round. Same reason as the line above: a substitution nobody is told about is silent.
+        fbk = p.get("fallback") if p["enabled"] else None
+        if fbk and fbk.get("off"):
+            lines.append("           - fallback %s: OFF in this run - %s"
+                         % (fbk["channel"], fbk["off"]))
+        elif fbk:
+            fslot = plan.get(fbk["channel"]) or {}
+            sib = [s for s in same_voice(reg, fbk["channel"]) if (plan.get(s) or {}).get("enabled")]
+            lines.append("           - fallback: if this channel ends with NO answer text, %s (%s, "
+                         "%s) runs the same brief once, after the round"
+                         % (fbk["channel"], fslot.get("model_label") or fslot.get("model"),
+                            reg["channels"][fbk["channel"]].get("cost", "?")))
+            lines.append("             %s; its answer is its own file. --no-fallback turns it off."
+                         % ("- not if %s (the same model) answers in this round" % " or ".join(sib)
+                            if sib else "- nothing else here carries that model"))
         # 🔴 THE PRICE LINE USED TO KEY ON THE WORD `expensive`, WHICH ONLY CODEX CARRIES - so the
         # channel that actually ran away printed nothing at all. Measured 2026-08-14: orgpt56terrapro
         # is tagged `metered`, the same word as a $0.10 channel, and billed $12.08 in one round while

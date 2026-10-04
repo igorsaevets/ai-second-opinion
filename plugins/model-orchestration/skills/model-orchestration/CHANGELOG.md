@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.105.0 — 2026-10-04
+
+- **A channel can now name a fallback model that runs once, after the round, when the channel left no answer.** `mimov26pro` (MiMo v2.6 Pro through the mimo CLI) names `mimov26flash` (MiMo v2.6 Flash, same CLI, same Xiaomi key). Pro has ended whole rounds with a 40-minute timeout and no file. The fallback runs only when Pro left no answer text. It does not run when:
+  - the same Flash model already answered in that round (the free `ocmimo26flashfree`), so no round pays twice for one voice;
+  - you excluded it (`--skip mimov26flash`, `--skip mimo`, or route text);
+  - `--no-fallback` is passed, or in `--task` mode.
+
+  The plan prints the fallback under Pro before anything is spent. The fallback answers into its own file, and its record carries `fallback_for`. A partial answer is left to the reader, because the end-marker check also flags complete answers.
+- **`mimov26flash` is a new channel, off by default and not a seat in any panel.** It also runs when named directly. Measured before use: the Xiaomi API and `mimo models` both list MiMo v2.6 Flash, and 4 of 4 live calls answered. `--variant` did not measurably change its reasoning, so `effort=max` is not measured depth.
+- **MiMo CLI costs were under-reported.** The CLI writes one `step_finish` per step, and the harness kept only the last. On a two-step call it reported $0.0004 instead of $0.0176. Tokens and cost are now summed over every step. The same parsing in `call_opencode` is not yet measured and is unchanged.
+- **The `mimo` group now holds every MiMo transport.** `ocmimo26flashfree` was missing, so `--skip mimo` did not skip it and `--only mimo` did not run it.
+- The auto-retry's dispatch is one function, which the fallback shares.
+
+Selftest: 1752 checks, with TEMP inside and outside the home folder and outside git.
+
 ## 1.104.1 — 2026-10-04
 
 Six outside reviewers read the 1.102.3 change: the session-start hook and its writes to Claude Code's `settings.json`. This release fixes what they found that held up against the code.
