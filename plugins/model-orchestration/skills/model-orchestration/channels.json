@@ -578,8 +578,10 @@
           "label": "GPT-5.6 Sol",
           "_lost_the_bare_5.6_alias_2026_08_14": "🔴 THIS MODEL USED TO ANSWER TO A BARE `5.6`, and round 38 removed it the moment a SECOND 5.6 model entered the registry (openai/gpt-5.6-terra-pro). Third instance of one class in a single round, after the `openai` alias on this same channel and the `gemini` group on 2026-08-07: a name is unambiguous only until the thing it names gets a sibling, and nothing fails when it stops being so. This one was not theoretical - it broke the exact sentence the operator asked to support. In «используй все модели и 5.6 Terra Pro» the scanner consumed `terra pro` first, leaving `5.6` free to match HERE, so the route reported «mentions codex» and refused. `5.6 sol`, `5.6-sol`, `sol` and `соль` all still work and none of them is ambiguous. A bare version number shared by two models cannot route, and the right answer is to stop accepting it rather than to guess.",
           "_lost_the_bare_sol_alias_2026_08_19": "🔴 FOURTH INSTANCE OF ONE CLASS, ON THIS SAME MODEL, AND THE SECOND TIME IT HAS BEEN THIS EXACT ENTRY. R38 removed the bare `5.6` from here when openai/gpt-5.6-terra-pro arrived; R54 removes the bare `sol` and `соль` because openai/gpt-5.6-SOL-PRO arrived, and `sol` now names two different models on two different transports - this subscription CLI and a metered OpenRouter channel that is explicit-only precisely so it cannot start by accident. Leaving it would mean «используй sol» quietly resolving to the cheap subscription voice while a human who meant the expensive one watched a plan that named neither ambiguity. `gpt-5.6-sol`, `5.6 sol` and `5.6-sol` all survive and none of them is ambiguous: the alias index sorts LONGEST FIRST, so «5.6 sol pro» is consumed whole by the Sol Pro entry before `5.6 sol` can match a prefix of it. The general rule, now written down for the fourth time: a name is unambiguous only until the thing it names gets a sibling, and NOTHING FAILS when it stops being so - the router keeps working and silently means less than it used to.",
+          "_marketing_spelling_r141": "R141 (2026-10-04) added `gpt-5.6 sol`: OpenAI's own spelling «GPT-5.6 Sol» lowercases to `gpt-5.6 sol`, where `5.6 sol` cannot match (a `-` stands before it) but the NEW `6 sol` of gpt-6-sol can (a `.` before it is not a word character). Without this alias «только codex GPT-5.6 Sol» ran GPT-6 Sol; before R141 the same words were refused loudly (R90). Fifth instance of the sibling class above.",
           "aliases": [
             "gpt-5.6-sol",
+            "gpt-5.6 sol",
             "5.6 sol",
             "5.6-sol"
           ],
@@ -591,6 +593,43 @@
             "xhigh"
           ],
           "_efforts_source": "Same generation as gpt-5.5, assumed same ladder (not probed)"
+        },
+        "gpt-6-sol": {
+          "label": "GPT-6 Sol",
+          "_added": "2026-10-04 (R141), the operator: «Добавь в codex 6 sol и 6.1 sol с effort max». OpenAI's model page (developers.openai.com/api/docs/models/gpt-6-sol, read 2026-10-04): reasoning.effort none, low, medium (default), high, xhigh, max; 1,050,000 context, 128,000 max output. The API said the same through codex-cli 0.160.0 on the operator's ChatGPT account: effort `minimal` -> 400 «Supported values are: 'none', 'low', 'medium', 'high', 'xhigh', and 'max'». A LISTED model: the channel default does not change; `--set codex=gpt-6-sol` or a route word («только codex 6 sol»).",
+          "aliases": [
+            "gpt-6-sol",
+            "gpt-6 sol",
+            "6 sol",
+            "6-sol"
+          ],
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "_efforts_source": "R141: OpenAI's model page AND the server's own list in the 400 for `minimal` (2026-10-04)"
+        },
+        "gpt-6.1-sol": {
+          "label": "GPT-6.1 Sol",
+          "_added": "2026-10-04 (R141), same request as gpt-6-sol. OpenAI's model page (developers.openai.com/api/docs/models/gpt-6.1-sol, read 2026-10-04): reasoning.effort low, medium (default), high, xhigh, max - `none` and `minimal` are NOT supported, unlike gpt-6-sol; 1,050,000 context, 128,000 max output. Live through codex-cli 0.160.0: effort `none` -> 400 «Supported values are: 'low', 'medium', 'high', 'xhigh', and 'max'». A LISTED model: the channel default does not change; `--set codex=gpt-6.1-sol` or a route word («только codex 6.1 sol»).",
+          "aliases": [
+            "gpt-6.1-sol",
+            "gpt-6.1 sol",
+            "6.1 sol",
+            "6.1-sol"
+          ],
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "_efforts_source": "R141: OpenAI's model page AND the server's own list in the 400 for `none` (2026-10-04); a `none` request is clamped UP to `low`"
         },
         "gpt-6-astra": {
           "label": "GPT-6 Astra",

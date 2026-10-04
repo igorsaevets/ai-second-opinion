@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.103.0 — 2026-10-04
+
+Two more models for the Codex channel: GPT-6 Sol and GPT-6.1 Sol.
+
+- **`gpt-6-sol` and `gpt-6.1-sol` are listed models of the `codex` channel.** Pick one with a route («только codex 6.1 sol», «GPT-6 Sol») or `--set codex=gpt-6.1-sol`. The channel's default model does not change. Their effort ladders come from OpenAI's model pages and match what the API itself lists in its 400 for an unsupported value. GPT-6.1 Sol has no `none`: a `none` request is clamped up to `low` in the plan rather than sent and refused. Both models top out at `max`. The shipped default stays `xhigh`, and an overlay that sets `max` reaches them unchanged.
+- **OpenAI's own spelling works for the older Sol too.** «GPT-5.6 Sol» lowercases to `gpt-5.6 sol`, and the new alias `6 sol` matches inside it, because the `.` before the `6` is not a word character. Without a separate alias that text would have run GPT-6 Sol. `gpt-5.6 sol` is now an alias of `gpt-5.6-sol`, and the selftest proves it is needed: a control run without it picks the wrong model.
+- **`--set` resolves model aliases.** `--set codex=6.1-sol` (or any alias of a listed model) used to miss the slug lookup. It was then sent as typed: as an unknown-model hypothesis, with no effort clamp. It now resolves the way a route resolves the same word.
+- **«codex sol» is refused instead of running the default model in silence.** The guard against dropped model words skipped short words (`sol` is three letters, `7` is one). So «только codex sol», which now matches three Sol models, and «только codex 7 sol», which matches none, both ran the default model without a word. A word that is part of one of the channel's own model aliases now counts as a model word, whatever its length. The route is refused, and the error lists the known models.
+- **The plan's effort line no longer says «ceiling» for a lower rung.** Every Codex run printed «effort X (clamped to this model's ceiling)». When the effort was below the model's top rung, that line falsely said the model was at its maximum. It now says «this model's ceiling» only when that is true, and «this model's ceiling is max» otherwise.
+- Selftest: `suite_r141_codex_sol`. It covers:
+  - every spelling;
+  - the alias control;
+  - `--set` aliases;
+  - the clamp on the new ladders;
+  - the plan wording;
+  - what `call_codex` receives under an overlay with `max` and without one;
+  - the argv it builds.
+
 ## 1.102.3 — 2026-10-04
 
 The session-start hook backlog from the R139 panel (MiMo v2.6 Flash).

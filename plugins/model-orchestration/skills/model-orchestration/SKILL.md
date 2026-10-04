@@ -121,7 +121,7 @@ are the registry key, upper-cased.
 | `--answer-cap` | ask every reviewer to keep the FINAL answer under N chars (default `20000` ≈ 5K tokens; `0` = off and the `--ask` default). Prompt-level at the payload TAIL, after attachments — depth and `max_tokens` untouched; `HANDOFF.md` names who exceeded it or declared `TRUNCATED-BY-LIMIT` |
 | `--only` | restrict channels. Names, aliases and **group** words all work — vendor families and billing paths; `routing.py` prints every accepted spelling. 🔴 One channel per argument: `--only a b c`, never `--only "a b c"` |
 | `--skip` | the inverse of `--only`; on a clash (`--only <group> --skip <member>`) **skip wins** |
-| `--set` | pin: `--set codex=gpt-5.4`; unlisted → HYPOTHESIS on network kinds |
+| `--set` | pin: `--set codex=gpt-5.4` (a model's alias works too); unlisted → HYPOTHESIS on network kinds |
 | `--route` / `--new-channel` | route: §0.1. `--new-channel N:K:S` → overlay |
 | `--dry-run` | full preflight (plan, payload, keys, gates), then exit — spends nothing |
 | `--strict-pii` | identifier gate **OFF by default since R45** (summary line, then send); `--warn-pii` itemises, `--strict-pii` refuses, `--allow-pii` is a no-op. **Secrets can never be sent, at any setting** |

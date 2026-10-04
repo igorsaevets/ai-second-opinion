@@ -1352,13 +1352,20 @@ def _detect_silent_drop(text, stream, alias_idx, reg):
         if cur:
             runs.append((cur_start, "".join(cur)))
         significant = []
+        # R141: a word that is PART of one of this channel's own model aliases is model-looking by
+        # construction, whatever its length. «только codex sol» (three Sol models listed) and
+        # «только codex 7 sol» ran the default gpt-5.5 in silence: «sol» is three letters, «7» one.
+        alias_words = {w for mv in (reg["channels"][cname].get("models") or {}).values()
+                       for a in (mv or {}).get("aliases") or [] for w in str(a).lower().split()}
         for pos, w in runs:
             w = w.strip(".-")
             if not w:
                 continue
             has_digit = bool(re.search(r"[0-9]", w))
             has_letter = bool(re.search(r"[A-Za-z]", w))
-            if has_digit and (has_letter or "." in w or "-" in w) and len(w) >= 2:
+            if w in alias_words:
+                significant.append((pos, w))
+            elif has_digit and (has_letter or "." in w or "-" in w) and len(w) >= 2:
                 significant.append((pos, w))
             elif has_letter and not has_digit and len(w) >= 4:
                 significant.append((pos, w))
@@ -1618,6 +1625,14 @@ def apply_flags(plan, reg, only=None, skip=None, sets=None):
                                 " or ".join("--set %s=%s" % (t, m) for t in targets)))
         c = targets[0]
         known = reg["channels"][c].get("models") or {}
+        # R141: a model ALIAS names a listed model here too. `--set codex=6.1-sol` used to miss
+        # the slug-keyed lookup below and go out «AS TYPED» as an unknown-model HYPOTHESIS - with
+        # no effort clamp - although the route «только codex 6.1 sol» resolved the same word.
+        key = m.strip().lower().replace("ё", "е")
+        for slug, mv in known.items():
+            if key in [str(a).lower().replace("ё", "е") for a in (mv or {}).get("aliases") or []]:
+                m = slug
+                break
         if m not in known:
             # 🔴 R90 iter 2 (2026-09-14): kind matrix. See ALLOW_ARBITRARY_MODEL_KINDS block above.
             kind = reg["channels"][c].get("kind")
@@ -1986,8 +2001,12 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                 # `efforts` array from channels.json and picks the nearest rung.
                 p["effort"] = _clamp_effort(reg, cname, p["model"], p.get("effort"), p)
                 p["timeout"] = t.get("codex_timeout", "50m")
-                p["_tier_note"] = ("timeout %s only - effort %s (clamped to this model's ceiling)"
-                                   % (p["timeout"], p.get("effort")))
+                # R141: this line said «clamped to this model's ceiling» for EVERY codex run, so
+                # gpt-6-astra at xhigh (its ladder tops at max) read as running at its top - the
+                # one line that answers «is it at max?» answered yes when it was not.
+                p["_tier_note"] = ("timeout %s only - effort %s (%s)"
+                                   % (p["timeout"], p.get("effort"),
+                                      _ceiling_phrase(reg, cname, p["model"], p.get("effort"))))
             elif p.get("kind") == "opencode":
                 p["timeout"] = t.get("opencode_timeout", p.get("timeout") or 120)
                 p["_tier_note"] = ("timeout %s only - effort stays %s (--variant flag), "
@@ -2201,6 +2220,16 @@ def _decorate(plan, reg):
 # index len-1 by accident; with them, the ordering is explicit and ties break
 # upward as documented. "none" is below low for codex models that list it.
 EFFORT_ORDER = ["none", "low", "medium", "high", "xhigh", "max"]
+
+
+def _ceiling_phrase(reg, cname, model, effort):
+    """Say whether `effort` IS this model's top rung, from the model's own `efforts` list."""
+    avail = ((reg["channels"][cname].get("models") or {}).get(model) or {}).get("efforts") or []
+    ranked = [e for e in avail if e in EFFORT_ORDER]
+    if not ranked:
+        return "no effort ladder listed for this model"
+    top = max(ranked, key=EFFORT_ORDER.index)
+    return "this model's ceiling" if effort == top else "this model's ceiling is %s" % top
 
 
 def _clamp_effort(reg, cname, model, want, slot):

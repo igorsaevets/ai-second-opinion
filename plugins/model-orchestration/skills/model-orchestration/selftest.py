@@ -7888,7 +7888,8 @@ def main():
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
                   suite_r139_i3_hook_identity,
                   suite_r140_i2_nvkimik3, suite_r140_i3_panel_hotfix,
-                  suite_r140_i4_env_fail_closed):
+                  suite_r140_i4_env_fail_closed,
+                  suite_r141_codex_sol):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -12328,6 +12329,186 @@ def suite_r140_i4_env_fail_closed():
             os.remove(f)
         os.rmdir(tmpd)
 
+
+def suite_r141_codex_sol():
+    """
+    R141 (2026-10-04), the operator: «Добавь в codex 6 sol и 6.1 sol с effort max».
+
+    gpt-6-sol and gpt-6.1-sol join the codex model table with the ladders OpenAI's model pages
+    give AND the API itself printed in a 400 on the operator's account (6.1 Sol has no `none`).
+    Pinned here: every spelling a human types reaches the right model - OpenAI's own «GPT-5.6 Sol»
+    included, because the new `6 sol` matches INSIDE it (a `.` is not a word character); `--set`
+    takes the same words instead of sending them «AS TYPED»; the effort that reaches the CALL is
+    max where the model has it and clamped where it has not (gpt-5.5 400'd on max in R113); and
+    the plan line that answers «is it at max?» no longer says «ceiling» for a rung below it.
+    """
+    section("R141: codex gpt-6-sol / gpt-6.1-sol at effort max")
+    import copy
+    import json as _json
+    import routing as r
+    base = r.load_registry(os.path.join(str(HERE), "channels.json"), overlay=False)
+
+    def reg_with(effort):
+        g = copy.deepcopy(base)
+        g["channels"]["codex"]["effort"] = effort
+        return g
+
+    def pick(reg, **kw):
+        try:
+            p = r.resolve(reg, tier="max", **kw)["codex"]
+            return p.get("model"), p.get("effort"), bool(p.get("enabled")), p
+        except r.RouteError as exc:
+            return "RouteError", str(exc)[:90], None, {}
+
+    models = base["channels"]["codex"].get("models") or {}
+    # ---- (a) the ladders as measured (model page + the server's own 400 text) ----------------
+    check((models.get("gpt-6-sol") or {}).get("efforts")
+          == ["none", "low", "medium", "high", "xhigh", "max"],
+          "R141 gpt-6-sol ladder none..max (OpenAI page + live 400 for `minimal`)",
+          repr((models.get("gpt-6-sol") or {}).get("efforts")))
+    check((models.get("gpt-6.1-sol") or {}).get("efforts")
+          == ["low", "medium", "high", "xhigh", "max"],
+          "R141 gpt-6.1-sol ladder low..max, NO none (OpenAI page + live 400 for `none`)",
+          repr((models.get("gpt-6.1-sol") or {}).get("efforts")))
+
+    # ---- (b) every spelling -> its model, at max where the model has it ------------------------
+    reg = reg_with("max")                      # what the operator's local.json says since R141
+    for text, slug, eff in (("только codex 6 sol", "gpt-6-sol", "max"),
+                            ("только codex 6.1 sol", "gpt-6.1-sol", "max"),
+                            ("только codex GPT-6 Sol", "gpt-6-sol", "max"),
+                            ("только codex GPT-6.1 Sol", "gpt-6.1-sol", "max"),
+                            ("только codex gpt-6.1-sol", "gpt-6.1-sol", "max"),
+                            ("второе мнение только GPT-6.1 Sol", "gpt-6.1-sol", "max"),
+                            ("только codex GPT-5.6 Sol", "gpt-5.6-sol", "xhigh"),
+                            ("только codex 5.6 sol", "gpt-5.6-sol", "xhigh"),
+                            ("только codex", "gpt-5.5", "xhigh")):
+        got = pick(reg, route=text)
+        check(got[:3] == (slug, eff, True), "R141 route «%s» -> %s at %s" % (text, slug, eff),
+              repr(got[:3]))
+
+    # ---- (c) NEGATIVE CONTROL: the `gpt-5.6 sol` alias is load-bearing ------------------------
+    nc = reg_with("max")
+    nc["channels"]["codex"]["models"]["gpt-5.6-sol"]["aliases"].remove("gpt-5.6 sol")
+    got = pick(nc, route="только codex GPT-5.6 Sol")
+    check(got[0] == "gpt-6-sol",
+          "R141 NC: without `gpt-5.6 sol` the new `6 sol` captures «GPT-5.6 Sol» (wrong model)",
+          repr(got[:3]))
+
+    # ---- (d) --set takes the same words as a route ----------------------------------------------
+    for spec, slug in (("codex=6.1-sol", "gpt-6.1-sol"), ("codex=6.1 sol", "gpt-6.1-sol"),
+                       ("codex=GPT-6 Sol", "gpt-6-sol"), ("codex=5.6-sol", "gpt-5.6-sol")):
+        got = pick(reg, only=["codex"], sets=[spec])
+        check(got[0] == slug and not got[3].get("model_hypothesis"),
+              "R141 --set %s resolves to the listed %s, not an AS-TYPED hypothesis" % (spec, slug),
+              repr(got[:3]))
+
+    # ---- (e) the clamp on the new ladders ------------------------------------------------------
+    check(pick(reg_with("none"), route="только codex 6.1 sol")[1] == "low",
+          "R141 6.1 Sol asked for `none` is clamped UP to `low` (the server 400s on none)")
+    check(pick(reg_with("none"), route="только codex 6 sol")[1] == "none",
+          "R141 6 Sol keeps `none` (its ladder has it) - control for the clamp above")
+    check(pick(reg_with("xhigh"), route="только codex 6.1 sol")[1] == "xhigh",
+          "R141 kit default (xhigh) reaches 6.1 Sol unchanged")
+
+    # ---- (f) the plan's «ceiling» wording tells the truth ---------------------------------------
+    note = pick(reg_with("xhigh"), route="только codex 6 astra")[3].get("_tier_note", "")
+    check("ceiling is max" in note, "R141 astra at xhigh: the plan says its ceiling is max", note)
+    note = pick(reg, route="только codex 6.1 sol")[3].get("_tier_note", "")
+    check(note.endswith("(this model's ceiling)"), "R141 6.1 Sol at max: the plan says ceiling", note)
+
+    # ---- (h) a bare Sol word is refused, never the default model in silence --------------------
+    for text in ("только codex sol", "только codex 7 sol"):
+        got = pick(reg, route=text)
+        check(got[0] == "RouteError" and "sol" in got[1],
+              "R141 «%s» is REFUSED (it ran gpt-5.5 in silence: «sol» is 3 letters)" % text,
+              repr(got[:3]))
+
+    # ---- (g) the CALL: what call_codex receives, then what argv it builds -----------------------
+    child = (
+        "import json, os, sys, tempfile\n"
+        f"sys.path.insert(0, {str(HERE)!r})\n"
+        "import orchestrate as o\n"
+        "L = []\n"
+        "def stub(kind):\n"
+        "    def f(*a, **k):\n"
+        "        L.append({'kind': kind, 'model': k.get('model'), 'effort': k.get('effort')})\n"
+        "        return {'ok': True, 'text': 'stub\\nREVIEW-COMPLETE', 'seconds': 0.0}\n"
+        "    return f\n"
+        "for _n in ('call_http_reviewer','call_codex','call_agy','call_oai_reviewer',\n"
+        "           'call_xai_responses','call_gemini_direct','call_hermes','call_opencode',\n"
+        "           'call_claudecli','call_mimocli','call_qwencli','call_kimicli'):\n"
+        "    assert callable(getattr(o, _n, None)), 'stub target missing: ' + _n\n"
+        "    setattr(o, _n, stub(_n))\n"
+        "t = tempfile.mkdtemp(prefix='r141-')\n"
+        "b = os.path.join(t, 'b.md')\n"
+        "open(b, 'w', encoding='utf-8').write('Review.\\nREVIEW-COMPLETE\\n')\n"
+        "out = {}\n"
+        "for i, route in enumerate(sys.argv[1:]):\n"
+        "    L.clear()\n"
+        "    sys.argv = ['o', '--brief', b, '--out', os.path.join(t, 'o%d' % i), '--route', route,\n"
+        "                '--no-citecheck', '--no-log']\n"
+        "    try:\n"
+        "        rc = o.main()\n"
+        "    except SystemExit as e:\n"
+        "        rc = e.code\n"
+        "    out[route] = {'rc': rc, 'calls': list(L)}\n"
+        "print('R141JSON' + json.dumps(out))\n")
+
+    def dispatched(overlay, routes):
+        d = tempfile.mkdtemp(prefix="r141-ov-")
+        try:
+            ov = os.path.join(d, "local.json")      # None: no file at all, as on CI / a kit
+            if overlay is not None:
+                with open(ov, "w", encoding="utf-8") as fh:
+                    _json.dump(overlay, fh)
+            env = dict(os.environ, MODEL_ORCH_LOCAL=ov, PYTHONIOENCODING="utf-8")
+            p = subprocess.run([sys.executable, "-c", child] + list(routes), capture_output=True,
+                               text=True, encoding="utf-8", errors="replace", env=env, timeout=240)
+            line = [x for x in (p.stdout or "").splitlines() if x.startswith("R141JSON")]
+            return _json.loads(line[-1][8:]) if line else {"_err": (p.stderr or p.stdout)[-300:]}
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def codex_call(res, route):
+        calls = [c for c in (res.get(route) or {}).get("calls") or [] if c["kind"] == "call_codex"]
+        return (calls[0]["model"], calls[0]["effort"]) if len(calls) == 1 else (None, repr(res)[:200])
+
+    res = dispatched({"channels": {"codex": {"effort": "max"}}},
+                     ["только codex 6.1 sol", "только codex 6 sol", "только codex"])
+    for route, want in (("только codex 6.1 sol", ("gpt-6.1-sol", "max")),
+                        ("только codex 6 sol", ("gpt-6-sol", "max")),
+                        ("только codex", ("gpt-5.5", "xhigh"))):
+        got = codex_call(res, route)
+        check(got == want, "R141 CALL «%s» with overlay effort=max -> call_codex%r" % (route, want),
+              repr(got))
+    res = dispatched(None, ["только codex 6.1 sol"])
+    got = codex_call(res, "только codex 6.1 sol")
+    check(got == ("gpt-6.1-sol", "xhigh"), "R141 CALL without an overlay: kit effort xhigh reaches 6.1 Sol",
+          repr(got))
+
+    import orchestrate as o
+    seen = {}
+
+    class _P:
+        stderr, returncode, stdout = "", 0, ""
+
+    def _fake_run(cmd, stdin_text=None, timeout=None, stdout_path=None, env=None, cwd=None):
+        seen["cmd"] = list(cmd)
+        return _P(), 0.1
+    saved = o._run
+    o._run = _fake_run
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            with contextlib.redirect_stdout(io.StringIO()):
+                o.call_codex("brief body", "MARK", os.path.join(d, "wd"), os.path.join(d, "out.md"),
+                             model="gpt-6.1-sol", effort="max")
+    finally:
+        o._run = saved
+    cmd = seen.get("cmd") or []
+    check("-m" in cmd and cmd[cmd.index("-m") + 1] == "gpt-6.1-sol"
+          and 'model_reasoning_effort="max"' in cmd,
+          "R141 argv: -m gpt-6.1-sol and model_reasoning_effort=\"max\" reach the codex command line",
+          repr(cmd)[:300])
 
 if __name__ == "__main__":
     sys.exit(main())
