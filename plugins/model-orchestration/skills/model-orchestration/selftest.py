@@ -10844,6 +10844,23 @@ def suite_r137_kimi_argv():
         o.subprocess.run, o.kimi_bin, o._kimi_node_argv, o.neutral_cwd = saved
         shutil.rmtree(td, ignore_errors=True)
 
+    # R140: the text Kimi Code CLI printed for every call 2026-10-02..04 (R139 panel run.log).
+    # Direct calls showed the gateway code behind it, `no_available_channel`, for the paid twin
+    # too; the old explanation called it capacity and told every reader to stop looking.
+    seen_text = ("EXIT 1: error: failed to run prompt: provider.api_error: 400 The model "
+                 "coding-kimi-k3-free cannot be served at the moment. Check the model ID at "
+                 "https://aihubmix.com/models, try again later, or contact support with the "
+                 "request ID. (tid: 2026100409334566931262491639246)")
+    cause, fix = o.diagnose(seen_text)
+    check(bool(cause) and "no_available_channel" in cause and "out of capacity" not in cause
+          and "will not help" in (fix or ""),
+          "R140: «cannot be served at the moment» is explained as a missing gateway route "
+          "(no_available_channel), not capacity", repr(cause)[:160])
+    rate_text = ("Model xiaomi-mimo-v2.6-flash-free rate limited by provider - contact support "
+                 "to request higher concurrency or try again later.")
+    check(o.diagnose(rate_text)[0] != cause,
+          "R140 control: the gateway's real capacity answer (429 «rate limited by provider») "
+          "does not get the no-route explanation")
 
 
 def suite_r137_i2_cli_tools():

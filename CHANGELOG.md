@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.101.7 — 2026-10-04
+
+A wrong explanation for one error message is corrected.
+
+- **«The model … cannot be served at the moment» no longer reads as "the free model is busy,
+  try later".** Called directly, the gateway (AIHubMix) returns an error code with that text:
+  `no_available_channel`. It means AIHubMix currently has no route to that model at all and
+  turns the request away in a fraction of a second, before any model sees your brief. The paid
+  version of the same model was turned away the same way, while other models on the same account
+  answered. A busy free model looks different there: a 429 «rate limited by provider». The free
+  Kimi K3 channel has been failing this way since 2026-10-02. Re-running in a few minutes does
+  not help. It will answer again only when AIHubMix restores the route, so read the other
+  reviewers' answers in the meantime.
+
 ## 1.101.6 — 2026-10-04
 
 The self-test no longer reaches outside its own temporary folder.

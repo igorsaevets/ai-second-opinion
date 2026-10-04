@@ -1203,13 +1203,22 @@ CLI_ENV_VARS = " / ".join(env for _, env, _ in CLI_BINARIES)
 
 
 KNOWN_FAILURES = [
-    # R137 (2026-10-03): AIHubMix's free Kimi K3 refused 2 of 2 calls that day and once in R133,
-    # after the brief had reached it whole. A vendor capacity answer, not a harness defect.
+    # R140 (2026-10-04) SUPERSEDES the R137 reading «a vendor capacity answer». Direct calls showed
+    # the code behind this text: `no_available_channel` - AIHubMix has no upstream route for the
+    # model and refuses in ~0.1 s, before any upstream is asked. The PAID `coding-kimi-k3` and
+    # `kimi-for-coding-free` answered the same; plain `kimi-k3` and a free GLM answered normally;
+    # real capacity on that gateway is a 429 «rate limited by provider». Kimi Code CLI prints the
+    # message only, never the code, so the explanation has to name it. The old text («out of
+    # capacity, re-run later») kept every session from looking for four days.
     ("cannot be served at the moment",
-     "The provider accepted the request and declined to serve this model right now (AIHubMix "
-     "says this about its free models when they are out of capacity).",
-     "Read the other channels; re-run only this one later (`--only <channel>`). Nothing in the "
-     "brief or the harness causes it, so rewriting the brief will not help."),
+     "The gateway has no route to this model right now (AIHubMix's error code behind this text "
+     "is `no_available_channel`): it refused in a fraction of a second, before any model saw the "
+     "brief. It is not a capacity limit - on AIHubMix that is a 429 «rate limited by provider» - "
+     "and it can last for days: Kimi K3 Free was refused this way on every call from 2026-10-02 "
+     "to 2026-10-04, and so was its paid twin.",
+     "Read the other channels. Re-running in a few minutes will not help: the channel answers "
+     "again only when the gateway restores the route (`--only <channel>` checks it). Nothing in "
+     "the brief or the harness causes it."),
     ("MODEL_API_KEY not set",
      "The Spark channel has no API key.",
      "Set MODEL_API_KEY, or run with --skip spark to use the other channels only. The harness "
