@@ -7329,6 +7329,38 @@ def suite_r139_hook_hygiene():
                 ucl.cmd_uninstall_hook(None)
             check(os.path.islink(link) and scripts(target) == [],
                   "--uninstall-hook writes through the link too (it had its own os.replace)")
+
+        # ---- (g) a settings file that EXISTS but cannot be read is never written over --------
+        # R139 panel (ocmimo26flashfree): `except OSError: settings = {}` took a sharing
+        # violation for «no file» and wrote the hook over the user's whole config.
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump({"env": {"KEEP": "1"}}, f)
+        before = open(sp, "rb").read()
+        real_open = open
+
+        def deny(path, *a, **k):
+            mode = a[0] if a else k.get("mode", "r")
+            if os.path.abspath(str(path)) == os.path.abspath(sp) and "r" in mode:
+                raise PermissionError(13, "simulated sharing violation", sp)
+            return real_open(path, *a, **k)
+        ucl._settings_path = lambda: sp
+        ucl.open = deny                   # module global shadows the builtin for ucl only
+        try:
+            msgs = []
+            rc = ucl.cmd_install_hook(None, out=msgs.append)
+            data, err = ucl._load_json_file(sp)
+        finally:
+            del ucl.open
+        check(rc == 1 and open(sp, "rb").read() == before and data is None and err
+              and any("could not be read" in m for m in msgs),
+              "a settings.json that exists but cannot be read REFUSES the install and stays "
+              "byte-identical; the loader reports it as unreadable, not as missing",
+              repr((rc, msgs[-1:], err)))
+        rc = ucl.cmd_install_hook(None, out=lambda *_a: None)
+        data = json.load(open(sp, encoding="utf-8"))
+        check(rc == 0 and data.get("env") == {"KEEP": "1"} and tmp_s in scripts(sp),
+              "the control: once readable, the same install goes through and keeps the file's "
+              "other content")
     finally:
         shutil.rmtree(td, ignore_errors=True)
 

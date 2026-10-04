@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.101.5 — 2026-10-04
+
+Fix found by the same review (MiMo v2.6 Flash): an older bug, now closed.
+
+- **A `settings.json` that exists but cannot be read is never written over.** Before, any read
+  failure (an antivirus or Claude Code holding the file for a moment, a permission problem) was
+  taken for «there is no settings file yet», and `--install-hook`, `--auto-update on` or an
+  `--apply` then wrote a new file over your whole Claude Code configuration. Now they refuse and
+  say so; try again in a moment. A missing file is still created as before.
+
 ## 1.101.4 — 2026-10-04
 
 Hook-hygiene hotfix from a three-model review of 1.101.2 (the dead-hook fix).

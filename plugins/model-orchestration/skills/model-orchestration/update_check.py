@@ -1205,7 +1205,8 @@ def _is_under(path, roots):
 
 def _hook_script(h):
     """The update_check.py a SessionStart hook runs, if the hook is OURS (any copy, any of the
-    three shapes this kit ever wrote), else None. Other tools' hooks are never ours."""
+    three shapes this kit ever wrote), else None. Ownership is the path shape this kit installs,
+    `.../model-orchestration/update_check.py`; a hook running any other script is never ours."""
     if not isinstance(h, dict):
         return None
     cands = [str(x) for x in h["args"]] if isinstance(h.get("args"), list) else []
@@ -1312,8 +1313,15 @@ def cmd_install_hook(args, out=print):
     try:
         with open(settings_path, encoding="utf-8") as f:
             settings = json.load(f)
-    except OSError:
+    except FileNotFoundError:
         settings = {}                     # no file yet - a fresh install starts one
+    except OSError as exc:
+        # 🔴 R139 panel (ocmimo26flashfree): every OTHER read failure - a sharing violation
+        # while an antivirus or Claude Code holds the file, no permission - was taken for «no
+        # file», and the hook was then written over the user's WHOLE config (the R74 class).
+        out("%s REFUSING: %s exists but could not be read (%s) - installing would have "
+            "overwritten it. Try again in a moment." % (BANNER_HEAD, settings_path, exc))
+        return 1
     except ValueError as exc:
         # 🔴 R74 (goog36flash, R73): this used to fall through to `settings = {}` and WRITE
         # that back - one malformed byte in settings.json and installing a hook silently
@@ -1407,8 +1415,10 @@ def _load_json_file(path):
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f), None
-    except OSError:
+    except FileNotFoundError:
         return {}, None
+    except OSError as exc:                # R139 panel: exists but unreadable is NOT «missing»
+        return None, "could not be read: %s" % exc
     except ValueError as exc:
         return None, str(exc)
 
@@ -1483,6 +1493,9 @@ def set_native_auto_update(info, on, only_if_undecided=False, out=print):
             % (BANNER_HEAD, "ON" if st["on"] else "OFF", st["source"], "off" if st["on"] else "on"))
         return 0
     settings, _err = _load_json_file(sp)
+    if _err:                              # unreadable since the check above: never write over it
+        out("%s REFUSING: %s %s" % (BANNER_HEAD, sp, _err))
+        return 1
     settings = settings or {}
     ekm = settings.setdefault("extraKnownMarketplaces", {})
     entry = ekm.get(mkt) if isinstance(ekm.get(mkt), dict) else {}
