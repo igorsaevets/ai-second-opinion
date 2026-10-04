@@ -39,6 +39,9 @@ sys.path.insert(0, str(HERE))
 PY = sys.executable
 NOPE = str(Path(tempfile.gettempdir()) / "orch-selftest" /
            ("nonexistent.exe" if os.name == "nt" else "nonexistent"))
+# R139 И-2: where the selftest world sends outbound HTTP(S) - port 1 on this machine, which nothing
+# serves, so a request dies at connect before any byte (or key) leaves; localhost stays direct.
+SELFTEST_DEAD_PROXY = "http://127.0.0.1:1"
 BRIEF = "Verify one trivial claim: the sky appears blue. One sentence.\n"
 
 _results: list[tuple[bool, str, str]] = []
@@ -918,36 +921,43 @@ def suite_dispatch():
     # good reviews. The sibling case: a registry `kind` the dispatcher cannot launch produced a
     # log line and no entry in `results`, which downstream is indistinguishable from a channel
     # nobody asked for, while the plan printed [RUN ] for it.
+    # 🔴 R139 И-2: the ghost channel lives in a COPY in the probe's own temp folder. This probe
+    # used to rewrite the real channels.json and move it back in `finally` - a kill in between
+    # (the 180 s timeout below kills it; `finally` never runs then) left the developer's or the
+    # installed registry with a ghost channel. orchestrate imports `routing` inside main(), so
+    # replacing `routing.load_registry` here reaches every registry read of that run; if it did
+    # not, `ghost` would be absent and the ghost check below fails.
     probe2 = (
-        "import json, os, shutil, sys, tempfile\n"
+        "import json, os, sys, tempfile\n"
         f"sys.path.insert(0, r'{HERE}')\n"
-        f"REG = os.path.join(r'{HERE}', 'channels.json')\n"
-        "shutil.copy(REG, REG + '.selftest-bak')\n"
-        "try:\n"
-        "    d = json.load(open(REG, encoding='utf-8'))\n"
-        "    d['channels']['ghost'] = {'kind': 'https', 'enabled': True, 'label': 'Ghost',\n"
-        "        'cost': 'cheap', 'model': 'nothing',\n"
-        "        'models': {'nothing': {'aliases': ['nothing-model']}}, 'aliases': ['ghost']}\n"
-        "    json.dump(d, open(REG, 'w', encoding='utf-8'), ensure_ascii=False)\n"
-        "    import orchestrate as o\n"
-        "    def ok(*a, **k): return {'ok': True, 'text': 'x\\nREVIEW-COMPLETE'}\n"
-        "    def boom(*a, **k): raise RuntimeError('simulated wrapper crash')\n"
-        "    o.call_http_reviewer = ok; o.call_codex = ok; o.call_oai_reviewer = ok\n"
-        "    o.call_hermes = ok; o.call_gemini_direct = ok; o.call_xai_responses = ok\n"
-        "    o.call_grokcli = ok; o.call_opencode = ok\n"
-        "    o.call_claudecli = ok; o.call_mimocli = ok; o.call_qwencli = ok\n"
-        "    o.call_kimicli = ok\n"
-        "    o.call_agy = boom\n"
-        "    t = tempfile.mkdtemp(); b = os.path.join(t, 'b.md')\n"
-        "    open(b, 'w', encoding='utf-8').write('hi\\nREVIEW-COMPLETE\\n')\n"
-        "    out = os.path.join(t, 'out')\n"
-        "    sys.argv = ['o', '--brief', b, '--out', out, '--no-citecheck']\n"
-        "    o.main()\n"
-        "    ch = json.load(open(os.path.join(out, 'diagnostics.json'),\n"
-        "                        encoding='utf-8'))['channels']\n"
-        "    print('RESULT2=' + json.dumps({k: bool(v.get('ok')) for k, v in ch.items()}))\n"
-        "finally:\n"
-        "    shutil.move(REG + '.selftest-bak', REG)\n"
+        "import routing\n"
+        "t = tempfile.mkdtemp()\n"
+        "REG = os.path.join(t, 'channels.json')\n"
+        "d = json.load(open(routing.DEFAULT_REGISTRY, encoding='utf-8'))\n"
+        "d['channels']['ghost'] = {'kind': 'https', 'enabled': True, 'label': 'Ghost',\n"
+        "    'cost': 'cheap', 'model': 'nothing',\n"
+        "    'models': {'nothing': {'aliases': ['nothing-model']}}, 'aliases': ['ghost']}\n"
+        "json.dump(d, open(REG, 'w', encoding='utf-8'), ensure_ascii=False)\n"
+        "_load = routing.load_registry\n"
+        "routing.load_registry = lambda path=None, overlay=True: _load(\n"
+        "    REG if path in (None, routing.DEFAULT_REGISTRY) else path, overlay)\n"
+        "import orchestrate as o\n"
+        "def ok(*a, **k): return {'ok': True, 'text': 'x\\nREVIEW-COMPLETE'}\n"
+        "def boom(*a, **k): raise RuntimeError('simulated wrapper crash')\n"
+        "o.call_http_reviewer = ok; o.call_codex = ok; o.call_oai_reviewer = ok\n"
+        "o.call_hermes = ok; o.call_gemini_direct = ok; o.call_xai_responses = ok\n"
+        "o.call_grokcli = ok; o.call_opencode = ok\n"
+        "o.call_claudecli = ok; o.call_mimocli = ok; o.call_qwencli = ok\n"
+        "o.call_kimicli = ok\n"
+        "o.call_agy = boom\n"
+        "b = os.path.join(t, 'b.md')\n"
+        "open(b, 'w', encoding='utf-8').write('hi\\nREVIEW-COMPLETE\\n')\n"
+        "out = os.path.join(t, 'out')\n"
+        "sys.argv = ['o', '--brief', b, '--out', out, '--no-citecheck']\n"
+        "o.main()\n"
+        "ch = json.load(open(os.path.join(out, 'diagnostics.json'),\n"
+        "                    encoding='utf-8'))['channels']\n"
+        "print('RESULT2=' + json.dumps({k: bool(v.get('ok')) for k, v in ch.items()}))\n"
     )
     pf2 = Path(tempfile.gettempdir()) / "orch_selftest_dispatch2.py"
     pf2.write_text(probe2, encoding="utf-8")
@@ -7364,14 +7374,48 @@ def suite_r139_hook_hygiene():
     finally:
         shutil.rmtree(td, ignore_errors=True)
 
-    # ---- (f) the selftest's own world is isolated (what stopped the 17) ------------------
+    # ---- (f) the selftest's world reaches a CHILD process (what stopped the 17) -----------
+    # R139 panel (ocmimo26flashfree, grok): the old (f) read THIS process right after main() set
+    # the variables, so it passed on code that leaked - and a child was what leaked. R139 И-2:
+    # the child also must not find a vendor CLI or a route to the internet.
     ucw = load(os.path.join(HERE, "update_check.py"), "uc_r139_world")
-    tr = [os.path.normcase(os.path.realpath(tempfile.gettempdir()))]
-    check(ucw._is_under(ucw._settings_path(), tr)
-          and ucw._is_under(ucw.STAMP_PATH, tr),
-          "inside the selftest, settings.json and the update stamp resolve into TEMP through "
-          "the environment (which child processes inherit)",
-          repr((ucw._settings_path(), ucw.STAMP_PATH)))
+    world = os.path.dirname(os.environ.get("CLAUDE_CONFIG_DIR") or "")
+    code = ("import json, sys, urllib.request; sys.path.insert(0, %r)\n"
+            "import update_check as u, orchestrate as o\n"
+            "print('W=' + json.dumps([[u._settings_path(), u.STAMP_PATH, u.UPDATES_DIR],\n"
+            "    [r() for r in o.CLI_RESOLVERS.values()], urllib.request.getproxies(),\n"
+            "    urllib.request.proxy_bypass('127.0.0.1')]))\n" % str(HERE))
+    r = subprocess.run([PY, "-c", code], capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=120)
+    line = next((ln for ln in r.stdout.splitlines() if ln.startswith("W=")), "")
+    files, clis, proxies, local_direct = json.loads(line[2:]) if line else ([], [], {}, False)
+    wr = [os.path.normcase(os.path.realpath(world))] if world else []
+    outside = [p for p in files + clis if not (wr and ucw._is_under(p, wr))]
+    check(bool(world) and len(files) == 3 and len(clis) >= 9 and not outside
+          and not any(os.path.exists(p) for p in clis),
+          "a CHILD process sees the selftest's world: settings.json, the update stamp, the "
+          "updates folder and every vendor CLI resolve inside it, and no such CLI exists",
+          repr(outside[:3]) + r.stderr[-200:])
+    check(proxies.get("https") == SELFTEST_DEAD_PROXY and bool(local_direct),
+          "a CHILD process sends outbound HTTPS to the dead local proxy and localhost direct "
+          "(no request to a vendor can leave the machine)", repr(proxies)[:160])
+    # the end-of-run byte check, with its negative control: it must SEE a change
+    tdh = tempfile.mkdtemp()
+    try:
+        fp, dp = os.path.join(tdh, "settings.json"), os.path.join(tdh, "updates")
+        os.makedirs(dp)
+        with open(fp, "w", encoding="utf-8") as f:
+            f.write("{}")
+        b0 = (_file_digest(fp), _file_digest(dp))
+        with open(fp, "w", encoding="utf-8") as f:
+            f.write('{"hooks": {}}')
+        with open(os.path.join(dp, "9.9.9.zip"), "w", encoding="utf-8") as f:
+            f.write("z")
+        check("absent" not in b0 and _file_digest(fp) != b0[0] and _file_digest(dp) != b0[1],
+              "the end-of-run check sees a rewritten file and a new download in a watched folder "
+              "(its negative control)", repr(b0))
+    finally:
+        shutil.rmtree(tdh, ignore_errors=True)
 
     net_calls = []
 
@@ -7403,9 +7447,19 @@ def suite_r139_hook_hygiene():
 
 
 def _file_digest(path):
-    """sha256 of a file's bytes, or 'absent' - for the R139 before/after proof."""
+    """sha256 of a file's bytes - of a folder's relative names and sizes (R139 И-2: the updates
+    folder) - or 'absent'; for the R139 before/after proof."""
     import hashlib
     try:
+        if os.path.isdir(path):
+            h = hashlib.sha256()
+            for root, dirs, files in os.walk(path):
+                dirs.sort()
+                for n in sorted(files) + [d + "/" for d in dirs]:
+                    p = os.path.join(root, n.rstrip("/"))
+                    size = -1 if n.endswith("/") else os.path.getsize(p)
+                    h.update(("%s\0%d\0" % (os.path.relpath(p, path), size)).encode("utf-8"))
+            return "dir:" + h.hexdigest()
         with open(path, "rb") as f:
             return hashlib.sha256(f.read()).hexdigest()
     except OSError:
@@ -7444,12 +7498,34 @@ def main():
         os.path.expanduser("~"), ".claude")
     _real_files = [os.path.join(_real_cfg, "settings.json"),
                    os.environ.get("MODEL_ORCH_UPDATE_STAMP") or os.path.join(
-                       os.path.expanduser("~"), ".claude", "model-orchestration.update-check.json")]
+                       os.path.expanduser("~"), ".claude", "model-orchestration.update-check.json"),
+                   # R139 И-2: the registry a probe once rewrote in place, and the updates folder
+                   os.path.join(HERE, "channels.json"),
+                   os.environ.get("MODEL_ORCH_UPDATES_DIR") or os.path.join(
+                       os.path.expanduser("~"), ".claude", "model-orchestration.updates")]
     _before = {p: _file_digest(p) for p in _real_files}
     _world = tempfile.mkdtemp(prefix="orch-selftest-world-")
     os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(_world, "claude-config")
     os.makedirs(os.environ["CLAUDE_CONFIG_DIR"])
     os.environ["MODEL_ORCH_UPDATE_STAMP"] = os.path.join(_world, "update-stamp.json")
+    os.environ["MODEL_ORCH_UPDATES_DIR"] = os.path.join(_world, "updates")
+    # 🔴 R139 И-2: the same class, one layer out - PROGRAMS and the NETWORK. An audit of one run
+    # on the author's machine: 220 starts of 11 installed vendor CLIs (each `--version` from the
+    # environment report, `hermes` creating 24 folders in its home, 22 `codex app-server` quota
+    # reads on the user's account) and 6 calls to openrouter.ai with the user's key (the credits
+    # meter). CI saw none of it: its runners have no CLIs and no keys. Every resolver reads its
+    # *_BIN variable first, so each points at a binary that cannot exist - what CI always had;
+    # a test that needs a CLI writes its own stub. A key cannot be blanked the same way (Windows
+    # falls back to HKCU\Environment, where `setx` keeps it), so outbound HTTP goes to a dead
+    # local proxy instead: the request dies before a connection leaves the machine.
+    sys.path.insert(0, HERE)
+    import orchestrate as _o0                 # resolvers read *_BIN at call time, not at import
+    for _kind, _var, _exe in _o0.CLI_BINARIES:
+        os.environ[_var] = os.path.join(_world, "no-vendor-cli", _exe)
+    for _pv in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        os.environ[_pv] = SELFTEST_DEAD_PROXY
+    for _pv in ("NO_PROXY", "no_proxy"):
+        os.environ[_pv] = "localhost,127.0.0.1,::1"
     import importlib.util as _ilu0
     _s0 = _ilu0.spec_from_file_location("_uc_seed", os.path.join(HERE, "update_check.py"))
     _u0 = _ilu0.module_from_spec(_s0)
@@ -7512,8 +7588,9 @@ def main():
             check(False, f"{suite.__name__} raised", repr(exc)[:120])
 
     _changed = [p for p in _real_files if _file_digest(p) != _before[p]]
-    check(not _changed, "R139: the run left the user's Claude Code settings.json and the update "
-          "stamp byte-identical (every write went to the temp world)", repr(_changed))
+    check(not _changed, "R139: the run left the user's Claude Code settings.json, the update "
+          "stamp, this tree's channels.json and the updates folder byte-identical (every write "
+          "went to the temp world)", repr(_changed))
     shutil.rmtree(_world, ignore_errors=True)
 
     failed = [r for r in _results if not r[0]]

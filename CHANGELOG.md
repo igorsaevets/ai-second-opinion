@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.101.6 — 2026-10-04
+
+The self-test no longer reaches outside its own temporary folder.
+
+- **It never starts the AI command-line tools installed on your computer.** On a machine with
+  the tools installed, one run of `selftest.py` started them more than 200 times (each one's
+  `--version`, and `codex app-server` to read your Codex quota), and one of them created folders
+  in its own home. Every tool is now pointed at a program that does not exist, which is what the
+  GitHub test machines always had. The run also got about twice as fast.
+- **It never contacts an AI provider.** The run read your OpenRouter balance six times with your
+  key. Outbound web requests now go to a dead local address, so nothing leaves the computer;
+  local test servers still work.
+- **It never edits the kit's own `channels.json`.** One test wrote a fake channel into it and put
+  the file back afterwards; if the test was killed in between, the fake channel stayed. It now
+  works on a copy in a temporary folder.
+- The updates folder can be moved with `MODEL_ORCH_UPDATES_DIR` (for tests, like the existing
+  `MODEL_ORCH_UPDATE_STAMP`); the self-test uses it. The end-of-run check now also proves
+  `channels.json` and the updates folder are unchanged, and it has a negative control.
+
 ## 1.101.5 — 2026-10-04
 
 Fix found by the same review (MiMo v2.6 Flash): an older bug, now closed.

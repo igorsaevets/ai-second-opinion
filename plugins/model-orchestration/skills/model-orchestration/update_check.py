@@ -117,7 +117,11 @@ REQUIRED_SHIPPED_FILES = ("VERSION", "SKILL.md", "orchestrate.py", "routing.py",
                           "channels.json", "doctor.py", "upgrade.py", "update_check.py")
 # Downloads and the extracted subtree, OUTSIDE the skill folder (an update replaces that) and
 # next to the other per-user files of this skill (`model-orchestration.local.json` etc.).
-UPDATES_DIR = os.path.join(os.path.expanduser("~"), ".claude", "model-orchestration.updates")
+# R139 И-2: the env override is for the selftest's temp world (and probing another home), like the
+# stamp's below - a test that patched only this attribute left every CHILD process pointed at the
+# user's real folder.
+UPDATES_DIR = os.environ.get("MODEL_ORCH_UPDATES_DIR") or os.path.join(
+    os.path.expanduser("~"), ".claude", "model-orchestration.updates")
 # The archive is ~1 MB (measured 1 013 518 bytes for v1.61.0). 50 MB is a corruption guard,
 # not a size expectation.
 MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
