@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.101.3 — 2026-10-04
+
+Selftest-only fix for 1.101.2 (the kit's code is unchanged): the check that the update stamp lives under your home folder now judges the default location. 1.101.2 pointed the selftest's stamp into a temp folder, which sits under home on some machines and not on others, so the check failed on all four CI legs.
+
 ## 1.101.2 — 2026-10-04
 
 Fix: dead session-start hooks. Review runs are unchanged.

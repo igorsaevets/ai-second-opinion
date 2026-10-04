@@ -4293,9 +4293,22 @@ def suite_r58_update_check():
           "no digit in the UA at all — a future edit that pastes VERSION in would be caught here")
 
     # The stamp path is per-user (expanduser) and outside any tree an upgrade could replace.
-    check(uc.STAMP_PATH.startswith(os.path.expanduser("~")),
-          "stamp path is under the user's home directory")
-    check("skills" not in uc.STAMP_PATH,
+    # R139: judged on the DEFAULT (no MODEL_ORCH_UPDATE_STAMP). main() now points that variable
+    # into the run's temp world; on the author's machine TEMP sits under home, so the old form
+    # still passed there - and failed on all four CI legs, where TEMP is elsewhere.
+    _saved_st = os.environ.pop("MODEL_ORCH_UPDATE_STAMP", None)
+    try:
+        _dspec = _ilu.spec_from_file_location("_uc58d", os.path.join(HERE, "update_check.py"))
+        _ucd = _ilu.module_from_spec(_dspec)
+        _dspec.loader.exec_module(_ucd)
+        default_stamp = _ucd.STAMP_PATH
+    finally:
+        if _saved_st is not None:
+            os.environ["MODEL_ORCH_UPDATE_STAMP"] = _saved_st
+    check(default_stamp.startswith(os.path.expanduser("~")),
+          "stamp path is under the user's home directory (the default, no env override)",
+          default_stamp)
+    check("skills" not in default_stamp,
           "stamp is NOT inside the skill folder — an upgrade must not lose the snooze")
 
     # Backoff on network failure: with 1 failure the fresh window shrinks from 168h to 1h so
