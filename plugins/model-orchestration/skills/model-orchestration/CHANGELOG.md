@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.103.1 — 2026-10-04
+
+- **GPT-6 Astra's effort ladder corrected: it has no `none`.** The entry was written from a probe that tested `max` only, and it listed `none` by assumption. OpenAI's model page and the API's own 400 for `minimal` both list `low`, `medium`, `high`, `xhigh`, `max`. A `none` request is now clamped up to `low` in the plan. Before, it was sent and refused. `max` is unchanged and was confirmed live again.
+- Selftest: two more checks in `suite_r141_codex_sol` (the ladder, and the `none` clamp).
+
 ## 1.103.0 — 2026-10-04
 
 Two more models for the Codex channel: GPT-6 Sol and GPT-6.1 Sol.

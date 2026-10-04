@@ -12409,6 +12409,14 @@ def suite_r141_codex_sol():
           "R141 6 Sol keeps `none` (its ladder has it) - control for the clamp above")
     check(pick(reg_with("xhigh"), route="только codex 6.1 sol")[1] == "xhigh",
           "R141 kit default (xhigh) reaches 6.1 Sol unchanged")
+    # 6 Astra's ladder was written on 09-13 from a max-only probe and carried `none`; the model
+    # page and the server's 400 for `minimal` both list low..max. A `none` there would be a 400.
+    check((models.get("gpt-6-astra") or {}).get("efforts")
+          == ["low", "medium", "high", "xhigh", "max"],
+          "R141 gpt-6-astra ladder low..max, NO none (OpenAI page + live 400 for `minimal`)",
+          repr((models.get("gpt-6-astra") or {}).get("efforts")))
+    check(pick(reg_with("none"), route="только codex 6 astra")[1] == "low",
+          "R141 6 Astra asked for `none` is clamped UP to `low` (the server 400s on none)")
 
     # ---- (f) the plan's «ceiling» wording tells the truth ---------------------------------------
     note = pick(reg_with("xhigh"), route="только codex 6 astra")[3].get("_tier_note", "")

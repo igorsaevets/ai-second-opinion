@@ -642,14 +642,13 @@
             "астра"
           ],
           "efforts": [
-            "none",
             "low",
             "medium",
             "high",
             "xhigh",
             "max"
           ],
-          "_efforts_source": "R113 probe: max accepted by gpt-6-astra (exit 0, marker present)"
+          "_efforts_source": "R141 (2026-10-04): OpenAI's model page AND the server's own 400 for `minimal` («Supported values are: 'low', 'medium', 'high', 'xhigh', and 'max'») - NO `none`. The 09-13 entry listed `none` by assumption: that probe tested max only."
         },
         "gpt-5.4": {
           "label": "GPT-5.4",
