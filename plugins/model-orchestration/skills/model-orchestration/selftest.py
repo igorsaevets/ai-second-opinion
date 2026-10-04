@@ -7306,8 +7306,8 @@ def suite_r139_hook_hygiene():
             json.dump({"hooks": {"SessionStart": [{"hooks": [ours(gone)]}]}}, f)
         real_prune = ucl.heal_dead_hooks
 
-        def racing(settings, path):
-            r = real_prune(settings, path)
+        def racing(settings, path, *rest):        # R139 И-4: heal_dead_hooks gained `remove`
+            r = real_prune(settings, path, *rest)
             with open(sp, "w", encoding="utf-8") as f:
                 f.write('{"written": "by Claude Code meanwhile"}')
             return r
@@ -7889,7 +7889,7 @@ def main():
                   suite_r139_i3_hook_identity,
                   suite_r140_i2_nvkimik3, suite_r140_i3_panel_hotfix,
                   suite_r140_i4_env_fail_closed,
-                  suite_r141_codex_sol):
+                  suite_r141_codex_sol, suite_r139_i4_hook_hotfix):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -12532,6 +12532,238 @@ def suite_r141_codex_sol():
           and 'model_reasoning_effort="max"' in cmd,
           "R141 argv: -m gpt-6.1-sol and model_reasoning_effort=\"max\" reach the codex command line",
           repr(cmd)[:300])
+
+def suite_r139_i4_hook_hotfix():
+    """R139 И-4 (2026-10-04): the cheap panel on v1.102.3, 6 of 6 read. (1) a path that cannot
+    be stat'ed, an empty mount point, a mount parent and a mapped network drive are not «gone»;
+    (2) only the script a hook RUNS (args[0]) makes it ours - another tool's entry that mentions
+    our path is neither deleted nor re-pointed; a single-quoted path is ours; (3) the end of a
+    round re-points only, never deletes, and only to an interpreter that starts; (4) a refused
+    rename is reported as one, not as «kept changing»; (5) the guard compares the bytes after the
+    fsync; (6) the marketplace auto-update switch writes through the guard too. Every check runs
+    on any version of update_check.py; the old one fails them (runs/r139-i4-*/nc_old_code.py)."""
+    section("R139 И-4. hooks panel: not-gone, ownership, round end, rename, guard order")
+    import importlib.util as _ilu
+
+    def load(path, name):
+        spec = _ilu.spec_from_file_location(name, path)
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def write(path, data):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+    def entries(path):
+        data = json.load(open(path, encoding="utf-8"))
+        return [h for e in (data.get("hooks") or {}).get("SessionStart") or []
+                for h in e.get("hooks") or []]
+
+    def fsync_race(path, change):
+        """os.fsync, except that its FIRST call is followed by another writer's change to `path`
+        - after our temp file is on disk, before our rename. Returns the restore function."""
+        real, fired = os.fsync, []
+
+        def fsync(fd):
+            real(fd)
+            if not fired:
+                fired.append(1)
+                data = json.load(open(path, encoding="utf-8"))
+                change(data)
+                write(path, data)
+        os.fsync = fsync
+        return lambda: setattr(os, "fsync", real)
+
+    td = tempfile.mkdtemp(prefix="orch-r139i4-")
+    try:
+        live = os.path.join(td, "inst", "skills", "model-orchestration")
+        cfg = os.path.join(td, "cfg")
+        os.makedirs(live)
+        os.makedirs(cfg)
+        shutil.copy2(os.path.join(HERE, "update_check.py"), live)
+        uc = load(os.path.join(live, "update_check.py"), "uc_r139i4")
+        sp = os.path.join(cfg, "settings.json")
+        uc._settings_path = lambda: sp
+        me = os.path.abspath(os.path.join(live, "update_check.py"))
+        py = uc._hook_python()
+        exe = "python.exe" if os.name == "nt" else "python3"
+        dead_py = os.path.join(td, "py-gone", exe)
+        gone_copy = os.path.join(td, "gone", "skills", "model-orchestration", "update_check.py")
+        uc.do_check = lambda force=False: ("fresh", None)
+
+        def ex(path, cmd=None):
+            return {"type": "command", "command": cmd or py, "args": [path, "--hook"],
+                    "timeout": uc.AUTO_HOOK_TIMEOUT_SECONDS}
+
+        def not_gone():
+            locked = os.path.join(td, "locked")
+            real_stat = os.stat
+
+            def stat(p, *a, **k):
+                s = p if isinstance(p, str) else ""
+                if s and os.path.normcase(s).startswith(os.path.normcase(locked)):
+                    raise PermissionError(13, "Permission denied", s)
+                return real_stat(p, *a, **k)
+            os.stat = stat
+            try:
+                denied = uc._gone(os.path.join(locked, "py", exe))
+            finally:
+                os.stat = real_stat
+            os.makedirs(os.path.join(td, "emptymnt"))
+            os.makedirs(os.path.join(td, "full"))
+            open(os.path.join(td, "full", "keep.txt"), "w").close()
+            empty = uc._gone(os.path.join(td, "emptymnt", "vol", "py", exe))
+            full = uc._gone(os.path.join(td, "full", "vol", "py", exe))
+            check(denied is False and empty is False and full is True,
+                  "a Python the OS will not let us stat is NOT gone, nor is one under an EMPTY "
+                  "folder (an unmounted mount point); the control - the same path under a folder "
+                  "that holds files - is gone", repr((denied, empty, full)))
+            if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() != 0:
+                real_dir = os.path.join(td, "noexec")
+                os.makedirs(os.path.join(real_dir, "py"))
+                open(os.path.join(real_dir, "py", exe), "w").close()
+                os.chmod(real_dir, 0)
+                try:
+                    hidden = os.path.exists(os.path.join(real_dir, "py", exe))
+                    real = uc._gone(os.path.join(real_dir, "py", exe))
+                finally:
+                    os.chmod(real_dir, 0o755)
+                check(hidden is False and real is False,
+                      "POSIX, a real folder without permission: os.path.exists says no, the "
+                      "interpreter is still not gone", repr((hidden, real)))
+            mps = [m for m in ("/Volumes", "/media", "/mnt") if os.name != "nt" and os.path.isdir(m)]
+            if mps:
+                res = [uc._gone("%s/r139i4-%d/py/python3" % (m, os.getpid())) for m in mps]
+                check(not any(res), "an unplugged disk under a mount parent (%s) is not a deleted "
+                      "Python" % ", ".join(mps), repr(res))
+            if os.name == "nt":
+                import ctypes
+                k32 = ctypes.windll.kernel32
+                real_gdt, probed = k32.GetDriveTypeW, []
+                saved = (os.stat, os.path.exists, os.path.isdir, os.path.realpath)
+
+                def spy(fn):
+                    def inner(p, *a, **k):
+                        if isinstance(p, str) and p.upper().startswith("Z:"):
+                            probed.append(fn.__name__)
+                        return fn(p, *a, **k)
+                    return inner
+                k32.GetDriveTypeW = (lambda root: 4 if str(root).upper().startswith("Z:")
+                                     else real_gdt(root))
+                os.stat, os.path.exists, os.path.isdir, os.path.realpath = (spy(f) for f in saved)
+                try:
+                    zg = uc._gone("Z:\\Python313\\python.exe")
+                    uc._path_key("Z:\\kit\\model-orchestration\\update_check.py")
+                finally:
+                    os.stat, os.path.exists, os.path.isdir, os.path.realpath = saved
+                    k32.GetDriveTypeW = real_gdt
+                check(zg is False and not probed,
+                      "a drive letter mapped to a network share is never probed (a dead share "
+                      "stalls a session start) - the rule UNC paths already had", repr((zg, probed)))
+
+        def ownership():
+            foreign = {"type": "command", "command": dead_py, "args": ["--watch", gone_copy]}
+            write(sp, {"hooks": {"SessionStart": [{"hooks": [dict(foreign)]}]}})
+            before = open(sp, "rb").read()
+            healed = uc.heal_settings_file(sp)
+            check(uc._hook_script(foreign) is None and healed == ([], [])
+                  and open(sp, "rb").read() == before,
+                  "another tool's entry that only MENTIONS our script (a later argument) is not "
+                  "ours: its gone path does not delete it, its gone program is not swapped",
+                  repr(healed))
+            write(sp, {"hooks": {"SessionStart": [{"hooks": [ex(gone_copy)]}]}})
+            removed, _r = uc.heal_settings_file(sp)
+            single = {"type": "command", "command": "python3 '%s' --hook" % me}
+            check(len(removed) == 1 and entries(sp) == [] and uc._is_this_copy(single),
+                  "the control: our entry (script = args[0]) whose copy is gone is removed at "
+                  "session start; a single-quoted path to this copy is this copy",
+                  repr((removed, uc._hook_script(single))))
+
+        def round_end():
+            write(sp, {"hooks": {"SessionStart": [{"hooks": [ex(gone_copy), ex(me, dead_py)]}]}})
+            note = uc.pending_notice() or ""
+            hl = entries(sp)
+            check([h["args"][0] for h in hl] == [gone_copy, me] and hl[1]["command"] == py
+                  and "Python is gone" in note and "removed" not in note,
+                  "the end of a round RE-POINTS a dead interpreter but never deletes an entry - "
+                  "a removal waits for a session start", repr(([h.get("command") for h in hl],
+                                                               note))[:300])
+            notpy = os.path.join(td, "notpy", exe)
+            os.makedirs(os.path.dirname(notpy))
+            with open(notpy, "w") as f:
+                f.write("not a python\n")
+            write(sp, {"hooks": {"SessionStart": [{"hooks": [ex(me, dead_py)]}]}})
+            real_hp = uc._hook_python
+            uc._hook_python = lambda: notpy
+            try:
+                healed = uc.heal_settings_file(sp)
+            finally:
+                uc._hook_python = real_hp
+            check(healed == ([], []) and entries(sp)[0]["command"] == dead_py,
+                  "an interpreter that exists but does not START (a Store stub, a broken file) "
+                  "never replaces a dead one", repr(healed))
+
+        def rename_refused():
+            write(sp, {"env": {"KEEP": "1"}})
+            before = open(sp, "rb").read()
+            real_replace, out = os.replace, []
+
+            def refuse(a, b):
+                raise PermissionError(13, "The process cannot access the file", b)
+            os.replace = refuse
+            try:
+                rc = uc.cmd_install_hook(None, out=out.append)
+            finally:
+                os.replace = real_replace
+            text = " ".join(out)
+            check(rc == 1 and "could not be written" in text and "kept changing" not in text
+                  and open(sp, "rb").read() == before,
+                  "a rename the OS refuses is reported as «could not be written», not as «kept "
+                  "changing», and nothing is written", text[:240])
+
+        def guard_after_fsync():
+            write(sp, {"env": {"KEEP": "1"}})
+            restore = fsync_race(sp, lambda d: d.setdefault("env", {}).update(OTHER="1"))
+            try:
+                rc = uc.cmd_install_hook(None, out=lambda *_a: None)
+            finally:
+                restore()
+            data = json.load(open(sp, encoding="utf-8"))
+            check(rc == 0 and data.get("env") == {"KEEP": "1", "OTHER": "1"}
+                  and [h["args"][0] for h in entries(sp)] == [me],
+                  "another writer's change that lands while our new file is being flushed is "
+                  "kept: the bytes are compared after the fsync, right before the rename",
+                  repr(data)[:240])
+            mcfg = os.path.join(td, "mcfg")
+            os.makedirs(mcfg)
+            msp = os.path.join(mcfg, "settings.json")
+            write(msp, {"extraKnownMarketplaces": {"mkt": {"source": {"source": "github",
+                                                                      "repo": "o/r"}}}})
+            restore = fsync_race(msp, lambda d: d.setdefault("env", {}).update(OTHER="1"))
+            # E-185: a Claude Code session exports DISABLE_AUTOUPDATER to every child
+            blockers = {n: os.environ.pop(n) for n in uc.CC_AUTOUPDATE_BLOCKERS
+                        if n in os.environ}
+            try:
+                uc.set_native_auto_update({"config_dir": mcfg, "marketplace": "mkt"}, True,
+                                          out=lambda *_a: None)
+            finally:
+                restore()
+                os.environ.update(blockers)
+            data = json.load(open(msp, encoding="utf-8"))
+            check(data.get("env") == {"OTHER": "1"}
+                  and data["extraKnownMarketplaces"]["mkt"].get("autoUpdate") is True,
+                  "the marketplace auto-update switch writes through the same guard: a "
+                  "concurrent change survives", repr(data)[:240])
+
+        for block in (not_gone, ownership, round_end, rename_refused, guard_after_fsync):
+            try:
+                block()
+            except Exception as exc:      # noqa: BLE001 - one broken block must not hide the rest
+                check(False, "R139 И-4 block %s raised" % block.__name__, repr(exc)[:160])
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
 
 if __name__ == "__main__":
     sys.exit(main())

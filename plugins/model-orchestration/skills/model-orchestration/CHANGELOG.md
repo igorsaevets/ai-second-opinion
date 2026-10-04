@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.104.1 — 2026-10-04
+
+Six outside reviewers read the 1.102.3 change: the session-start hook and its writes to Claude Code's `settings.json`. This release fixes what they found that held up against the code.
+
+- **A Python that only cannot be reached is no longer treated as deleted.** The heal deletes or re-points a hook whose file is gone, and three cases looked like «gone»:
+  - a path the OS would not let it check (no permission, macOS privacy);
+  - a disk that is only unplugged (`/Volumes/...`, `/media/...`, `/mnt/...`, or an empty mount folder);
+  - a drive letter mapped to a network share. This one was probed at every session start, and a dead share can stall one.
+  Every doubt now counts as «not gone».
+- **Only the script a hook runs makes it ours.** For an exec-form hook that is its first argument. Another tool's hook that merely mentioned our path as a later argument was taken for ours. It was deleted when that path was gone, and its program was replaced by our Python. A single-quoted path is now recognised too.
+- **The end of a review round only re-points a dead interpreter. It never deletes a hook.** Deletion waits for a session start, where a live copy runs anyway. The replacement interpreter must also start a Python 3.8+ first: a file that merely exists can be the Microsoft Store stub.
+- **A refused write is reported as one.** When Windows refused the rename (a program holding the file open, a read-only file), the message said the file «kept changing». It now says it could not be written.
+- **Another writer's change is lost in fewer cases.** The changed-under-us guard now compares the bytes after the new file is on disk, right before the rename. The window that remains is that comparison and the rename.
+- **The marketplace auto-update switch writes through the same guard.** `--auto-update on|off` for a plugin install had bypassed it.
+- `--status` judges «the hook's Python is gone» the same way as the heal. An unplugged disk is reported as «cannot be reached now» instead of offering a reinstall.
+- Selftest: `suite_r139_i4_hook_hotfix`, 9 checks. All 9 fail on 1.104.0, each on its behaviour.
+
 ## 1.104.0 — 2026-10-04
 
 - **The Codex channel now runs GPT-6.1 Sol by default; it was GPT-5.5.** OpenAI lists GPT-6.1 Sol for all Plus, Pro, Business, Enterprise and Edu users in Codex.

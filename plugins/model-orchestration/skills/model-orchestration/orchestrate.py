@@ -8831,7 +8831,9 @@ def _release_notice():
     --dry-run returned long before this is reached, so a preflight never touches the network.
     The stamp (168 h), the ETag, the 3 s timeout and every kill switch live in update_check.py;
     this only prints what it returns - a notice that names the version and the ONE command
-    that applies it. Never raises: a finished round must not turn into a crash over a
+    that applies it. R139 И-3/И-4: pending_notice also RE-POINTS a session-start hook whose
+    Python is gone (settings.json is written then, and the note says so); it never deletes
+    an entry from here. Never raises: a finished round must not turn into a crash over a
     version check, and a machine without network must not notice this line exists."""
     try:
         import importlib.util as _ilu

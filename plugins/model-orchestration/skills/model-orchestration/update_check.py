@@ -679,8 +679,11 @@ def pending_notice():
     """For callers that just finished real work (orchestrate.py at the end of a round): heal our
     session-start hooks, then run the stamped weekly check. Returns the text to show, or None.
     Never raises. R139 И-3: with ONE tree install, a hook whose Python was upgraded away has no
-    live copy left to heal it at session start - the next real round does."""
-    note = _heal_note(*heal_settings_file()) or None
+    live copy left to heal it at session start - the next real round does. R139 И-4 (panel:
+    ocmimo26flashfree, mimov26pro; grok and agy38flash wanted no write here at all): from a
+    round it only RE-POINTS, to an interpreter proven to start, and says so; it never deletes -
+    that waits for a session start, where a live copy runs anyway."""
+    note = _heal_note(*heal_settings_file(remove=False)) or None
     try:
         action, payload = do_check()
     except Exception:                                    # noqa: BLE001 - a notice never crashes a round
@@ -1195,7 +1198,9 @@ def _hook_python():
 # --apply test ran the hook installer against the REAL settings file from a throw-away build in
 # TEMP; the entry's identity is its absolute path, so every build added one and nothing ever
 # removed it. Two rules now: a settings file outside TEMP never gets a hook pointing INTO TEMP,
-# and a live copy removes the dead entries of every other copy of this script.
+# and a live copy removes the dead entries of every other copy of this script that sits in a
+# `model-orchestration` folder (R139 И-4: a renamed folder cannot be told from another tool's
+# update_check.py, so a dead entry of a renamed copy stays until the user removes it).
 
 def _temp_roots():
     """Folders a cleaner (Storage Sense, tmpreaper, a test's rmtree) may empty at any time."""
@@ -1216,12 +1221,29 @@ def _is_under(path, roots):
     return any(p == r or p.startswith(r.rstrip("\\/") + os.sep) for r in roots)
 
 
+def _is_network(p):
+    """A path on a network share: UNC (`\\\\server\\share`, `//server`) or, on Windows, a drive
+    letter mapped to one (R139 И-4 panel: grok, ocmimo26flashfree, agy38flash - `Z:\\` was probed
+    while `\\\\server` was not). Such a path is never probed: a dead share can stall a session
+    start. GetDriveTypeW reads the drive letter's type, not the share."""
+    p = str(p)
+    if p.startswith(("\\\\", "//")):
+        return True
+    if os.name == "nt" and len(p) > 1 and p[1] == ":":
+        try:
+            import ctypes
+            return ctypes.windll.kernel32.GetDriveTypeW(p[0] + ":\\") == 4      # DRIVE_REMOTE
+        except Exception:                                # noqa: BLE001 - unknown: as before
+            return False
+    return False
+
+
 def _path_key(p):
     """How two spellings of one file compare (R139 И-3): letter case and separators the way the
     OS compares them, symlinks / junctions / 8.3 names resolved. A network path is never probed (a
     dead share can stall a session start) and a relative one is compared as written."""
     p = str(p)
-    if p.startswith(("\\\\", "//")) or not os.path.isabs(p):
+    if not os.path.isabs(p) or _is_network(p):
         return os.path.normcase(os.path.normpath(p))
     return os.path.normcase(os.path.realpath(p))
 
@@ -1237,11 +1259,17 @@ def _hook_script(h):
     path inside a `command` string. A hook running any other script is never ours."""
     if not isinstance(h, dict):
         return None
-    cands = [str(x) for x in h["args"]] if isinstance(h.get("args"), list) else []
+    # R139 И-4 panel (mimov26pro measured, grok): only the script a hook RUNS counts - `args[0]`
+    # in exec form - never a later argument. Another tool's entry that merely MENTIONED our path
+    # was judged ours: deleted when that path was gone, its program swapped for our Python.
+    args = h.get("args")
+    cands = [str(args[0])] if isinstance(args, list) and args else []
     cmd = str(h.get("command") or "")
-    # R139 panel (ocmimo26flashfree): `args` present with the path left in `command` was missed
-    cands += re.findall(r'"([^"]*update_check\.py)"', cmd) or re.findall(
-        r"(\S*update_check\.py)(?!\S)", cmd)
+    # R139 panel (ocmimo26flashfree): `args` present with the path left in `command` was missed;
+    # R139 И-4: a single-quoted path (a hand-written POSIX hook) too
+    quoted = [a or b for a, b in re.findall(
+        r"\"([^\"]*update_check\.py)\"|'([^']*update_check\.py)'", cmd)]
+    cands += quoted or re.findall(r"(\S*update_check\.py)(?!\S)", cmd)
     me = None
     for c in cands:
         parts = os.path.normpath(c).replace("\\", "/").split("/")
@@ -1262,30 +1290,64 @@ def _is_this_copy(h):
     return bool(s) and _path_key(s) == _path_key(os.path.abspath(__file__))
 
 
-def _gone(path):
-    """An absolute local path that no longer exists while something above it still does. An
-    unmounted drive or share is not a deleted file, and a network path is never probed (R139
-    panel: a dead share can stall a session start). R139 И-3: on Windows an existing drive root
-    is enough - `C:\\Python313\\python.exe` has nothing else above it, and a drive that answers
-    for its root is mounted; on POSIX `/` always exists, so it proves nothing."""
-    if not os.path.isabs(path) or path.startswith(("\\\\", "//")):
+def _stat_state(p):
+    """True: it exists. False: it does not (ENOENT / ENOTDIR). None: cannot tell - no
+    permission, a busy or broken volume. R139 И-4 panel (6 of 6): os.path.exists says False for
+    a path it may not stat, and the heal then deleted or re-pointed a hook that was only
+    unreadable (POSIX: a folder without `x`, macOS privacy prompts)."""
+    try:
+        os.stat(p)
+        return True
+    except (FileNotFoundError, NotADirectoryError):
         return False
-    if os.path.exists(path):
+    except (OSError, ValueError):
+        return None
+
+
+# where removable volumes are mounted: the folder above an unplugged disk's path still exists
+_MOUNT_PARENTS = ("/Volumes", "/media", "/mnt", "/run/media")
+
+
+def _gone(path):
+    """An absolute local path that no longer exists while the folder above it still does. Every
+    doubt reads «not gone» - what follows (a deleted entry, a swapped interpreter) is not undone:
+    - a network path is never probed (_is_network: a dead share can stall a session start);
+    - a path that cannot be stat'ed is not gone (_stat_state);
+    - an unmounted volume is not a deleted file: nothing above it exists (a Windows drive
+      letter), or the first folder that does is EMPTY (an unmounted mount point) or a mount
+      parent (/Volumes, /media/<user>, /mnt, /run/media/<user> - R139 И-4 panel, 6 of 6: macOS
+      took an unplugged disk for a deleted Python);
+    - R139 И-3: on Windows an existing drive root is enough - `C:\\Python313\\python.exe` has
+      nothing else above it; on POSIX `/` always exists, so it proves nothing."""
+    if not os.path.isabs(path) or _is_network(path) or _stat_state(path) is not False:
         return False
     up = os.path.dirname(path)
-    while not os.path.isdir(up):
+    while True:
+        state = _stat_state(up)
+        if state is None:
+            return False
+        if state:
+            break
         nxt = os.path.dirname(up)
         if nxt == up:
             return False                  # nothing above it exists: that volume is not there
         up = nxt
-    return os.name == "nt" or os.path.dirname(up) != up
+    if os.path.dirname(up) == up:
+        return os.name == "nt"
+    if os.name != "nt" and (up in _MOUNT_PARENTS or os.path.dirname(up) in _MOUNT_PARENTS):
+        return False
+    try:
+        with os.scandir(up) as it:
+            return next(it, None) is not None
+    except OSError:
+        return False
 
 
 def _dead_reason(script, settings_path, install=False):
     """Why a hook of ours can never work again, or None (see _gone). `install=True` (the
     refusal) also rejects a LIVE copy in a temp folder; the heal does not - a working portable
     copy there keeps its hook until its file is really gone (R139 panel: spark + agy)."""
-    if not os.path.isabs(script) or script.startswith(("\\\\", "//")):
+    if not os.path.isabs(script) or _is_network(script):
         return None                       # ${CLAUDE_PLUGIN_ROOT} and friends: not ours to judge
     if install:
         roots = _temp_roots()
@@ -1296,23 +1358,36 @@ def _dead_reason(script, settings_path, install=False):
 
 def _live_hook_python(settings_path):
     """_hook_python() when it may stand in for a dead interpreter: an absolute path to a file
-    that exists, and not in a temp folder unless the settings file is in one too (the rule the
-    install refusal keeps). '' otherwise."""
+    that exists, not in a temp folder unless the settings file is in one too (the rule the
+    install refusal keeps), and that STARTS a Python 3.8+ - R139 И-4 panel (5 of 6): a file
+    that exists can be the Microsoft Store stub (exits 9009), as _working_interpreters already
+    knew. Only reached when an interpreter is gone. '' otherwise."""
     py = _hook_python()
     if not (os.path.isabs(py) and os.path.isfile(py)):
         return ""
     roots = _temp_roots()
-    return "" if _is_under(py, roots) and not _is_under(settings_path, roots) else py
+    if _is_under(py, roots) and not _is_under(settings_path, roots):
+        return ""
+    try:
+        rc = subprocess.call([py, "-c", "import sys; sys.exit(sys.version_info < (3, 8))"],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        rc = 1
+    return py if rc == 0 else ""
 
 
-def heal_dead_hooks(settings, settings_path):
+def heal_dead_hooks(settings, settings_path, remove=True):
     """Fix OUR SessionStart hooks that cannot run, in `settings`, in place. Returns (removed,
     repointed). removed = [(script, reason)]: the copy is gone (see _dead_reason), the entry
-    goes. repointed = [(old, new)]: the copy is alive but the INTERPRETER its exec-form entry
-    starts is gone - it now starts the one running this code (R139 И-3: upgrading Python away
-    killed the hook; every session start printed an error and nothing healed it, because a
-    missing interpreter runs no code - only another live copy or the next real round can).
-    Other tools' entries, other events and every working entry are kept."""
+    goes - only with `remove` (R139 И-4: the end of a round passes False; a removal is not
+    undone, and a live copy at the next session start can do it). repointed = [(old, new)]: the
+    copy is alive but the INTERPRETER its exec-form entry starts (`command`, with the script as
+    `args[0]`) is gone - it now starts the one running this code, once that one is proven to
+    start (R139 И-3: upgrading Python away killed the hook; every session start printed an
+    error and nothing healed it, because a missing interpreter runs no code - only another live
+    copy or the next real round can). Other tools' entries, other events and every working
+    entry are kept."""
     hooks = settings.get("hooks") if isinstance(settings, dict) else None
     groups = hooks.get("SessionStart") if isinstance(hooks, dict) else None
     if not isinstance(groups, list):
@@ -1326,9 +1401,14 @@ def heal_dead_hooks(settings, settings_path):
             s = _hook_script(h)
             why = _dead_reason(s, settings_path) if s else None
             if why:
-                removed.append((s, why))
+                if remove:
+                    removed.append((s, why))
+                else:
+                    keep.append(h)
                 continue
-            old = h.get("command") if s and isinstance(h.get("args"), list) else None
+            args = h.get("args") if s else None
+            old = (h.get("command") if isinstance(args, list) and args and str(args[0]) == s
+                   else None)
             if isinstance(old, str) and _gone(old):
                 new_py = new_py if new_py is not None else _live_hook_python(settings_path)
                 if new_py and _path_key(old) != _path_key(new_py):
@@ -1379,18 +1459,19 @@ def _read_settings(path):
 def _write_settings_if_unchanged(path, raw, data):
     """The changed-under-us guard: write `data` only while the file still holds the bytes it was
     parsed from (`raw` None: still absent). False = it changed, or could not be read again, and
-    nothing was written. What is left open is the moment between this read and the rename."""
-    try:
-        with open(path, "rb") as f:
-            now = f.read()
-    except FileNotFoundError:
-        now = None
-    except OSError:
-        return False
-    if now != raw:
-        return False
-    _write_json_atomic(path, data)
-    return True
+    nothing was written. R139 И-4 panel (grok, ocmimo26flashfree, agy38flash): the bytes are
+    compared AFTER the new file is written and fsync'ed, right before the rename - what is left
+    open is that compare and the rename, no longer the write and the disk flush."""
+    def unchanged():
+        try:
+            with open(path, "rb") as f:
+                now = f.read()
+        except FileNotFoundError:
+            now = None
+        except OSError:
+            return False
+        return now == raw
+    return _write_json_atomic(path, data, guard=unchanged)
 
 
 SETTINGS_EDIT_ATTEMPTS = 3
@@ -1432,6 +1513,12 @@ def _edit_settings(path, edit, attempts=SETTINGS_EDIT_ATTEMPTS):
 
 def _settings_refusal(path, why, consequence):
     """The REFUSING line for an _edit_settings failure; `consequence` ends the sentence."""
+    if why.startswith("unwritable: "):
+        # R139 И-4 panel (6 of 6): the OS refused the rename - a program holding the file open
+        # (an antivirus, an editor), a read-only file - and it was reported as «kept changing».
+        return ("%s REFUSING: %s could not be written (%s) - another program holds it open (an "
+                "antivirus, an editor) or it is read-only; nothing was written. Try again in a "
+                "moment." % (BANNER_HEAD, path, why.split(": ", 1)[1]))
     if why.startswith("invalid: "):
         what, then = "is not valid JSON", "Fix the file first - "
     elif why.startswith("unreadable: "):
@@ -1447,13 +1534,14 @@ def _settings_refusal(path, why, consequence):
         BANNER_HEAD, path, what, why.split(": ", 1)[1], then, consequence)
 
 
-def heal_settings_file(settings_path=None):
-    """The heal at a session start (cmd_hook) and at the end of a real round (pending_notice):
-    heal_dead_hooks on settings.json under the changed-under-us guard, one attempt - a file that
-    changed is healed by the next start or round. Never raises; returns (removed, repointed)."""
-    sp = settings_path or _settings_path()
+def heal_settings_file(settings_path=None, remove=True):
+    """The heal at a session start (cmd_hook) and at the end of a real round (pending_notice,
+    `remove=False`: it only re-points): heal_dead_hooks on settings.json under the changed-under-
+    us guard, one attempt - a file that changed is healed by the next start or round. Never
+    raises; returns (removed, repointed)."""
     try:
-        result, _why = _edit_settings(sp, lambda s: heal_dead_hooks(s, sp), attempts=1)
+        sp = settings_path or _settings_path()
+        result, _why = _edit_settings(sp, lambda s: heal_dead_hooks(s, sp, remove), attempts=1)
         return result or ([], [])
     except Exception:                                    # noqa: BLE001 - a hook never fails
         return [], []
@@ -1559,9 +1647,12 @@ def _load_json_file(path):
         return None, str(exc)
 
 
-def _write_json_atomic(path, data):
+def _write_json_atomic(path, data, guard=None):
+    """Write `data` as JSON through a temp file + rename. `guard()` is asked after the temp file
+    is on disk, right before the rename: False -> nothing is written and this returns False."""
     # R139: a settings.json that is a symlink into a dotfiles repo stays a symlink - os.replace
-    # on the link itself would swap it for a plain file.
+    # on the link itself would swap it for a plain file. (A junction cannot stand for a FILE:
+    # `mklink /J` to one is created and then refuses every open - measured R139 И-4.)
     path = os.path.realpath(path) if os.path.islink(path) else path
     os.makedirs(os.path.dirname(path), exist_ok=True)
     # a unique temp name (R139 panel, grok): a fixed `path + ".tmp"` is shared by every writer
@@ -1573,7 +1664,10 @@ def _write_json_atomic(path, data):
             # R139 panel (ocmimo26flashfree): on disk before the rename publishes it
             f.flush()
             os.fsync(f.fileno())
+        if guard is not None and not guard():
+            return False
         os.replace(tmp, path)
+        return True
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
@@ -1631,28 +1725,45 @@ def set_native_auto_update(info, on, only_if_undecided=False, out=print):
         out("%s automatic updates: %s - left as you set them (%s). Change: --auto-update %s"
             % (BANNER_HEAD, "ON" if st["on"] else "OFF", st["source"], "off" if st["on"] else "on"))
         return 0
-    settings, _err = _load_json_file(sp)
-    if _err:                              # unreadable since the check above: never write over it
-        out("%s REFUSING: %s %s" % (BANNER_HEAD, sp, _err))
+    km_src = []
+
+    def edit(settings):
+        # R139 И-4 panel (grok): this read-modify-write bypassed _edit_settings, so a concurrent
+        # write by Claude Code between the read and the rename was lost - the class И-3 closed
+        # for install and uninstall. Nothing is changed until the outcome is known.
+        ekm = settings.get("extraKnownMarketplaces")
+        if ekm is not None and not isinstance(ekm, dict):
+            return "shape"
+        entry = dict(ekm[mkt]) if isinstance((ekm or {}).get(mkt), dict) else {}
+        if not entry.get("source"):
+            if not km_src:
+                km, _e = _load_json_file(os.path.join(info["config_dir"], "plugins",
+                                                      "known_marketplaces.json"))
+                km_src.append(((km or {}).get(mkt) or {}).get("source"))
+            if not km_src[0]:
+                return "unknown"
+            entry["source"] = km_src[0]          # copied verbatim: a different source re-clones
+        if entry.get("autoUpdate") is bool(on):
+            return "already"
+        entry["autoUpdate"] = bool(on)
+        settings.setdefault("extraKnownMarketplaces", {})[mkt] = entry
+        return "written"
+
+    result, why = _edit_settings(sp, edit)
+    if result is None:
+        out(_settings_refusal(sp, why, "nothing was written"))
         return 1
-    settings = settings or {}
-    ekm = settings.setdefault("extraKnownMarketplaces", {})
-    entry = ekm.get(mkt) if isinstance(ekm.get(mkt), dict) else {}
-    if not entry.get("source"):
-        km, _e = _load_json_file(os.path.join(info["config_dir"], "plugins",
-                                              "known_marketplaces.json"))
-        src = ((km or {}).get(mkt) or {}).get("source")
-        if not src:
-            out("%s marketplace %s is not in %s - switch it in Claude Code instead: %s"
-                % (BANNER_HEAD, mkt, info["config_dir"], ui))
-            return 1
-        entry = dict(entry, source=src)          # copied verbatim: a different source re-clones
-    if entry.get("autoUpdate") is bool(on):
+    if result == "shape":
+        out("%s REFUSING: extraKnownMarketplaces in %s is not an object - nothing was written. "
+            "Switch it in Claude Code: %s" % (BANNER_HEAD, sp, ui))
+        return 1
+    if result == "unknown":
+        out("%s marketplace %s is not in %s - switch it in Claude Code instead: %s"
+            % (BANNER_HEAD, mkt, info["config_dir"], ui))
+        return 1
+    if result == "already":
         out("%s automatic updates: already %s (%s)" % (BANNER_HEAD, "ON" if on else "OFF", sp))
     else:
-        entry["autoUpdate"] = bool(on)
-        ekm[mkt] = entry
-        _write_json_atomic(sp, settings)
         out("%s automatic updates: %s - Claude Code's auto-update for marketplace %s, written to "
             "%s (the same switch as %s)" % (BANNER_HEAD, "ON" if on else "OFF", mkt, sp, ui))
     if on:
@@ -1967,9 +2078,15 @@ def cmd_status(args):
         elif not hook:
             row("fail", "hook", "no session-start hook for this install in %s" % sp,
                 'python "%s" --auto-update on' % me)
-        elif "args" in hook and not os.path.isfile(str(hook.get("command"))):
+        elif "args" in hook and _gone(str(hook.get("command"))):
             row("fail", "hook", "the hook's Python is gone: %s" % hook.get("command"),
                 'python "%s" --install-hook' % me)
+        elif "args" in hook and not os.path.isfile(str(hook.get("command"))):
+            # R139 И-4 panel (grok, ocmimo26flashfree): --status used a third «gone» test and
+            # offered a reinstall for a disk that is only unplugged; the heal leaves it alone.
+            row("fail", "hook", "the hook's Python cannot be reached now: %s (a volume that is "
+                "not mounted, a network drive or no permission) - left as it is"
+                % hook.get("command"))
         elif "args" not in hook:
             row("fail", "hook", "old hook shape (bare `python`, no fallback) in %s" % sp,
                 'python "%s" --install-hook' % me)
