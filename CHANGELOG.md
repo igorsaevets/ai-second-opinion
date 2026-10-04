@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.105.1 — 2026-10-04
+
+Hotfix after a six-model review of the 1.105.0 MiMo fallback.
+
+- **The fallback no longer pays twice for one model.** It was skipped only when the free MiMo Flash channel reported `ok`; a whole Flash answer flagged INCOMPLETE by the end-marker check did not count, so the metered Flash ran again. "Answered" now means `ok`, or at least 2 000 bytes of text, the size the harness already calls substantial.
+- **A few lines of narration are not an answer.** The trigger was "no text at all". In the review round the free Flash stopped at 125 bytes of narration when its free quota ran out. A channel that fails with under 2 000 bytes now gets its fallback; a substantial partial answer is still left to the reader.
+- **A timeout keeps what the CLI had printed** (mimo and opencode): the text, and the tokens and cost of the steps it finished. A timed-out MiMo Pro run used to report no spend at all.
+- **opencode channels now sum every step's tokens and cost**, as mimo does since 1.105.0. Measured in opencode's own session store: one record per step, `input` is that step's uncached tokens. A 27-step run summed 499,923 input tokens where the old parse reported the last step's 5,140. All opencode channels are free, so only token counts were wrong, never money.
+- **The plan tells the truth about the fallback:** it prints the extra wall-clock (`up to 30m more`), prints the fallback OFF under `--no-fallback` and `--task`, and turns off a fallback whose channel needs `--accept-spend`.
+- **HANDOFF.md names a fallback**, so the reader knows which file stands in for which channel.
+- The registry note no longer says `--only` excludes the fallback: `--only mimov26pro` keeps it; `--skip` and route exclusions turn it off.
+
 ## 1.105.0 — 2026-10-04
 
 - **A channel can now name a fallback model that runs once, after the round, when the channel left no answer.** `mimov26pro` (MiMo v2.6 Pro through the mimo CLI) names `mimov26flash` (MiMo v2.6 Flash, same CLI, same Xiaomi key). Pro has ended whole rounds with a 40-minute timeout and no file. The fallback runs only when Pro left no answer text. It does not run when:

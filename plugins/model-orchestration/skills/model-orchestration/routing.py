@@ -1885,6 +1885,11 @@ def same_voice(reg, name):
     return out
 
 
+# R142 И-2: a failed channel with fewer bytes of text than this has NO ANSWER, so its fallback runs;
+# orchestrate.SUBSTANTIAL_BYTES is the same number (selftest pins them equal).
+SUBSTANTIAL_BYTES = 2000
+
+
 def apply_fallback(plan, reg, ready=None):
     """
     R142: arm each RUNNING channel's run-time `fallback` (channels.json), or record why it is off.
@@ -1915,6 +1920,8 @@ def apply_fallback(plan, reg, ready=None):
             off = "%s already runs in this round as its own voice" % fb
         elif plan[fb].get("_user_off"):
             off = "%s is excluded in this run (%s)" % (fb, plan[fb]["_user_off"])
+        elif ((chans.get(fb) or {}).get("spend_guard") or {}).get("requires_ack"):
+            off = "%s needs --accept-spend (its spend_guard), which a fallback never asks for" % fb
         elif ready is not None:
             try:
                 verdict = ready(fb)
@@ -2582,12 +2589,17 @@ def format_plan(plan, reg):
         elif fbk:
             fslot = plan.get(fbk["channel"]) or {}
             sib = [s for s in same_voice(reg, fbk["channel"]) if (plan.get(s) or {}).get("enabled")]
-            lines.append("           - fallback: if this channel ends with NO answer text, %s (%s, "
-                         "%s) runs the same brief once, after the round"
-                         % (fbk["channel"], fslot.get("model_label") or fslot.get("model"),
-                            reg["channels"][fbk["channel"]].get("cost", "?")))
+            lines.append("           - fallback: if this channel fails with under %d bytes of text "
+                         "(no answer), %s (%s, %s) runs the same brief once, after the round "
+                         "(up to %s more)"
+                         % (SUBSTANTIAL_BYTES, fbk["channel"],
+                            fslot.get("model_label") or fslot.get("model"),
+                            reg["channels"][fbk["channel"]].get("cost", "?"),
+                            fslot.get("timeout") or reg["channels"][fbk["channel"]].get("timeout")
+                            or "its own timeout"))
             lines.append("             %s; its answer is its own file. --no-fallback turns it off."
-                         % ("- not if %s (the same model) answers in this round" % " or ".join(sib)
+                         % ("- not if %s (the same model) answers in this round (ok, or %d+ "
+                            "bytes)" % (" or ".join(sib), SUBSTANTIAL_BYTES)
                             if sib else "- nothing else here carries that model"))
         # 🔴 THE PRICE LINE USED TO KEY ON THE WORD `expensive`, WHICH ONLY CODEX CARRIES - so the
         # channel that actually ran away printed nothing at all. Measured 2026-08-14: orgpt56terrapro

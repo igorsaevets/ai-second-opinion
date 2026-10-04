@@ -12776,7 +12776,7 @@ def suite_r142_mimo_flash_fallback():
 
     Plan side: routing.apply_fallback arms it or says why not, format_plan prints it before any
     spend. Run side: orchestrate.run_fallbacks with a fake dispatcher - it runs only when Pro left
-    NO answer text and the Flash voice (ocmimo26flashfree) did not answer either. The wire: main()
+    NO ANSWER (failed, under 2000 bytes) and the Flash voice (ocmimo26flashfree) did not answer either. The wire: main()
     calls run_fallbacks (E-215). And call_mimocli sums every step_finish (it kept the last one).
     """
     section("R142 mimov26pro -> mimov26flash run-time fallback")
@@ -12815,8 +12815,10 @@ def suite_r142_mimo_flash_fallback():
           "running: %s" % running)
     reg2 = rt.load_registry()
     txt = rt.format_plan(rt.resolve(reg2, only=["mimov26pro", "ocmimo26flashfree"], ready=yes), reg2)
-    check("NO answer text, mimov26flash" in txt and "not if ocmimo26flashfree" in txt,
-          "R142 (b) the plan prints the fallback and its same-voice condition before any spend")
+    check("bytes of text (no answer), mimov26flash" in txt and "not if ocmimo26flashfree" in txt
+          and "(up to 30m more)" in txt,
+          "R142 (b) the plan prints the fallback, its extra time and its same-voice condition before any spend",
+          txt[txt.find("fallback:"):][:400])
     p3 = rt.resolve(rt.load_registry(), only=["mimov26pro", "ocmimo26flashfree"], skip=["mimov26flash"], ready=yes)
     off3 = (p3["mimov26pro"].get("fallback") or {}).get("off") or ""
     check("excluded" in off3 and "--skip" in off3, "R142 (c) --skip mimov26flash turns it OFF", off3)
@@ -12861,8 +12863,8 @@ def suite_r142_mimo_flash_fallback():
           "R142 (d) the primary's record names the fallback that ran")
     go(good, dead)
     check(calls == [], "R142 (e) Pro answered: no fallback")
-    go({"ok": False, "text": "a whole review", "warnings": ["END MARKER NOT ON LAST LINE"]}, dead)
-    check(calls == [], "R142 (e) a partial answer is left to the reader (E-73): no fallback")
+    go({"ok": False, "text": "a whole review. " * 200, "warnings": ["END MARKER NOT ON LAST LINE"]}, dead)
+    check(calls == [], "R142 (e) a substantial partial answer is left to the reader (E-73): no fallback")
     go(dead, dead, no_fallback=True)
     check(calls == [], "R142 (e) --no-fallback")
     go(dead, dead, task_mode=True)
@@ -12894,6 +12896,66 @@ def suite_r142_mimo_flash_fallback():
           "R142 (g) call_mimocli sums tokens and cost over EVERY step (it reported the last step)",
           "usd=%r in=%r cached=%r reasoning=%r" % (r.get("usd"), r.get("in_tokens"),
                                                   r.get("cached_in_tokens"), r.get("reasoning_tokens")))
+
+    # R142 И-2 (the panel hotfix, 1.105.1)
+    check(o.SUBSTANTIAL_BYTES == rt.SUBSTANTIAL_BYTES == 2000,
+          "R142 И-2 (h) one 'substantial answer' size for the trigger, the plan and the R42 note")
+    big = "flash review line. " * 120
+    go(dead, {"ok": False, "text": big, "warnings": ["END MARKER NOT ON LAST LINE"]})
+    check(calls == [], "R142 И-2 (h) the free Flash wrote a whole answer flagged INCOMPLETE (E-73): "
+          "that voice answered, no second bill", "calls=%r" % calls)
+    narr = "Found the skill tree. Now diffing before -> after to isolate the change."
+    go(dead, {"ok": False, "text": narr, "warnings": ["END MARKER NOT ON LAST LINE"]})
+    check(calls == ["mimov26flash"], "R142 И-2 (h) the free Flash left only narration (the R142 panel: "
+          "125 bytes, its free quota died): the fallback still runs", "calls=%r" % calls)
+    go({"ok": False, "text": narr, "warnings": ["END MARKER NOT ON LAST LINE"]}, dead)
+    check(calls == ["mimov26flash"], "R142 И-2 (h) Pro left only narration: no answer, the fallback runs",
+          "calls=%r" % calls)
+    reg3 = rt.load_registry()
+    reg3["channels"]["mimov26flash"]["spend_guard"] = {"requires_ack": True}
+    p6 = rt.resolve(reg3, only=["mimov26pro"], ready=yes)
+    check("accept-spend" in ((p6["mimov26pro"].get("fallback") or {}).get("off") or ""),
+          "R142 И-2 (i) a fallback whose spend needs --accept-spend is OFF (never authorised by itself)")
+    check('"--task runs no fallback"' in msrc and "a.no_fallback or task_mode" in msrc,
+          "R142 И-2 (j) main() prints the fallback OFF under --no-fallback / --task (the plan is the contract)")
+    for shape, payload in (("str, Windows", nd), ("bytes, POSIX", nd.encode("utf-8"))):
+        def _boom(*a, _p=payload, **k):
+            raise _sp.TimeoutExpired(a[0] if a else "mimo", 5, output=_p)
+        o.subprocess.run, o.mimo_bin = _boom, (lambda: "mimo")
+        tpath = os.path.join(tmp, "T-%d.md" % len(shape))
+        try:
+            r = o.call_mimocli("brief", "R142-MARK", tpath,
+                               model="xiaomi/mimo-v2.6-flash", name="mimov26flash", timeout=5)
+        finally:
+            o.subprocess.run, o.mimo_bin = real_run, real_bin
+        check(r.get("ok") is False and "TIMEOUT" in (r.get("error") or "")
+              and "answer" in (r.get("text") or "") and abs((r.get("usd") or 0) - 0.0176) < 1e-9
+              and os.path.isfile(tpath),
+              "R142 И-2 (k) a TIMEOUT keeps what mimo had printed - text, file, spend (%s)" % shape,
+              "r=%r" % ({k: r.get(k) for k in ("ok", "error", "usd", "bytes")},))
+    real_ob = o.opencode_bin
+    o.subprocess.run = lambda *a, **k: _sp.CompletedProcess(a[0] if a else [], 0, nd, "")
+    o.opencode_bin = lambda: "opencode"
+    try:
+        r = o.call_opencode("brief", "R142-MARK", os.path.join(tmp, "O.md"),
+                            model="opencode/mimo-v2.6-flash-free", name="ocmimo26flashfree", timeout=5)
+    finally:
+        o.subprocess.run, o.opencode_bin = real_run, real_ob
+    check(r.get("in_tokens") == 103 and r.get("cached_in_tokens") == 90 and r.get("out_tokens") == 12
+          and abs((r.get("usd") or 0) - 0.0176) < 1e-9,
+          "R142 И-2 (l) call_opencode sums every step_finish (it reported the last step)",
+          "in=%r cached=%r out=%r usd=%r" % (r.get("in_tokens"), r.get("cached_in_tokens"),
+                                             r.get("out_tokens"), r.get("usd")))
+    hd = os.path.join(tmp, "hand")
+    os.makedirs(hd, exist_ok=True)
+    try:
+        o.write_handoff(hd, {"mimov26pro": dict(dead), "mimov26flash": {
+            "ok": True, "text": "x", "bytes": 1, "fallback_for": "mimov26pro"}}, marker="R142-MARK")
+        htxt = open(os.path.join(hd, "HANDOFF.md"), encoding="utf-8").read()
+    except Exception as exc:                                   # noqa: BLE001
+        htxt = "write_handoff raised %r" % (exc,)
+    check("**Fallback:** `mimov26flash` answered for `mimov26pro`" in htxt,
+          "R142 И-2 (m) HANDOFF.md names the fallback and the channel it stood in for", htxt[-300:])
 
 
 if __name__ == "__main__":

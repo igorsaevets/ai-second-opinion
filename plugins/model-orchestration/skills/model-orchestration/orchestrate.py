@@ -1728,6 +1728,15 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             L += ["🔴 **Ran but left no answer file:** %s. Those channels cost time and possibly "
                   "money and produced nothing to read; their cause is in `diagnostics.json` → "
                   "`problems`." % ", ".join("`%s`" % m for m in missing), ""]
+        _fbs = sorted((n, r.get("fallback_for")) for n, r in results.items()
+                      if isinstance(r, dict) and r.get("fallback_for"))
+        if _fbs:                                        # R142 И-2: say which file stands in for whom
+            L += ["🔁 **Fallback:** %s. A channel that ended with no answer had its declared "
+                  "`fallback` (another model, channels.json) run the same brief once after the "
+                  "round; weigh that file as the fallback's model, not the original's."
+                  % "; ".join(("`%s` answered for `%s` (`%s`)" % (n, fr, n.upper() + ".md"))
+                              if results[n].get("ok") else ("`%s` ran for `%s` and failed too" % (n, fr))
+                              for n, fr in _fbs), ""]
 
         # R72 (Igor, 2026-08-31): the reading protocol, IN the artifact the reader opens first.
         # The strongest placement this project has measured is the instruction at the decision
@@ -3608,6 +3617,69 @@ def _task_child_env(env=None):
     return out
 
 
+def _cli_ndjson(raw):
+    """opencode / mimo `run --format json` stdout -> (text, tokens, cost), SUMMED over every step.
+
+    R142: ONE step_finish PER STEP, each carrying that step's own usage - `input` is the step's
+    UNCACHED tokens and `cache.read` the reused prefix, so the sums are what the run was billed.
+    Measured: the mimo NDJSON (a bash step $0.0172, then the answer step $0.0004 with input 358 and
+    cache.read 122368) and, R142 И-2, opencode's own session store (a 27-step free-Flash run summed
+    499,923 input tokens; the last step alone said 5,140). Both parsers kept the LAST step.
+    """
+    text, tokens, cost = "", {}, None
+    for line in (raw or "").split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        otype = obj.get("type")
+        part = obj.get("part") or {}
+        if otype == "text":
+            text += part.get("text") or ""
+        elif otype == "step_finish":
+            st = part.get("tokens") or {}
+            for k in ("input", "output", "reasoning"):
+                if isinstance(st.get(k), (int, float)):
+                    tokens[k] = tokens.get(k, 0) + st[k]
+            sc = st.get("cache") or {}
+            if isinstance(sc.get("read"), (int, float)):
+                tokens.setdefault("cache", {})
+                tokens["cache"]["read"] = tokens["cache"].get("read", 0) + sc["read"]
+            if isinstance(part.get("cost"), (int, float)):
+                cost = (cost or 0) + part["cost"]
+    return text, tokens, cost
+
+
+def _cli_timeout(name, exc, outfile, t0, timeout, model, effort=None):
+    """R142 И-2 (Grok's finding): a TIMEOUT keeps what the CLI had already printed.
+
+    subprocess.run hands it over on the exception - on Windows the whole decoded stdout, on POSIX
+    the bytes read so far. The record used to say text "" with no tokens: a timed-out metered run
+    reported no spend at all (E-137), and an answer already printed was dropped while the fallback
+    was billed for another. `ok` stays False; the fallback trigger judges the text it kept.
+    """
+    raw = exc.stdout or ""
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", "replace")
+    text, tokens, cost = _cli_ndjson(raw)
+    if text:
+        with open(outfile, "w", encoding="utf-8") as f:
+            f.write(text)
+    cache = tokens.get("cache") or {}
+    return {"channel": name, "ok": False, "text": text,
+            "seconds": round(time.time() - t0, 1), "bytes": len(text.encode("utf-8")),
+            "error": "TIMEOUT after %s" % (timeout or "2400s"), "model": model, "effort": effort,
+            "in_tokens": tokens.get("input"), "out_tokens": tokens.get("output"),
+            "reasoning_tokens": tokens.get("reasoning"), "cached_in_tokens": cache.get("read"),
+            "usd": cost if cost and cost > 0 else None,
+            "warnings": ["TIMEOUT"], "notes": []}
+
+
 def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
                   timeout=2400, name="ocspark13free"):
     """opencode CLI (opencode.ai) — free Spark 1.3 Contributor, no API key needed.
@@ -3656,34 +3728,13 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
                            timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
-    except subprocess.TimeoutExpired:
-        return {"channel": name, "ok": False, "text": "",
-                "seconds": round(time.time() - t0, 1),
-                "error": "TIMEOUT after %s" % (timeout or "2400s"), "model": model,
-                "warnings": ["TIMEOUT"], "notes": []}
+    except subprocess.TimeoutExpired as exc:
+        return _cli_timeout(name, exc, outfile, t0, timeout, model, effort)
 
     secs = time.time() - t0
     raw = (p.stdout or "").strip()
     warn, note = [], []
-    text = ""
-    tokens = {}
-    cost = None
-
-    for line in raw.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            continue
-        otype = obj.get("type")
-        part = obj.get("part") or {}
-        if otype == "text":
-            text += part.get("text") or ""
-        elif otype == "step_finish":
-            tokens = part.get("tokens") or {}
-            cost = part.get("cost")
+    text, tokens, cost = _cli_ndjson(raw)
 
     if p.returncode != 0 and not text:
         warn.append("EXIT %d: %s" % (p.returncode, scrub(p.stderr or raw or "")[:300]))
@@ -3755,45 +3806,13 @@ def call_mimocli(brief, marker, outfile, model=None, effort=None, system=None,
                            timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
-    except subprocess.TimeoutExpired:
-        return {"channel": name, "ok": False, "text": "",
-                "seconds": round(time.time() - t0, 1),
-                "error": "TIMEOUT after %s" % (timeout or "2400s"), "model": model,
-                "warnings": ["TIMEOUT"], "notes": []}
+    except subprocess.TimeoutExpired as exc:
+        return _cli_timeout(name, exc, outfile, t0, timeout, model, effort)
 
     secs = time.time() - t0
     raw = (p.stdout or "").strip()
     warn, note = [], []
-    text = ""
-    tokens = {}
-    cost = None
-
-    for line in raw.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            continue
-        otype = obj.get("type")
-        part = obj.get("part") or {}
-        if otype == "text":
-            text += part.get("text") or ""
-        elif otype == "step_finish":
-            # R142: ONE step_finish PER STEP, each with that step's own tokens and cost - measured
-            # (runs/r142-mimo-flash-fallback, max-1: a bash tool step $0.0172, then the answer step
-            # $0.0004). This kept the LAST one, so a 30-step review reported one step's cost.
-            st = part.get("tokens") or {}
-            for k in ("input", "output", "reasoning"):
-                if isinstance(st.get(k), (int, float)):
-                    tokens[k] = tokens.get(k, 0) + st[k]
-            sc = st.get("cache") or {}
-            if isinstance(sc.get("read"), (int, float)):
-                tokens.setdefault("cache", {})
-                tokens["cache"]["read"] = tokens["cache"].get("read", 0) + sc["read"]
-            if isinstance(part.get("cost"), (int, float)):
-                cost = (cost or 0) + part["cost"]
+    text, tokens, cost = _cli_ndjson(raw)
 
     if p.returncode != 0 and not text:
         warn.append("EXIT %d: %s" % (p.returncode, scrub(p.stderr or raw or "")[:300]))
@@ -7110,15 +7129,34 @@ KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "he
 REFS_KINDS = ("codex", "agy", "grokcli", "claudecli", "qwencli")
 
 
+# R142 И-2: the size from which a FAILED channel's text is an answer for the reader. The same number
+# grades the R42 «SUBSTANTIAL TEXT, MARKER MISPLACED» note and the plan line (routing.SUBSTANTIAL_BYTES,
+# selftest pins them equal). Below it a run-time fallback treats the channel as having no answer: the
+# R142 panel's free Flash stopped at 125 bytes of narration when its free quota ran out mid-run.
+SUBSTANTIAL_BYTES = 2000
+
+
+def _has_answer(r):
+    """R142 И-2: did this result leave an answer for the reader - `ok`, or SUBSTANTIAL_BYTES+ of text?"""
+    r = r or {}
+    if r.get("ok"):
+        return True
+    t = r.get("text")
+    n = len(t.strip().encode("utf-8")) if isinstance(t, str) else (r.get("bytes") or 0)
+    return n >= SUBSTANTIAL_BYTES
+
+
 def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, submit=None,
                   same_voice=None):
     """R142: run each failed channel's armed `fallback` once, after the round; mutates `results`.
 
-    A channel that ends the round with NO ANSWER TEXT and declares a `fallback` (channels.json;
+    A channel that ends the round with NO ANSWER (failed, under SUBSTANTIAL_BYTES of text)
+    and declares a `fallback` (channels.json;
     routing.apply_fallback armed it and the plan printed it) gets that other channel run ONCE
     on the same brief. Igor 2026-10-04: MiMo 2.6 Flash for MiMo 2.6 Pro (E-137: 40 minutes, no
     file, twice). Not when the fallback's VOICE already answered here (routing.same_voice: its
-    cascade group), so no round pays twice for one voice; not for a partial answer (E-73: the
+    cascade group; `ok` or SUBSTANTIAL_BYTES+ of text), so no round pays twice for one voice;
+    not for a substantial partial answer (E-73: the
     end-marker check flags whole answers too - the reader judges those); after the auto-retry,
     so a transient death is retried on the primary first; never in --task mode.
 
@@ -7131,10 +7169,13 @@ def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, 
         for cname in sorted(want):
             r = results.get(cname) or {}
             fbk = (plan.get(cname) or {}).get("fallback")
-            if not fbk or r.get("ok") or (r.get("text") or "").strip():
+            if not fbk or _has_answer(r):
                 continue
             fb = fbk["channel"]
             failed = (r.get("error") or "; ".join(r.get("warnings") or []) or "no answer text")
+            _nb = len((r.get("text") or "").strip().encode("utf-8"))
+            if _nb:
+                failed = "%s; only %d bytes of text" % (failed, _nb)
             if fbk.get("off"):
                 why_not = "OFF in this run - %s" % fbk["off"]
             elif no_fallback:
@@ -7145,7 +7186,7 @@ def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, 
                 why_not = "%s is already the fallback of another channel here" % fb
             else:
                 voiced = [s for s in same_voice(reg, fb)
-                          if (results.get(s) or {}).get("ok")]
+                          if _has_answer(results.get(s))]
                 why_not = ("the same model already answered here through %s"
                            % ", ".join(voiced)) if voiced else None
             if why_not:
@@ -9459,8 +9500,8 @@ def main():
     # R142: a channel's run-time `fallback` (channels.json; mimov26pro -> mimov26flash).
     ap.add_argument("--no-fallback", dest="no_fallback", action="store_true",
                     help="do not run a channel's `fallback` (another model, once, after the "
-                         "round) when the channel ends with no usable answer. The plan prints "
-                         "each fallback before anything is spent")
+                         "round) when the channel ends with no answer (failed, under 2000 bytes "
+                         "of text). The plan prints each fallback before anything is spent")
     # R138 И-1: a TASK to carry out instead of a document to review (see _task_plan).
     ap.add_argument("--task", action="store_true",
                     help="the brief is a TASK to carry out, not a document to review: each CLI "
@@ -9673,6 +9714,11 @@ def main():
             plan = routing.resolve(reg, route=a.route, only=a.only, skip=a.skip,
                                    sets=a.sets, tier=a.tier, panel=a.panel,
                                    ready=_cascade_ready(reg))
+            # R142 И-2: a fallback this invocation will never run is printed OFF, not "runs".
+            for _fp in plan.values():
+                _fbk = _fp.get("fallback")
+                if _fbk and not _fbk.get("off") and (a.no_fallback or task_mode):
+                    _fbk["off"] = "--no-fallback" if a.no_fallback else "--task runs no fallback"
             log(routing.format_plan(plan, reg))
         except routing.RouteError as e:          # ambiguity must stop the run, never guess
             log("ROUTE ERROR: %s" % e)
@@ -10653,7 +10699,7 @@ def main():
         # here rather than in the five dispatchers that raise the marker warning: one place that
         # every channel passes through, keyed on the artifact rather than on the transport.
         _marker_only = (not r.get("ok")
-                        and (r.get("answer_bytes") or 0) >= 2000
+                        and (r.get("answer_bytes") or 0) >= SUBSTANTIAL_BYTES
                         and any("END MARKER" in w for w in (r.get("warnings") or []))
                         and not any(("EMPTY OUTPUT" in w or "NO ANSWER TURN" in w
                                      or "PROVIDER ERROR" in w or "BUDGET EXHAUSTED" in w)
