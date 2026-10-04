@@ -5436,9 +5436,12 @@ def suite_r74_panel_fixes():
         # ---- (g) update_check -------------------------------------------------------------
         home = os.path.join(d, "home")
         os.makedirs(os.path.join(home, ".claude"))
-        real_exp = uc.os.path.expanduser
+        # R139: was a patched os.path.expanduser - CLAUDE_CONFIG_DIR (Claude Code's own variable,
+        # honoured by _settings_path) now points the whole selftest at a temp world, so this
+        # block points it at its own sandbox the same way.
+        real_cfg = os.environ.get("CLAUDE_CONFIG_DIR")
         try:
-            uc.os.path.expanduser = lambda p: home if p == "~" else real_exp(p)
+            os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(home, ".claude")
             with contextlib.redirect_stdout(io.StringIO()):
                 rc = uc.cmd_install_hook(None)
             sp = os.path.join(home, ".claude", "settings.json")
@@ -5476,7 +5479,10 @@ def suite_r74_panel_fixes():
                   "uninstall removes the legacy args-shape hook and KEEPS the co-tenant - "
                   "the old counter returned before writing", repr(left))
         finally:
-            uc.os.path.expanduser = real_exp
+            if real_cfg is None:
+                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            else:
+                os.environ["CLAUDE_CONFIG_DIR"] = real_cfg
 
         saved = {}
         real = (uc.is_check_disabled, uc.read_local_version, uc.read_stamp,
@@ -7132,8 +7138,200 @@ def suite_r86_self_update():
 
 
 # =================================================================================================
+def suite_r139_hook_hygiene():
+    """R139 (2026-10-04). 17 dead SessionStart entries on the author's machine, each printing
+    «can't open file ...Temp/orch-r60-build2-*/.../update_check.py» at every session start.
+    Cause (measured with an audit hook): suite_r86_self_update's --apply installed the hook into
+    the REAL settings.json from whichever copy ran it, and the R60 build test runs the SHIPPED
+    selftest from TEMP; the entry's identity is its path, so each build added one. Checks: the
+    refusal and its control, the prune of every dead shape and what it must keep, the session-
+    start self-heal and its no-write controls, the changed-under-us guard, a symlinked file."""
+    section("R139. session-start hook hygiene")
+    import importlib.util as _ilu
+
+    def load(path, name):
+        spec = _ilu.spec_from_file_location(name, path)
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def ours(path):
+        return {"type": "command", "command": sys.executable, "args": [path, "--hook"],
+                "timeout": 120}
+
+    def scripts(path):
+        data = json.load(open(path, encoding="utf-8"))
+        return [(h.get("args") or [h.get("command")])[0]
+                for e in (data.get("hooks") or {}).get("SessionStart") or []
+                for h in e.get("hooks") or []]
+
+    with tempfile.TemporaryDirectory() as td:
+        fake_tmp = os.path.join(td, "fake-temp")
+        cfg = os.path.join(td, "cfg")
+        tmp_copy = os.path.join(fake_tmp, "orch-build", "skills", "model-orchestration")
+        live = os.path.join(td, "inst", "skills", "model-orchestration")
+        for p in (cfg, tmp_copy, live):
+            os.makedirs(p)
+        for p in (tmp_copy, live):
+            shutil.copy2(os.path.join(HERE, "update_check.py"), p)
+        roots = [os.path.normcase(os.path.realpath(fake_tmp))]
+        uct = load(os.path.join(tmp_copy, "update_check.py"), "uc_r139_tmp")
+        ucl = load(os.path.join(live, "update_check.py"), "uc_r139_live")
+        for m in (uct, ucl):
+            m._temp_roots = lambda: roots
+        sp = os.path.join(cfg, "settings.json")
+        tmp_s = os.path.join(live, "update_check.py")
+        tmp_t = os.path.join(tmp_copy, "update_check.py")
+
+        # ---- (a) the refusal, and its control ------------------------------------------------
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump({"hooks": {"SessionStart": [{"hooks": [{"type": "command",
+                                                              "command": "echo other"}]}]}}, f)
+        before = open(sp, "rb").read()
+        uct._settings_path = lambda: sp
+        msgs = []
+        rc = uct.cmd_install_hook(None, out=msgs.append)
+        check(rc == 1 and open(sp, "rb").read() == before and "REFUSING" in "".join(msgs),
+              "a copy in TEMP refuses to hook itself into a settings file OUTSIDE TEMP - the "
+              "file is untouched (the 17 dead entries were this write)", repr((rc, msgs[-1:])))
+        sp_in = os.path.join(fake_tmp, "cfg", "settings.json")
+        uct._settings_path = lambda: sp_in
+        rc = uct.cmd_install_hook(None, out=lambda *_a: None)
+        check(rc == 0 and scripts(sp_in) == [tmp_t],
+              "the control: the same copy installs into a settings file that is ALSO in TEMP "
+              "(a sandbox dies with its hook)", repr(rc))
+
+        # ---- (b) install from the live copy prunes every dead shape, keeps the rest ----------
+        gone = os.path.join(td, "gone", "skills", "model-orchestration", "update_check.py")
+        legacy = os.path.join(td, "old", "skills", "model-orchestration", "update_check.py")
+        other_dead = os.path.join(td, "x", "other-tool", "check.py")
+        if os.name == "nt":
+            drive = next((c + ":" for c in "QRSTUVWXYZ" if not os.path.exists(c + ":\\")), None)
+            unmounted = (drive + "\\skills\\model-orchestration\\update_check.py") if drive else None
+        else:
+            unmounted = "/r139-no-such-volume/skills/model-orchestration/update_check.py"
+        plug = "${CLAUDE_PLUGIN_ROOT}/skills/model-orchestration/update_check.py"
+        hl = [ours(gone), ours(tmp_t),
+              {"type": "command", "command": 'python "%s" --check' % legacy, "timeout": 5},
+              {"type": "command", "command": sys.executable, "args": [other_dead]},
+              {"type": "command", "command": "echo other"}, ours(plug)]
+        if unmounted:
+            hl.append(ours(unmounted))
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump({"env": {"KEEP": "1"}, "hooks": {"SessionStart": [{"hooks": hl}],
+                                                       "Stop": [{"hooks": [ours(gone)]}]}}, f)
+        ucl._settings_path = lambda: sp
+        msgs = []
+        rc = ucl.cmd_install_hook(None, out=msgs.append)
+        left = scripts(sp)
+        data = json.load(open(sp, encoding="utf-8"))
+        check(rc == 0 and gone not in left and tmp_t not in left
+              and not any(legacy in str(x) for x in left)
+              and other_dead in left and "echo other" in left and plug in left
+              and (unmounted is None or unmounted in left) and tmp_s in left
+              and any("removed 3 dead" in m for m in msgs),
+              "install from the live copy removes OUR dead entries (deleted copy, copy in TEMP, "
+              "legacy string form) and keeps another tool's dead hook, a ${CLAUDE_PLUGIN_ROOT} "
+              "path and an unmounted volume", repr((left, msgs[-2:])))
+        check(data.get("env") == {"KEEP": "1"} and data["hooks"].get("Stop"),
+              "nothing outside SessionStart is touched (env, other events)")
+        before = open(sp, "rb").read()
+        msgs = []
+        ucl.cmd_install_hook(None, out=msgs.append)
+        check(open(sp, "rb").read() == before and any("already installed" in m for m in msgs),
+              "the control: a second run finds nothing to prune and writes nothing")
+
+        # ---- (c) the session-start self-heal, and both no-write controls ---------------------
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump({"hooks": {"SessionStart": [{"hooks": [ours(tmp_s), ours(gone)]}]}}, f)
+        ucl.hook_message = lambda: None
+        ucl.is_check_disabled = lambda: True
+        before = open(sp, "rb").read()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ucl.cmd_hook(None)
+        check(open(sp, "rb").read() == before and not buf.getvalue(),
+              "with update checks disabled (CI, MODEL_ORCH_UPDATE_CHECK=0) the hook writes nothing")
+        ucl.is_check_disabled = lambda: False
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = ucl.cmd_hook(None)
+        out = json.loads(buf.getvalue() or "{}")
+        check(rc == 0 and scripts(sp) == [tmp_s] and "removed 1 dead" in out.get(
+              "systemMessage", ""),
+              "a session start prunes the dead sibling and SAYS so (a dead entry cannot heal "
+              "itself: its python fails before any code runs)", repr((scripts(sp), out)))
+        before = open(sp, "rb").read()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ucl.cmd_hook(None)
+        check(open(sp, "rb").read() == before and not buf.getvalue(),
+              "the control: the next session start writes nothing and says nothing")
+
+        # ---- (d) changed under us -> no write; the uninstall path prunes too -----------------
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump({"hooks": {"SessionStart": [{"hooks": [ours(gone)]}]}}, f)
+        real_prune = ucl.prune_dead_hooks
+
+        def racing(settings, path):
+            r = real_prune(settings, path)
+            with open(sp, "w", encoding="utf-8") as f:
+                f.write('{"written": "by Claude Code meanwhile"}')
+            return r
+        ucl.prune_dead_hooks = racing
+        r = ucl.prune_settings_file(sp)
+        ucl.prune_dead_hooks = real_prune
+        check(r == [] and "meanwhile" in open(sp, encoding="utf-8").read(),
+              "a file that changed while we looked is NOT overwritten (the next start retries)")
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump({"hooks": {"SessionStart": [{"hooks": [ours(tmp_s), ours(gone),
+                                                              {"type": "command",
+                                                               "command": "echo other"}]}]}}, f)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ucl.cmd_uninstall_hook(None)
+        check(scripts(sp) == ["echo other"] and "removed 2" in buf.getvalue(),
+              "--uninstall-hook removes this copy AND the dead ones, keeps the co-tenant",
+              repr(scripts(sp)))
+
+        # ---- (e) a symlinked settings.json stays a symlink -----------------------------------
+        real_dir = os.path.join(td, "dotfiles")
+        os.makedirs(real_dir)
+        target = os.path.join(real_dir, "settings.json")
+        with open(target, "w", encoding="utf-8") as f:
+            json.dump({"hooks": {"SessionStart": [{"hooks": [ours(gone)]}]}}, f)
+        link = os.path.join(td, "cfg-link-settings.json")
+        try:
+            os.symlink(target, link)
+        except (OSError, NotImplementedError):
+            link = None                   # Windows without the symlink privilege: CI covers it
+        if link:
+            r = ucl.prune_settings_file(link)
+            check(len(r) == 1 and os.path.islink(link) and scripts(target) == [],
+                  "a symlinked settings.json is written THROUGH the link - the link survives")
+
+    # ---- (f) the selftest's own world is isolated (what stopped the 17) ------------------
+    ucw = load(os.path.join(HERE, "update_check.py"), "uc_r139_world")
+    tr = [os.path.normcase(os.path.realpath(tempfile.gettempdir()))]
+    check(ucw._is_under(ucw._settings_path(), tr)
+          and ucw._is_under(ucw.STAMP_PATH, tr),
+          "inside the selftest, settings.json and the update stamp resolve into TEMP - "
+          "children inherit it", repr((ucw._settings_path(), ucw.STAMP_PATH)))
+
+
+def _file_digest(path):
+    """sha256 of a file's bytes, or 'absent' - for the R139 before/after proof."""
+    import hashlib
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return "absent"
+
+
 def main():
     global _quiet
+    import time
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args()
@@ -7151,6 +7349,28 @@ def main():
     # the distribution check that only held in one of the two trees; this). The fix is the same
     # every time - state the world, do not inherit it. Pointing the variable at a path that cannot
     # exist is deliberate: unsetting it would fall back to the real `~/.claude` file.
+    # 🔴🔴 R139: the same class, one directory up. suite_r86_self_update ran --apply, which
+    # installs the session-start hook into `_settings_path()` - the REAL ~/.claude/settings.json
+    # - from whatever copy runs the suite. The R60 build test runs the SHIPPED selftest from a
+    # throw-away tree in TEMP, so every run left one more entry pointing into TEMP: 17 of them
+    # printed «can't open file» at every session start on the author's machine. A child
+    # orchestrate.py also wrote the real update stamp (a live GitHub check). Claude Code's own
+    # config dir and the stamp now point into a fresh temp world, children inherit it, and the
+    # run ends by proving the real files are byte-identical.
+    _real_cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(
+        os.path.expanduser("~"), ".claude")
+    _real_files = [os.path.join(_real_cfg, "settings.json"),
+                   os.environ.get("MODEL_ORCH_UPDATE_STAMP") or os.path.join(
+                       os.path.expanduser("~"), ".claude", "model-orchestration.update-check.json")]
+    _before = {p: _file_digest(p) for p in _real_files}
+    _world = tempfile.mkdtemp(prefix="orch-selftest-world-")
+    os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(_world, "claude-config")
+    os.makedirs(os.environ["CLAUDE_CONFIG_DIR"])
+    os.environ["MODEL_ORCH_UPDATE_STAMP"] = os.path.join(_world, "update-stamp.json")
+    with open(os.environ["MODEL_ORCH_UPDATE_STAMP"], "w", encoding="utf-8") as f:
+        # a check "done just now", so no child of the suite goes to the network on its own
+        json.dump({"last_check_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, f)
+
     sys.path.insert(0, HERE)
     import routing as _r
     os.environ[_r.OVERLAY_ENV] = os.path.join(
@@ -7196,11 +7416,16 @@ def main():
                   suite_r130_qwen_home_override,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
-                  suite_r138_i2_hotfix):
+                  suite_r138_i2_hotfix, suite_r139_hook_hygiene):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
             check(False, f"{suite.__name__} raised", repr(exc)[:120])
+
+    _changed = [p for p in _real_files if _file_digest(p) != _before[p]]
+    check(not _changed, "R139: the run left the user's Claude Code settings.json and the update "
+          "stamp byte-identical (every write went to the temp world)", repr(_changed))
+    shutil.rmtree(_world, ignore_errors=True)
 
     failed = [r for r in _results if not r[0]]
     print("\n" + "=" * 78)

@@ -70,6 +70,7 @@ import contextlib
 import datetime
 import json
 import os
+import re
 import shutil
 import ssl
 import subprocess
@@ -1086,13 +1087,19 @@ def cmd_hook(args):
     2.1.268 in `-p`: both fields reach the session from a plugin hook; anthropics/claude-code
     #12151 (open) says interactive delivery of additionalContext has regressed at times, which
     is why both are sent."""
+    # R139: a live copy heals the entries of dead ones (a dead entry cannot heal itself - its
+    # python fails before any code runs). Before the check, so a failing check cannot skip it.
+    # «Disable everything» (MODEL_ORCH_UPDATE_CHECK=0, CI) also means no write to settings.json.
+    pruned = [] if is_check_disabled() else prune_settings_file()
     try:
         msg = hook_message()
     except Exception:                                    # noqa: BLE001 - see below
         # A session-start hook never fails the session, and never exits non-zero: the plugin's
         # hooks.json falls back python3 -> python -> py on a non-zero exit, which must mean
         # "this interpreter is missing", not "run the whole check again" (R136).
-        return 0
+        msg = None
+    if pruned:
+        msg = _prune_note(pruned) + ("\n\n" + msg if msg else "")
     if not msg:
         return 0
     capped = msg[:8500]  # keep well under the 10 KB cap, with room for the note below
@@ -1171,6 +1178,123 @@ def _hook_python():
     return "python3" if os.name != "nt" else "python"
 
 
+# ------------------------------------------------------------------- hook hygiene (R139)
+# 🔴 R139: 17 dead SessionStart entries in the author's settings.json, each printing «can't open
+# file ...\Temp\orch-r60-build2-*\...\update_check.py» at every session start. The selftest's
+# --apply test ran the hook installer against the REAL settings file from a throw-away build in
+# TEMP; the entry's identity is its absolute path, so every build added one and nothing ever
+# removed it. Two rules now: a settings file outside TEMP never gets a hook pointing INTO TEMP,
+# and a live copy removes the dead entries of every other copy of this script.
+
+def _temp_roots():
+    """Folders a cleaner (Storage Sense, tmpreaper, a test's rmtree) may empty at any time."""
+    roots = {tempfile.gettempdir()}
+    for name in ("TEMP", "TMP", "TMPDIR"):
+        if os.environ.get(name):
+            roots.add(os.environ[name])
+    return [os.path.normcase(os.path.realpath(r)) for r in roots if r]
+
+
+def _is_under(path, roots):
+    p = os.path.normcase(os.path.realpath(path))
+    return any(p == r or p.startswith(r.rstrip("\\/") + os.sep) for r in roots)
+
+
+def _hook_script(h):
+    """The update_check.py a SessionStart hook runs, if the hook is OURS (any copy, any of the
+    three shapes this kit ever wrote), else None. Other tools' hooks are never ours."""
+    if not isinstance(h, dict):
+        return None
+    cands = [str(x) for x in h["args"]] if isinstance(h.get("args"), list) else []
+    if not cands:
+        cmd = str(h.get("command") or "")
+        cands = re.findall(r'"([^"]*update_check\.py)"', cmd) or re.findall(
+            r"(\S*update_check\.py)", cmd)
+    for c in cands:
+        parts = os.path.normpath(c).replace("\\", "/").split("/")
+        if (len(parts) >= 2 and parts[-1].lower() == "update_check.py"
+                and parts[-2].lower() == "model-orchestration"):
+            return c
+    return None
+
+
+def _dead_reason(script, settings_path):
+    """Why a hook of ours can never work again, or None. Missing counts only when something
+    above it still exists on that volume - an unmounted drive or share is not a deleted copy."""
+    if not os.path.isabs(script):
+        return None                       # ${CLAUDE_PLUGIN_ROOT} and friends: not ours to judge
+    roots = _temp_roots()
+    if _is_under(script, roots) and not _is_under(settings_path, roots):
+        return "lives in a temp folder"
+    if os.path.exists(script):
+        return None
+    up = os.path.dirname(os.path.dirname(script))
+    while up and not os.path.isdir(up):
+        nxt = os.path.dirname(up)
+        if nxt == up:
+            return None
+        up = nxt
+    if not up or os.path.dirname(up) == up:
+        return None                       # only the root is left: the volume is not there
+    return "file is gone"
+
+
+def prune_dead_hooks(settings, settings_path):
+    """Drop OUR SessionStart hooks that cannot run (see _dead_reason) from `settings`, in place.
+    Returns [(script, reason)]. Other tools' entries and every live copy are kept."""
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    groups = hooks.get("SessionStart") if isinstance(hooks, dict) else None
+    if not isinstance(groups, list):
+        return []
+    removed = []
+    for e in groups:
+        if not isinstance(e, dict) or not isinstance(e.get("hooks"), list):
+            continue
+        keep = []
+        for h in e["hooks"]:
+            s = _hook_script(h)
+            why = _dead_reason(s, settings_path) if s else None
+            if why:
+                removed.append((s, why))
+            else:
+                keep.append(h)
+        e["hooks"] = keep
+    if removed:
+        groups[:] = [e for e in groups if not (isinstance(e, dict) and e.get("hooks") == [])]
+        if not groups:
+            hooks.pop("SessionStart", None)
+        if not hooks:
+            settings.pop("hooks", None)
+    return removed
+
+
+def _prune_note(removed):
+    return ("%s removed %d dead SessionStart hook entr%s left by deleted or temporary copies of "
+            "update_check.py (they printed «can't open file» at every session start)"
+            % (BANNER_HEAD, len(removed), "y" if len(removed) == 1 else "ies"))
+
+
+def prune_settings_file(settings_path=None):
+    """The session-start self-heal: prune dead entries of ours from settings.json. Writes only
+    when something was removed AND the file did not change while we looked (Claude Code writes
+    this file too). Never raises; returns the removed list."""
+    sp = settings_path or _settings_path()
+    try:
+        with open(sp, "rb") as f:
+            raw = f.read()
+        settings = json.loads(raw.decode("utf-8"))
+        removed = prune_dead_hooks(settings, sp)
+        if not removed:
+            return []
+        with open(sp, "rb") as f:
+            if f.read() != raw:
+                return []                 # changed under us - the next session start retries
+        _write_json_atomic(sp, settings)
+        return removed
+    except Exception:                                    # noqa: BLE001 - a hook never fails
+        return []
+
+
 def cmd_install_hook(args, out=print):
     """Add our SessionStart entry to ~/.claude/settings.json. A plugin install already has the
     hook (hooks.json); this is for script / manual installs, so a session start on those paths
@@ -1192,9 +1316,17 @@ def cmd_install_hook(args, out=print):
             "installing would have overwritten it wholesale."
             % (BANNER_HEAD, settings_path, exc))
         return 1
+    my_path = os.path.abspath(__file__)
+    reason = _dead_reason(my_path, settings_path)
+    if reason:
+        # 🔴 R139: the selftest wrote 17 such entries from builds in TEMP into the real file.
+        out("%s REFUSING: this copy %s (%s) - a hook pointing at it from %s would fail at every "
+            "session start once the folder is cleaned. Run --install-hook from the installed "
+            "copy instead." % (BANNER_HEAD, reason, os.path.dirname(my_path), settings_path))
+        return 1
+    pruned = prune_dead_hooks(settings, settings_path)
     hooks = settings.setdefault("hooks", {})
     session_start = hooks.setdefault("SessionStart", [])
-    my_path = os.path.abspath(__file__)
     # SUPERSEDED R136: R74 wrote ONE command string `python "<path>" --hook` - a bare `python`
     # that does not exist on macOS / most Linux. Exec form with the absolute interpreter now.
     py = _hook_python()
@@ -1223,9 +1355,15 @@ def cmd_install_hook(args, out=print):
             e["hooks"] = inner
             migrated = True
     session_start[:] = [e for e in session_start if e.get("hooks")]
-    if already and not migrated:
+    if pruned:
+        out(_prune_note(pruned))
+    if already and not migrated and not pruned:
         out("%s SessionStart hook already installed in %s"
             % (BANNER_HEAD, settings_path))
+        return 0
+    if already and not migrated:
+        _write_json_atomic(settings_path, settings)
+        out("%s SessionStart hook already installed in %s" % (BANNER_HEAD, settings_path))
         return 0
     if not already:
         session_start.append(entry)
@@ -1269,6 +1407,9 @@ def _load_json_file(path):
 
 
 def _write_json_atomic(path, data):
+    # R139: a settings.json that is a symlink into a dotfiles repo stays a symlink - os.replace
+    # on the link itself would swap it for a plain file.
+    path = os.path.realpath(path) if os.path.islink(path) else path
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -1519,6 +1660,9 @@ def cmd_uninstall_hook(args):
         if inner:
             e["hooks"] = inner
             keep.append(e)
+    if keep:                              # R139: dead copies' entries go too
+        removed += len(prune_dead_hooks({"hooks": {"SessionStart": keep}}, settings_path))
+        keep = [e for e in keep if e.get("hooks")]
     if not removed:
         print("%s no matching SessionStart hook found in %s"
               % (BANNER_HEAD, settings_path))

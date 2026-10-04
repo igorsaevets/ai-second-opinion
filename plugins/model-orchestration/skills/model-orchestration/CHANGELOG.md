@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.101.2 — 2026-10-04
+
+Fix: dead session-start hooks. Review runs are unchanged.
+
+- **Symptom**: Claude Code printed `SessionStart:startup hook error ... can't open file
+  ...\Temp\orch-r60-build2-*\...\update_check.py` at every session start (17 lines on one
+  machine). **Cause**: running `selftest.py` outside CI installed the update hook into your REAL
+  `settings.json` from a throw-away build in the temp folder; the folder was deleted, the entry
+  stayed. A child process of the selftest also rewrote the real update-check stamp.
+- **The selftest now runs in its own world**: `CLAUDE_CONFIG_DIR` and the update stamp point into
+  a temp folder for the whole run (children inherit it), and the run ends with a check that your
+  `settings.json` and stamp are byte-identical.
+- **`--install-hook` refuses** to point a settings file outside the temp folder at a copy inside it.
+- **Self-heal**: a live copy removes dead entries of this hook (deleted copies, copies in the temp
+  folder, the old string form) at session start, on `--install-hook` and on `--uninstall-hook`,
+  and says so in one line. Other tools' hooks are never touched; a file that changed while it was
+  read is not overwritten; a symlinked `settings.json` stays a symlink.
+  Off with every other automatic action: `MODEL_ORCH_UPDATE_CHECK=0` (or `CI=1`).
+
 ## 1.101.1 — 2026-10-03
 
 `--task` hotfix from a five-model review of 1.101.0. Review runs are unchanged byte for byte.
