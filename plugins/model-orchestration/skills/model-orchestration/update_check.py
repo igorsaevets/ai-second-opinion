@@ -1089,8 +1089,9 @@ def cmd_hook(args):
     is why both are sent."""
     # R139: a live copy heals the entries of dead ones (a dead entry cannot heal itself - its
     # python fails before any code runs). Before the check, so a failing check cannot skip it.
-    # «Disable everything» (MODEL_ORCH_UPDATE_CHECK=0, CI) also means no write to settings.json.
-    pruned = [] if is_check_disabled() else prune_settings_file()
+    # Not gated on the update kill switch (R139 panel, grok): a user who switched update checks
+    # off would keep the «can't open file» lines forever. It writes only when an entry is dead.
+    pruned = prune_settings_file()
     try:
         msg = hook_message()
     except Exception:                                    # noqa: BLE001 - see below
@@ -1192,7 +1193,9 @@ def _temp_roots():
     for name in ("TEMP", "TMP", "TMPDIR"):
         if os.environ.get(name):
             roots.add(os.environ[name])
-    return [os.path.normcase(os.path.realpath(r)) for r in roots if r]
+    out = [os.path.normcase(os.path.realpath(r)) for r in roots if r]
+    # R139 panel (grok): TEMP=C:\ would make a whole drive "temp" - a root is never a temp root.
+    return [r for r in out if os.path.dirname(r) != r]
 
 
 def _is_under(path, roots):
@@ -1218,14 +1221,18 @@ def _hook_script(h):
     return None
 
 
-def _dead_reason(script, settings_path):
+def _dead_reason(script, settings_path, install=False):
     """Why a hook of ours can never work again, or None. Missing counts only when something
-    above it still exists on that volume - an unmounted drive or share is not a deleted copy."""
-    if not os.path.isabs(script):
+    above it still exists on that volume - an unmounted drive or share is not a deleted copy.
+    `install=True` (the refusal) also rejects a LIVE copy in a temp folder; the prune does not -
+    a working portable copy there keeps its hook until its file is really gone (R139 panel:
+    spark + agy). UNC paths are never probed: a dead share can stall a session start."""
+    if not os.path.isabs(script) or script.startswith(("\\\\", "//")):
         return None                       # ${CLAUDE_PLUGIN_ROOT} and friends: not ours to judge
-    roots = _temp_roots()
-    if _is_under(script, roots) and not _is_under(settings_path, roots):
-        return "lives in a temp folder"
+    if install:
+        roots = _temp_roots()
+        if _is_under(script, roots) and not _is_under(settings_path, roots):
+            return "lives in a temp folder"
     if os.path.exists(script):
         return None
     up = os.path.dirname(os.path.dirname(script))
@@ -1317,7 +1324,7 @@ def cmd_install_hook(args, out=print):
             % (BANNER_HEAD, settings_path, exc))
         return 1
     my_path = os.path.abspath(__file__)
-    reason = _dead_reason(my_path, settings_path)
+    reason = _dead_reason(my_path, settings_path, install=True)
     if reason:
         # 🔴 R139: the selftest wrote 17 such entries from builds in TEMP into the real file.
         out("%s REFUSING: this copy %s (%s) - a hook pointing at it from %s would fail at every "
@@ -1411,11 +1418,16 @@ def _write_json_atomic(path, data):
     # on the link itself would swap it for a plain file.
     path = os.path.realpath(path) if os.path.islink(path) else path
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-    os.replace(tmp, path)
+    # a unique temp name (R139 panel, grok): a fixed `path + ".tmp"` is shared by every writer
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".settings-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 def _env_set(name, settings_env=None):
@@ -1673,11 +1685,7 @@ def cmd_uninstall_hook(args):
         hooks.pop("SessionStart", None)
     if not hooks:
         settings.pop("hooks", None)
-    tmp = settings_path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(settings, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-    os.replace(tmp, settings_path)
+    _write_json_atomic(settings_path, settings)   # R139: through a symlink, unique temp name
     print("%s removed %d SessionStart hook(s) from %s"
           % (BANNER_HEAD, removed, settings_path))
     return 0

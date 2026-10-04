@@ -7178,7 +7178,10 @@ def suite_r139_hook_hygiene():
                 for e in (data.get("hooks") or {}).get("SessionStart") or []
                 for h in e.get("hooks") or []]
 
-    with tempfile.TemporaryDirectory() as td:
+    # mkdtemp + rmtree(ignore_errors), not TemporaryDirectory: its cleanup raised «directory
+    # not empty» once under an antivirus scan here, and ignore_cleanup_errors is 3.10+ (CI: 3.9)
+    td = tempfile.mkdtemp(prefix="orch-r139-")
+    try:
         fake_tmp = os.path.join(td, "fake-temp")
         cfg = os.path.join(td, "cfg")
         tmp_copy = os.path.join(fake_tmp, "orch-build", "skills", "model-orchestration")
@@ -7224,7 +7227,8 @@ def suite_r139_hook_hygiene():
         else:
             unmounted = "/r139-no-such-volume/skills/model-orchestration/update_check.py"
         plug = "${CLAUDE_PLUGIN_ROOT}/skills/model-orchestration/update_check.py"
-        hl = [ours(gone), ours(tmp_t),
+        unc = "\\\\r139-no-server\\share\\skills\\model-orchestration\\update_check.py"
+        hl = [ours(gone), ours(tmp_t), ours(unc),
               {"type": "command", "command": 'python "%s" --check' % legacy, "timeout": 5},
               {"type": "command", "command": sys.executable, "args": [other_dead]},
               {"type": "command", "command": "echo other"}, ours(plug)]
@@ -7238,14 +7242,15 @@ def suite_r139_hook_hygiene():
         rc = ucl.cmd_install_hook(None, out=msgs.append)
         left = scripts(sp)
         data = json.load(open(sp, encoding="utf-8"))
-        check(rc == 0 and gone not in left and tmp_t not in left
+        check(rc == 0 and gone not in left and tmp_t in left and unc in left
               and not any(legacy in str(x) for x in left)
               and other_dead in left and "echo other" in left and plug in left
               and (unmounted is None or unmounted in left) and tmp_s in left
-              and any("removed 3 dead" in m for m in msgs),
-              "install from the live copy removes OUR dead entries (deleted copy, copy in TEMP, "
-              "legacy string form) and keeps another tool's dead hook, a ${CLAUDE_PLUGIN_ROOT} "
-              "path and an unmounted volume", repr((left, msgs[-2:])))
+              and any("removed 2 dead" in m for m in msgs),
+              "install from the live copy removes OUR dead entries (deleted copy, legacy string "
+              "form) and keeps a LIVE copy in TEMP (a portable install), a UNC share (never "
+              "probed), another tool's dead hook, a ${CLAUDE_PLUGIN_ROOT} path and an unmounted "
+              "volume", repr((left, msgs[-2:])))
         check(data.get("env") == {"KEEP": "1"} and data["hooks"].get("Stop"),
               "nothing outside SessionStart is touched (env, other events)")
         before = open(sp, "rb").read()
@@ -7258,22 +7263,17 @@ def suite_r139_hook_hygiene():
         with open(sp, "w", encoding="utf-8") as f:
             json.dump({"hooks": {"SessionStart": [{"hooks": [ours(tmp_s), ours(gone)]}]}}, f)
         ucl.hook_message = lambda: None
+        # not gated on the update kill switch: such a user would keep the errors forever
         ucl.is_check_disabled = lambda: True
-        before = open(sp, "rb").read()
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            ucl.cmd_hook(None)
-        check(open(sp, "rb").read() == before and not buf.getvalue(),
-              "with update checks disabled (CI, MODEL_ORCH_UPDATE_CHECK=0) the hook writes nothing")
-        ucl.is_check_disabled = lambda: False
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             rc = ucl.cmd_hook(None)
         out = json.loads(buf.getvalue() or "{}")
         check(rc == 0 and scripts(sp) == [tmp_s] and "removed 1 dead" in out.get(
               "systemMessage", ""),
-              "a session start prunes the dead sibling and SAYS so (a dead entry cannot heal "
-              "itself: its python fails before any code runs)", repr((scripts(sp), out)))
+              "a session start prunes the dead sibling and SAYS so, even with update checks "
+              "switched off (a dead entry cannot heal itself: its python fails before any code "
+              "runs)", repr((scripts(sp), out)))
         before = open(sp, "rb").read()
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -7322,14 +7322,52 @@ def suite_r139_hook_hygiene():
             r = ucl.prune_settings_file(link)
             check(len(r) == 1 and os.path.islink(link) and scripts(target) == [],
                   "a symlinked settings.json is written THROUGH the link - the link survives")
+            with open(target, "w", encoding="utf-8") as f:
+                json.dump({"hooks": {"SessionStart": [{"hooks": [ours(tmp_s)]}]}}, f)
+            ucl._settings_path = lambda: link
+            with contextlib.redirect_stdout(io.StringIO()):
+                ucl.cmd_uninstall_hook(None)
+            check(os.path.islink(link) and scripts(target) == [],
+                  "--uninstall-hook writes through the link too (it had its own os.replace)")
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
 
     # ---- (f) the selftest's own world is isolated (what stopped the 17) ------------------
     ucw = load(os.path.join(HERE, "update_check.py"), "uc_r139_world")
     tr = [os.path.normcase(os.path.realpath(tempfile.gettempdir()))]
     check(ucw._is_under(ucw._settings_path(), tr)
           and ucw._is_under(ucw.STAMP_PATH, tr),
-          "inside the selftest, settings.json and the update stamp resolve into TEMP - "
-          "children inherit it", repr((ucw._settings_path(), ucw.STAMP_PATH)))
+          "inside the selftest, settings.json and the update stamp resolve into TEMP through "
+          "the environment (which child processes inherit)",
+          repr((ucw._settings_path(), ucw.STAMP_PATH)))
+
+    net_calls = []
+
+    def _no_net(*_a, **_k):
+        net_calls.append(1)
+        raise AssertionError("network")
+    ucw._fetch_tags, ucw.fetch_latest_tag = _no_net, _no_net
+    ucw.is_check_disabled, ucw.check_agy_stale = (lambda: False), (lambda: False)
+    try:
+        act = ucw.do_check()[0]
+    except AssertionError:
+        act = "went to the network"
+    # dev tree: no VERSION file -> "no-version", also network-free; shipped tree -> "cached"
+    check(not net_calls,
+          "the run's seeded stamp answers the daily check without the network (it carries "
+          "installed_version - a fresh stamp for another version is not trusted)", act)
+    saved_tmpdir = os.environ.get("TMPDIR")
+    os.environ["TMPDIR"] = os.path.abspath(os.sep)
+    try:
+        roots = ucw._temp_roots()
+    finally:
+        if saved_tmpdir is None:
+            os.environ.pop("TMPDIR", None)
+        else:
+            os.environ["TMPDIR"] = saved_tmpdir
+    check(roots and all(os.path.dirname(r) != r for r in roots),
+          "a temp variable pointing at a drive / filesystem root is ignored (else every copy on "
+          "that drive would count as temporary)", repr(roots))
 
 
 def _file_digest(path):
@@ -7380,9 +7418,15 @@ def main():
     os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(_world, "claude-config")
     os.makedirs(os.environ["CLAUDE_CONFIG_DIR"])
     os.environ["MODEL_ORCH_UPDATE_STAMP"] = os.path.join(_world, "update-stamp.json")
+    import importlib.util as _ilu0
+    _s0 = _ilu0.spec_from_file_location("_uc_seed", os.path.join(HERE, "update_check.py"))
+    _u0 = _ilu0.module_from_spec(_s0)
+    _s0.loader.exec_module(_u0)
     with open(os.environ["MODEL_ORCH_UPDATE_STAMP"], "w", encoding="utf-8") as f:
-        # a check "done just now", so no child of the suite goes to the network on its own
-        json.dump({"last_check_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, f)
+        # a check "done just now" FOR THIS VERSION (do_check trusts a fresh stamp only when
+        # installed_version matches - R139 panel, grok), so no child goes to the network
+        json.dump({"last_check_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                   "installed_version": _u0.read_local_version()}, f)
 
     sys.path.insert(0, HERE)
     import routing as _r

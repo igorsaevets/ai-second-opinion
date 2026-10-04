@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.101.4 — 2026-10-04
+
+Hook-hygiene hotfix from a three-model review of 1.101.2 (the dead-hook fix).
+
+- **A working copy in a temp folder keeps its hook**: the clean-up removes an entry only when its file is really gone. Only `--install-hook` still refuses to point a settings file outside the temp folder at a copy inside it.
+- **The clean-up also runs when update checks are switched off** - otherwise those users kept the error lines forever. It writes only when an entry is dead.
+- Network shares (`\server\share`) are never probed at session start; a temp variable set to a drive root is ignored; settings are written through a unique temp file; `--uninstall-hook` writes through a symlinked `settings.json` too.
+- The selftest's own stamp now carries the version, so no child of the run goes to the network.
+
 ## 1.101.3 — 2026-10-04
 
 Selftest-only fix for 1.101.2 (the kit's code is unchanged): the check that the update stamp lives under your home folder now judges the default location. 1.101.2 pointed the selftest's stamp into a temp folder, which sits under home on some machines and not on others, so the check failed on all four CI legs.
