@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.104.0 — 2026-10-04
+
+- **The Codex channel now runs GPT-6.1 Sol by default; it was GPT-5.5.** OpenAI lists GPT-6.1 Sol for all Plus, Pro, Business, Enterprise and Edu users in Codex.
+  - The shipped effort stays `xhigh`, a tier below the top so that older CLIs keep working. An overlay that sets `max` runs it at `max`.
+  - GPT-5.5 stays listed: «только codex 5.5» or `--set codex=gpt-5.5`.
+- Selftest: the checks that named GPT-5.5 as the default now read the default from the registry.
+
 ## 1.103.1 — 2026-10-04
 
 - **GPT-6 Astra's effort ladder corrected: it has no `none`.** The entry was written from a probe that tested `max` only, and it listed `none` by assumption. OpenAI's model page and the API's own 400 for `minimal` both list `low`, `medium`, `high`, `xhigh`, `max`. A `none` request is now clamped up to `low` in the plan. Before, it was sent and refused. `max` is unchanged and was confirmed live again.

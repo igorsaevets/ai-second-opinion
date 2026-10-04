@@ -8595,8 +8595,11 @@ def suite_r90_silent_drop_criterion_1():
           and "5.9" in blob and "Nova" in blob and "Ultra" in blob,
           "R90 CLI: dry-run refuses «codex 5.9 Nova Ultra» with all three words named",
           "exit=%d" % p.returncode)
-    check(p.returncode != 0 and "gpt-5.5" in blob and "silently" in blob.lower(),
-          "R90 CLI: error mentions the default (gpt-5.5) it would have run silently",
+    _codex_default = json.load(open(os.path.join(str(HERE), "channels.json"),
+                                    encoding="utf-8"))["channels"]["codex"]["model"]
+    check(p.returncode != 0 and _codex_default in blob and "silently" in blob.lower(),
+          "R90 CLI: error mentions the default (%s, read from the registry) it would have run "
+          "silently" % _codex_default,
           "exit=%d" % p.returncode)
 
     p = run_cli(["--route", "второе мнение, только codex 5.6 Sol Max",
@@ -12381,10 +12384,18 @@ def suite_r141_codex_sol():
                             ("второе мнение только GPT-6.1 Sol", "gpt-6.1-sol", "max"),
                             ("только codex GPT-5.6 Sol", "gpt-5.6-sol", "xhigh"),
                             ("только codex 5.6 sol", "gpt-5.6-sol", "xhigh"),
-                            ("только codex", "gpt-5.5", "xhigh")):
+                            ("только codex 5.5", "gpt-5.5", "xhigh")):
         got = pick(reg, route=text)
         check(got[:3] == (slug, eff, True), "R141 route «%s» -> %s at %s" % (text, slug, eff),
               repr(got[:3]))
+    # R141 b (2026-10-04), the operator: «Давай заменим 5.5 на 6.1 Sol Max» - the bare channel word
+    # runs the registry's default model, whatever it is, at that model's ceiling under max.
+    _d = base["channels"]["codex"]["model"]
+    _top = max([e for e in (models.get(_d) or {}).get("efforts") or [] if e in r.EFFORT_ORDER],
+               key=r.EFFORT_ORDER.index)
+    check(pick(reg, route="только codex")[:3] == (_d, _top, True),
+          "R141 «только codex» runs the registry default (%s) at its ceiling (%s)" % (_d, _top),
+          repr(pick(reg, route="только codex")[:3]))
 
     # ---- (c) NEGATIVE CONTROL: the `gpt-5.6 sol` alias is load-bearing ------------------------
     nc = reg_with("max")
@@ -12482,10 +12493,14 @@ def suite_r141_codex_sol():
         return (calls[0]["model"], calls[0]["effort"]) if len(calls) == 1 else (None, repr(res)[:200])
 
     res = dispatched({"channels": {"codex": {"effort": "max"}}},
-                     ["только codex 6.1 sol", "только codex 6 sol", "только codex"])
+                     ["только codex 6.1 sol", "только codex 6 sol", "только codex 5.5", "только codex"])
+    dflt = base["channels"]["codex"]["model"]          # the operator rotates it; never pin it here
+    dflt_top = max([e for e in (models.get(dflt) or {}).get("efforts") or ["xhigh"]
+                    if e in r.EFFORT_ORDER], key=r.EFFORT_ORDER.index)
     for route, want in (("только codex 6.1 sol", ("gpt-6.1-sol", "max")),
                         ("только codex 6 sol", ("gpt-6-sol", "max")),
-                        ("только codex", ("gpt-5.5", "xhigh"))):
+                        ("только codex 5.5", ("gpt-5.5", "xhigh")),
+                        ("только codex", (dflt, dflt_top))):
         got = codex_call(res, route)
         check(got == want, "R141 CALL «%s» with overlay effort=max -> call_codex%r" % (route, want),
               repr(got))
