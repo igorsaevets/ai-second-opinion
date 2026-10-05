@@ -397,7 +397,11 @@ def suite_routing():
         # channel NAMES until 2026-08-07 and are now aliases of the model-bearing names, so these
         # two cases are the regression test for that promise, not decoration.
         (["--only", "qwen"], {"qwen38max"}, "--only qwen (OLD NAME, now an alias)"),
-        (["--only", "kimi"], {"kimik3"}, "--only kimi (OLD NAME, now an alias)"),
+        # R142 И-6 (Б-53): `kimi` is the Kimi FAMILY group now - as an alias of the paid channel it
+        # bought the OpenRouter voice while the free NVIDIA one was ready. The promise above holds:
+        # the command still runs Kimi; the cascade keeps one transport.
+        (["--only", "kimi"], cascaded(group_of("kimi")), "--only kimi (GROUP -> every Kimi transport)"),
+        (["--only", "kimik3"], {"kimik3"}, "--only kimik3 (the channel's own name stays exact)"),
         (["--only", "qwen38max"], {"qwen38max"}, "--only qwen38max"),
         (["--only", "agy36flash"], {"agy36flash"}, "--only agy36flash"),
         (["--only", "spark11", "codex"], {"spark11", "codex"}, "--only with two channels"),
@@ -7907,7 +7911,8 @@ def main():
                   suite_r142_i3_kimi_single_agent, suite_r142_i4_kimi_postmortem,
                   suite_r142_i5_thinking_advice,
                   suite_r143_i3_free_voices,
-                  suite_r142_i6_audit_hotfix):
+                  suite_r142_i6_audit_hotfix,
+                  suite_r142_i6_kimi):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -11176,9 +11181,13 @@ def suite_r140_i2_nvkimik3():
                   % c, repr(sorted(k for k in env if k.startswith("KIMI_MODEL"))))
             o.call_kimicli("brief", "R140-DONE", os.path.join(td, "plain.md"), name=partner,
                            workdir=os.path.join(td, "ws2"))
-            check(seen[-1][1].get("env") is None,
-                  "R140 И-2 control: a kimicli channel without env_model inherits the env "
-                  "unchanged (kimik3free still reads its own config)")
+            # R142 И-6 (Б-51): no longer the whole env - the same allowlist, no KIMI_MODEL_* (it
+            # still reads its own config.toml, which needs nothing from the env).
+            penv2 = seen[-1][1].get("env") or {}
+            check(penv2 and not any(k.upper().startswith("KIMI_MODEL_") for k in penv2)
+                  and set(penv2) <= set(o._kimi_min_env()),
+                  "R140 И-2 control: a kimicli channel without env_model runs on the allowlist and "
+                  "no KIMI_MODEL_* (kimik3free still reads its own config)", repr(sorted(penv2))[:160])
             o._env_key = lambda _k: None
             n_before = len(seen)
             r = o.call_kimicli("brief", "R140-DONE", os.path.join(td, "nokey.md"), name=c,
@@ -11335,10 +11344,12 @@ def suite_r140_i3_panel_hotfix():
                 o.call_kimicli("brief", "R140-DONE", os.path.join(td, "plain.md"), name=partner,
                                workdir=os.path.join(td, "ws-plain"))
                 penv = seen[-1][1].get("env") or {}
+                # R142 И-6 (Б-51): the plain route is allowlisted too - it kept every other
+                # vendor's key in its agent's reach although config.toml holds its own.
                 check("KIMI_MODEL_NAME" not in penv and penv.get("PATH") == os.environ.get("PATH")
-                      and penv.get("OPENROUTER" + "_API_KEY") == "planted",
-                      "R140 И-3: the plain call (%s) drops an inherited KIMI_MODEL_* and keeps the "
-                      "rest of its env as before" % partner, repr(sorted(penv))[:160])
+                      and "OPENROUTER" + "_API_KEY" not in penv,
+                      "R140 И-3 / R142 И-6: the plain call (%s) drops an inherited KIMI_MODEL_* and "
+                      "every other vendor's key, keeps PATH" % partner, repr(sorted(penv))[:160])
             _unplant()
             # (c) a --task run wraps it
             o._TASK.ctx = {"remote": False}
@@ -11434,8 +11445,13 @@ def suite_r137_kimi_argv():
         stdout = '{"role": "assistant", "content": "ok\\nR137-DONE"}\n'
         stderr = ""
 
+    briefs = {}
+
     def _fake_run(cmd, **_kw):
         seen.append(list(cmd))
+        if "--add-dir" in cmd:        # R142 И-6: BRIEF.md is deleted after the run - read it now
+            bp = os.path.join(cmd[cmd.index("--add-dir") + 1], "BRIEF.md")
+            briefs[bp] = open(bp, encoding="utf-8").read() if os.path.isfile(bp) else ""
         return _Done()
 
     saved = (o.subprocess.run, o.kimi_bin, o._kimi_node_argv, o.neutral_cwd)
@@ -11460,11 +11476,13 @@ def suite_r137_kimi_argv():
         p2 = c2[c2.index("-p") + 1]
         bpath = os.path.join(o._ascii_safe_workdir(os.path.join(td, "ws2"), "kimik3free",
                                                    "kimik3free"), "BRIEF.md")
-        body = open(bpath, encoding="utf-8").read() if os.path.isfile(bpath) else ""
+        body = briefs.get(bpath, "")
         check("--add-dir" in c2 and len(p2) < 400 and "\n" not in p2 and bpath in p2
               and body.endswith(big) and body.startswith(o.CLI_BYPASS_SAFETY_PROMPT[:40]),
               "R137: past the 32K command-line cap the brief goes to BRIEF.md (whole) and -p "
               "is one line naming it", "p=%r body=%d" % (p2[:120], len(body)))
+        check(not os.path.exists(bpath),
+              "R142 И-6: BRIEF.md (the whole brief) is deleted when the Kimi run ends", bpath)
         o._kimi_node_argv = lambda b: None
         o.call_kimicli("short\nbrief", "R137-DONE", os.path.join(td, "K3.md"),
                        workdir=os.path.join(td, "ws3"))
@@ -13034,10 +13052,13 @@ def suite_r142_i3_kimi_single_agent():
         o.call_kimicli(big, "R142I3-DONE", os.path.join(td, "K2.md"), workdir=os.path.join(td, "ws2"))
         c2 = seen[-1]
         wd2 = o._ascii_safe_workdir(os.path.join(td, "ws2"), "kimik3free", "kimik3free")
+        # R142 И-6: BRIEF.md is deleted when the run ends, so its place is read off the -p line.
         check("--agent-file" in c2 and "--add-dir" in c2
               and os.path.dirname(os.path.abspath(c2[c2.index("--agent-file") + 1]))
-              == os.path.abspath(wd2) and os.path.isfile(os.path.join(wd2, "BRIEF.md")),
-              "R142 И-3 (a) brief over the argv cap: --agent-file too, beside BRIEF.md",
+              == os.path.abspath(wd2)
+              and os.path.join(wd2, "BRIEF.md") in c2[c2.index("-p") + 1]
+              and not os.path.isfile(os.path.join(wd2, "BRIEF.md")),
+              "R142 И-3 (a) brief over the argv cap: --agent-file too, beside BRIEF.md (gone after)",
               repr(c2[:6])[:200])
         # (b) timeout keeps the printed stream-json, str (Windows) and bytes (POSIX)
         for label, out in (("str", '{"role": "assistant", "content": "half a review"}\n'),
@@ -13610,6 +13631,195 @@ def suite_r142_i6_audit_hotfix():
               repr(notes))
     else:
         check(False, "R142 И-6 (f): a grokcli channel with an effort ladder exists", repr(g))
+
+
+def suite_r142_i6_kimi():
+    """R142 И-6 (2026-10-05), everything Kimi after the audit panel. Names come from channels.json.
+    (a) `kimi`/`кими`/`к3`/`moonshot` are the Kimi FAMILY group: «только кими» runs the env-routed
+    (free) Kimi, the standard panel falls back to the OpenRouter one only when that is not ready,
+    «не используй кими» drops every Kimi, and the paid channel by its own name stays exact - the
+    words used to be aliases of the PAID channel ($1.38 a standard run while the free one was ready);
+    (b) a timed-out CLI run stops the processes its agent started, and returns on time even when a
+    grandchild holds the output pipe (_run_tree, real processes); (c) Kimi's tokens, served model
+    and overlapping sessions are read from its session log; (d) the env-route check reads a big
+    binary in chunks and still finds the marker across a chunk edge."""
+    import copy
+    import inspect
+    import shutil as _sh
+    import subprocess as _sp
+    import sys as _sys
+    import tempfile
+    import time as _t
+    import orchestrate as o
+    import routing
+
+    def section(label, fn):
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001 - a raise is a failed check, never a crash
+            check(False, "R142 И-6 %s raised" % label, repr(exc)[:200])
+
+    def a():
+        reg = routing.load_registry(overlay=False)
+        chans = reg["channels"]
+        kimi = sorted(c for c, ch in chans.items() if isinstance(ch, dict) and ch.get("vendor") == "moonshot")
+        grp = (reg.get("groups") or {}).get("kimi") or {}
+        check(len(kimi) >= 2 and set(grp.get("channels") or []) == set(kimi),
+              "R142 И-6 (a): the `kimi` group holds every Kimi channel (vendor moonshot)",
+              repr((grp.get("channels"), kimi)))
+        nv = next(c for c in kimi if isinstance(chans[c].get("env_model"), dict))
+        paid = next(c for c in kimi if chans[c].get("kind") == "openrouter")
+        fam = {"kimi", "кими", "к3", "moonshot"}
+        check(not fam & set(chans[paid].get("aliases") or []) and fam <= set(grp.get("aliases") or []),
+              "R142 И-6 (a): the family words name the group, not the paid channel",
+              repr(chans[paid].get("aliases")))
+        kit = copy.deepcopy(reg)
+        for ch in kit["channels"].values():
+            if isinstance(ch, dict) and ch.get("distribution") == "local":
+                ch["enabled"] = False
+
+        def run(rdy, **kw):
+            p = routing.resolve(copy.deepcopy(kit), ready=rdy, **kw)
+            return sorted(c for c, v in p.items() if isinstance(v, dict) and v.get("enabled"))
+
+        yes = lambda c: True                                              # noqa: E731
+        nokey = lambda c: True if c != nv else "probe: no key"            # noqa: E731
+        got = run(yes, route="только кими")
+        check(got == [nv], "R142 И-6 (a): «только кими» runs the free Kimi, not the paid one", repr(got))
+        got = run(nokey, route="только кими")
+        check(paid not in got, "R142 И-6 (a): a cheap «только кими» never buys the paid voice", repr(got))
+        got = (run(yes, route="только кими, стандартная панель"),
+               run(nokey, route="только кими, стандартная панель"))
+        check(got == ([nv], [paid]), "R142 И-6 (a): in the standard panel the free Kimi runs when "
+              "ready and the paid one only when it is not", repr(got))
+        got = run(yes, route="не используй кими")
+        check(got and not set(got) & set(kimi), "R142 И-6 (a): «не используй кими» drops EVERY Kimi "
+              "(the NVIDIA one used to stay)", repr(got))
+        got = run(yes, only=[paid])
+        check(got == [paid], "R142 И-6 (a): the paid channel by its own name stays exact (control)",
+              repr(got))
+
+    def alive(pid):
+        for _ in range(40):
+            if os.name == "nt":
+                import ctypes
+                k = ctypes.windll.kernel32
+                h = k.OpenProcess(0x1000, False, int(pid))
+                if not h:
+                    return False
+                code = ctypes.c_ulong()
+                ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+                k.CloseHandle(h)
+                if not (ok and code.value == 259):
+                    return False
+            else:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    return False
+                except PermissionError:
+                    pass
+                try:
+                    with open("/proc/%d/stat" % pid) as f:
+                        if f.read().split(")")[-1].split()[0] == "Z":
+                            return False
+                except (OSError, IndexError):
+                    pass
+            _t.sleep(0.1)
+        return True
+
+    def b():
+        check(o.subprocess.run is o._STDLIB_SUBPROCESS_RUN,
+              "R142 И-6 (b): subprocess.run is the real one here (no stub leaked into this suite)")
+        child = ("import subprocess, sys, time\n"
+                 "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(25)'],"
+                 " stdout=sys.stdout, stderr=sys.stderr)\n"
+                 "print(g.pid, flush=True)\n"
+                 "time.sleep(25)\n")
+        t0, out, raised = _t.time(), "", False
+        try:
+            o._run_tree([_sys.executable, "-c", child], capture_output=True, text=True,
+                        encoding="utf-8", timeout=3)
+        except _sp.TimeoutExpired as exc:
+            raised, out = True, exc.output or ""
+        el = _t.time() - t0
+        first = (out or "").split()
+        gpid = int(first[0]) if first and first[0].isdigit() else None
+        check(raised and el < 15, "R142 И-6 (b): a timed-out run returns near its timeout even "
+              "when a grandchild holds the output pipe", "%.1f s, raised=%s" % (el, raised))
+        check(gpid is not None and not alive(gpid), "R142 И-6 (b): the grandchild the run started "
+              "is gone after the timeout - the tree is killed, not only the child", repr(gpid))
+        src = inspect.getsource(o.call_kimicli)
+        check("_run_tree(cmd" in src and "subprocess.run(cmd" not in src,
+              "R142 И-6 (b): the Kimi channel starts its CLI through _run_tree")
+
+    def c():
+        td = tempfile.mkdtemp(prefix="st-r142i6k-")
+        try:
+            home = os.path.join(td, "kimi-home")
+            prompt = "PROMPT-" + "q" * 500 + "-R142I6-MID-" + "w" * 500
+            now = _t.time()
+            ms = lambda x: int(x * 1000)                                  # noqa: E731
+
+            def sess(name, recs):
+                d = os.path.join(home, "sessions", "wd_x", "session_" + name, "agents", "main")
+                os.makedirs(d, exist_ok=True)
+                with open(os.path.join(d, "wire.jsonl"), "w", encoding="utf-8") as f:
+                    for r in recs:
+                        f.write(json.dumps(r) + "\n")
+                return os.path.join(d, "wire.jsonl")
+
+            sess("aaaa1111-ours", [
+                {"type": "turn.prompt", "time": ms(now - 50), "input": [{"text": prompt}]},
+                {"type": "llm.request", "time": ms(now - 49), "model": "moonshotai/kimi-k3"},
+                {"type": "usage.record", "time": ms(now - 40), "usageScope": "turn",
+                 "usage": {"inputOther": 100, "inputCacheRead": 900, "inputCacheCreation": 5,
+                           "output": 70}},
+                {"type": "llm.request", "time": ms(now - 39), "model": "moonshotai/kimi-k3"},
+                {"type": "usage.record", "time": ms(now - 30), "usageScope": "turn",
+                 "usage": {"inputOther": 10, "inputCacheRead": 1000, "inputCacheCreation": 0,
+                           "output": 30}},
+                {"type": "turn.ended", "time": ms(now - 29), "reason": "completed"}])
+            sess("bbbb2222-other", [{"type": "turn.prompt", "time": ms(now - 45),
+                                     "input": [{"text": "another run"}]}])
+            old = sess("cccc3333-older", [{"type": "turn.prompt", "time": ms(now - 9000),
+                                          "input": [{"text": "an old run"}]}])
+            os.utime(old, (now - 8000, now - 8000))
+            pm = o._kimi_wire_postmortem(now - 60, prompt, {"KIMI_CODE_HOME": home})
+            got = o._kimi_usage_fields(pm)
+            check(got == {"in_tokens": 115, "cached_in_tokens": 1900, "out_tokens": 100,
+                          "model_served": ["moonshotai/kimi-k3"]},
+                  "R142 И-6 (c): Kimi's tokens and served model come from its session log", repr(got))
+            check(bool(pm) and pm.get("overlap") == 1, "R142 И-6 (c): one other Kimi session ran "
+                  "at the same time; an old one does not count", repr((pm or {}).get("overlap")))
+            none = o._kimi_usage_fields(None)
+            check(none["in_tokens"] is None and none["model_served"] is None,
+                  "R142 И-6 (c): no session found -> unknown (None), never 0", repr(none))
+            src = inspect.getsource(o.call_kimicli)
+            check(src.count("_kimi_usage_fields(pm)") == 2,
+                  "R142 И-6 (c): both the finished and the timed-out Kimi record carry the log's numbers")
+        finally:
+            _sh.rmtree(td, ignore_errors=True)
+
+    def d():
+        td = tempfile.mkdtemp(prefix="st-r142i6c-")
+        try:
+            p1 = os.path.join(td, "edge.bin")
+            with open(p1, "wb") as f:
+                f.write(b"\0" * ((1 << 22) - 7) + b"KIMI_MODEL_NAME" + b"\0" * 1000)
+            p2 = os.path.join(td, "none.bin")
+            with open(p2, "wb") as f:
+                f.write(b"\0" * ((1 << 22) + 5000))
+            check(o._kimi_reads_env_model(p1) is True and o._kimi_reads_env_model(p2) is False,
+                  "R142 И-6 (d): the env-route marker is found across a read-chunk edge, and only "
+                  "where it is")
+            check("in f.read()" not in inspect.getsource(o._kimi_reads_env_model),
+                  "R142 И-6 (d): the env-route check never reads the whole ~160 MB binary at once")
+        finally:
+            _sh.rmtree(td, ignore_errors=True)
+
+    for label, fn in (("(a)", a), ("(b)", b), ("(c)", c), ("(d)", d)):
+        section(label, fn)
 
 
 if __name__ == "__main__":

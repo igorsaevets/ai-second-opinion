@@ -4545,8 +4545,16 @@ def _kimi_reads_env_model(main_path):
     try:
         k = (main_path, os.path.getmtime(main_path))
         if k not in _KIMI_ENV_ROUTE_SEEN:
+            # R142 И-6 (Kimi's audit): the vendor script installs ONE ~160 MB binary, and this read
+            # it whole into memory. Chunks with an overlap, stopping at the first hit.
+            needle, tail, hit = b"KIMI_MODEL_NAME", b"", False
             with open(main_path, "rb") as f:
-                _KIMI_ENV_ROUTE_SEEN[k] = b"KIMI_MODEL_NAME" in f.read()
+                for chunk in iter(lambda: f.read(1 << 22), b""):
+                    if needle in tail + chunk:
+                        hit = True
+                        break
+                    tail = chunk[-(len(needle) - 1):]
+            _KIMI_ENV_ROUTE_SEEN[k] = hit
         return _KIMI_ENV_ROUTE_SEEN[k]
     except OSError:
         return None
@@ -4687,7 +4695,8 @@ def _kimi_sessions_root(child_env=None):
     return os.path.join(home, "sessions")
 
 
-_KIMI_WIRE_KEYS = ("llm.request", "turn.step.retrying", "subagent.", "turn.ended")
+_KIMI_WIRE_KEYS = ("llm.request", "turn.step.retrying", "subagent.", "turn.ended", "usage.record")
+_KIMI_USAGE_KEYS = ("inputOther", "inputCacheRead", "inputCacheCreation", "output")
 
 
 def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
@@ -4703,7 +4712,7 @@ def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
     """
     want = (prompt or "").strip()
     mid = want[len(want) // 2:len(want) // 2 + 160] if len(want) > 400 else want[:160]
-    root, found = _kimi_sessions_root(child_env), None
+    root, found, recent = _kimi_sessions_root(child_env), None, []
     try:
         wds = [e.path for e in os.scandir(root) if e.is_dir()]
     except OSError:
@@ -4717,6 +4726,8 @@ def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
             mw = os.path.join(s, "agents", "main", "wire.jsonl")
             try:
                 mt = os.path.getmtime(mw)
+                if mt >= t0 - 5:
+                    recent.append(s)          # R142 И-6: active during this run - maybe another one
                 if mt < t0 - 5 or (found and mt <= found[1]):
                     continue
                 with open(mw, encoding="utf-8", errors="replace") as f:
@@ -4737,6 +4748,7 @@ def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
     reqs = r429 = think = streak = 0
     other, ev, ended, last_req = {}, [], None, None
     req_t, think_t = {}, {}
+    usage, models = dict.fromkeys(_KIMI_USAGE_KEYS, 0), set()
     try:
         agents = [e for e in os.scandir(os.path.join(found[0], "agents")) if e.is_dir()]
     except OSError:
@@ -4760,9 +4772,16 @@ def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
                 t = t / 1000.0 if isinstance(t, (int, float)) and t > 1e12 else t
                 if ty == "llm.request":
                     reqs += 1
+                    if isinstance(rec.get("model"), str) and rec["model"]:
+                        models.add(rec["model"][:80])          # R142 И-6: the model SERVED
                     if isinstance(t, (int, float)):
                         last_req = max(last_req or t, t)
                         req_t.setdefault(a.name, []).append(t)
+                elif ty == "usage.record":
+                    # R142 И-6: the CLI prints no usage on stdout; its session log does, per step.
+                    for k, v in (rec.get("usage") or {}).items():
+                        if k in usage and isinstance(v, (int, float)) and not isinstance(v, bool):
+                            usage[k] += v
                 elif ty == "turn.step.retrying":
                     fa = rec.get("failedAttempt")
                     if a.name == "main" and isinstance(fa, int) and not isinstance(fa, bool):
@@ -4809,6 +4828,27 @@ def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
             cause += ", each ended at most %.0f s after its request" % max(think_secs)
     if cause and spawned:
         cause += "; it ran %d sub-agent(s), up to %d at once" % (spawned, peak)
+    # R142 И-6 (Б-52): other Kimi sessions on this machine active while this one ran. Since the
+    # one-reviewer setup they rarely break a run (05.10: 9 of 12 overlapping sessions finished),
+    # but they share a free key's rate limit - 62 of 417 requests (15%) got a 429 against 4 of 70
+    # (6%) alone (runs/r142-i6-audit-panel/kimi_overlap_rates.log).
+    end, overlap = stopped_at or time.time(), 0
+    for s in recent:
+        if s == found[0]:
+            continue
+        try:
+            with open(os.path.join(s, "agents", "main", "wire.jsonl"), encoding="utf-8",
+                      errors="replace") as f:
+                first = json.loads(f.readline() or "{}")
+            st = first.get("time") if isinstance(first, dict) else None
+            st = st / 1000.0 if isinstance(st, (int, float)) and st > 1e12 else st
+            if isinstance(st, (int, float)) and st < end:
+                overlap += 1
+        except (OSError, ValueError):
+            continue
+    if cause and overlap and r429:
+        cause += ("; %d other Kimi session(s) on this machine ran at the same time, and runs on "
+                  "one key share its rate limit" % overlap)
     line = ("Kimi session log %s: %d requests; retries: %d x 429, %d thinking-only, other %s%s; "
             "sub-agents %d (max %d at once); turn %s"
             % (os.path.basename(found[0])[8:16], reqs, r429, think,
@@ -4818,9 +4858,82 @@ def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
                ended or "never ended (the CLI was still working when it was stopped)"))
     if stopped_at and last_req:
         line += "; last request %.0f s before the stop" % max(0.0, stopped_at - last_req)
+    if any(usage.values()):
+        line += "; tokens: in %d + cached %d, out %d" % (
+            usage["inputOther"] + usage["inputCacheCreation"], usage["inputCacheRead"], usage["output"])
+    if overlap:
+        line += "; %d other Kimi session(s) on this machine ran at the same time" % overlap
     return {"cause": cause, "line": line, "requests": reqs, "r429": r429, "thinking": think,
             "subagents": spawned, "peak": peak, "ended": ended, "session": found[0],
-            "think_max_s": max(think_secs) if think_secs else None, "streak": streak}
+            "think_max_s": max(think_secs) if think_secs else None, "streak": streak,
+            "usage": usage, "models": sorted(models), "overlap": overlap}
+
+
+_STDLIB_SUBPROCESS_RUN = subprocess.run
+
+
+def _kill_tree(p):
+    """Kill a child AND every process it started (R142 И-6). Windows: `taskkill /T` walks the tree
+    from the still-live child; POSIX: the child leads its own process group (start_new_session)."""
+    try:
+        if os.name == "nt":
+            tk = os.path.join(os.environ.get("SystemRoot") or r"C:\Windows", "System32", "taskkill.exe")
+            subprocess.run([tk if os.path.isfile(tk) else "taskkill", "/F", "/T", "/PID", str(p.pid)],
+                           capture_output=True, timeout=30)
+        else:
+            import signal
+            os.killpg(p.pid, signal.SIGKILL)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        p.kill()
+    except OSError:
+        pass
+
+
+def _run_tree(cmd, timeout=None, **kw):
+    """subprocess.run(cmd, capture_output=True, ...) whose timeout stops the child's whole TREE.
+
+    R142 И-6, measured (runs/r142-i6-audit-panel/kimi_tree_probe.py): a Kimi run stopped at its
+    150 s timeout returned on time, but the shell command its agent had started (a 6-minute ping)
+    kept running after the round reported TIMEOUT - subprocess.run kills the direct child only,
+    and nothing reaps the rest. An agent's command outliving the run is the agent still acting on
+    the machine after the harness said it stopped. (The panel's worry - a grandchild holding the
+    output pipe so the call hangs past its timeout - did not happen there; the tree kill covers it.)
+    The selftest swaps subprocess.run for every CLI channel; when it has, this defers to it so that
+    one seam keeps working - the real path has its own check with real processes.
+    """
+    if subprocess.run is not _STDLIB_SUBPROCESS_RUN:
+        return subprocess.run(cmd, timeout=timeout, **kw)
+    kw.pop("capture_output", None)
+    inp = kw.pop("input", None)
+    if os.name != "nt":
+        kw["start_new_session"] = True
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE if inp is not None else None,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kw)
+    try:
+        out, err = p.communicate(inp, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(p)
+        try:
+            out, err = p.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            out = err = None          # a process outside the tree still holds a pipe: no output
+        raise subprocess.TimeoutExpired(cmd, timeout, output=out, stderr=err) from None
+    except BaseException:
+        _kill_tree(p)
+        raise
+    return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+
+
+def _drop_file(path):
+    """Delete a file this run wrote for a CLI (R142 И-6: Kimi's BRIEF.md carries the whole brief,
+    and under a non-ASCII --out it sits in a %TEMP% mirror, outside the run's folder)."""
+    if path:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
@@ -4836,7 +4949,8 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
         Model must be set via default_model in ~/.kimi-code/config.toml.
       * `--auto` CANNOT combine with `-p` (error).
       * `-y`/`--yolo` is "ask when needed" mode — not relevant for `-p` (non-interactive).
-      * No token/usage data in stream-json output (session DB only).
+      * No token/usage data in stream-json output (session DB only). R142 И-6: tokens and the
+        served model are read from the run's own session log afterwards (_kimi_usage_fields).
       * coding-kimi-k3-free: Moonshot AI K3, 1.05M context, free on AIHubMix
         (5 RPM, 100 RPD, 1M TPD).
       * Live tested 2026-10-02: 8.3s, $0.
@@ -4861,10 +4975,15 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
     # the plain channel too (main.mjs keeps the file config only when it is unset), so the
     # plain call drops inherited KIMI_MODEL_* - and changes nothing when there are none.
     if env_model is None and any(k.upper().startswith("KIMI_MODEL_") for k in os.environ):
-        child_env = {k: v for k, v in os.environ.items()
-                     if not k.upper().startswith("KIMI_MODEL_")}
         log("  [%s] dropped inherited KIMI_MODEL_* from the child: this channel's route "
             "is config.toml" % name)
+    if env_model is None:
+        # R142 И-6 (Б-51, the Kimi part): this route reads its key from config.toml and needs none
+        # from the env, yet its agent got the whole parent env - every other vendor's key in reach
+        # of its shell. Same allowlist as the env route (which already drops KIMI_MODEL_*).
+        child_env = _kimi_min_env()
+        route += " (allowlisted env: %d of %d variables, no other vendor's key)" % (
+            len(child_env), len(os.environ))
     if env_model is not None:
         # R140 И-4: a block present but unusable refuses here, never the config.toml route.
         prob = _env_model_problem(env_model)
@@ -4904,7 +5023,7 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
     wd = _ascii_safe_workdir(wd, name, name)
     agent = ["--agent-file", _kimi_agent_file(wd)]      # R142 И-3: one reviewer, no sub-agents
     cmd = (base or [binary]) + agent + ["-p", text_in, "--output-format", "stream-json"]
-    how = "prompt as -p arg"
+    how, brief_file = "prompt as -p arg", None
     # R137: past the CreateProcess cap - or when only the cmd.exe shim exists, which would cut
     # the brief at its first newline - the brief goes to a file and -p carries one ASCII line
     # naming it. Same route agy takes above AGY_ARGV_LIMIT. The cap is measured on the QUOTED
@@ -4917,6 +5036,7 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
                              "path %r holds a character cmd.exe would rewrite" % bpath}
         with open(bpath, "w", encoding="utf-8") as f:
             f.write(text_in)
+        brief_file = bpath                     # R142 И-6: deleted when the run ends
         cmd = (base or [binary]) + agent + [
             "-p", "Read the file %s from its first line to its last (it is long - keep reading "
                   "until the end) and carry out the task it describes. Your reply is the "
@@ -4938,12 +5058,15 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
     t0 = time.time()
     try:
         # R140 И-3 (grok, panel): a --task run gets the git/pip fence the other CLIs get.
-        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           cwd=ncwd, env=_task_child_env(child_env),
-                           timeout=_seconds(timeout, 2400))
+        # R142 И-6: _run_tree - a timeout stops the agent's own commands too, not just the CLI.
+        p = _run_tree(cmd, capture_output=True, text=True, encoding="utf-8",
+                      cwd=ncwd, env=_task_child_env(child_env),
+                      timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
+        _drop_file(brief_file)
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
     except subprocess.TimeoutExpired as exc:
+        _drop_file(brief_file)
         # R142 И-3: like mimo/opencode since v1.105.1 - keep what the CLI printed before the kill.
         part = exc.stdout or ""
         if isinstance(part, bytes):
@@ -4958,12 +5081,13 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
         if pm and pm["cause"]:
             err += " - " + pm["cause"]
             twarn += " - " + pm["cause"]
-        return {"channel": name, "ok": False, "text": part,
-                "seconds": round(time.time() - t0, 1), "bytes": len(part.encode("utf-8")),
-                "error": err, "model": model, "effort": effort, "warnings": [twarn],
-                "notes": [pm["line"]] if pm else []}
+        return dict({"channel": name, "ok": False, "text": part,
+                     "seconds": round(time.time() - t0, 1), "bytes": len(part.encode("utf-8")),
+                     "error": err, "model": model, "effort": effort, "warnings": [twarn],
+                     "notes": [pm["line"]] if pm else []}, **_kimi_usage_fields(pm))
 
     secs = time.time() - t0
+    _drop_file(brief_file)
     raw = (p.stdout or "").strip()
     warn, note = [], []
     text = _kimi_stream_text(raw)
@@ -4980,22 +5104,36 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
     if not text.strip() and not warn:
         warn.append("EMPTY OUTPUT despite exit 0")
     record_refusal(refusal_check(text, marker), warn, note)
-    if warn:
-        pm = _kimi_wire_postmortem(t0, prompt_arg, child_env)      # R142 И-4
-        if pm:
-            note.append(pm["line"])
-            if pm["cause"]:
-                warn.insert(0, "Kimi session log: " + pm["cause"])
+    # R142 И-4: the session log says why a run failed. R142 И-6: read on EVERY run - it also holds
+    # the tokens and the model actually served, which stdout never carries.
+    pm = _kimi_wire_postmortem(t0, prompt_arg, child_env)
+    if pm and warn:
+        note.append(pm["line"])
+        if pm["cause"]:
+            warn.insert(0, "Kimi session log: " + pm["cause"])
+    elif pm and pm.get("overlap"):
+        note.append("%d other Kimi session(s) on this machine ran at the same time as this one; "
+                    "runs on one free key share its rate limit (more 429 retries, a slower "
+                    "answer)" % pm["overlap"])
 
-    return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
-            "bytes": len(text.encode("utf-8")), "exit": p.returncode,
-            "model": model, "effort": effort,
-            "in_tokens": None,
-            "out_tokens": None,
-            "reasoning_tokens": None,
-            "cached_in_tokens": None,
-            "usd": None,
-            "warnings": warn, "notes": note}
+    return dict({"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
+                 "bytes": len(text.encode("utf-8")), "exit": p.returncode,
+                 "model": model, "effort": effort,
+                 "reasoning_tokens": None,
+                 "usd": None,
+                 "warnings": warn, "notes": note}, **_kimi_usage_fields(pm))
+
+
+def _kimi_usage_fields(pm):
+    """Tokens and served model from a Kimi session log (R142 И-6). Uncached input (fresh + cache
+    writes) and cached reads apart, as the opencode channel reports them; None when not found."""
+    u = (pm or {}).get("usage") or {}
+    if not any(u.values()):
+        return {"in_tokens": None, "cached_in_tokens": None, "out_tokens": None,
+                "model_served": (pm or {}).get("models") or None}
+    return {"in_tokens": u.get("inputOther", 0) + u.get("inputCacheCreation", 0),
+            "cached_in_tokens": u.get("inputCacheRead"), "out_tokens": u.get("output"),
+            "model_served": (pm or {}).get("models") or None}
 
 
 def call_hermes(brief, marker, outfile, model=None, toolsets=None, system=None, timeout=2400):

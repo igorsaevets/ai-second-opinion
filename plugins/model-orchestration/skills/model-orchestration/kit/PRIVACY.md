@@ -23,7 +23,10 @@ request, not what you review; the User-Agent carries no version). `python update
 --show-what-would-be-sent` prints it; `MODEL_ORCH_UPDATE_CHECK=0` switches it off.
 
 The only files written are inside the run's own output folder: the answers each channel returned,
-and the report about them. Nothing is uploaded anywhere.
+and the report about them. Nothing is uploaded anywhere. One exception: when that folder's path
+holds non-ASCII letters, a CLI that cannot open such a path works in a copy of its subfolder
+under your temp folder, swept after three days; a brief Kimi reads from a file is deleted from
+there (and from the output folder) as soon as its run ends.
 
 ## What DOES leave your machine, and to whom
 

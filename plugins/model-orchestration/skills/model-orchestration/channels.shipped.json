@@ -129,6 +129,28 @@
         "сяоми"
       ]
     },
+    "kimi": {
+      "label": "every Kimi K3, all transports",
+      "channels": [
+        "nvkimik3",
+        "kimik3free",
+        "kimik3"
+      ],
+      "_added_r142_i6": "R142 И-6 (2026-10-05, BACKLOG Б-53): «только кими» ran the PAID OpenRouter channel while the free NVIDIA one was ready, because these words were aliases of kimik3 - a channel - so the cascade group never applied. Same rule as `grok` and `mimo`: once one model is reachable several ways, the model word means the FAMILY and the transport words mean the transport (`kimi nvidia`, `kimi_free`, `kimi openrouter`). The cascade `[nvkimik3, kimik3free, kimik3]` keeps one voice.",
+      "aliases": [
+        "kimi",
+        "кими",
+        "moonshot",
+        "муншот",
+        "к3",
+        "k3",
+        "kimi-k3",
+        "kimi k3",
+        "кими к3",
+        "kimi k3 max",
+        "k3 max"
+      ]
+    },
     "direct": {
       "label": "every channel on a DIRECT vendor key rather than a reseller or a CLI",
       "channels": [
@@ -412,6 +434,7 @@
       "panel": "cheap",
       "vendor": "moonshot",
       "enabled": false,
+      "_disabled_r142_i6": "R142 И-6 (2026-10-05): AIHubMix still answers `no_available_channel` for coding-kimi-k3-free (probe runs/r142-i6-audit-panel/aihubmix_free32.log, 0.14 s), as since 2026-10-02 (R140). In the Kimi cascade it sat BEFORE the paid kimik3, so a standard run whose NVIDIA Kimi was not ready picked this dead route. Named by its own name it still runs; turn it back on when runs/r140-kimi-k3/aihubmix_probe.py free32 answers 200.",
       "distribution": "local",
       "label": "Kimi K3 Free",
       "cost": "free",
@@ -862,26 +885,18 @@
           "label": "Kimi K3",
           "data_policy": "Metered API. OpenRouter documents `provider.data_collection: deny` and `provider.zdr: true` as per-request controls; NEITHER IS SET HERE - see _data_controls_not_wired at the end of this file.",
           "aliases": [
-            "moonshotai/kimi-k3",
-            "kimi-k3",
-            "kimi k3",
-            "k3",
-            "kimi k3 max",
-            "k3 max",
-            "кими к3"
+            "moonshotai/kimi-k3"
           ]
         }
       },
       "aliases": [
         "kimik3",
-        "kimi",
+        "kimi openrouter",
+        "кими опенроутер",
         "hermes",
-        "гермес",
-        "кими",
-        "moonshot",
-        "муншот",
-        "к3"
+        "гермес"
       ],
+      "_aliases_r142_i6": "R142 И-6 (Б-53): kimi, кими, к3, k3, moonshot and the model words moved to the `kimi` GROUP - as aliases of this PAID channel, «только кими» paid $1.38 a standard run while the free NVIDIA Kimi was ready. This channel is named by its own name or a transport word.",
       "_toolsets": "`web` ONLY, deliberately. Hermes ships terminal, file, code_execution, browser and computer_use ENABLED by default; handing those to a channel whose entire input is an untrusted review brief is remote code execution on the operator's own machine by way of a prompt. A reviewer needs search and nothing else. Never add --yolo, which bypasses the approval prompts that are the remaining backstop.",
       "_ignore_rules": "The call passes --ignore-rules so SOUL.md, AGENTS.md and Hermes's own memory are NOT injected. A reviewer that inherits the persona of the setup it is reviewing is not independent, and the injected context also makes runs irreproducible between machines. 🔴 It does NOT stop a CLI injecting the launch directory's CLAUDE.md - that needs a neutral cwd, which the harness sets.",
       "notes": "The CODE channel: 2.8T-param MoE, 1M context, reasoning=true. Send it diffs, build failures and API-contract questions - the things Spark answers from prose and Codex charges strategic rates for."

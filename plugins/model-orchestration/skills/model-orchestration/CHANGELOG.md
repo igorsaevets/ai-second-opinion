@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.107.0 — 2026-10-05
+
+Everything left open around Kimi K3.
+
+- **«только кими» asks the free Kimi.** `kimi`, `кими`, `к3`, `k3`, `moonshot` and the Kimi model words were aliases of the PAID OpenRouter channel `kimik3`, so «только кими» paid about $1.38 a standard run while the free NVIDIA Kimi was ready. They now name the Kimi family (a group, like `grok` and `mimo`), and the cascade keeps one voice: in the default (cheap) panel the free `nvkimik3`; in the standard panel the paid one only when the free one cannot start. «не используй кими» now drops every Kimi (the NVIDIA one used to stay). `kimik3` by its own name, or «kimi openrouter», still runs the paid one.
+- **A timed-out Kimi run stops its agent's commands too.** Measured: a Kimi run stopped at its timeout returned on time, but a 6-minute command its agent had started kept running afterwards. The CLI's whole process tree is now killed (`taskkill /T` on Windows, the process group elsewhere). The panel's worry that the call could hang past its timeout did not reproduce; the same kill covers it.
+- **Kimi's numbers in the report.** Tokens (uncached, cached, output) and the model actually served are read from the CLI's own session log after every run; the report showed «-» for them. When another Kimi session on the same machine ran at the same time, the run says so: on one free key they share the rate limit (measured on 22 single-reviewer sessions: 15% of requests refused with 429 when overlapping, 6% alone; 9 of 12 overlapping sessions still finished, so there is no lock).
+- **The brief file Kimi reads is deleted when its run ends** (it holds the whole brief; under a non-ASCII output folder it sat in a temp copy for up to three days).
+- **The AIHubMix Kimi route has its agent on the same environment allowlist** as the NVIDIA one; it used to see every other vendor's key. That route (`kimik3free`, local installs only) is switched off while AIHubMix keeps answering `no_available_channel` (since 2026-10-02): in the cascade it stood before the paid Kimi.
+- Smaller: the env-route check reads the ~160 MB script-installed binary in chunks instead of whole; SECURITY.md no longer says Kimi runs with `--auto`.
+
 ## 1.106.1 — 2026-10-05
 
 Fixes from a full code audit by the cheap panel (four of six voices answered: Kimi K3, Grok 4.7, Gemini 3.8 Flash, MiMo v2.6 Flash). Each fix was checked by running the code, and the new selftest checks fail on 1.106.0.

@@ -129,7 +129,7 @@ channel launches with its vendor's own bypass flag:
 |---|---|---|---|
 | `codex` | codex-cli 0.154.0 | `--dangerously-bypass-approvals-and-sandbox` | `--sandbox read-only` |
 | `grokbuild` | grok 1.0.46 | `--permission-mode bypassPermissions`, and since v1.100.0 NO `--tools` allowlist (full toolset + MCP gateway; firecrawl MCP and credential files denied by rule) | `--permission-mode dontAsk` + the web-only allowlist |
-| `kimik3free` | kimi 2.1.1 | `--auto` (Never Ask mode, since v1.100.0) | — |
+| `nvkimik3` (and the local `kimik3free`) | kimi 2.1.1 | none: `-p` already runs every tool with no prompt (vendor default; `--auto` next to `-p` is refused, so it was dropped in v1.100.1). The safety directive rides every brief, the child env is an allowlist with no other vendor's key, and since v1.107.0 a timeout stops the agent's own commands too | — |
 | `agy31pro` / `36flash` / `38flash` | agy 1.2.2 | `--dangerously-skip-permissions` | `--sandbox` |
 | `cclopus46` | claude 2.1.270 | `--permission-mode bypassPermissions` (always on since v1.61.0) | — |
 | `ocspark13free` | opencode | (no field on purpose — `opencode run` is already YOLO by default) | — |
