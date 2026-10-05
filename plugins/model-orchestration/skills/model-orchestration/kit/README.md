@@ -36,9 +36,9 @@ To start you need **one OpenRouter key and a couple of free programs**. Everythi
 
 | Step | What to do | What it gives you | What it costs (as of 2026-10-05) |
 |---|---|---|---|
-| **1. OpenRouter** — the main one | Sign up at [openrouter.ai](https://openrouter.ai), add credit and create a key (*Keys → Create Key*). Put it in the `OPENROUTER_API_KEY` variable in your own terminal, not in a chat with an AI ([how — INSTALL.md](INSTALL.md#openrouter--openrouter_api_key)) | The paid voices: MiMo in the cheap panel; Kimi, Qwen, DeepSeek, GLM and Nemotron in the standard one; a fallback route to Gemini and Muse Spark | Pay per token on the key; prices are in the tables below. OpenRouter takes a 5.5% fee when you buy credits. Free models: 50 requests a day, or 1000 a day once you have bought at least $10 of credits |
-| **2. opencode CLI** | `npm install -g opencode-ai` | The free Muse Spark 1.3 voice (Meta). The free MiMo v2.6 Flash (Xiaomi) runs through it too; in this version you [turn it on yourself](#how-to-turn-on-the-two-free-models) | Free, no key and no account: that is how it works for us. OpenCode warns that its free models are available "for a limited time" |
-| **2b. Kimi Code CLI + an NVIDIA key** | Install the [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code), sign up for free at [build.nvidia.com](https://build.nvidia.com), get a key and put it in `NVIDIA_NIM_API_KEY` | Kimi K3 (Moonshot); in this version you [turn it on yourself](#how-to-turn-on-the-two-free-models) | Free. NVIDIA calls it a trial service, limited to about 40 requests a minute |
+| **1. OpenRouter** — the main one | Sign up at [openrouter.ai](https://openrouter.ai), add credit and create a key (*Keys → Create Key*). Put it in the `OPENROUTER_API_KEY` variable in your own terminal, not in a chat with an AI ([how — INSTALL.md](INSTALL.md#openrouter--openrouter_api_key)) | The paid voices: MiMo in the cheap panel; Qwen, DeepSeek, GLM and Nemotron in the standard one, and Kimi when there is no NVIDIA key; a fallback route to Gemini and Muse Spark | Pay per token on the key; prices are in the tables below. OpenRouter takes a 5.5% fee when you buy credits. Free models: 50 requests a day, or 1000 a day once you have bought at least $10 of credits |
+| **2. opencode CLI** | `npm install -g opencode-ai` | The free Muse Spark 1.3 voice (Meta). The free MiMo v2.6 Flash (Xiaomi) runs through it too | Free, no key and no account: that is how it works for us. OpenCode warns that its free models are available "for a limited time" |
+| **2b. Kimi Code CLI + an NVIDIA key** | Install the [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) with one command ([which one — INSTALL.md](INSTALL.md#kimi-code-cli-free-kimi-k3-through-nvidia)), sign up for free at [build.nvidia.com](https://build.nvidia.com), get a key and put it in `NVIDIA_NIM_API_KEY` | Kimi K3 (Moonshot) in both panels. Without this step the cheap panel answers with five voices, and in the standard one Kimi answers through OpenRouter, for a fee | Free. NVIDIA calls it a trial service, limited to about 40 requests a minute |
 | **3. Antigravity CLI (`agy`)** | Install it, sign in with a Google account and run `patch_agy_permissions.py` **once**. Without that step the answers come back empty ([INSTALL.md](INSTALL.md#antigravity-cli-gemini)) | Gemini 3.8 Flash, and Gemini 3.1 Pro by name | Free on a personal Google account, with weekly limits. Google AI Pro ($19.99/month) and Ultra ($99.99 or $199.99/month) raise them |
 | **4. Grok Build CLI** | Install it and run `grok login` ([INSTALL.md](INSTALL.md#grok-build-cli)) | Grok 4.7 with live web search | An xAI account. xAI says Grok Build is now available to everyone; SuperGrok ($30/month) and SuperGrok Plus ($100/month) raise the limits. Whether the CLI works on a free account we have not checked |
 | **5. Codex CLI** — for the standard panel | Install it and sign in with a ChatGPT account ([INSTALL.md](INSTALL.md#codex-cli)) | GPT-6.1 Sol | A ChatGPT plan: Plus $20/month, Pro $200/month. OpenAI says Codex is also in Free and Go ($8/month); whether GPT-6.1 Sol is available there we have not checked. Limits are counted in 5-hour and weekly windows |
@@ -55,10 +55,10 @@ In Claude Code with the plugin (and in any agent you gave the line from the top 
 
 | You say | What runs (version 1.105.5) |
 |---|---|
-| **"second opinion"** (for example, "give me a second opinion on this file") | **The cheap panel**, the default: 4 models, or 6 if you [turn on the two free ones](#how-to-turn-on-the-two-free-models) |
-| **"second opinion, CLI only"** | Only the CLI agents of the cheap panel: 3 models — Muse Spark, Gemini 3.8 Flash and Grok 4.7, or 5 with the two free ones (plus MiMo v2.6 Flash and Kimi K3). Not one paid request on your OpenRouter key |
-| "standard panel" or "all models" | 10 models: the cheap panel plus GPT-6.1 Sol, Kimi K3, Qwen 3.8 Max, DeepSeek V4 Pro, GLM 5.3 and Nemotron. With the two free ones, 11: Kimi K3 then answers for free through NVIDIA |
-| "CLI only, standard panel" | 4 models: the three CLI agents plus Codex (GPT-6.1 Sol); 6 with the two free ones |
+| **"second opinion"** (for example, "give me a second opinion on this file") | **The cheap panel**, the default: 6 models (5 without step 2b) |
+| **"second opinion, CLI only"** | Only the CLI agents of the cheap panel: 5 models — Muse Spark, MiMo v2.6 Flash, Kimi K3, Gemini 3.8 Flash and Grok 4.7. Not one paid request on your OpenRouter key |
+| "standard panel" or "all models" | 11 models: the cheap panel plus GPT-6.1 Sol, Qwen 3.8 Max, DeepSeek V4 Pro, GLM 5.3 and Nemotron. Kimi K3 answers here too, for free through NVIDIA, or through OpenRouter for a fee without step 2b |
+| "CLI only, standard panel" | 6 models: the five CLI agents plus Codex (GPT-6.1 Sol) |
 | "ask only codex", "only grok" | The one named channel |
 | "only agy31pro" or "only agypro" | Gemini 3.1 Pro: it starts only when named |
 | "don't use openrouter" | Everything except the OpenRouter channels |
@@ -73,13 +73,13 @@ How to read the tables:
 - **Price per 1M tokens** is from the OpenRouter catalogue on 2026-10-05, input / output.
 - **Per run** is the median of our runs from 1 September to 5 October 2026; n is the number of runs. Yours will be higher or lower: it depends on the size of the document and the number of web searches. The tool prints the exact amount at the end of every run.
 
-### The cheap panel — the default: 4 models, 6 with the two free ones
+### The cheap panel — the default: 6 models
 
 | Model | Channel | Transport | Effort | Payment | Price per 1M (in / out) | Per run |
 |---|---|---|---|---|---|---|
 | Muse Spark 1.3 (Meta) | `ocspark13free` | opencode CLI agent | xhigh — the free version's ceiling | free | — | $0 |
-| MiMo v2.6 Flash (Xiaomi) — *you turn it on* | `ocmimo26flashfree` | opencode CLI agent | the default: the free version takes no levels | free | — | $0 |
-| Kimi K3 (Moonshot) — *you turn it on* | `nvkimik3` | Kimi Code CLI agent, NVIDIA's free server | max | free, needs an NVIDIA key | — | $0 |
+| MiMo v2.6 Flash (Xiaomi) | `ocmimo26flashfree` | opencode CLI agent | the default: the free version takes no levels | free | — | $0 |
+| Kimi K3 (Moonshot) | `nvkimik3` | Kimi Code CLI agent, NVIDIA's free server | max | free, needs an NVIDIA key | — | $0 |
 | Gemini 3.8 Flash (Google) | `agy38flash` | Antigravity CLI agent (`agy`) | not set: agy decides | Google account: free, with weekly limits | — | $0 beyond the plan |
 | MiMo v2.6 Pro (Xiaomi) | `ormimopro` | OpenRouter | a reasoning budget of 85,000 tokens | per key | $0.435 / $0.87 | ≈ $0.06 (n=9) |
 | Grok 4.7 (xAI) | `grokbuild` | Grok Build CLI agent | xhigh (the ceiling) | xAI account or plan | — | $0 beyond the plan |
@@ -87,28 +87,27 @@ How to read the tables:
 If you lack the main transport, a fallback route to the same model takes over:
 - **Muse Spark.** No opencode → `spark13cont` (Meta key) → `orspark13cont` (OpenRouter, $0.10 / $0.20, effort xhigh).
 - **Gemini 3.8 Flash.** No `agy` → `orgemini38flash` (OpenRouter, $0.75 / $3.75, effort high — this model's ceiling).
-- **Kimi K3.** The cheap panel has no fallback for it, so turn it on only after step 2b: this channel needs the Kimi Code CLI and an NVIDIA key.
+- **Kimi K3.** The cheap panel has no fallback for it: without the Kimi Code CLI or an NVIDIA key (step 2b) the panel answers with five voices ([what you see then and how to switch the channel off](#if-you-do-not-want-kimi-or-mimo-flash)). NVIDIA's limit is per key: two panels started at the same time share it, and Kimi may not answer in one of them.
 
-**In total:** about $0.06 a run on your OpenRouter key plus your subscriptions. Expect about 15 minutes: MiMo v2.6 Pro thinks longest, its median is 14 minutes. With the two free ones, about 35 minutes: Kimi through NVIDIA thinks longest, its median is 34 minutes.
+**In total:** about $0.06 a run on your OpenRouter key plus your subscriptions. Expect about 35 minutes: Kimi through NVIDIA thinks longest, its median is 34 minutes. Without Kimi, about 15 minutes: MiMo v2.6 Pro is next, its median is 14 minutes.
 
-#### How to turn on the two free models
+#### If you do not want Kimi or MiMo Flash
 
-In this version MiMo v2.6 Flash and Kimi K3 through NVIDIA ship with the kit but are off. To turn them on, put this in `~/.claude/model-orchestration.local.json` (your own settings file; updates never touch it):
+Without the Kimi Code CLI or an NVIDIA key, the run's plan says up front what is missing, and the `nvkimik3` channel ends at once with a pointer and sends nothing: the cheap panel answers with five voices. To stop it from starting, put this in `~/.claude/model-orchestration.local.json` (your own settings file; updates never touch it):
 
 ```json
-{ "channels": { "ocmimo26flashfree": { "enabled": true },
-                "nvkimik3":          { "enabled": true },
-                "kimik3":            { "enabled": false } } }
+{ "channels": { "nvkimik3": { "enabled": false } } }
 ```
 
-The last line turns off the paid Kimi K3 on OpenRouter (≈ $1.38 a run), so that Kimi K3 does not answer twice in the standard panel. If the file already exists, add these three channels to its `channels` section. `python routing.py` shows who will run, spending nothing.
+Any other channel switches off the same way, for example `ocmimo26flashfree`. If the file already exists, add the channel to its `channels` section. In the standard panel the paid `kimik3` on OpenRouter (≈ $1.38 a run) answers in place of a switched-off `nvkimik3`. `python routing.py` shows who will run, spending nothing.
 
-### The standard panel — 10 models: the cheap one + 6
+
+### The standard panel — 11 models: the cheap one + 5
 
 | Model | Channel | Transport | Effort | Payment | Price per 1M (in / out) | Per run |
 |---|---|---|---|---|---|---|
 | GPT-6.1 Sol (OpenAI) | `codex` | Codex CLI agent | xhigh | ChatGPT plan | — | $0 beyond the plan |
-| Kimi K3 (Moonshot) — with the two free ones on, `nvkimik3` runs instead | `kimik3` | OpenRouter | max | per key | $0.67 / $14.00 | ≈ $1.38 (n=9) |
+| Kimi K3 (Moonshot) — only when `nvkimik3` cannot start: no Kimi Code CLI or NVIDIA key | `kimik3` | OpenRouter | max | per key | $0.67 / $14.00 | ≈ $1.38 (n=9) |
 | Qwen 3.8 Max (Alibaba) | `qwen38max` | OpenRouter | xhigh (the ceiling) | per key | $2.00 / $6.00 | ≈ $1.02 (n=8), see below |
 | DeepSeek V4 Pro | `ordeepseekv4pro` | OpenRouter | xhigh (the ceiling) | per key | $0.209 / $0.418 | ≈ $0.11 (n=8) |
 | GLM 5.3 (Z.ai) | `orglm53` | OpenRouter | max | per key | $0.05 / $7.00 | ≈ $0.54 (n=8) |
@@ -116,7 +115,7 @@ The last line turns off the paid Kimi K3 on OpenRouter (≈ $1.38 a run), so tha
 
 ⚠️ **Qwen 3.8 Max:** in September 0 of our 8 runs ended with an answer, although each cost about $1.02; the cause is not known yet. To avoid paying for it, add `--skip qwen38max`.
 
-**In total:** about $3.2 a run on your OpenRouter key plus subscriptions; with the two free ones (Kimi through NVIDIA instead of OpenRouter), about $1.8. Expect up to 45 minutes: GLM 5.3 thinks longest, its median is 44 minutes. Every paid channel has a spending ceiling per run ($2–5); when it reaches it, the channel stops.
+**In total:** about $1.8 a run on your OpenRouter key plus subscriptions; about $3.2 when Kimi answers through OpenRouter (no NVIDIA key). Expect up to 45 minutes: GLM 5.3 thinks longest, its median is 44 minutes. Every paid channel has a spending ceiling per run ($2–5); when it reaches it, the channel stops.
 
 ### By name only
 
@@ -246,7 +245,7 @@ document number against the register genuinely is research.
 
 ## What one run looks like
 
-You write your question in a plain text file and run one command. Below is the real output of a run of this version on 2026-10-05, shortened: the cheap panel with the two free models checked five claims about OpenRouter and NVIDIA, one of which we made false on purpose.
+You write your question in a plain text file and run one command. Below is the real output of a run of this version on 2026-10-05, shortened: the cheap panel (all six models) checked five claims about OpenRouter and NVIDIA, one of which we made false on purpose.
 
 ```
 [agy38flash] OK  275.2s  model=Gemini 3.8 Flash [gemini-3.8-flash]
@@ -285,7 +284,7 @@ the run it came from.)
 
 In short, from our runs of September–October 2026:
 - **the cheap panel** — about $0.06 a run on your OpenRouter key plus subscriptions;
-- **the standard one** — about $3.2, or about $1.8 if you turn on the free Kimi through NVIDIA;
+- **the standard one** — about $1.8, or about $3.2 when Kimi answers through OpenRouter (no NVIDIA key);
 - **CLI only** — $0 on the key, subscriptions only.
 
 The per-model breakdown is in the tables above. The accounts, none of which this tool provides, are listed under [«Getting started»](#getting-started-accounts-and-keys). *Optional:* the `GEMINI_API_KEY`, `XAI_API_KEY` and `MIMO_API_KEY` keys reach the same Gemini, Grok and MiMo models through the vendors' own APIs; those channels are off by default, details in [INSTALL.md](INSTALL.md#direct-vendor-alternatives-to-openrouter-off-by-default).
@@ -496,7 +495,7 @@ MiMo, Grok, GLM, DeepSeek, Muse Spark and NVIDIA Nemotron. Start with that and a
 vendor access later for the models that benefit from it.
 
 **Is this expensive?**<br>
-No. The cheap panel costs about $0.06 a run on your OpenRouter key, plus subscriptions you most likely already have. Say "CLI only" and there is not one paid request on the key. The standard panel costs about $3.2 a run, or about $1.8 if you turn on the free Kimi through NVIDIA. These are the medians of our runs in September–October 2026; the tool prints the exact amount of your run at its end. See [what it costs](#what-it-costs-honestly).
+No. The cheap panel costs about $0.06 a run on your OpenRouter key, plus subscriptions you most likely already have. Say "CLI only" and there is not one paid request on the key. The standard panel costs about $1.8 a run, or about $3.2 when Kimi answers through OpenRouter (no NVIDIA key). These are the medians of our runs in September–October 2026; the tool prints the exact amount of your run at its end. See [what it costs](#what-it-costs-honestly).
 
 ## Found a bug? Want a feature? Want to work together?
 

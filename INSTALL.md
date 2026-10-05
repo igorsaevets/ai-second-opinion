@@ -407,7 +407,8 @@ disagreement this tool exists to produce. Everything else is optional.
 
 | what it needs | what that unlocks | cost |
 |---|---|---|
-| the opencode CLI (`npm install -g opencode-ai`) | `ocspark13free` — the **free** Spark 1.3 voice, and the default `--ask` channel | **free** |
+| the opencode CLI (`npm install -g opencode-ai`) | `ocspark13free` — the **free** Spark 1.3 voice, and the default `--ask` channel; `ocmimo26flashfree` — the **free** MiMo v2.6 Flash | **free** |
+| the Kimi Code CLI + `NVIDIA_NIM_API_KEY` ([below](#kimi-code-cli-free-kimi-k3-through-nvidia)) | `nvkimik3` — a **free** Kimi K3 voice in the cheap panel; the standard panel runs it instead of the paid `kimik3` | **free** (NVIDIA's trial service) |
 | `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, a Muse Spark voice and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
 | `MODEL_API_KEY` | the Muse Spark voices reached directly from Meta | metered API |
 | the Codex CLI, signed in | `codex` | your existing subscription |
@@ -599,7 +600,9 @@ opencode --version
 
 No key, no account, no sign-in — the `opencode/` prefix models are free. This installs the
 opencode CLI from [opencode.ai](https://opencode.ai/), which hosts free access to Meta's Muse
-Spark 1.3 Contributor checkpoint among others.
+Spark 1.3 Contributor checkpoint among others. The cheap panel's free MiMo v2.6 Flash
+(`ocmimo26flashfree`) runs through the same CLI. Both are free relays and can refuse for a
+while with a usage limit (`provider.quota`); the run then says so for that voice.
 
 **This is the default `--ask` channel** (`ocspark13free`). When the opencode CLI is installed,
 `--ask` uses it first — ahead of `spark13cont` (needs `MODEL_API_KEY`) and `orspark13cont`
@@ -609,6 +612,45 @@ reported and skipped, not fatal.
 If the CLI is absent, the others work the same as before — you only lose the free default.
 `doctor.py` reports whether the CLI is found and where. If yours is installed in an unusual
 location, set `OPENCODE_BIN` to the full path.
+
+### Kimi Code CLI (free Kimi K3 through NVIDIA)
+
+Since 1.106.0 the cheap panel has a free Kimi K3 voice, `nvkimik3`: the Kimi Code CLI
+([github.com/MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code)) talking to NVIDIA's
+free endpoint. It needs two things, both free:
+
+1. **The CLI.** The vendor's script installs one binary and needs no Node.js:
+
+   ```
+   # Windows (PowerShell)
+   irm https://code.kimi.com/kimi-code/install.ps1 | iex
+   # macOS / Linux
+   curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
+   ```
+
+   Then open a new terminal and run `kimi --version`. `npm install -g @moonshot-ai/kimi-code` works
+   too (Node.js 22.19 or newer). On Windows the vendor asks for Git for Windows first: the CLI uses
+   its Git Bash. You need no `kimi login` and no config file: for the one process it starts, the
+   harness routes the CLI to NVIDIA with environment variables, and your Kimi config is not edited.
+2. **An NVIDIA key.** Sign up at [build.nvidia.com](https://build.nvidia.com), create an API key and
+   put it in `NVIDIA_NIM_API_KEY`, the same way as `OPENROUTER_API_KEY` above. NVIDIA calls this a
+   trial service, limited to about 40 requests a minute per key: two panels started at the same
+   time share that limit, and Kimi may not finish in one of them.
+
+Measured on 2026-10-05 with Kimi Code CLI 2.1.1: the script's binary, an empty Kimi home folder and
+this one key answered a review in 59 s.
+
+**Without the CLI or the key** the cheap panel answers with five voices: the plan says what is
+missing before anything starts, and `nvkimik3` ends at once with a pointer, sending nothing. In the
+standard panel the paid `kimik3` (OpenRouter, about $1.38 a run) answers instead. To stop `nvkimik3`
+from starting at all, put this in `~/.claude/model-orchestration.local.json`:
+
+```json
+{ "channels": { "nvkimik3": { "enabled": false } } }
+```
+
+If the CLI lives somewhere unusual, set `KIMI_BIN` to its full path. `doctor.py` reports whether it
+is found and where.
 
 ### Codex CLI
 

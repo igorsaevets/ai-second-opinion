@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.106.0 — 2026-10-05
+
+The free MiMo v2.6 Flash and Kimi K3 through NVIDIA are in everyone's cheap panel now, and the standard panel asks Kimi once.
+
+- **Cheap panel: 6 voices by default** (was 4): `ocmimo26flashfree` (MiMo v2.6 Flash, free through the opencode CLI the kit already uses) and `nvkimik3` (Kimi K3 through the Kimi Code CLI and NVIDIA's free endpoint) ship ON. «CLI only» runs 5, the standard panel 11, «CLI only, standard» 6.
+- **One Kimi per run.** The paid `kimik3` (OpenRouter) joined `nvkimik3`'s cascade group as its last member: a standard run asks Kimi through NVIDIA when the CLI and the key are there, otherwise through OpenRouter. A cheap run never pulls the paid seat in. A local install that ran both now runs one (about $1.38 less per standard run).
+- **Without the Kimi Code CLI or `NVIDIA_NIM_API_KEY`** the cheap panel answers with five voices: the preflight says what is missing, where the free key comes from and how to switch the channel off, and the channel ends at once without sending anything.
+- **The vendor's install script works.** `kimi_bin()` also looks in `~/.kimi-code/bin`, where the official script puts its single binary (a terminal opened before the install has the old PATH). Measured with Kimi Code CLI 2.1.1: that binary, an empty Kimi home and only the NVIDIA key answered in 59 s. INSTALL.md has a Kimi Code CLI section.
+- README: the «turn it on yourself» marks and the three-line opt-in block are gone; in their place, what an install without Kimi sees and how to switch a channel off. Costs: standard about $1.8 a run, about $3.2 when Kimi answers through OpenRouter.
+
 ## 1.105.5 — 2026-10-05
 
 The README describes the panels as they are today, with dates, prices and the keys to get.

@@ -7905,7 +7905,8 @@ def main():
                   suite_r141_codex_sol, suite_r139_i4_hook_hotfix,
                   suite_r142_mimo_flash_fallback,
                   suite_r142_i3_kimi_single_agent, suite_r142_i4_kimi_postmortem,
-                  suite_r142_i5_thinking_advice):
+                  suite_r142_i5_thinking_advice,
+                  suite_r143_i3_free_voices):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -12308,7 +12309,7 @@ def suite_r140_i4_env_fail_closed():
               repr(p2[pre[1]]["why"])[-160:])
         break
     on_reg = copy.deepcopy(reg)
-    for name in (nv, kf):                # the kit ships nvkimik3 OFF (distribution: local)
+    for name in (nv, kf):                # R143 И-3: kimik3free stays local (OFF in the kit)
         on_reg["channels"][name]["enabled"] = True
     for name in (nv, kf):
         p = routing.resolve(copy.deepcopy(on_reg), only=[name],
@@ -13356,6 +13357,122 @@ def suite_r142_i5_thinking_advice():
           and pm2.get("think_max_s") is None,
           "R142 И-5 control: a 429 death keeps its cause; a bool failedAttempt is not a count",
           repr({k: pm2.get(k) for k in ("cause", "streak", "think_max_s")})[:200])
+
+
+def suite_r143_i3_free_voices():
+    """R143 И-3 (2026-10-05): the free MiMo v2.6 Flash (opencode) and Kimi K3 (NVIDIA) ship in the
+    kit's cheap panel, and the OpenRouter Kimi (standard panel, paid) joined the env-routed Kimi's
+    cascade group, so a standard run has ONE Kimi voice. Names come from channels.json. Invariants:
+    (a) every Kimi channel (vendor moonshot) sits in ONE cascade group - no plan runs two Kimis;
+    (b) a cheap plan never enables a channel declared `standard`, ready or not: the group spans two
+    panels and must not pull the paid seat into a cheap run; (c) in a KIT-shaped registry
+    (package.py's distribution flip) a standard plan runs exactly one Kimi - the env-routed one when
+    it is ready, else the OpenRouter one, and the plan says why - and a cheap plan runs the
+    env-routed one either way (its preflight names what is missing); (d) kimi_bin() finds the vendor
+    script's binary under ~/.kimi-code/bin when PATH does not (a terminal opened before the install
+    has the old PATH); (e) a missing NVIDIA key is named with where to get one and how to switch the
+    channel off, in the preflight and in the run's own error, and no process starts."""
+    section("R143 И-3 free voices shipped: one Kimi per run, a cheap run never pulls the paid seat")
+    import copy
+    import orchestrate as o
+    import routing
+    import tempfile
+    reg = json.load(open(os.path.join(HERE, "channels.json"), encoding="utf-8"))
+    chans = reg.get("channels") or {}
+    groups = [g for g in reg.get("_cascade_groups") or [] if isinstance(g, list)]
+    kimi = sorted(c for c, ch in chans.items() if isinstance(ch, dict) and ch.get("vendor") == "moonshot")
+    homes = [g for g in groups if set(kimi) & set(g)]
+    check(len(kimi) >= 2 and len(homes) == 1 and set(kimi) <= set(homes[0]),
+          "R143 И-3 (a): every Kimi channel (vendor moonshot) is in ONE cascade group, so no run has "
+          "two Kimi voices", repr((kimi, homes)))
+    grp = homes[0] if homes else []
+    nv = next((c for c in grp if isinstance((chans.get(c) or {}).get("env_model"), dict)), None)
+    paid = next((c for c in grp if (chans.get(c) or {}).get("kind") == "openrouter"), None)
+    check(bool(nv and paid) and grp.index(nv) < grp.index(paid),
+          "R143 И-3: the group has an env-routed Kimi and an OpenRouter Kimi, the free one first",
+          repr(grp))
+    if not (nv and paid):
+        return
+    yes = lambda c: True                                       # noqa: E731
+    none = lambda c: "probe: absent"                           # noqa: E731
+    std_names = sorted(c for c, ch in chans.items()
+                       if isinstance(ch, dict) and ch.get("panel") == "standard")
+    for label, rdy in (("all ready", yes), ("none ready", none)):
+        p = routing.resolve(copy.deepcopy(reg), panel="cheap", ready=rdy)
+        leak = sorted(c for c in std_names if c in p and p[c]["enabled"])
+        check(not leak, "R143 И-3 (b): a cheap plan (%s) enables no channel declared standard" % label,
+              repr(leak))
+    kit = copy.deepcopy(reg)
+    for c, ch in kit["channels"].items():
+        if isinstance(ch, dict):
+            d = ch.get("distribution", "both")
+            if d == "local":
+                ch["enabled"] = False
+            elif d == "kit":
+                ch["enabled"] = True
+    check(kit["channels"][nv].get("enabled", True) and kit["channels"][paid].get("enabled", True),
+          "R143 И-3: the kit ships %s ON (distribution not local) and keeps %s as its fallback"
+          % (nv, paid), repr((chans[nv].get("distribution"), chans[paid].get("distribution"))))
+    not_nv = lambda c: "%s is not set" % chans[nv]["env_model"]["key_env"] if c == nv else True  # noqa: E731
+    for label, rdy, want in (("ready", yes, [nv]), ("its key missing", not_nv, [paid])):
+        p = routing.resolve(copy.deepcopy(kit), panel="standard", ready=rdy)
+        on = sorted(c for c in kimi if c in p and p[c]["enabled"])
+        check(on == want, "R143 И-3 (c): kit standard plan, %s %s -> one Kimi: %s" % (nv, label, want),
+              repr(on))
+        if rdy is not_nv:
+            check(any("not ready here" in str(x) and paid in str(x) for x in p[nv]["why"]),
+                  "R143 И-3 (c): the plan says why %s did not run and who runs instead" % nv,
+                  repr(p[nv]["why"])[-200:])
+        pc = routing.resolve(copy.deepcopy(kit), panel="cheap", ready=rdy)
+        onc = sorted(c for c in kimi if c in pc and pc[c]["enabled"])
+        check(onc == [nv], "R143 И-3 (c): kit cheap plan, %s %s -> %s alone, never %s"
+              % (nv, label, nv, paid), repr(onc))
+    td = tempfile.mkdtemp(prefix="r143i3_")
+    exe = os.path.join(td, ".kimi-code", "bin", "kimi.exe" if os.name == "nt" else "kimi")
+    os.makedirs(os.path.dirname(exe))
+    open(exe, "wb").close()
+    keep = {k: os.environ.get(k) for k in ("KIMI_BIN", "PATH", "USERPROFILE", "HOME")}
+    try:
+        os.environ.pop("KIMI_BIN", None)
+        os.environ["PATH"] = os.path.join(td, "no-such-dir")
+        os.environ["USERPROFILE"] = td
+        os.environ["HOME"] = td
+        got = o.kimi_bin()
+    finally:
+        for k, v in keep.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    check(os.path.normcase(got) == os.path.normcase(exe),
+          "R143 И-3 (d): kimi_bin() finds the vendor script's ~/.kimi-code/bin binary when PATH "
+          "has no kimi", repr(got))
+    saved = (o._env_key, o.kimi_bin, o.subprocess.run, o.subprocess.Popen)
+    started = []
+
+    def _no_process(*a, **k):
+        started.append(a[:1])
+        raise AssertionError("R143 И-3 probe: a process was started")
+    try:
+        o._env_key = lambda k: None
+        o.kimi_bin = lambda: exe
+        lines = list(o.channel_preflight([nv], td, {nv: "kimicli"}, plan={nv: {}}))
+        o.subprocess.run = _no_process
+        o.subprocess.Popen = _no_process
+        r = o.call_kimicli("brief", "R143-DONE", os.path.join(td, "out.md"), name=nv,
+                           env_model=chans[nv]["env_model"]) or {}
+    finally:
+        o._env_key, o.kimi_bin, o.subprocess.run, o.subprocess.Popen = saved
+    key_line = [ln for ln in lines if chans[nv]["env_model"]["key_env"] in ln]
+    check(any("build.nvidia.com" in ln and "INSTALL.md" in ln and "--skip %s" % nv in ln
+              for ln in key_line),
+          "R143 И-3 (e): the preflight names the free key's source, --skip and the INSTALL.md "
+          "section that switches %s off" % nv, repr(key_line)[:240])
+    err = r.get("error") or ""
+    check(r.get("ok") is False and not started and "build.nvidia.com" in err
+          and "--skip %s" % nv in err and "Nothing was sent" in err,
+          "R143 И-3 (e): without the key the run refuses at once with the same pointers, and no "
+          "process starts", repr((r.get("ok"), started, err[:200])))
 
 
 if __name__ == "__main__":

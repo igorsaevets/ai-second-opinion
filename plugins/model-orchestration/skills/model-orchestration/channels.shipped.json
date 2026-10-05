@@ -374,8 +374,9 @@
       "kind": "opencode",
       "panel": "cheap",
       "vendor": "xiaomi",
-      "enabled": false,
-      "distribution": "local",
+      "enabled": true,
+      "distribution": "both",
+      "_distribution_r143": "R143 И-3 (2026-10-05): ships ON in the kit (was local since R133). the operator: both free voices in everyone's cheap panel. It needs nothing beyond the opencode CLI the kit already asks for (ocspark13free): no key, no account. The free relay can refuse: on 05.10 both opencode free models got FreeUsageLimitError (provider.quota) in two runs; 30-day ok 49/55 here (runs/r143-i3-ship-free/free_health.log).",
       "label": "OC MiMo 2.6 Flash Free",
       "cost": "free",
       "fetch_fallback_hint_ref": "mcp_fallback",
@@ -447,8 +448,9 @@
       "kind": "kimicli",
       "panel": "cheap",
       "vendor": "moonshot",
-      "enabled": false,
-      "distribution": "local",
+      "enabled": true,
+      "distribution": "both",
+      "_distribution_r143": "R143 И-3 (2026-10-05): ships ON in the kit (was local since R140 И-2). Needs Kimi Code CLI (vendor script or npm) and NVIDIA_NIM_API_KEY (free at build.nvidia.com); measured 05.10: the vendor's single binary with an EMPTY Kimi home (no config.toml, no login) answered OK in 59 s (runs/r143-i3-ship-free/fresh_kimi_probe.py). Without the CLI or the key a cheap run has 5 voices: the preflight names what is missing and the channel fails at once, spending nothing. In a standard run kimik3 (OpenRouter) is the last member of this cascade, so one Kimi answers either way.",
       "label": "Kimi K3 (NVIDIA free)",
       "cost": "free",
       "fetch_fallback_hint_ref": "mcp_fallback",
@@ -1883,10 +1885,11 @@
     ],
     [
       "nvkimik3",
-      "kimik3free"
+      "kimik3free",
+      "kimik3"
     ]
   ],
-  "_cascade_groups_doc": "Panel cascade: when several channels carry the SAME model through different transports, only the first READY one runs; the rest are skipped. Order matters - cheapest/free first. The panel runs independent VOICES in parallel; paying three transports for one voice is waste, not breadth. Added 2026-09-04 (the operator: 'незачем у одних и тех же моделей спрашивать').",
+  "_cascade_groups_doc": "Panel cascade: when several channels carry the SAME model through different transports, only the first READY one runs; the rest are skipped. Order matters - cheapest/free first. The panel runs independent VOICES in parallel; paying three transports for one voice is waste, not breadth. Added 2026-09-04 (the operator: 'незачем у одних и тех же моделей спрашивать'). R143 И-3 (2026-10-05): a group may span panels. kimik3 (standard, OpenRouter, paid) is the last member of nvkimik3's group; members are only the channels already in THIS run's plan, so a cheap run never pulls kimik3 in, and a standard run gets one Kimi - nvkimik3 when its CLI and key are here, else kimik3.",
   "_ask_default_doc": "Added 2026-08-30 (R69). The order --ask resolves its channel when --ask-channel is not passed: the FIRST entry that is enabled AND whose transport key is actually present in the environment wins; if none has a key, the first enabled entry runs and its preflight explains what is missing. Until R69 the default was the argparse literal `spark12cont`, which for a kit user holding only an OPENROUTER_API_KEY pointed the one-shot path at the one channel they cannot run - degradation was graceful, but the default was wrong for exactly the user the kit exists for. the operator's 2026-08-08 instruction «--ask по умолчанию идёт на spark12cont - оставляем на нем» is preserved by the ORDER: spark12cont is first, so any machine with a MODEL_API_KEY behaves exactly as before. Names here must be CHANNEL names - not groups, not aliases - and selftest enforces that.",
   "panels": {
     "cheap": {

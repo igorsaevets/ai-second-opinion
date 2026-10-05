@@ -4799,9 +4799,15 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
                     "warnings": ["env_model unusable"], "notes": []}
         key = _env_key(env_model["key_env"])
         if not key:
+            # R143 И-3: every kit user's cheap panel has nvkimik3 now; this is the line they see
+            # at the end of a run, so it names the fix and the off switch.
             return {"channel": name, "ok": False, "text": "", "model": model,
                     "error": "%s is not set (process env or HKCU\\Environment) - this channel "
-                             "routes Kimi Code CLI with it" % env_model.get("key_env"),
+                             "routes Kimi Code CLI with it%s. Nothing was sent. To stop running "
+                             "it: --skip %s, or INSTALL.md, section «Kimi Code CLI»"
+                             % (env_model.get("key_env"),
+                                " (a free key: build.nvidia.com)" if "nvidia" in str(
+                                    env_model.get("base_url") or "") else "", name),
                     "warnings": ["no key"], "notes": []}
         child_env = _kimi_model_env(env_model, effort, key)
         route = ("env model override -> %s %s (config.toml untouched; allowlisted env: "
@@ -7305,13 +7311,19 @@ def qwen_bin():
 
 
 def kimi_bin():
-    """Kimi Code CLI (Moonshot AI) — npm install -g @moonshot-ai/kimi-code.
+    """Kimi Code CLI (Moonshot AI). Two installs, both measured on 2.1.1:
+    the vendor's script (github.com/MoonshotAI/kimi-code README) puts ONE binary at
+    ~/.kimi-code/bin/kimi(.exe) and adds that folder to the user PATH, which only a NEW terminal
+    sees - hence the explicit path below (R143 И-3: nvkimik3 OK in 59 s on that binary with an
+    empty Kimi home); npm install -g @moonshot-ai/kimi-code gives `kimi.cmd` on Windows.
 
-    Uses AIHubMix provider (OpenAI-compatible) via config.toml with AIHUBMIX_API_KEY.
-    Model `coding-kimi-k3-free` is configured as default_model in ~/.kimi-code/config.toml.
-    Binary is `kimi` (or `kimi.cmd` on Windows), installed via npm globally.
+    kimik3free routes through config.toml (AIHubMix); nvkimik3 routes by env (`env_model`) and
+    needs no config.toml at all.
     """
+    home = os.path.expanduser("~")
     return _resolve_bin("KIMI_BIN", "kimi", [
+        os.path.join(home, ".kimi-code", "bin", "kimi.exe"),
+        os.path.join(home, ".kimi-code", "bin", "kimi"),
         os.path.join(os.environ.get("APPDATA", ""), "npm", "kimi.cmd"),
         os.path.join(os.environ.get("APPDATA", ""), "npm", "kimi"),
         "/usr/local/bin/kimi", "/opt/homebrew/bin/kimi",
@@ -7609,8 +7621,14 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
                    "config.toml route); fix its block in the registry, or run with --skip %s."
                    % (c, prob, c))
         elif em is not None and not _env_key(em["key_env"]):
+            # R143 И-3: nvkimik3 is in every kit user's cheap panel now, so this line says where
+            # the key comes from and how to stop the channel for good, not only for one run.
             yield ("%s: %s is not set (process env or HKCU\\Environment). This channel will "
-                   "fail. Set it, or run with --skip %s." % (c, em["key_env"], c))
+                   "fail at once, spending nothing. Set it%s, run with --skip %s, or switch it "
+                   "off for good: INSTALL.md, section «Kimi Code CLI»." % (
+                       c, em["key_env"],
+                       " (a free key: build.nvidia.com)" if "nvidia" in str(
+                           em.get("base_url") or "") else "", c))
     for c in sorted(by_kind.get("grokcli", [])):
         # 🔴 A MACHINE-WIDE RULES DIRECTORY NO cwd CAN PROTECT AGAINST. This CLI scans
         # `~/.grok/rules/*.md` for EVERY project, on top of the CLAUDE.md/AGENTS.md discovery
@@ -7723,8 +7741,12 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
                 % (em.get("base_url"), em.get("model"), em.get("key_env")))))
         else:
             em = _kimi_env_model(c)                      # R140 И-3 (agy): THIS route
-            yield ("%s: Kimi Code CLI NOT FOUND. Install: npm install -g "
-                   "@moonshot-ai/kimi-code; %s" % (c, (
+            # R143 И-3: the vendor's README installs with a script now (one binary, no Node);
+            # npm still works (Node >= 22.19). Both measured on 2.1.1.
+            yield ("%s: Kimi Code CLI NOT FOUND. Install (Windows PowerShell): irm "
+                   "https://code.kimi.com/kimi-code/install.ps1 | iex - or macOS/Linux: curl "
+                   "-fsSL https://code.kimi.com/kimi-code/install.sh | bash - or npm install -g "
+                   "@moonshot-ai/kimi-code, then open a new terminal; %s" % (c, (
                        "configure AIHubMix provider in ~/.kimi-code/config.toml" if em is None
                        else "this channel is routed by env (key %s) and needs no config.toml"
                        % (em.get("key_env") if isinstance(em, dict) else "?"))))
