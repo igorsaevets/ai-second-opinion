@@ -3644,13 +3644,13 @@ def _cli_ndjson(raw):
         elif otype == "step_finish":
             st = part.get("tokens") or {}
             for k in ("input", "output", "reasoning"):
-                if isinstance(st.get(k), (int, float)):
+                if isinstance(st.get(k), (int, float)) and not isinstance(st.get(k), bool):
                     tokens[k] = tokens.get(k, 0) + st[k]
             sc = st.get("cache") or {}
-            if isinstance(sc.get("read"), (int, float)):
+            if isinstance(sc.get("read"), (int, float)) and not isinstance(sc.get("read"), bool):
                 tokens.setdefault("cache", {})
                 tokens["cache"]["read"] = tokens["cache"].get("read", 0) + sc["read"]
-            if isinstance(part.get("cost"), (int, float)):
+            if isinstance(part.get("cost"), (int, float)) and not isinstance(part.get("cost"), bool):
                 cost = (cost or 0) + part["cost"]
     return text, tokens, cost
 
@@ -4533,6 +4533,55 @@ def _kimi_model_env(env_model, effort, key):
     return env
 
 
+# R142 И-3: the panel's Kimi seat is ONE reviewer. Measured in the Kimi Code CLI session logs of
+# 2026-10-04 (NVIDIA free endpoint): on three iron-note-backend briefs the CLI fanned out to 5, 11
+# and 4 of its own sub-agents ("Verify P290 external facts #1..#11"); the swarm sent up to 44
+# requests a minute and the endpoint refused them with 429 - 4% of requests at 1-3 a minute, 32% at
+# 4-6, 59-82% above that. Two of those rounds hit the 60m timeout with no answer, the third died on
+# «thinking only» replies while its main agent waited for the swarm. The six single-agent runs of
+# the same day (4 panel seats, 2 probes) all finished. `--agent-file` loads one agent file "at the
+# highest priority for this launch" (kimi docs, customization/agents); `disallowedTools` removes the
+# two dispatch tools from what the model sees and is re-checked before execution; `${base_prompt}`
+# keeps the CLI's own system prompt.
+KIMI_PANEL_AGENT = (
+    "---\n"
+    "name: panel-reviewer\n"
+    "description: One independent reviewer seat of a second-opinion panel. Works alone, in one "
+    "context, and writes the whole answer itself.\n"
+    "tools: \"*\"\n"
+    "disallowedTools: Agent, AgentSwarm\n"
+    "---\n"
+    "${base_prompt}\n")
+
+
+def _kimi_agent_file(wd):
+    """Write the single-reviewer agent file into this run's own workdir (never a shared dir: two
+    panels at once would race on it, and an invalid --agent-file makes the CLI exit). Its path."""
+    os.makedirs(wd, exist_ok=True)
+    path = os.path.join(wd, "panel-reviewer.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(KIMI_PANEL_AGENT)
+    return path
+
+
+def _kimi_stream_text(raw):
+    """The assistant text in a Kimi Code CLI `--output-format stream-json` stdout."""
+    text = ""
+    for line in (raw or "").split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and obj.get("role") == "assistant":
+            content = obj.get("content")
+            if isinstance(content, str) and content:
+                text += content
+    return text
+
+
 def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
                  timeout=2400, name="kimik3free", workdir=None, bypass=False, env_model=None):
     """Kimi Code CLI (Moonshot AI) — free via AIHubMix provider, AIHUBMIX_API_KEY.
@@ -4603,17 +4652,17 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
                          "config.toml route under this channel's name, so it refuses (the env "
                          "route was measured on 2.1.1)" % base[-1],
                 "warnings": ["CLI ignores env_model"], "notes": []}
-    cmd = (base or [binary]) + ["-p", text_in, "--output-format", "stream-json"]
+    wd = os.path.abspath(workdir or os.path.join(os.path.dirname(os.path.abspath(outfile)),
+                                                 name + "-ws"))
+    wd = _ascii_safe_workdir(wd, name, name)
+    agent = ["--agent-file", _kimi_agent_file(wd)]      # R142 И-3: one reviewer, no sub-agents
+    cmd = (base or [binary]) + agent + ["-p", text_in, "--output-format", "stream-json"]
     how = "prompt as -p arg"
     # R137: past the CreateProcess cap - or when only the cmd.exe shim exists, which would cut
     # the brief at its first newline - the brief goes to a file and -p carries one ASCII line
     # naming it. Same route agy takes above AGY_ARGV_LIMIT. The cap is measured on the QUOTED
     # command line, because list2cmdline escapes every `"` and a JSON-heavy brief grows.
     if base is None or len(subprocess.list2cmdline(cmd)) > KIMI_CMDLINE_LIMIT:
-        wd = os.path.abspath(workdir or os.path.join(os.path.dirname(os.path.abspath(outfile)),
-                                                     name + "-ws"))
-        wd = _ascii_safe_workdir(wd, name, name)
-        os.makedirs(wd, exist_ok=True)
         bpath = os.path.join(wd, "BRIEF.md")
         if base is None and any(c in bpath for c in '%^&|<>"!'):
             return {"channel": name, "ok": False,
@@ -4621,7 +4670,7 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
                              "path %r holds a character cmd.exe would rewrite" % bpath}
         with open(bpath, "w", encoding="utf-8") as f:
             f.write(text_in)
-        cmd = (base or [binary]) + [
+        cmd = (base or [binary]) + agent + [
             "-p", "Read the file %s from its first line to its last (it is long - keep reading "
                   "until the end) and carry out the task it describes. Your reply is the "
                   "finished answer that file asks for." % bpath,
@@ -4635,7 +4684,8 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
     # «non-interactive mode uses auto permission by default». So every kimi -p run already has every
     # tool with no prompt, and the SAFETY DIRECTIVE rides every brief (text_in above), like mimocli.
     log("  [%s] -p runs in kimi's auto permission mode (vendor default): every tool, no prompts; "
-        "SAFETY DIRECTIVE prepended to the brief." % name)
+        "SAFETY DIRECTIVE prepended to the brief. One reviewer: --agent-file drops the sub-agent "
+        "tools (Agent, AgentSwarm)." % name)
     log("  [%s] Kimi Code CLI, %s; %s (%d chars)" % (name, route, how, len(text_in)))
     t0 = time.time()
     try:
@@ -4645,30 +4695,24 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
                            timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
-    except subprocess.TimeoutExpired:
-        return {"channel": name, "ok": False, "text": "",
-                "seconds": round(time.time() - t0, 1),
+    except subprocess.TimeoutExpired as exc:
+        # R142 И-3: like mimo/opencode since v1.105.1 - keep what the CLI printed before the kill.
+        part = exc.stdout or ""
+        if isinstance(part, bytes):
+            part = part.decode("utf-8", "replace")
+        part = _kimi_stream_text(part)
+        if part:
+            with open(outfile, "w", encoding="utf-8") as f:
+                f.write(part)
+        return {"channel": name, "ok": False, "text": part,
+                "seconds": round(time.time() - t0, 1), "bytes": len(part.encode("utf-8")),
                 "error": "TIMEOUT after %s" % (timeout or "2400s"), "model": model,
-                "warnings": ["TIMEOUT"], "notes": []}
+                "effort": effort, "warnings": ["TIMEOUT"], "notes": []}
 
     secs = time.time() - t0
     raw = (p.stdout or "").strip()
     warn, note = [], []
-    text = ""
-
-    for line in raw.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            continue
-        role = obj.get("role")
-        if role == "assistant":
-            content = obj.get("content")
-            if content:
-                text += content
+    text = _kimi_stream_text(raw)
 
     if p.returncode != 0 and not text:
         stderr_tail = (p.stderr or "").strip()[-400:]
@@ -7205,6 +7249,12 @@ def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, 
                 _fut = submit(_fex, fb)
                 if _fut is not None:
                     _ffuts[fb] = (cname, _fut)
+                else:                                       # R142 И-3 (Kimi): never vanish
+                    log("  [%s] FALLBACK %s could not be dispatched (no caller for its kind)"
+                        % (cname, fb))
+                    if isinstance(results.get(cname), dict):
+                        results[cname].setdefault("notes", []).append(
+                            "FALLBACK %s could not be dispatched (no caller for its kind)." % fb)
             for fb, (cname, f) in _ffuts.items():
                 try:
                     _fr = f.result()
@@ -8629,7 +8679,14 @@ def _channel_key_ready(ch):
         if em is not None:                               # R140 И-4: present = must be usable
             return not _env_model_problem(em) and bool(_env_key(em["key_env"]))
         return True
-    return True                                          # codex / agy / grokcli / hermes
+    if kind in ("mimocli", "agy", "grokcli"):
+        # R142 И-3 (Kimi, panel): these fell through to True, so a cascade member whose CLI is
+        # missing could win the pick (agy38flash over orgemini38flash, mimov26pro over ormimopro)
+        # and its twin, which would have run, never started. opencode/claude/qwen/kimi were
+        # already checked here; preflight still reports the missing binary for a named channel.
+        b = CLI_RESOLVERS[kind]()
+        return bool(b and (os.path.isfile(b) or shutil.which(b)))
+    return True                                          # codex / hermes
 
 
 def _pick_ask_channel(reg, key_ready):

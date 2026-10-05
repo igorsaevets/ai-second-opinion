@@ -946,6 +946,11 @@ def suite_dispatch():
         "routing.load_registry = lambda path=None, overlay=True: _load(\n"
         "    REG if path in (None, routing.DEFAULT_REGISTRY) else path, overlay)\n"
         "import orchestrate as o\n"
+        # R142 И-3: cascade readiness now looks for the agy binary, and the selftest world has
+        # none, so orgemini38flash would take the seat and call_agy would never be reached. A
+        # stub path makes agy38flash the pick; call_agy is replaced below, so it never runs.
+        "stub = os.path.join(t, 'agy-stub.exe'); open(stub, 'w').close()\n"
+        "o.CLI_RESOLVERS['agy'] = lambda: stub\n"
         "def ok(*a, **k): return {'ok': True, 'text': 'x\\nREVIEW-COMPLETE'}\n"
         "def boom(*a, **k): raise RuntimeError('simulated wrapper crash')\n"
         "o.call_http_reviewer = ok; o.call_codex = ok; o.call_oai_reviewer = ok\n"
@@ -7895,7 +7900,8 @@ def main():
                   suite_r140_i2_nvkimik3, suite_r140_i3_panel_hotfix,
                   suite_r140_i4_env_fail_closed,
                   suite_r141_codex_sol, suite_r139_i4_hook_hotfix,
-                  suite_r142_mimo_flash_fallback):
+                  suite_r142_mimo_flash_fallback,
+                  suite_r142_i3_kimi_single_agent):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -12956,6 +12962,145 @@ def suite_r142_mimo_flash_fallback():
         htxt = "write_handoff raised %r" % (exc,)
     check("**Fallback:** `mimov26flash` answered for `mimov26pro`" in htxt,
           "R142 И-2 (m) HANDOFF.md names the fallback and the channel it stood in for", htxt[-300:])
+
+
+def suite_r142_i3_kimi_single_agent():
+    """
+    R142 И-3 (v1.105.2). The Kimi seat of a panel runs as ONE reviewer: on 2026-10-04 the CLI fanned
+    out to 5, 11 and 4 of its own sub-agents on three iron-note-backend briefs, the NVIDIA free
+    endpoint answered most of the swarm's requests with 429, and none of those rounds produced an
+    answer. Also: a kimi timeout keeps what the CLI printed; a cascade member whose CLI is missing
+    does not win the pick (mimocli, agy, grokcli fell through to True); an undispatchable fallback
+    leaves a note; NDJSON counters ignore bools; the kimicli tier note names the env route.
+    """
+    import subprocess as _sp
+    import tempfile as _tf
+    import orchestrate as o
+    import routing as rt
+
+    td = _tf.mkdtemp(prefix="r142i3-")
+    seen = []
+    mode = {"raise": None}
+
+    class _Done:
+        returncode = 0
+        stdout = ('{"role": "meta", "content": "x"}\n[1]\n'
+                  '{"role": "assistant", "content": "review\\nR142I3-DONE"}\n')
+        stderr = ""
+
+    def _fake_run(cmd, **_kw):
+        seen.append(list(cmd))
+        if mode["raise"] is not None:
+            raise mode["raise"]
+        return _Done()
+
+    saved = (o.subprocess.run, o.kimi_bin, o._kimi_node_argv, o.neutral_cwd)
+    try:
+        o.subprocess.run = _fake_run
+        o.kimi_bin = lambda: os.path.join(td, "kimi.cmd")
+        o.neutral_cwd = lambda: td
+        o._kimi_node_argv = lambda b: ["node", "main.mjs"]
+        r = o.call_kimicli("short brief", "R142I3-DONE", os.path.join(td, "K1.md"),
+                           workdir=os.path.join(td, "ws1"))
+        c1 = seen[-1]
+        af = c1[c1.index("--agent-file") + 1] if "--agent-file" in c1 else ""
+        body = io.open(af, encoding="utf-8").read() if af and os.path.isfile(af) else ""
+        check(bool(af) and c1.index("--agent-file") < c1.index("-p") and "--add-dir" not in c1,
+              "R142 И-3 (a) inline brief: --agent-file rides before -p, still no --add-dir",
+              repr(c1[:5])[:200])
+        check(body.startswith("---\n") and "\ndisallowedTools: Agent, AgentSwarm\n" in body
+              and "\ntools: \"*\"\n" in body and "\ndescription: " in body
+              and body.rstrip().endswith("${base_prompt}"),
+              "R142 И-3 (a) the agent file drops Agent + AgentSwarm, keeps every other tool and "
+              "the CLI's own prompt (${base_prompt})", repr(body[:160]))
+        wd1 = o._ascii_safe_workdir(os.path.join(td, "ws1"), "kimik3free", "kimik3free")
+        check(os.path.dirname(os.path.abspath(af)) == os.path.abspath(wd1),
+              "R142 И-3 (a) the agent file lives in THIS run's workdir (two panels never share it)",
+              af)
+        check(r.get("ok") and r.get("text") == "review\nR142I3-DONE",
+              "R142 И-3 (a) stream-json: only role=assistant text is kept (meta and a non-object "
+              "line are skipped)", repr(r.get("text"))[:120])
+        big = "z" * 40000 + "\nNONCE-R142I3\n"
+        o.call_kimicli(big, "R142I3-DONE", os.path.join(td, "K2.md"), workdir=os.path.join(td, "ws2"))
+        c2 = seen[-1]
+        wd2 = o._ascii_safe_workdir(os.path.join(td, "ws2"), "kimik3free", "kimik3free")
+        check("--agent-file" in c2 and "--add-dir" in c2
+              and os.path.dirname(os.path.abspath(c2[c2.index("--agent-file") + 1]))
+              == os.path.abspath(wd2) and os.path.isfile(os.path.join(wd2, "BRIEF.md")),
+              "R142 И-3 (a) brief over the argv cap: --agent-file too, beside BRIEF.md",
+              repr(c2[:6])[:200])
+        # (b) timeout keeps the printed stream-json, str (Windows) and bytes (POSIX)
+        for label, out in (("str", '{"role": "assistant", "content": "half a review"}\n'),
+                           ("bytes", b'{"role": "assistant", "content": "half a review"}\n')):
+            mode["raise"] = _sp.TimeoutExpired(["kimi"], 5, output=out)
+            ofile = os.path.join(td, "T-%s.md" % label)
+            rt_ = o.call_kimicli("short brief", "R142I3-DONE", ofile, timeout="60m",
+                                 workdir=os.path.join(td, "ws3"))
+            check(rt_.get("ok") is False and rt_.get("text") == "half a review"
+                  and str(rt_.get("error", "")).startswith("TIMEOUT after 60m")
+                  and "TIMEOUT" in (rt_.get("warnings") or []) and os.path.isfile(ofile),
+                  "R142 И-3 (b) kimi TIMEOUT keeps the printed answer text (%s stdout)" % label,
+                  repr({k: rt_.get(k) for k in ("ok", "text", "error")})[:200])
+        mode["raise"] = None
+    finally:
+        o.subprocess.run, o.kimi_bin, o._kimi_node_argv, o.neutral_cwd = saved
+
+    # (c) CLI binaries count in cascade readiness
+    missing = os.path.join(td, "no-such-cli.exe")
+    present = os.path.join(td, "fake-cli.exe")
+    with open(present, "w") as f:
+        f.write("")
+    keep = dict(o.CLI_RESOLVERS)
+    try:
+        for kind in ("mimocli", "agy", "grokcli"):
+            o.CLI_RESOLVERS[kind] = lambda: missing
+            gone = o._channel_key_ready({"kind": kind})
+            o.CLI_RESOLVERS[kind] = lambda: present
+            here = o._channel_key_ready({"kind": kind})
+            check(gone is False and here is True,
+                  "R142 И-3 (c) %s: missing CLI -> not ready, present -> ready" % kind,
+                  "missing=%r present=%r" % (gone, here))
+        o.CLI_RESOLVERS["agy"] = lambda: missing
+        why = o._cascade_ready(rt.load_registry())("agy38flash")
+        check(why is not True and "missing" in str(why),
+              "R142 И-3 (c) agy38flash with no agy CLI is NOT the cascade pick (orgemini38flash can run)",
+              repr(why))
+    finally:
+        o.CLI_RESOLVERS.clear()
+        o.CLI_RESOLVERS.update(keep)
+
+    # (d) an undispatchable fallback leaves a note
+    reg = rt.load_registry()
+    plan = {"mimov26pro": {"enabled": True, "fallback": {"channel": "mimov26flash", "off": None}}}
+    res = {"mimov26pro": {"ok": False, "text": "", "error": "TIMEOUT after 40m"},
+           "ocmimo26flashfree": {"ok": False, "text": "", "error": "429"}}
+    o.run_fallbacks(res, plan, reg, ["mimov26pro", "ocmimo26flashfree"],
+                    submit=lambda _ex, _n: None, same_voice=rt.same_voice)
+    check(any("could not be dispatched" in n for n in res["mimov26pro"].get("notes", []))
+          and "mimov26flash" not in res,
+          "R142 И-3 (d) submit() returned None: the primary records it, nothing vanishes",
+          repr(res["mimov26pro"].get("notes")))
+
+    # (e) NDJSON counters ignore bools
+    raw = ('{"type": "step_finish", "part": {"tokens": {"input": true, "output": 7, '
+           '"cache": {"read": false}}, "cost": true}}\n'
+           '{"type": "step_finish", "part": {"tokens": {"input": 5, "output": 3}, "cost": 0.5}}\n')
+    _t, tok, cost = o._cli_ndjson(raw)
+    check(tok.get("input") == 5 and tok.get("output") == 10 and "cache" not in tok and cost == 0.5,
+          "R142 И-3 (e) _cli_ndjson: a JSON true/false is not a count", repr((tok, cost)))
+
+    # (f) the kimicli tier note tells the route the run takes
+    def yes(_n):
+        return True
+    pl = rt.resolve(rt.load_registry(), tier="max", only=["nvkimik3", "kimik3free"], ready=yes)
+    nv = (pl.get("nvkimik3") or {}).get("_tier_note") or ""
+    kf = (pl.get("kimik3free") or {}).get("_tier_note") or ""
+    check("routed by env to integrate.api.nvidia.com" in nv and "AIHubMix" not in nv
+          and "one reviewer" in nv and "KIMI_MODEL_THINKING_EFFORT" in nv,
+          "R142 И-3 (f) nvkimik3 tier note: NVIDIA host, effort sent, one reviewer", nv)
+    check("AIHubMix" in kf and "one reviewer" in kf,
+          "R142 И-3 (f) kimik3free tier note keeps its AIHubMix route", kf)
+    shutil.rmtree(td, ignore_errors=True)
 
 
 if __name__ == "__main__":

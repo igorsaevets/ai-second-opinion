@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.105.2 — 2026-10-04
+
+Kimi runs as one reviewer again. Investigated from the Kimi Code CLI's own session logs of every Kimi run on 2026-10-04.
+
+- **The Kimi seat no longer launches its own sub-agents.** On three review rounds the Kimi Code CLI split the work across 5, 11 and 4 sub-agents of its own. They sent up to 44 requests a minute to the free NVIDIA endpoint, which answered most of them with `429` (4% of requests at 1-3 a minute, 32% at 4-6, 59-82% above that). Two rounds hit the 60-minute timeout with no answer; the third failed on replies that held only reasoning. All six single-agent runs that day finished. The harness now starts Kimi with `--agent-file`, a small agent definition that removes the two sub-agent tools (`Agent`, `AgentSwarm`) and keeps every other tool and the CLI's own system prompt. Before this, Kimi K3 through AIHubMix answered every request with `400 cannot be served` (see 1.101.7); that was the provider, not the harness.
+- **A Kimi timeout keeps what the CLI had printed**, as MiMo and opencode do since 1.105.1. A stdout line that is valid JSON but not an object no longer crashes the Kimi channel.
+- **A missing CLI no longer wins a cascade.** For the MiMo, Antigravity and Grok CLIs the readiness check said "ready" without looking for the binary, so on a machine without `agy` the cascade picked `agy38flash`, and `orgemini38flash`, which could have run, never started. The check now looks for the binary, as it already did for opencode, Claude, Qwen and Kimi.
+- **A fallback that cannot be dispatched leaves a note** on the channel it was meant to replace, instead of vanishing.
+- **Token and cost sums ignore JSON `true`/`false`** in the MiMo and opencode stream.
+- **The plan line for `nvkimik3`** said "via AIHubMix, no effort control". It now names the NVIDIA host and the effort it sends, and both Kimi lines say "one reviewer (no sub-agents)".
+
 ## 1.105.1 — 2026-10-04
 
 Hotfix after a six-model review of the 1.105.0 MiMo fallback.

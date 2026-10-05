@@ -2107,9 +2107,19 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                                    % (p.get("effort") or "default", p["timeout"]))
             elif p.get("kind") == "kimicli":
                 p["timeout"] = p.get("timeout") or "40m"
-                p["_tier_note"] = ("timeout %s only — no effort control on this free model, "
-                                   "Kimi Code CLI via AIHubMix, $0"
-                                   % p["timeout"])
+                # R142 И-3: nvkimik3 printed «via AIHubMix, no effort control» for a route that is
+                # NVIDIA and sends its effort (KIMI_MODEL_THINKING_EFFORT, seen in the session wire).
+                _em = ((reg.get("channels") or {}).get(cname) or {}).get("env_model")
+                if isinstance(_em, dict):
+                    _host = str(_em.get("base_url") or "").split("//")[-1].split("/")[0]
+                    p["_tier_note"] = ("timeout %s, effort %s (KIMI_MODEL_THINKING_EFFORT), Kimi "
+                                       "Code CLI routed by env to %s, one reviewer (no "
+                                       "sub-agents), $0" % (p["timeout"], p.get("effort") or
+                                                            _em.get("thinking_effort"), _host))
+                else:
+                    p["_tier_note"] = ("timeout %s only — no effort control on this free model, "
+                                       "Kimi Code CLI via AIHubMix, one reviewer (no "
+                                       "sub-agents), $0" % p["timeout"])
         # 🔴 THE TIER DID NOTHING TO THE SPARK CHANNELS, and it looked like it did. The tier
         # varied `thinking.budget_tokens`, but Meta documents that field as "accepted for
         # compatibility but not translated into an effort value" - depth on this endpoint is set
