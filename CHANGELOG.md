@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.105.3 — 2026-10-05
+
+A failed Kimi run now says why.
+
+- **The report names the real cause of a failed Kimi run.** The harness sees only what the Kimi Code CLI prints, and a run that dies prints little. When a Kimi run fails, the harness now finds that run's own session log (`$KIMI_CODE_HOME/sessions`, else `~/.kimi-code/sessions`; the session written after the start whose prompt matches the one sent) and counts requests, `429` refusals, replies that held only reasoning, sub-agents and how many ran at once, and how the turn ended. It reads counts and error names only, never a prompt, a reply or a tool result. Checked on the runs that failed on 2026-10-04: one had 514 requests, 326 refused with `429` and 11 sub-agents at once; another 114 requests, 58 refusals and 27 reasoning-only replies. The report used to tell the operator to raise the timeout. It now says the endpoint rate-limited the run, and that more time does not cure a rate limit. A plain timeout and a plain `429` keep their old advice.
+- **Kimi stream output whose content is a list of parts** (`[{"type": "text", ...}]`) is read; it was dropped.
+- The selftest gives Kimi an empty home of its own (`KIMI_CODE_HOME`), so it never reads the user's real sessions.
+
 ## 1.105.2 — 2026-10-04
 
 Kimi runs as one reviewer again. Investigated from the Kimi Code CLI's own session logs of every Kimi run on 2026-10-04.

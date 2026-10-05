@@ -1385,6 +1385,15 @@ KNOWN_FAILURES = [
      "look at the round total printed above and at which channel spent it - as of 2026-08-15 the "
      "harness sums per-round cost across tool rounds and reports it even for channels that "
      "failed, which it did not do when this was first seen."),
+    # R142 И-4: the cause _kimi_wire_postmortem reads from Kimi Code CLI's session log when a run
+    # fails. Ahead of the generic 429 entry and the timeout entry on purpose: a run the endpoint rate-limits also times out,
+    # and «raise the timeout» is what three such iron rounds were told on 2026-10-04.
+    (r"refused \d+ of \d+ requests with HTTP 429",
+     "The model endpoint rate-limited this run: it refused that share of the CLI's requests with "
+     "HTTP 429 and the CLI's own retries used up the time. More time does not cure a rate limit.",
+     "Read the other channels. Re-run this one alone (`--only <channel>`) when no other run uses "
+     "the same key - a second panel or session on a free key multiplies the request rate. If the "
+     "line names sub-agents, they were the burst."),
     ("status.*429|\\b429\\b|rate.?limited?\\b|LIMIT EXHAUSTED|limit exceeded|quota exceeded",
      "A usage or rate limit was hit on that vendor.",
      "Wait, or route the work to another channel with --route/--skip. Do NOT switch that "
@@ -4577,9 +4586,134 @@ def _kimi_stream_text(raw):
             continue
         if isinstance(obj, dict) and obj.get("role") == "assistant":
             content = obj.get("content")
+            if isinstance(content, list):       # R142 И-4: content parts, not only one string
+                content = "".join(c.get("text") or "" for c in content
+                                  if isinstance(c, dict) and c.get("type") in (None, "text"))
             if isinstance(content, str) and content:
                 text += content
     return text
+
+
+def _kimi_sessions_root(child_env=None):
+    """Where Kimi Code CLI keeps its session logs: $KIMI_CODE_HOME/sessions, else ~/.kimi-code
+    (main.mjs resolves its home the same way) - read from the env the child was started with."""
+    env = child_env if child_env is not None else os.environ   # the env the CLI got
+    home = env.get("KIMI_CODE_HOME") or os.path.join(os.path.expanduser("~"), ".kimi-code")
+    return os.path.join(home, "sessions")
+
+
+_KIMI_WIRE_KEYS = ("llm.request", "turn.step.retrying", "subagent.", "turn.ended")
+
+
+def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
+    """R142 И-4: what Kimi Code CLI's own session log says about a run that did not finish.
+
+    The harness sees stdout only; why a Kimi run died is in the CLI's session log,
+    `<home>/sessions/wd_*/session_*/agents/<agent>/wire.jsonl`. On 2026-10-04 three iron rounds died
+    on the NVIDIA endpoint's 429s (Kimi's own sub-agent swarm) and one on «only thinking content»
+    replies, while the report told the operator to raise the timeout. The session is the one
+    written after `t0` whose first prompt holds the middle of the `-p` text this call sent (the
+    start is the shared system preset). Counts, status codes and error NAMES only - never a prompt,
+    a reply or a tool result. None when no such session is found.
+    """
+    want = (prompt or "").strip()
+    mid = want[len(want) // 2:len(want) // 2 + 160] if len(want) > 400 else want[:160]
+    root, found = _kimi_sessions_root(child_env), None
+    try:
+        wds = [e.path for e in os.scandir(root) if e.is_dir()]
+    except OSError:
+        return None
+    for wd in wds:
+        try:
+            sessions = [e.path for e in os.scandir(wd) if e.is_dir() and e.name.startswith("session_")]
+        except OSError:
+            continue
+        for s in sessions:
+            mw = os.path.join(s, "agents", "main", "wire.jsonl")
+            try:
+                mt = os.path.getmtime(mw)
+                if mt < t0 - 5 or (found and mt <= found[1]):
+                    continue
+                with open(mw, encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        if "turn.prompt" not in line:
+                            continue
+                        rec = json.loads(line)
+                        if isinstance(rec, dict) and rec.get("type") == "turn.prompt":
+                            txt = "".join((x.get("text") or "") for x in (rec.get("input") or [])
+                                          if isinstance(x, dict))
+                            if mid and mid in txt:
+                                found = (s, mt)
+                            break
+            except (OSError, ValueError):
+                continue
+    if not found:
+        return None
+    reqs = r429 = think = 0
+    other, ev, ended, last_req = {}, [], None, None
+    try:
+        agents = [e for e in os.scandir(os.path.join(found[0], "agents")) if e.is_dir()]
+    except OSError:
+        agents = []
+    for a in agents:
+        try:
+            f = open(os.path.join(a.path, "wire.jsonl"), encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        with f:
+            for line in f:
+                if not any(k in line for k in _KIMI_WIRE_KEYS):
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+                ty, t = rec.get("type") or "", rec.get("time")
+                t = t / 1000.0 if isinstance(t, (int, float)) and t > 1e12 else t
+                if ty == "llm.request":
+                    reqs += 1
+                    if isinstance(t, (int, float)):
+                        last_req = max(last_req or t, t)
+                elif ty == "turn.step.retrying":
+                    if rec.get("statusCode") == 429:
+                        r429 += 1
+                    elif "thinking" in str(rec.get("errorMessage") or "").lower():
+                        think += 1
+                    else:
+                        k = str(rec.get("errorName") or rec.get("statusCode") or "unknown")[:40]
+                        other[k] = other.get(k, 0) + 1
+                elif ty in ("subagent.spawned", "subagent.completed", "subagent.failed") \
+                        and isinstance(t, (int, float)):
+                    ev.append((t, 1 if ty == "subagent.spawned" else -1))
+                elif ty == "turn.ended" and a.name == "main":
+                    er = rec.get("error")
+                    ended = "%s%s" % (rec.get("reason"), (" (%s)" % er.get("name"))
+                                      if isinstance(er, dict) and er.get("name") else "")
+    cur = peak = spawned = 0
+    for _t, d in sorted(ev):
+        cur += d
+        peak = max(peak, cur)
+        spawned += d > 0
+    cause = None
+    if r429 >= 5 and r429 >= 0.2 * max(1, reqs):
+        cause = "the endpoint refused %d of %d requests with HTTP 429 (rate limit)" % (r429, reqs)
+        if think >= 3:
+            cause += ", and %d more replies held only thinking content" % think
+    elif think >= 3:
+        cause = "%d replies containing only thinking content (no answer, no tool call)" % think
+    if cause and spawned:
+        cause += "; it ran %d sub-agent(s), up to %d at once" % (spawned, peak)
+    line = ("Kimi session log %s: %d requests; retries: %d x 429, %d thinking-only, other %s; "
+            "sub-agents %d (max %d at once); turn %s"
+            % (os.path.basename(found[0])[8:16], reqs, r429, think,
+               (", ".join("%s x%d" % kv for kv in sorted(other.items())) or "none"), spawned, peak,
+               ended or "never ended (the CLI was still working when it was stopped)"))
+    if stopped_at and last_req:
+        line += "; last request %.0f s before the stop" % max(0.0, stopped_at - last_req)
+    return {"cause": cause, "line": line, "requests": reqs, "r429": r429, "thinking": think,
+            "subagents": spawned, "peak": peak, "ended": ended, "session": found[0]}
 
 
 def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
@@ -4678,6 +4812,7 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
         how = "brief in %s (%s), -p names it" % (bpath, "no node path: cmd.exe shim"
                                                  if base is None else "over the argv cap")
 
+    prompt_arg = cmd[cmd.index("-p") + 1]     # R142 И-4: the session log is matched on it
     ncwd = neutral_cwd()
     # R137 И-2 hotfix (v1.100.1): NO `--auto` here. kimi 2.1.1 refuses it next to -p («Cannot combine
     # --prompt with --auto.», exit 1 - v1.100.0 shipped that and the panel caught it); its docs:
@@ -4704,10 +4839,16 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
         if part:
             with open(outfile, "w", encoding="utf-8") as f:
                 f.write(part)
+        # R142 И-4: say WHY from the CLI's session log - a rate-limited run also times out.
+        pm = _kimi_wire_postmortem(t0, prompt_arg, child_env, stopped_at=time.time())
+        err, twarn = "TIMEOUT after %s" % (timeout or "2400s"), "TIMEOUT"
+        if pm and pm["cause"]:
+            err += " - " + pm["cause"]
+            twarn += " - " + pm["cause"]
         return {"channel": name, "ok": False, "text": part,
                 "seconds": round(time.time() - t0, 1), "bytes": len(part.encode("utf-8")),
-                "error": "TIMEOUT after %s" % (timeout or "2400s"), "model": model,
-                "effort": effort, "warnings": ["TIMEOUT"], "notes": []}
+                "error": err, "model": model, "effort": effort, "warnings": [twarn],
+                "notes": [pm["line"]] if pm else []}
 
     secs = time.time() - t0
     raw = (p.stdout or "").strip()
@@ -4726,6 +4867,12 @@ def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
     if not text.strip() and not warn:
         warn.append("EMPTY OUTPUT despite exit 0")
     record_refusal(refusal_check(text, marker), warn, note)
+    if warn:
+        pm = _kimi_wire_postmortem(t0, prompt_arg, child_env)      # R142 И-4
+        if pm:
+            note.append(pm["line"])
+            if pm["cause"]:
+                warn.insert(0, "Kimi session log: " + pm["cause"])
 
     return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
             "bytes": len(text.encode("utf-8")), "exit": p.returncode,

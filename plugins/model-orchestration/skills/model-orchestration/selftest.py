@@ -7838,6 +7838,9 @@ def main():
         os.environ[_var] = os.path.join(_world, "no-vendor-cli", _exe)
     for _pv in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
         os.environ[_pv] = SELFTEST_DEAD_PROXY
+    # R142 И-4: a failed Kimi call reads the CLI's session logs ($KIMI_CODE_HOME/sessions) - inside
+    # the selftest that must be the world's own empty home, never the user's real sessions.
+    os.environ["KIMI_CODE_HOME"] = os.path.join(_world, "kimi-code-home")
     for _pv in ("NO_PROXY", "no_proxy"):
         os.environ[_pv] = "localhost,127.0.0.1,::1"
     import importlib.util as _ilu0
@@ -7901,7 +7904,7 @@ def main():
                   suite_r140_i4_env_fail_closed,
                   suite_r141_codex_sol, suite_r139_i4_hook_hotfix,
                   suite_r142_mimo_flash_fallback,
-                  suite_r142_i3_kimi_single_agent):
+                  suite_r142_i3_kimi_single_agent, suite_r142_i4_kimi_postmortem):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -13101,6 +13104,178 @@ def suite_r142_i3_kimi_single_agent():
     check("AIHubMix" in kf and "one reviewer" in kf,
           "R142 И-3 (f) kimik3free tier note keeps its AIHubMix route", kf)
     shutil.rmtree(td, ignore_errors=True)
+
+
+def suite_r142_i4_kimi_postmortem():
+    """
+    R142 И-4. A failed Kimi run names its cause, read from Kimi Code CLI's own session log
+    (`$KIMI_CODE_HOME/sessions/*/session_*/agents/*/wire.jsonl`). On 2026-10-04 three iron rounds died
+    on the NVIDIA endpoint's 429s (Kimi's own sub-agent swarm) or on «only thinking content» replies,
+    and the report told the operator to raise the timeout. Measured on the real logs: P290 514
+    requests / 326 x 429 / 11 sub-agents at once; P293 114 / 58 x 429 / 27 thinking-only / 4.
+    """
+    import json as _js
+    import subprocess as _sp
+    import tempfile as _tf
+    import time as _tm
+    import orchestrate as o
+
+    t0 = _tm.time()
+    home = _tf.mkdtemp(prefix="r142i4-kimi-home-")
+
+    def ms(s):
+        return int((t0 + s) * 1000)
+
+    def write_session(hm, name, prompt, agents, mtime=None):
+        for an, recs in agents.items():
+            d = os.path.join(hm, "sessions", "wd_test", "session_" + name, "agents", an)
+            os.makedirs(d, exist_ok=True)
+            w = os.path.join(d, "wire.jsonl")
+            with io.open(w, "w", encoding="utf-8") as f:
+                if an == "main":
+                    f.write(_js.dumps({"type": "turn.prompt", "time": ms(0),
+                                       "input": [{"type": "text", "text": prompt}]}) + "\n")
+                for r in recs:
+                    f.write(_js.dumps(r) + "\n")
+            if mtime:
+                os.utime(w, (mtime, mtime))
+
+    def req(s):
+        return {"type": "llm.request", "time": ms(s)}
+
+    def r429(s):
+        return {"type": "turn.step.retrying", "time": ms(s), "statusCode": 429,
+                "errorName": "APIStatusError", "errorMessage": "429 status code (no body)"}
+
+    def rthink(s):
+        return {"type": "turn.step.retrying", "time": ms(s), "errorName": "APIEmptyResponseError",
+                "errorMessage": "The API returned a response containing only thinking content"}
+
+    def sub(ty, s):
+        return {"type": ty, "time": ms(s)}
+
+    def prompt(tag):
+        return "You are an independent reviewer.\n" + "".join("%s brief line %d\n" % (tag, i)
+                                                             for i in range(60))
+
+    env = {"KIMI_CODE_HOME": home}
+    # 1. a swarm under 429: main 20 requests / 9 x 429 / 1 thinking, a sub-agent 10 / 4 x 429, three
+    #    sub-agents up at once, the turn never ended (the harness killed it)
+    p1 = prompt("storm")
+    write_session(home, "storm", p1, {
+        "main": [req(i) for i in range(20)] + [r429(i) for i in range(9)] + [rthink(30)]
+        + [sub("subagent.spawned", 1), sub("subagent.spawned", 2), sub("subagent.spawned", 3),
+           sub("subagent.completed", 10), sub("subagent.failed", 11), sub("subagent.completed", 12)],
+        "sub1": [req(i) for i in range(10)] + [r429(i) for i in range(4)]})
+    pm = o._kimi_wire_postmortem(t0, p1, env, stopped_at=t0 + 60)
+    check(bool(pm) and pm["requests"] == 30 and pm["r429"] == 13 and pm["subagents"] == 3
+          and pm["peak"] == 3,
+          "R142 И-4: the post-mortem counts requests, 429s and sub-agents over EVERY agent of the "
+          "session (main + sub-agents), and how many sub-agents ran at once",
+          repr(pm and {k: pm[k] for k in ("requests", "r429", "subagents", "peak")}))
+    cause = (pm or {}).get("cause") or ""
+    check(cause.startswith("the endpoint refused 13 of 30 requests with HTTP 429")
+          and "up to 3 at once" in cause and "never ended" in (pm or {}).get("line", ""),
+          "R142 И-4: a rate-limited run's cause names the 429 share and the sub-agents; a turn "
+          "that never ended says so", cause[:160])
+    c_storm = o.diagnose("TIMEOUT after 60m - " + cause)[0] or ""
+    check("rate-limited" in c_storm and "allotted" not in c_storm,
+          "R142 И-4: diagnose() of a rate-limited Kimi timeout gives the rate-limit cause, not "
+          "«took longer than its allotted time» (the advice three 10-04 rounds got)", c_storm[:90])
+    check("allotted" in (o.diagnose("TIMEOUT after 60m")[0] or "")
+          and (o.diagnose("429 Too Many Requests")[0] or "").startswith("A usage or rate limit"),
+          "R142 И-4 control: a plain timeout keeps the timeout advice and a plain 429 the generic "
+          "rate-limit cause - the new entry is specific to the session-log wording")
+    # 2. thinking-only death, no 429
+    p2 = prompt("think")
+    write_session(home, "think", p2, {"main": [req(i) for i in range(10)]
+                                       + [rthink(i) for i in range(4)]
+                                       + [{"type": "turn.ended", "time": ms(40), "reason": "failed",
+                                           "error": {"name": "APIEmptyResponseError"}}]})
+    pm2 = o._kimi_wire_postmortem(t0, p2, env) or {}
+    c2 = o.diagnose("Kimi session log: " + (pm2.get("cause") or ""))[0] or ""
+    check("containing only thinking content" in (pm2.get("cause") or "")
+          and c2.startswith("The endpoint returned reasoning")
+          and "failed (APIEmptyResponseError)" in pm2.get("line", ""),
+          "R142 И-4: a run that died on thinking-only replies is named so, with how its turn ended",
+          repr(pm2.get("line"))[:160])
+    # 3. a slow but healthy run: no cause, the plain timeout advice stays true
+    p3 = prompt("slow")
+    write_session(home, "slow", p3, {"main": [req(i) for i in range(12)] + [r429(5)]
+                                     + [{"type": "turn.ended", "time": ms(50), "reason": "completed"}]})
+    pm3 = o._kimi_wire_postmortem(t0, p3, env) or {}
+    check(pm3.get("requests") == 12 and pm3.get("cause") is None,
+          "R142 И-4: one 429 in 12 requests is not a rate-limit death - no cause is invented",
+          repr(pm3.get("cause")))
+    # 4. isolation: an older session with the same prompt, an unknown prompt, the world's home
+    p4 = prompt("old")
+    write_session(home, "old", p4, {"main": [req(1)] + [r429(i) for i in range(9)]},
+                  mtime=t0 - 3600)
+    check(o._kimi_wire_postmortem(t0, p4, env) is None
+          and o._kimi_wire_postmortem(t0, prompt("nobody"), env) is None,
+          "R142 И-4: a session written before this call, or one with another prompt, is never "
+          "read as this run's")
+    check(o._kimi_sessions_root(None).startswith(os.environ.get("KIMI_CODE_HOME") or "\0")
+          and o._kimi_sessions_root(env).startswith(home),
+          "R142 И-4: the sessions root comes from the env the CLI got (child env, else this "
+          "process's) - inside the selftest that is the world's own home, never the user's")
+    # 5. end to end through call_kimicli: TIMEOUT and EXIT paths carry the cause and the log line
+    home2 = _tf.mkdtemp(prefix="r142i4-kimi-home2-")
+    td = _tf.mkdtemp(prefix="r142i4-")
+    mode = {"n": 0, "timeout": True}
+
+    class _Exit1:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    def _fake_run(cmd, **_kw):
+        mode["n"] += 1
+        pa = cmd[cmd.index("-p") + 1]
+        write_session(home2, "e2e%d" % mode["n"], pa, {
+            "main": [req(i) for i in range(10)] + [r429(i) for i in range(6)]
+            + [sub("subagent.spawned", 1), sub("subagent.spawned", 2)]})
+        if mode["timeout"]:
+            raise _sp.TimeoutExpired(cmd, 5, output="")
+        return _Exit1()
+
+    saved = (o.subprocess.run, o.kimi_bin, o._kimi_node_argv, o.neutral_cwd,
+             os.environ.get("KIMI_CODE_HOME"))
+    try:
+        os.environ["KIMI_CODE_HOME"] = home2
+        o.subprocess.run = _fake_run
+        o.kimi_bin = lambda: os.path.join(td, "kimi.cmd")
+        o.neutral_cwd = lambda: td
+        o._kimi_node_argv = lambda b: ["node", "main.mjs"]
+        rt_ = o.call_kimicli("a short brief " * 40, "R142I4-DONE", os.path.join(td, "K.md"),
+                             timeout=5, name="nvkimik3", workdir=os.path.join(td, "ws1"))
+        mode["timeout"] = False
+        rx = o.call_kimicli("another brief " * 40, "R142I4-DONE", os.path.join(td, "K2.md"),
+                            timeout=5, name="nvkimik3", workdir=os.path.join(td, "ws2"))
+    finally:
+        (o.subprocess.run, o.kimi_bin, o._kimi_node_argv, o.neutral_cwd) = saved[:4]
+        if saved[4] is None:
+            os.environ.pop("KIMI_CODE_HOME", None)
+        else:
+            os.environ["KIMI_CODE_HOME"] = saved[4]
+    check(str(rt_.get("error", "")).startswith("TIMEOUT after 5 - the endpoint refused 6 of 10 "
+                                              "requests with HTTP 429")
+          and (rt_.get("warnings") or [""])[0].startswith("TIMEOUT - the endpoint refused")
+          and any("Kimi session log" in n for n in rt_.get("notes") or []),
+          "R142 И-4: call_kimicli's TIMEOUT names the session log's cause in the error AND the "
+          "warning (diagnose reads both) and keeps the counts line in notes",
+          repr((rt_.get("error"), rt_.get("warnings")))[:200])
+    check(rx.get("ok") is False
+          and (rx.get("warnings") or [""])[0].startswith("Kimi session log: the endpoint refused")
+          and any(w.startswith("EXIT 1") for w in rx.get("warnings") or [])
+          and any("sub-agents 2" in n for n in rx.get("notes") or []),
+          "R142 И-4: an EXIT failure puts the session log's cause first in the warnings, beside "
+          "the exit line", repr(rx.get("warnings"))[:200])
+    check(o._kimi_stream_text('{"role": "assistant", "content": [{"type": "text", "text": "a"}, '
+                              '{"type": "think", "text": "x"}, {"type": "text", "text": "b"}]}')
+          == "ab" and o._kimi_stream_text('{"role": "assistant", "content": "plain"}') == "plain",
+          "R142 И-4 (Spark): list-shaped assistant content is read (text parts only); the string "
+          "form is unchanged")
 
 
 if __name__ == "__main__":
