@@ -7904,7 +7904,8 @@ def main():
                   suite_r140_i4_env_fail_closed,
                   suite_r141_codex_sol, suite_r139_i4_hook_hotfix,
                   suite_r142_mimo_flash_fallback,
-                  suite_r142_i3_kimi_single_agent, suite_r142_i4_kimi_postmortem):
+                  suite_r142_i3_kimi_single_agent, suite_r142_i4_kimi_postmortem,
+                  suite_r142_i5_thinking_advice):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -13276,6 +13277,85 @@ def suite_r142_i4_kimi_postmortem():
           == "ab" and o._kimi_stream_text('{"role": "assistant", "content": "plain"}') == "plain",
           "R142 И-4 (Spark): list-shaped assistant content is read (text parts only); the string "
           "form is unchanged")
+
+
+def suite_r142_i5_thinking_advice():
+    """
+    R142 И-5. A Kimi run that died on «only thinking content» replies was told «suspect the budget,
+    a narrower brief is the lever». Measured on NVIDIA's free K3 endpoint (all 103 such attempts
+    since 10-04): each ended 5-240 s after its request, while successful steps ran at 11.6-26.9
+    output tokens/s - a full 65,536-token budget takes 40+ minutes. The post-mortem now says how
+    long the failed attempts lasted and how long the main agent's longest retry run was, and the
+    advice tells the two causes apart by that duration.
+    """
+    import json as _js
+    import tempfile as _tf
+    import time as _tm
+    import orchestrate as o
+
+    t0 = _tm.time()
+    home = _tf.mkdtemp(prefix="r142i5-kimi-home-")
+
+    def ms(s):
+        return int((t0 + s) * 1000)
+
+    def write(name, prompt, agents):
+        for an, recs in agents.items():
+            d = os.path.join(home, "sessions", "wd_test", "session_" + name, "agents", an)
+            os.makedirs(d, exist_ok=True)
+            with io.open(os.path.join(d, "wire.jsonl"), "w", encoding="utf-8") as f:
+                if an == "main":
+                    f.write(_js.dumps({"type": "turn.prompt", "time": ms(0),
+                                       "input": [{"type": "text", "text": prompt}]}) + "\n")
+                for r in recs:
+                    f.write(_js.dumps(r) + "\n")
+
+    def req(s):
+        return {"type": "llm.request", "time": ms(s)}
+
+    def think(s, attempt):
+        return {"type": "turn.step.retrying", "time": ms(s), "errorName": "APIEmptyResponseError",
+                "failedAttempt": attempt, "maxAttempts": 10,
+                "errorMessage": "The API returned a response containing only thinking content"}
+
+    env = {"KIMI_CODE_HOME": home}
+    p1 = "You are an independent reviewer.\n" + "".join("i5 brief line %d\n" % i for i in range(60))
+    # the main agent: one good step, then 4 attempts of one step each answered with thinking only
+    # 30 s after its request; a sub-agent's own retry run (7) must not count as the main's
+    main = [req(0), req(40), think(70, 1), req(71), think(101, 2), req(102), think(132, 3),
+            req(133), think(163, 4),
+            {"type": "turn.ended", "time": ms(170), "reason": "failed",
+             "error": {"name": "APIEmptyResponseError"}}]
+    write("i5think", p1, {"main": main,
+                          "sub1": [req(5), {"type": "turn.step.retrying", "time": ms(6),
+                                            "statusCode": 429, "failedAttempt": 7}]})
+    pm = o._kimi_wire_postmortem(t0, p1, env) or {}
+    check(round(pm.get("think_max_s") or 0) == 30 and pm.get("streak") == 4,
+          "R142 И-5: the post-mortem measures how long each thinking-only attempt ran (request -> "
+          "retry) and the MAIN agent's longest run of failed attempts (a sub-agent's run is not it)",
+          repr({k: pm.get(k) for k in ("think_max_s", "streak")}))
+    check("each ended at most 30 s after its request" in (pm.get("cause") or "")
+          and "longest run of failed attempts on one step: 4" in (pm.get("line") or ""),
+          "R142 И-5: the cause and the counts line carry those two numbers",
+          repr((pm.get("cause"), pm.get("line")))[:220])
+    cz, fz = o.diagnose("Kimi session log: " + (pm.get("cause") or ""))
+    check((cz or "").startswith("The endpoint returned reasoning") and "5-240 s" in (cz or "")
+          and "seconds to a few minutes" in (fz or "") and "re-run is the remedy" in (fz or "")
+          and "If it ends this way again on the same brief, suspect the budget" not in (fz or ""),
+          "R142 И-5: the advice tells an empty reply (seconds to minutes: re-run) from a used-up "
+          "budget (attempts as long as a full budget) - no unconditional «narrow the brief»",
+          repr(fz)[:200])
+    # control: a rate-limited run keeps its own cause, without the thinking duration clause
+    p2 = "You are an independent reviewer.\n" + "".join("i5 rate line %d\n" % i for i in range(60))
+    write("i5rate", p2, {"main": [req(i) for i in range(10)] + [
+        {"type": "turn.step.retrying", "time": ms(i), "statusCode": 429, "failedAttempt": True}
+        for i in range(6)]})
+    pm2 = o._kimi_wire_postmortem(t0, p2, env) or {}
+    check((pm2.get("cause") or "").startswith("the endpoint refused 6 of 10 requests")
+          and "each ended" not in (pm2.get("cause") or "") and pm2.get("streak") == 0
+          and pm2.get("think_max_s") is None,
+          "R142 И-5 control: a 429 death keeps its cause; a bool failedAttempt is not a count",
+          repr({k: pm2.get(k) for k in ("cause", "streak", "think_max_s")})[:200])
 
 
 if __name__ == "__main__":

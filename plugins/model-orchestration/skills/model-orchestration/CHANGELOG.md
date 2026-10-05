@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.105.4 — 2026-10-05
+
+A Kimi run that ends on reasoning-only replies gets advice that fits it.
+
+- **The advice for that failure no longer sends the operator to shrink the brief.** It said: if it happens again, suspect the output budget and narrow the brief. On NVIDIA's free Kimi K3 endpoint, all 103 reasoning-only replies since 2026-10-04 came back 5 to 240 seconds after their request, including the three runs that ended this way (one of them had no sub-agent). Successful steps there ran at 12 to 27 output tokens a second, so a reply that used the whole 65,536-token budget would take 40 minutes or more. Those were empty replies, not a used-up budget, and a re-run is the remedy: on that endpoint, runs without sub-agents finished 12 of 14. The advice now says how to tell the two apart.
+- **The Kimi session-log line shows the numbers for that:** how long the longest reasoning-only attempt ran, and the main agent's longest run of failed attempts on one step.
+- **No change to the Kimi seat: it stays one reviewer.** A test on a real review brief allowed one sub-agent, with the limit written into the agent's instructions. The model kept to the limit. The run that used its sub-agent failed ten attempts in a row at the next step (nine empty replies, one `429`); the run that did not use it gained nothing over the current seat. On that endpoint, runs with sub-agents finished 0 of 4.
+
 ## 1.105.3 — 2026-10-05
 
 A failed Kimi run now says why.

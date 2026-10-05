@@ -1455,17 +1455,26 @@ KNOWN_FAILURES = [
      "(output limit, effort, temperature) with that vendor's documented ranges."),
     # The per-attempt text Kimi Code CLI records in its session wire (`APIEmptyResponseError`);
     # it retries it itself, up to 10 attempts. R140 И-2: 2 of 4 NVIDIA requests came back this
-    # way and the retry answered. A run that ENDS with it exhausted the retries (not measured).
-    # R140 И-3 (grok): the CLI's own sentence names TWO causes - a cut stream, or a reasoning
-    # that used the whole output budget (on NVIDIA reasoning + answer share 65,536 at max).
+    # way and the retry answered. R140 И-3 (grok): the CLI's own sentence names TWO causes - a
+    # cut stream, or a reasoning that used the whole output budget (on NVIDIA reasoning + answer
+    # share 65,536 at max). R142 И-5 (05.10, `runs/r142-i5-kimi-verdict/think_durations.log`):
+    # all 103 thinking-only attempts on NVIDIA since 10-04, incl. the three runs that ENDED this way
+    # (one with no sub-agent, at its 2nd step), ended 5-240 s after the request; successful steps
+    # ran at 11.6-26.9 output tokens/s - so the old «suspect the budget» advice was wrong for them.
     ("containing only thinking content",
      "The endpoint returned reasoning but no answer and no tool call, on every retry the CLI "
-     "made. Two causes give this text: the stream was cut, or the reasoning used the whole "
-     "output budget (env_model.max_output_size; reasoning and answer share it). One measured "
-     "NVIDIA run: 2 of 4 requests, recovered by the CLI's retry - the cut kind.",
-     "Re-run the channel later (`--only <channel>`) and read the other channels meanwhile. If "
-     "it ends this way again on the same brief, suspect the budget: the cap is the vendor's "
-     "ceiling and effort stays at max by policy, so a narrower brief is the lever."),
+     "made. Two causes give this text: an empty or cut reply, or a reasoning that used the whole "
+     "output budget (env_model.max_output_size; reasoning and answer share it). Measured on "
+     "NVIDIA's free K3 endpoint (2026-10-04/05): all 103 such attempts, including the three runs "
+     "that ended this way (one with no sub-agent), ended 5-240 s after their request - far too "
+     "soon for the budget (successful steps ran at 12-27 output tokens/s, so 65,536 tokens take "
+     "40+ minutes).",
+     "Re-run the channel (`--only <channel>`) and read the other channels meanwhile; on that "
+     "endpoint the runs with no sub-agent finished 12 of 14 (2026-10-04/05). The Kimi session "
+     "log line says how long the failed attempts lasted: seconds to a few minutes = an empty "
+     "reply, and a re-run is the remedy. Only attempts that each ran about as long as a full "
+     "budget takes point to the budget - the cap is the vendor's ceiling and effort stays at "
+     "max by policy, so then a narrower brief is the lever."),
     ("timed out|timeout",
      "The channel took longer than its allotted time.",
      "Raise that channel's timeout in the tier block, or split the brief into smaller questions. "
@@ -4649,8 +4658,9 @@ def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
                 continue
     if not found:
         return None
-    reqs = r429 = think = 0
+    reqs = r429 = think = streak = 0
     other, ev, ended, last_req = {}, [], None, None
+    req_t, think_t = {}, {}
     try:
         agents = [e for e in os.scandir(os.path.join(found[0], "agents")) if e.is_dir()]
     except OSError:
@@ -4676,11 +4686,17 @@ def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
                     reqs += 1
                     if isinstance(t, (int, float)):
                         last_req = max(last_req or t, t)
+                        req_t.setdefault(a.name, []).append(t)
                 elif ty == "turn.step.retrying":
+                    fa = rec.get("failedAttempt")
+                    if a.name == "main" and isinstance(fa, int) and not isinstance(fa, bool):
+                        streak = max(streak, fa)
                     if rec.get("statusCode") == 429:
                         r429 += 1
                     elif "thinking" in str(rec.get("errorMessage") or "").lower():
                         think += 1
+                        if isinstance(t, (int, float)):
+                            think_t.setdefault(a.name, []).append(t)
                     else:
                         k = str(rec.get("errorName") or rec.get("statusCode") or "unknown")[:40]
                         other[k] = other.get(k, 0) + 1
@@ -4696,6 +4712,16 @@ def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
         cur += d
         peak = max(peak, cur)
         spawned += d > 0
+    # R142 И-5: how long each thinking-only attempt ran - from its agent's latest request to the
+    # retry. Seconds to a few minutes rule out an output budget used to the end: on NVIDIA's free K3
+    # endpoint successful steps ran at 11.6-26.9 output tokens/s, so 65,536 tokens take 40+ minutes.
+    think_secs = []
+    for an, tl in think_t.items():
+        rq = sorted(req_t.get(an) or [])
+        for tt in tl:
+            before = [x for x in rq if x <= tt]
+            if before:
+                think_secs.append(tt - before[-1])
     cause = None
     if r429 >= 5 and r429 >= 0.2 * max(1, reqs):
         cause = "the endpoint refused %d of %d requests with HTTP 429 (rate limit)" % (r429, reqs)
@@ -4703,17 +4729,22 @@ def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
             cause += ", and %d more replies held only thinking content" % think
     elif think >= 3:
         cause = "%d replies containing only thinking content (no answer, no tool call)" % think
+        if think_secs:
+            cause += ", each ended at most %.0f s after its request" % max(think_secs)
     if cause and spawned:
         cause += "; it ran %d sub-agent(s), up to %d at once" % (spawned, peak)
-    line = ("Kimi session log %s: %d requests; retries: %d x 429, %d thinking-only, other %s; "
+    line = ("Kimi session log %s: %d requests; retries: %d x 429, %d thinking-only, other %s%s; "
             "sub-agents %d (max %d at once); turn %s"
             % (os.path.basename(found[0])[8:16], reqs, r429, think,
-               (", ".join("%s x%d" % kv for kv in sorted(other.items())) or "none"), spawned, peak,
+               (", ".join("%s x%d" % kv for kv in sorted(other.items())) or "none"),
+               ("; the main agent's longest run of failed attempts on one step: %d" % streak)
+               if streak else "", spawned, peak,
                ended or "never ended (the CLI was still working when it was stopped)"))
     if stopped_at and last_req:
         line += "; last request %.0f s before the stop" % max(0.0, stopped_at - last_req)
     return {"cause": cause, "line": line, "requests": reqs, "r429": r429, "thinking": think,
-            "subagents": spawned, "peak": peak, "ended": ended, "session": found[0]}
+            "subagents": spawned, "peak": peak, "ended": ended, "session": found[0],
+            "think_max_s": max(think_secs) if think_secs else None, "streak": streak}
 
 
 def call_kimicli(brief, marker, outfile, model=None, effort=None, system=None,
