@@ -2087,8 +2087,12 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                 # it at plan time and prints a NOTE rather than wasting a run.
                 p["effort"] = _clamp_effort(reg, cname, p["model"], p.get("effort"), p)
                 p["timeout"] = t.get("grokcli_timeout", p.get("timeout") or "40m")
-                p["_tier_note"] = ("effort %s (clamped to this model's ceiling), timeout %s"
-                                   % (p.get("effort"), p["timeout"]))
+                # R142 И-6 (Grok's audit): «clamped to this model's ceiling» was printed for any
+                # effort the ladder accepts - a local `medium` read as the top. Same fix as R141's.
+                p["_tier_note"] = ("effort %s (%s), timeout %s"
+                                   % (p.get("effort"),
+                                      _ceiling_phrase(reg, cname, p["model"], p.get("effort")),
+                                      p["timeout"]))
             elif p.get("kind") == "mimocli":
                 p["effort"] = _clamp_effort(reg, cname, p["model"], p.get("effort"), p)
                 p["timeout"] = p.get("timeout") or "40m"

@@ -26,7 +26,7 @@ a labelled `token=` / `password=` / `api_key=` assignment, or a bearer token is 
 There is deliberately no flag to force it. If it is a false positive — a placeholder, a documented
 example — rename the variable or redact the value in the document.
 
-**Personal identifiers — detected, listed by kind and line, and sent by default.** National ID
+**Personal identifiers — detected, counted by kind in one line, and sent by default.** National ID
 numbers, case and receipt numbers, SSNs, email addresses, phone numbers, labelled dates of
 birth and passport numbers are found and reported before send but the payload IS sent unless
 you pass `--strict-pii`, which refuses the round instead. The default is warn-and-send; the
@@ -36,7 +36,8 @@ The recommended handling is to tokenize in the **sent copy only** — never edit
 record — and tell the model the placeholders are expected. A reviewer never needs real identifiers
 to review reasoning.
 
-**The gate reports kind and line number, never the value.** Printing the matched value would leak
+**The gate reports kind and line number (identifiers: with `--warn-pii` or `--strict-pii`; by
+default one line with the count and kinds), never the value.** Printing the matched value would leak
 it into the terminal transcript, which is the same mistake one step earlier.
 
 Both the document and the system-prompt file are scanned; a hand-written preset carries a key just

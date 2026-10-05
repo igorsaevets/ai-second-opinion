@@ -486,6 +486,9 @@ def check_pii_gate(r, mod):
              "-----BEGIN RSA PRIVATE KEY-----\n"
              "anthropic sk-ant-" + "a" * 40 + "\n"
              "openai sk-" + "b" * 40 + "\n"
+             # R142 И-6: the two hyphenated key shapes the gate learned in 1.106.1.
+             "openrouter sk-or-" + "v1-" + "e" * 64 + "\n"
+             "openai project sk-" + "proj-" + "f" * 48 + "\n"
              "aws AKIAIOSFODNN7EXAMPLE\n"
              "github ghp_" + "c" * 36 + "\n"
              "slack xoxb-1234567890-abcdefghij\n"

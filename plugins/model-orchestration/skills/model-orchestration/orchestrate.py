@@ -699,6 +699,10 @@ REFUSAL_TELLS = [
     "i won't be able", "i will not be able",
     "not able to assist", "can't assist with", "cannot assist with",
     "i must decline", "i have to decline",
+    # R142 И-6 (MiMo Flash's audit): every tell was English, so a Russian decline matched at no
+    # length - and Russian briefs get Russian answers here. Same meanings as the lines above.
+    "не могу предоставить", "не могу помочь", "не могу выполнить",
+    "мне не разрешено", "я не в состоянии", "вынужден отказаться", "должен отказаться",
 ]
 
 
@@ -813,6 +817,14 @@ def refusal_check(text, marker=None, min_chars=800):
                 "narrow question this is correct; if it asked for a full review, read it before "
                 "counting it - a decline, a truncation and a misread brief all look like this."
                 % len(body))
+    tell = next((t for t in REFUSAL_TELLS if t in head), None)
+    if tell:
+        # R142 И-6 (agy, Grok, MiMo Flash - 3 of the 4 audits): a decline padded past min_chars
+        # with policy text passed with NO signal. It stays SOFT: a real review may open «I cannot
+        # provide a date for X, but...», and a hard verdict there is the false alarm measured above.
+        return (SOFT + "OPENS LIKE A REFUSAL (%d chars): its first 400 characters say %r. A "
+                "decline padded past %d characters passes every mechanical check - read the "
+                "opening before counting this channel." % (len(body), tell, min_chars))
     return None
 
 
@@ -1061,6 +1073,12 @@ SECRET_PATTERNS = [
     ("PRIVATE_KEY_BLOCK", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("ANTHROPIC_KEY",     re.compile(r"\bsk-ant-[A-Za-z0-9_\-]{20,}")),
     ("OPENAI_KEY",        re.compile(r"\bsk-[A-Za-z0-9]{32,}")),
+    # R142 И-6 (panel: Kimi K3, Grok 4.7): the rule above wants 32 ALNUM right after `sk-`, so the
+    # hyphenated shapes in use today passed this gate AND scrub() - measured on 1.106.0. OpenRouter,
+    # the key this kit pays with: `sk-or-v1-` + 64 hex (its create-key docs, read 2026-10-05).
+    # OpenAI: `sk-proj-`, `sk-svcacct-`, `sk-admin-` + a base64url body, so `-` and `_` count.
+    ("OPENROUTER_KEY",    re.compile(r"\bsk-or-v1-[A-Za-z0-9]{20,}")),
+    ("OPENAI_SCOPED_KEY", re.compile(r"\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{20,}")),
     ("AWS_ACCESS_KEY",    re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
     ("GITHUB_TOKEN",      re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}|"
                                      r"\bgithub_pat_[A-Za-z0-9_]{30,}")),
@@ -1252,6 +1270,17 @@ CLI_ENV_VARS = " / ".join(env for _, env, _ in CLI_BINARIES)
 
 
 KNOWN_FAILURES = [
+    # R142 И-6: FIRST, because the text also says 429 / «Rate limit exceeded», which the generic
+    # rate-limit entry below matches - and «wait, or reroute» hides that nothing on THIS machine
+    # spent a shared free quota. Both free voices of 2026-10-05's rounds died on it (store:
+    # `provider.quota`), at 1 s and mid-run. The mimo CLI writes the same NDJSON, hence «paid».
+    ("provider\\.quota",
+     "The provider's usage quota for this model is used up. On opencode's free models that quota "
+     "is shared by every free user, so it runs out in bursts whatever your brief holds, and "
+     "nothing is billed.",
+     "The other channels' answers stand. Re-run this channel later, or leave it out with --skip "
+     "<channel>; on a paid model, check the account's balance or plan limit first. Do not re-run "
+     "it in a loop."),
     # R140 (2026-10-04) SUPERSEDES the R137 reading «a vendor capacity answer». Direct calls showed
     # the code behind this text: `no_available_channel` - AIHubMix has no upstream route for the
     # model and refuses in ~0.1 s, before any upstream is asked. The PAID `coding-kimi-k3` and
@@ -3673,6 +3702,51 @@ def _cli_ndjson(raw):
     return text, tokens, cost
 
 
+def _cli_ndjson_error(raw):
+    """The LAST `{"type":"error"}` frame of an opencode / mimo NDJSON stream as one line, or None.
+
+    R142 И-6: both free voices of the audit panel died on opencode's shared free quota MID-RUN,
+    after 58 and 117 s of steps (`provider.quota`, read in opencode's own store). The error frame
+    comes last, so a warning cut from the first 300 chars of stdout showed a `step_start` frame
+    («no stock diagnosis»), and Spark, which had printed 280 chars of narration, got no cause at
+    all. Shape measured 2026-10-05 (runs/r143-readme-panels/example-stdout.log):
+    {"type":"error", ..., "error":{"type":"provider.quota","message":"...","status":429, ...}}.
+    """
+    last = None
+    for line in (raw or "").split("\n"):
+        line = line.strip()
+        if not line.startswith("{") or '"error"' not in line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(obj, dict) or obj.get("type") != "error":
+            continue
+        e = obj.get("error")
+        if isinstance(e, dict):
+            data = e.get("data") if isinstance(e.get("data"), dict) else {}
+            kind = e.get("type") or e.get("name") or "error"
+            msg = e.get("message") or data.get("message") or ""
+            status = e.get("status") or e.get("statusCode") or obj.get("status")
+        else:
+            kind, msg, status = "error", obj.get("message") or e or "", obj.get("status")
+        last = "%s%s: %s" % (kind, (" (HTTP %s)" % status) if status else "", str(msg)[:240])
+    return last
+
+
+def _cli_error_lines(rc, text, raw, stderr, marker, warn, note):
+    """The EXIT / mid-run error lines shared by call_opencode and call_mimocli (R142 И-6)."""
+    err = _cli_ndjson_error(raw)
+    if rc != 0 and not text:
+        warn.append("EXIT %d: %s" % (rc, scrub(err or stderr or raw or "")[:300]))
+    elif err and (rc != 0 or not (marker and _marker_on_last_line(text, marker))):
+        warn.append("EXIT %d after %d chars of text - the CLI stopped on an error: %s"
+                    % (rc, len(text), scrub(err)[:300]))
+    elif err:
+        note.append("the CLI reported an error mid-run and still finished: %s" % scrub(err)[:300])
+
+
 def _cli_timeout(name, exc, outfile, t0, timeout, model, effort=None):
     """R142 И-2 (Grok's finding): a TIMEOUT keeps what the CLI had already printed.
 
@@ -3754,8 +3828,7 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     warn, note = [], []
     text, tokens, cost = _cli_ndjson(raw)
 
-    if p.returncode != 0 and not text:
-        warn.append("EXIT %d: %s" % (p.returncode, scrub(p.stderr or raw or "")[:300]))
+    _cli_error_lines(p.returncode, text, raw, p.stderr, marker, warn, note)
     if text:
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
@@ -3832,8 +3905,7 @@ def call_mimocli(brief, marker, outfile, model=None, effort=None, system=None,
     warn, note = [], []
     text, tokens, cost = _cli_ndjson(raw)
 
-    if p.returncode != 0 and not text:
-        warn.append("EXIT %d: %s" % (p.returncode, scrub(p.stderr or raw or "")[:300]))
+    _cli_error_lines(p.returncode, text, raw, p.stderr, marker, warn, note)
     if text:
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
@@ -4192,9 +4264,9 @@ def call_qwencli(brief, marker, outfile, model=None, effort=None, system=None,
 
     AUTH: Subscription is key-based (unlike claudecli's OAuth login). Settings.json carries
     `BAILIAN_TOKEN_PLAN_API_KEY` and the matching `baseUrl`
-    (https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1). No env
-    scrubbing. If a corporate proxy sets OPENAI_* vars they would override — not scrubbed by
-    this helper, but surfaced in the stderr tail of the result.
+    (https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1). The child env
+    drops QWENCLI_SCRUB_ENV first (OPENAI_*, QWEN_MODEL, DASHSCOPE_API_KEY - R128): set, they
+    would outrank settings.json and retarget the run while the plan still said Token Plan.
 
     JSON output fields used (from the final `type:"result"` element of the array):
       result               — the model's text answer
@@ -4436,6 +4508,10 @@ def _kimi_node_argv(binary):
     node = os.path.join(shim_dir, "node.exe")
     if not os.path.isfile(node):
         node = shutil.which("node") or shutil.which("node.exe")
+    # R142 И-6 (Grok's audit): a version manager can put `node.cmd` on PATH; starting THAT brings
+    # back the cmd.exe route this function exists to avoid. None sends the brief through BRIEF.md.
+    if node and node.lower().endswith((".cmd", ".bat")):
+        return None
     return [node, main] if node else None
 
 
@@ -10778,10 +10854,14 @@ def main():
             "ONCE: %s" % (len(_retryable), ", ".join(sorted(_retryable))))
         for _rcn, _rr in sorted(_retryable.items()):
             _pe = _rr.get("provider_error")
-            log("  [%s] finish=%s  provider_code=%s  prior_cost=$%.4f"
+            # R142 И-6 (MiMo Flash's audit): `usd or 0` printed `$0.0000` for a channel that
+            # reports no price (qwencli always, mimo/opencode when the CLI omits it) - money
+            # possibly spent, shown as none. The note below already says «nothing» only for 0.
+            _pu = _rr.get("usd")
+            log("  [%s] finish=%s  provider_code=%s  prior_cost=%s"
                 % (_rcn, _rr.get("finish_reason"),
                    _pe.get("code") if isinstance(_pe, dict) else None,
-                   _rr.get("usd") or 0))
+                   ("$%.4f" % _pu) if isinstance(_pu, (int, float)) else "unknown (no price reported)"))
         with ThreadPoolExecutor(max_workers=max(4, len(_retryable))) as _rex:
             _rjobs = {}
             for cname in sorted(_retryable):

@@ -7906,7 +7906,8 @@ def main():
                   suite_r142_mimo_flash_fallback,
                   suite_r142_i3_kimi_single_agent, suite_r142_i4_kimi_postmortem,
                   suite_r142_i5_thinking_advice,
-                  suite_r143_i3_free_voices):
+                  suite_r143_i3_free_voices,
+                  suite_r142_i6_audit_hotfix):
         try:
             suite()
         except Exception as exc:                       # a broken suite is itself a failure
@@ -12266,8 +12267,12 @@ def suite_r140_i4_env_fail_closed():
               "R140 И-4: a key split by the 300-char stderr cut is scrubbed first", w[-80:])
     finally:
         (o._env_key, o.kimi_bin, o.subprocess.run, o._kimi_node_argv, o.neutral_cwd) = saved
-    check(src.count('scrub(p.stderr or raw or "")[:300]') == 3
-          and src.count('(p.stderr or raw or "")[:300]') == 3,
+    # R142 И-6: opencode and mimo now build their EXIT line in ONE helper (_cli_error_lines, which
+    # also reads the stream's error frame); grok keeps its own. Still: every cut is scrubbed first.
+    check(src.count('scrub(p.stderr or raw or "")[:300]') == 1
+          and src.count('(p.stderr or raw or "")[:300]') == 1
+          and src.count('scrub(err or stderr or raw or "")[:300]') == 1
+          and src.count("_cli_error_lines(p.returncode, text, raw, p.stderr, marker, warn, note)") == 2,
           "R140 И-4: every EXIT warning scrubs stderr before cutting it")
 
     # (b) the answer value scan
@@ -13473,6 +13478,138 @@ def suite_r143_i3_free_voices():
           and "--skip %s" % nv in err and "Nothing was sent" in err,
           "R143 И-3 (e): without the key the run refuses at once with the same pointers, and no "
           "process starts", repr((r.get("ok"), started, err[:200])))
+
+
+def suite_r142_i6_audit_hotfix():
+    """R142 И-6 (2026-10-05): the code-audit panel's confirmed findings, each checked by running
+    the code. (a) bare OpenRouter / scoped OpenAI keys are refused and scrubbed - the old OPENAI_KEY
+    rule wanted 32 alnum right after `sk-`; prose stays silent; (b) a decline padded past 800 chars
+    gets a SOFT note and a Russian decline is a refusal - all tells were English; (c) an opencode /
+    mimo error frame that arrives AFTER some steps names its cause (the audit's two free voices died
+    on `provider.quota` mid-run and were reported as a raw `step_start` frame / no cause), and
+    diagnose() gives the quota line, not the generic rate-limit one; (d) the auto-retry log prints
+    «unknown», not `$0.0000`, for a channel that reports no price; (e) a `node.cmd` on PATH is not
+    taken for node (Windows); (f) the grok plan line says the ceiling only when the effort IS it."""
+    import copy
+    import inspect
+    import os as _os
+    import shutil as _sh
+    import tempfile
+    import orchestrate as o
+    import routing
+    # (a) -------------------------------------------------------------------------------------
+    hexs = "0123456789abcdef" * 4
+    body = "Ab3dE5fG7hJ9kL1mN2pQ4rS6tU8vW0xY" * 3
+    keys = {"OPENROUTER_KEY": "sk-or-" + "v1-" + hexs,
+            "OPENAI_SCOPED_KEY": "sk-" + "proj-" + body[:40] + "_" + body[40:80]}
+    keys["OPENAI_SCOPED_KEY svcacct"] = "sk-" + "svcacct-" + body[:60]
+    for kind, key in keys.items():
+        text = "Here is the run log:\n%s\nreview it.\n" % key
+        secrets, _ = o.scan_payload(text, "brief")
+        got = sorted({s.split(" ")[0] for s in secrets})
+        check(kind.split(" ")[0] in got and key not in o.scrub(text),
+              "R142 И-6 (a): a bare %s is refused by the gate and scrubbed" % kind, repr(got))
+    for prose in ("sk-learn is a library", "use sk-" + "proj-" + "short here"):
+        secrets, _ = o.scan_payload(prose, "brief")
+        check(not secrets, "R142 И-6 (a): prose stays silent: %r" % prose[:24], repr(secrets))
+    # (b) -------------------------------------------------------------------------------------
+    m = "AUDIT-X-DONE"
+    en_long = "I cannot provide the review you asked for. " + "Policy text. " * 70 + "\n" + m
+    ru_short = "Я не могу помочь с этим запросом.\n" + m
+    ru_long = "Я не могу помочь с этим запросом. " + "Это противоречит правилам. " * 40 + "\n" + m
+    clean = "## Verdict\nThree defects. " + "Finding with file:line and quoted code. " * 40 + "\n" + m
+    late = "## Verdict\n" + "x " * 260 + "I cannot provide a date for X. " + "y " * 300 + "\n" + m
+    r = o.refusal_check(en_long, m)
+    check(bool(r) and o.is_soft(r) and "OPENS LIKE A REFUSAL" in r,
+          "R142 И-6 (b): a decline padded past 800 chars gets a SOFT «opens like a refusal» note",
+          repr((r or "")[:80]))
+    r = o.refusal_check(ru_short, m)
+    check(bool(r) and not o.is_soft(r) and r.startswith("REFUSAL"),
+          "R142 И-6 (b): a short Russian decline is a REFUSAL (the tells were English only)",
+          repr((r or "")[:80]))
+    r = o.refusal_check(ru_long, m)
+    check(bool(r) and o.is_soft(r) and "OPENS LIKE A REFUSAL" in r,
+          "R142 И-6 (b): a long Russian decline gets the SOFT note", repr((r or "")[:80]))
+    check(o.refusal_check(clean, m) is None and o.refusal_check(late, m) is None,
+          "R142 И-6 (b): a long review with no tell in its first 400 chars stays clean (control)")
+    # (c) -------------------------------------------------------------------------------------
+    frame = ('{"type":"error","timestamp":1,"sessionID":"ses_x","error":{"type":"provider.quota",'
+             '"message":"Error from provider (Console): Rate limit exceeded. Please try again '
+             'later.","status":429,"response":{"body":"{}"}}}')
+    step = '{"type":"step_start","timestamp":1,"sessionID":"ses_x","part":{"type":"step-start"}}'
+    txt = '{"type":"text","part":{"text":"Deep audit underway."}}'
+    err = o._cli_ndjson_error("\n".join([step, txt, frame]))
+    check(bool(err) and "provider.quota" in err and "429" in err,
+          "R142 И-6 (c): the last error frame of the NDJSON stream is read", repr(err))
+    w, n = [], []
+    o._cli_error_lines(1, "Deep audit underway.", "\n".join([step, txt, frame]), "", m, w, n)
+    check(len(w) == 1 and "provider.quota" in w[0] and not n,
+          "R142 И-6 (c): a mid-run death AFTER some text gets a warning naming the error", repr(w))
+    cause = o.diagnose(w[0] if w else "")[0] or ""
+    check(cause.startswith("The provider's usage quota"),
+          "R142 И-6 (c): diagnose() names the quota, ahead of the generic rate-limit line",
+          repr(cause[:60]))
+    w, n = [], []
+    o._cli_error_lines(1, "", "\n".join([step, step, step, frame]), "", m, w, n)
+    check(len(w) == 1 and "provider.quota" in w[0],
+          "R142 И-6 (c): with no text the EXIT line quotes the error frame, not the first frame",
+          repr(w))
+    w, n = [], []
+    o._cli_error_lines(0, "review\n" + m, "\n".join([step, frame, txt]), "", m, w, n)
+    check(not w and len(n) == 1, "R142 И-6 (c): an error the CLI recovered from (exit 0, marker "
+          "on the last line) is a note, not a warning", repr((w, n)))
+    w, n = [], []
+    o._cli_error_lines(0, "review\n" + m, "\n".join([step, txt]), "", m, w, n)
+    check(not w and not n, "R142 И-6 (c): no error frame, nothing added (control)", repr((w, n)))
+    # (d) -------------------------------------------------------------------------------------
+    src = inspect.getsource(o.main)
+    check("unknown (no price reported)" in src and '_rr.get("usd") or 0' not in src,
+          "R142 И-6 (d): the auto-retry log prints «unknown» for a channel with no price")
+    # (e) -------------------------------------------------------------------------------------
+    if _os.name == "nt":
+        d = tempfile.mkdtemp(prefix="st-r142i6-")
+        try:
+            shim = _os.path.join(d, "kimi.cmd")
+            open(shim, "w").close()
+            mdir = _os.path.join(d, "node_modules", "@moonshot-ai", "kimi-code", "dist")
+            _os.makedirs(mdir)
+            open(_os.path.join(mdir, "main.mjs"), "w").close()
+            real = _sh.which
+            _sh.which = lambda name, *a, **k: (_os.path.join(d, "node.cmd")
+                                               if name in ("node", "node.exe") else None)
+            try:
+                got = o._kimi_node_argv(shim)
+            finally:
+                _sh.which = real
+            check(got is None, "R142 И-6 (e): a node.cmd on PATH is not taken for node - the "
+                  "brief goes through BRIEF.md, never cmd.exe", repr(got))
+        finally:
+            _sh.rmtree(d, ignore_errors=True)
+    else:
+        check(True, "R142 И-6 (e): node.cmd guard is Windows-only (skipped here)")
+    # (f) -------------------------------------------------------------------------------------
+    reg = json.load(open(_os.path.join(HERE, "channels.json"), encoding="utf-8"))
+    g = next((c for c, ch in (reg.get("channels") or {}).items()
+              if isinstance(ch, dict) and ch.get("kind") == "grokcli"), None)
+    ch = (reg.get("channels") or {}).get(g) or {}
+    ladder = ((ch.get("models") or {}).get(ch.get("model")) or {}).get("efforts") or []
+    ranked = [e for e in ladder if e in routing.EFFORT_ORDER]
+    if g and len(ranked) >= 2:
+        top = max(ranked, key=routing.EFFORT_ORDER.index)
+        low = min(ranked, key=routing.EFFORT_ORDER.index)
+        notes = {}
+        for eff in (top, low):
+            r2 = copy.deepcopy(reg)
+            r2["channels"][g]["effort"] = eff
+            r2["channels"][g]["enabled"] = True
+            p = routing.resolve(r2, only=[g], ready=lambda c: True,
+                                tier=next(iter(reg.get("tiers") or {}), None))
+            notes[eff] = (p.get(g) or {}).get("_tier_note") or ""
+        check("this model's ceiling)" in notes[top] and ("ceiling is %s" % top) in notes[low],
+              "R142 И-6 (f): the grok plan line calls the effort the ceiling only when it is",
+              repr(notes))
+    else:
+        check(False, "R142 И-6 (f): a grokcli channel with an effort ladder exists", repr(g))
 
 
 if __name__ == "__main__":

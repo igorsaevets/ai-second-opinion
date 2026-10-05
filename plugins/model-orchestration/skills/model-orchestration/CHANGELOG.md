@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.106.1 — 2026-10-05
+
+Fixes from a full code audit by the cheap panel (four of six voices answered: Kimi K3, Grok 4.7, Gemini 3.8 Flash, MiMo v2.6 Flash). Each fix was checked by running the code, and the new selftest checks fail on 1.106.0.
+
+- **The secret gate knows today's key shapes.** A bare OpenRouter key (`sk-or-v1-` + 64 hex) and OpenAI's `sk-proj-` / `sk-svcacct-` / `sk-admin-` keys passed the no-override gate and the log scrubber, because the old rule wanted 32 letters and digits right after `sk-`. Both now refuse the run and are scrubbed; prose such as «sk-learn» stays silent.
+- **A free voice that dies mid-run says why.** When opencode's shared free quota ran out after a minute of work, the report showed a raw `step_start` frame («no stock diagnosis»), or no cause at all when some text had been printed. The last error frame of the CLI's stream is now read, and `provider.quota` gets its own explanation: the quota is shared by every free user, nothing is billed, re-run later or `--skip` it. The same code path serves the MiMo CLI.
+- **A refusal longer than 800 characters is flagged.** It used to pass with no signal; now it gets a note to read its opening (a note, not a failure, because a real review can open with «I cannot provide a date for X, but…»). Russian refusals are recognised too.
+- The auto-retry line printed `prior_cost=$0.0000` for channels that report no price; it says «unknown» now. A `node.cmd` on PATH is no longer taken for Node when starting Kimi (that would bring back the cmd.exe route). The Grok plan line calls the effort «this model's ceiling» only when it is.
+- Docs: identifiers are reported by default as one line with a count and their kinds (`--warn-pii` lists them by line) — PRIVACY.md, SECURITY.md, README.md and SKILL.md said every run lists them by line. SKILL.md §0 said the bare command runs every enabled channel; it runs the default panel.
+
 ## 1.106.0 — 2026-10-05
 
 The free MiMo v2.6 Flash and Kimi K3 through NVIDIA are in everyone's cheap panel now, and the standard panel asks Kimi once.

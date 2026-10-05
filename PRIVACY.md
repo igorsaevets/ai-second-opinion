@@ -106,8 +106,9 @@ Two mechanisms, deliberately unequal:
 
 - **Personal data warns loudly and is SENT.** 🔴 This is the opposite of what this file used to
   say. ID numbers, case and receipt numbers, national-insurance and social-security numbers, email
-  addresses, phone numbers and dates of birth are detected and **itemised by kind and line number —
-  never by value — and then the run proceeds.** Pass `--strict-pii` to make it a hard stop instead.
+  addresses, phone numbers and dates of birth are detected and **reported in one line — how many,
+  of which kinds, never a value — and then the run proceeds.** `--warn-pii` lists each one by kind
+  and line number; `--strict-pii` makes it a hard stop instead.
 
   The reason for the inversion, stated plainly because it is a weakening of a protection: the gate
   had a high false-positive rate on exactly the legal and medical documents people bring to a tool

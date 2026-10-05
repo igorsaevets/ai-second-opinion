@@ -97,7 +97,7 @@ python "<SKILL_DIR>\orchestrate.py" `
   --out "$env:TEMP\reviews"
 ```
 
-That runs **every enabled channel in parallel**, writes one `<CHANNEL>.md` per channel into
+That runs **the default panel in parallel**, writes one `<CHANNEL>.md` per channel into
 `--out`, renders `REPORT.md`, and prints a verification block.
 
 🔴 **Do not count the channels from this file, and do not list them** — every prose copy has been
@@ -188,7 +188,7 @@ stable and worth knowing:
 **Secrets.** Never `Read`, `cat`, `echo` or `Write-Output` the key. The script reads it from the
 environment; `doctor.py` reports presence and length only. Printing the value is a hard failure —
 and `orchestrate.py` refuses to SEND one, with no override at any setting. Identifiers warn and go
-(`--strict-pii` to block); both report kind and line, never the value. `--dry-run` runs the gate free.
+(`--strict-pii` to block) as one count line (`--warn-pii`: by line), never a value. `--dry-run` is free.
 
 ---
 
