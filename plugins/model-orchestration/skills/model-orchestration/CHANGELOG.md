@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.105.5 — 2026-10-05
+
+The README describes the panels as they are today, with dates, prices and the keys to get.
+
+- **A new opening.** Each model is trained on different data and runs in its own harness, so each brings its own recommendations; every review ends with an UNASKED section; the models never see each other's answers. Any AI agent with a terminal can install and drive the tool, not only Claude Code: AGENTS.md is its map, and one standing line makes another agent react to "second opinion".
+- **«Getting started»: one table of accounts and keys** (OpenRouter first, then opencode, Kimi Code CLI + NVIDIA key, agy, Grok Build, Codex), each with what it unlocks and what it costs on 2026-10-05.
+- **«How to ask»: the plain phrases and what each one runs**, every phrase resolved in the kit tree (`only agy31pro` — the bare «agy 3.1 pro» is a route error, and «only agy 3.1 pro» also starts agy38flash).
+- **Dated panel tables**: model, channel, transport (CLI agent or OpenRouter), effort, payment, price per 1M tokens and the median cost per run of our September–October runs. The kit ships 4 cheap / 10 standard; the free MiMo v2.6 Flash and Kimi K3 through NVIDIA ship off and are turned on with a three-line `model-orchestration.local.json` (6 / 11, measured).
+- **Stale claims removed**: Grok «free during beta», agy «subscription», «a full run is under $2» (the standard panel is about $3.2), an example run on GPT-5.4. The example run is a real run of this version.
+- INSTALL.md: the Grok Build heading no longer names a model version; agy is free on a personal Google account.
+
 ## 1.105.4 — 2026-10-05
 
 A Kimi run that ends on reasoning-only replies gets advice that fits it.

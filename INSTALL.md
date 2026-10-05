@@ -412,8 +412,8 @@ disagreement this tool exists to produce. Everything else is optional.
 | `MODEL_API_KEY` | the Muse Spark voices reached directly from Meta | metered API |
 | the Codex CLI, signed in | `codex` | your existing subscription |
 | the Claude Code CLI, signed in | `cclopus46` — Claude Opus, **off by default**; runs with permission prompts bypassed, see its section below | your existing subscription |
-| the Antigravity CLI, signed in | the `agy` Gemini channels | your existing subscription |
-| the Grok Build CLI, signed in | `grokbuild` — Grok 4.6, and it opens pages itself | your existing subscription |
+| the Antigravity CLI, signed in | the `agy` Gemini channels | free on a personal Google account, with weekly limits; Google AI plans raise them |
+| the Grok Build CLI, signed in | `grokbuild` — Grok, and it opens pages itself | an xAI account; SuperGrok plans raise the limits |
 | `GEMINI_API_KEY` | Gemini on Google's **own** API — the best-grounded channel here, and the only one whose citations carry character spans. **Off by default**, see below | metered, free tier available |
 | `XAI_API_KEY` | Grok on xAI's **own** API — adds X/Twitter search and reports the dollar cost of each call. **Off by default** | metered |
 | `MIMO_API_KEY` | MiMo on Xiaomi's **own** API — its search opens whole pages instead of returning excerpts. **Off by default** | metered |
@@ -644,7 +644,7 @@ denied (measured 2026-09-11). Your `permissions.deny` rules and hooks still appl
 [SECURITY.md](SECURITY.md) has the full picture. If that is not acceptable on the machine you run
 this from, leave the channel off — the panel does not need it.
 
-### Grok Build CLI (Grok 4.6)
+### Grok Build CLI
 
 ```
 grok --version      # expect: grok 1.0.4 (…) [stable] or newer

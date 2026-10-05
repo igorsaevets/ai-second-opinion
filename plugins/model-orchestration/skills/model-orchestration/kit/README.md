@@ -4,15 +4,24 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![no dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](INSTALL.md)
 
-**One AI agreeing with you proves nothing. Three of them arguing is worth reading.**
+**Every AI model knows its own things. Ask several at once and you get not only a check, but advice no single model would have given you — including on what you did not ask.**
 
-Send the same document to a **panel of independent AI models** — GPT, Claude, Gemini, Grok,
-DeepSeek, Qwen, Kimi, Muse Spark, NVIDIA Nemotron and more — at once. Get back what each one
-found, where they contradict each other, and a mechanical check that catches **AI
-hallucinations**: fabricated citations, invented sources, and quiet refusals.
+A panel pays off twice:
+1. **Different knowledge.** Each model was trained on its own data and runs in its own harness: the vendor's CLI agent or an API, its own web search, its own way of reading pages. So when you ask "how should I design this" or "review this code", each one answers with its own recommendations, and together they cover more than any one of them.
+2. **An independent check.** The models never see each other's answers. When they agree, that means something; when they disagree, it means more. One AI agreeing with you proves nothing.
 
-Install as a [Claude Code plugin](#install), run standalone from any terminal, or hand the repo
-to your AI coding assistant (Claude Code, Cursor, Windsurf — anything with shell access).
+Every review answer ends with an **UNASKED** section. That is where the model puts a wrong assumption, a risk, a better alternative or the thing worth checking next — only what it would defend as significant, and if there is nothing, it says so. The most valuable finding often comes from there.
+
+Send the same document **to several independent AI models at once**: GPT, Gemini, Grok, Kimi, Qwen, DeepSeek, GLM, MiMo, Muse Spark, NVIDIA Nemotron, and Claude if you switch it on. You get back:
+- what each model found and what it recommends;
+- its UNASKED section — what matters that you did not ask about;
+- where the models contradict each other;
+- a mechanical check that catches **AI hallucinations**: fabricated citations, invented sources and quiet refusals.
+
+**Any AI agent can install it, not only Claude Code.** Any agent with terminal access will do — for example Codex CLI, Cursor, Gemini CLI, opencode, Kimi Code or Qwen Code: this is plain Python with no dependencies. Give the agent the repository link and ask it to install the tool ([a ready-made request is under «Install»](#install)). The repository carries [AGENTS.md](AGENTS.md), the instructions for AI agents on how to install the tool and run a review, so from then on the agent runs the panel itself. The sequence an agent runs — `install.ps1`, `doctor.py` and a free `--dry-run` — was checked on 2026-10-05 from a plain terminal, without Claude Code.
+
+In Claude Code the plugin reacts to "second opinion" by itself. To make another agent do the same, add one line to its standing instructions: *"When I ask for a second opinion, run AI Second Opinion following `~/.claude/skills/model-orchestration/SKILL.md`"*.
+
 Pure Python, zero dependencies, MIT license.
 
 [Русская версия](README.ru.md) · [How it works, in technical detail](TECHNICAL.md) ·
@@ -21,123 +30,115 @@ Pure Python, zero dependencies, MIT license.
 
 ---
 
-## The problem this solves
+## Getting started: accounts and keys
 
-You ask an AI to review your strategy memo. It tells you the memo is strong, adds three
-supportive points, and cites four sources.
+To start you need **one OpenRouter key and a couple of free programs**. Everything else adds voices but is optional: the tool runs whatever you have and tells you plainly what it skipped.
 
-That answer is nearly worthless, for three reasons most people never check:
+| Step | What to do | What it gives you | What it costs (as of 2026-10-05) |
+|---|---|---|---|
+| **1. OpenRouter** — the main one | Sign up at [openrouter.ai](https://openrouter.ai), add credit and create a key (*Keys → Create Key*). Put it in the `OPENROUTER_API_KEY` variable in your own terminal, not in a chat with an AI ([how — INSTALL.md](INSTALL.md#openrouter--openrouter_api_key)) | The paid voices: MiMo in the cheap panel; Kimi, Qwen, DeepSeek, GLM and Nemotron in the standard one; a fallback route to Gemini and Muse Spark | Pay per token on the key; prices are in the tables below. OpenRouter takes a 5.5% fee when you buy credits. Free models: 50 requests a day, or 1000 a day once you have bought at least $10 of credits |
+| **2. opencode CLI** | `npm install -g opencode-ai` | The free Muse Spark 1.3 voice (Meta). The free MiMo v2.6 Flash (Xiaomi) runs through it too; in this version you [turn it on yourself](#how-to-turn-on-the-two-free-models) | Free, no key and no account: that is how it works for us. OpenCode warns that its free models are available "for a limited time" |
+| **2b. Kimi Code CLI + an NVIDIA key** | Install the [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code), sign up for free at [build.nvidia.com](https://build.nvidia.com), get a key and put it in `NVIDIA_NIM_API_KEY` | Kimi K3 (Moonshot); in this version you [turn it on yourself](#how-to-turn-on-the-two-free-models) | Free. NVIDIA calls it a trial service, limited to about 40 requests a minute |
+| **3. Antigravity CLI (`agy`)** | Install it, sign in with a Google account and run `patch_agy_permissions.py` **once**. Without that step the answers come back empty ([INSTALL.md](INSTALL.md#antigravity-cli-gemini)) | Gemini 3.8 Flash, and Gemini 3.1 Pro by name | Free on a personal Google account, with weekly limits. Google AI Pro ($19.99/month) and Ultra ($99.99 or $199.99/month) raise them |
+| **4. Grok Build CLI** | Install it and run `grok login` ([INSTALL.md](INSTALL.md#grok-build-cli)) | Grok 4.7 with live web search | An xAI account. xAI says Grok Build is now available to everyone; SuperGrok ($30/month) and SuperGrok Plus ($100/month) raise the limits. Whether the CLI works on a free account we have not checked |
+| **5. Codex CLI** — for the standard panel | Install it and sign in with a ChatGPT account ([INSTALL.md](INSTALL.md#codex-cli)) | GPT-6.1 Sol | A ChatGPT plan: Plus $20/month, Pro $200/month. OpenAI says Codex is also in Free and Go ($8/month); whether GPT-6.1 Sol is available there we have not checked. Limits are counted in 5-hour and weekly windows |
+| optional | Claude Code with a subscription ([INSTALL.md](INSTALL.md#claude-code-cli-claude-opus--off-by-default)) | Claude Opus 4.6. Off by default | Claude Pro $20/month, Max from $100/month. Claude Code is in every paid plan |
+| optional | A Meta key, `MODEL_API_KEY` ([INSTALL.md](INSTALL.md#spark--model_api_key)) | A second route to Muse Spark if opencode is not installed | Per key: $0.10 / $0.20 per 1M tokens (Contributor tier) |
 
-1. **It is built to agree with you.** You wrote the memo, you asked the question, and the model
-   optimises for a helpful-feeling reply. Ask the same model to attack the memo and it will find
-   problems it just told you did not exist.
-2. **One model has one set of blind spots.** Whatever it was weak at yesterday, it is weak at
-   today, and nothing in its answer tells you which parts those are.
-3. **The sources may not exist.** Models generate citations that *look* right — real domain,
-   plausible path, correct-sounding document number — for pages that were never opened and
-   sometimes never existed. In one measured run here, a model produced 11 source links; **3 of
-   them were dead**, and its conclusions were still correct. That combination is the dangerous
-   one, because it survives a casual read.
+To check what was found: `python doctor.py`. It prints which keys and programs it found, and never prints a key itself: only present / absent and the length.
 
-## What this does instead
+🔴 **Do not paste a key into a chat with an AI assistant.** Set it yourself in the terminal; why is explained under [«Install»](#install).
 
-- **A panel of independent models, same document, at the same time.** They do not see each
-  other's answers, so agreement means something and disagreement means more.
-- **It shows you the disagreement.** That is the actual product. Two models calling a claim fine
-  and one calling it fatal is the most useful thing you will read all week.
-- **It checks the receipts.** Every source link each model cites is opened and reported as
-  live / moved / dead. Where the channel supports it, the tool also checks whether the model
-  *actually opened* the page it cited, or just listed it.
-- **It catches a model that quietly refused.** A model that declines a task still formats its
-  reply correctly, so it passes every naive "did it finish?" check. This catches that.
-- **Nothing with a password or key ever leaves your machine.** Blocked outright, no override.
-  Personal data — ID numbers, SSNs, emails, phone numbers, dates of birth — is **found, itemised
-  and reported, and then SENT**; `--strict-pii` turns that into a hard stop. **Names and street
-  addresses are not detected at all**, at any setting. `PRIVACY.md` has the reasoning and the
-  measurement behind both.
+## How to ask
 
-## Who this is for
+In Claude Code with the plugin (and in any agent you gave the line from the top of this page) just say it in plain words:
 
-| You are | You use it to |
+| You say | What runs (version 1.105.5) |
 |---|---|
-| **Founder / CEO** | Pressure-test a strategy memo, a board deck, an investor update or a pricing decision before anyone external sees it. Several models, several sets of objections, before your board finds them. |
-| **Product manager** | Review a spec or PRD for holes, check competitive claims you are about to publish, stress-test a launch plan's assumptions. |
-| **C-level / operations** | Verify claims in a vendor proposal or a consultant's report. Check that a regulation you are relying on is still current and says what someone told you it says. |
-| **Legal / compliance** | Verify that every citation in a research memo resolves to a real document that actually says what the memo claims. This is source-verification work, done properly and at speed. See the note below. |
-| **AI / ML engineer** | Compare model behaviour on the same prompt across vendors. See which models ground their answers in real sources and which ones fabricate citations. Evaluate before you ship. |
-| **Anyone writing something that matters** | Get the objections in private, before they arrive in public. |
+| **"second opinion"** (for example, "give me a second opinion on this file") | **The cheap panel**, the default: 4 models, or 6 if you [turn on the two free ones](#how-to-turn-on-the-two-free-models) |
+| **"second opinion, CLI only"** | Only the CLI agents of the cheap panel: 3 models — Muse Spark, Gemini 3.8 Flash and Grok 4.7, or 5 with the two free ones (plus MiMo v2.6 Flash and Kimi K3). Not one paid request on your OpenRouter key |
+| "standard panel" or "all models" | 10 models: the cheap panel plus GPT-6.1 Sol, Kimi K3, Qwen 3.8 Max, DeepSeek V4 Pro, GLM 5.3 and Nemotron. With the two free ones, 11: Kimi K3 then answers for free through NVIDIA |
+| "CLI only, standard panel" | 4 models: the three CLI agents plus Codex (GPT-6.1 Sol); 6 with the two free ones |
+| "ask only codex", "only grok" | The one named channel |
+| "only agy31pro" or "only agypro" | Gemini 3.1 Pro: it starts only when named |
+| "don't use openrouter" | Everything except the OpenRouter channels |
 
-### A note for legal teams
+From a terminal the same is done with flags: `--panel cheap` (the default), `--panel standard`, `--route "только CLI"`, `--only codex`, `--skip openrouter`. You can see the plan before anything is spent, for free: `python routing.py` or `--dry-run`.
 
-This is a **research verification** tool, not an advice tool, and the distinction is built into
-the software rather than written on it. It ships with a mode (`--system legal-research`) that
-frames the work as what it is: checking sources for a document a licensed professional will
-review. Nothing in the output is legal advice, and the models are explicitly instructed not to
-opine on any named individual's situation or decide what anyone should file.
+## Panels as of 2026-10-05 (version 1.105.5)
 
-That framing is also what makes it *work*. Asked to "review this filing strategy", the models
-refuse on policy. Asked to "verify these six claims against their cited sources", the same models
-answer all six with correct citations. The reframing is accurate, not a workaround — checking a
-document number against the register genuinely is research.
+How to read the tables:
+- **Transport.** A *CLI agent* is the vendor's program on your computer (opencode, agy, grok, kimi, codex, claude). It runs on your subscription or for free and needs no OpenRouter key. *OpenRouter* is an API request on your key, paid per token.
+- **Effort** is how hard the model thinks. The tool always sets the highest level the model accepts.
+- **Price per 1M tokens** is from the OpenRouter catalogue on 2026-10-05, input / output.
+- **Per run** is the median of our runs from 1 September to 5 October 2026; n is the number of runs. Yours will be higher or lower: it depends on the size of the document and the number of web searches. The tool prints the exact amount at the end of every run.
 
-## What one run looks like
+### The cheap panel — the default: 4 models, 6 with the two free ones
 
-You write the question in a plain text file, then run one command. A few minutes later:
+| Model | Channel | Transport | Effort | Payment | Price per 1M (in / out) | Per run |
+|---|---|---|---|---|---|---|
+| Muse Spark 1.3 (Meta) | `ocspark13free` | opencode CLI agent | xhigh — the free version's ceiling | free | — | $0 |
+| MiMo v2.6 Flash (Xiaomi) — *you turn it on* | `ocmimo26flashfree` | opencode CLI agent | the default: the free version takes no levels | free | — | $0 |
+| Kimi K3 (Moonshot) — *you turn it on* | `nvkimik3` | Kimi Code CLI agent, NVIDIA's free server | max | free, needs an NVIDIA key | — | $0 |
+| Gemini 3.8 Flash (Google) | `agy38flash` | Antigravity CLI agent (`agy`) | not set: agy decides | Google account: free, with weekly limits | — | $0 beyond the plan |
+| MiMo v2.6 Pro (Xiaomi) | `ormimopro` | OpenRouter | a reasoning budget of 85,000 tokens | per key | $0.435 / $0.87 | ≈ $0.06 (n=9) |
+| Grok 4.7 (xAI) | `grokbuild` | Grok Build CLI agent | xhigh (the ceiling) | xAI account or plan | — | $0 beyond the plan |
 
+If you lack the main transport, a fallback route to the same model takes over:
+- **Muse Spark.** No opencode → `spark13cont` (Meta key) → `orspark13cont` (OpenRouter, $0.10 / $0.20, effort xhigh).
+- **Gemini 3.8 Flash.** No `agy` → `orgemini38flash` (OpenRouter, $0.75 / $3.75, effort high — this model's ceiling).
+- **Kimi K3.** The cheap panel has no fallback for it, so turn it on only after step 2b: this channel needs the Kimi Code CLI and an NVIDIA key.
+
+**In total:** about $0.06 a run on your OpenRouter key plus your subscriptions. Expect about 15 minutes: MiMo v2.6 Pro thinks longest, its median is 14 minutes. With the two free ones, about 35 minutes: Kimi through NVIDIA thinks longest, its median is 34 minutes.
+
+#### How to turn on the two free models
+
+In this version MiMo v2.6 Flash and Kimi K3 through NVIDIA ship with the kit but are off. To turn them on, put this in `~/.claude/model-orchestration.local.json` (your own settings file; updates never touch it):
+
+```json
+{ "channels": { "ocmimo26flashfree": { "enabled": true },
+                "nvkimik3":          { "enabled": true },
+                "kimik3":            { "enabled": false } } }
 ```
-[spark11]     OK  155s  model=Muse Spark 1.1 [muse-spark-1.1]
-[spark13cont] OK  279s  model=Muse Spark 1.3 Contributor
-[codex]       OK  407s  model=GPT-5.4    32 sources cited, 1 dead (deliberate check - correct)
-[agy31pro]    OK   44s  model=Gemini 3.1 Pro    11 cited, only 2 actually opened  <- PROBLEM
-[agy38flash]  OK   25s  model=Gemini 3.8 Flash
-[kimik3]      OK  185s  model=Kimi K3     4 cited, 1 opened
-[qwen38max]   OK  814s  model=Qwen3.8 Max 7 cited, 5 opened
-6/7 channels returned a verified review.
-```
 
-Every line names the **model**, not just the channel, because two of these channels are two
-checkpoints of one family and one of them deliberately rotates between models when a weekly
-limit runs out. "Codex answered" is not a fact you can act on; "Codex answered on GPT-5.4" is.
+The last line turns off the paid Kimi K3 on OpenRouter (≈ $1.38 a run), so that Kimi K3 does not answer twice in the standard panel. If the file already exists, add these three channels to its `channels` section. `python routing.py` shows who will run, spending nothing.
 
-Plus one file per model containing the actual review, and a diagnostics file if anything went
-wrong.
+### The standard panel — 10 models: the cheap one + 6
 
-## Panels: who reviews your document
+| Model | Channel | Transport | Effort | Payment | Price per 1M (in / out) | Per run |
+|---|---|---|---|---|---|---|
+| GPT-6.1 Sol (OpenAI) | `codex` | Codex CLI agent | xhigh | ChatGPT plan | — | $0 beyond the plan |
+| Kimi K3 (Moonshot) — with the two free ones on, `nvkimik3` runs instead | `kimik3` | OpenRouter | max | per key | $0.67 / $14.00 | ≈ $1.38 (n=9) |
+| Qwen 3.8 Max (Alibaba) | `qwen38max` | OpenRouter | xhigh (the ceiling) | per key | $2.00 / $6.00 | ≈ $1.02 (n=8), see below |
+| DeepSeek V4 Pro | `ordeepseekv4pro` | OpenRouter | xhigh (the ceiling) | per key | $0.209 / $0.418 | ≈ $0.11 (n=8) |
+| GLM 5.3 (Z.ai) | `orglm53` | OpenRouter | max | per key | $0.05 / $7.00 | ≈ $0.54 (n=8) |
+| Nemotron 3 Ultra (NVIDIA) | `ornemotron3ultra` | OpenRouter | high (the ceiling) | free model | $0 / $0 | ≈ $0.06 (n=12): only the web searches are paid here |
 
-A **panel** decides which models see your document. Two built-in panels; standard is a
-superset of cheap.
+⚠️ **Qwen 3.8 Max:** in September 0 of our 8 runs ended with an answer, although each cost about $1.02; the cause is not known yet. To avoid paying for it, add `--skip qwen38max`.
 
-**Several channels run on your existing subscriptions — no API key needed.** If you already pay
-for Claude, ChatGPT or have an eligible Google account, you already have reviewers. Grok CLI
-is free during beta. The opencode CLI adds a Muse Spark voice with no account at all.
+**In total:** about $3.2 a run on your OpenRouter key plus subscriptions; with the two free ones (Kimi through NVIDIA instead of OpenRouter), about $1.8. Expect up to 45 minutes: GLM 5.3 thinks longest, its median is 44 minutes. Every paid channel has a spending ceiling per run ($2–5); when it reaches it, the channel stops.
 
-### `--panel cheap` (the default)
+### By name only
 
-Free and subscription channels — no per-token API spend:
+| Model | Channel | Transport | Effort | Payment |
+|---|---|---|---|---|
+| Gemini 3.1 Pro (Google) | `agy31pro` | agy CLI agent | not set | as for agy above. Starts only when named: "only agy31pro" |
+| Claude Opus 4.6 [1M] (Anthropic) | `cclopus46` | Claude Code CLI agent | max | a Claude plan (Pro $20/month). Off by default; when on, it runs with permission prompts bypassed ([SECURITY.md](SECURITY.md)) |
 
-| Model family | Vendor | Access | Cost |
-|---|---|---|---|
-| **Muse Spark** | Meta | opencode CLI | **Free** — no account needed |
-| **Gemini** | Google | Antigravity CLI (`agy`) | **Subscription** (Google) |
-| **Grok** | xAI | Grok CLI (`grokbuild`) | **Free** during beta |
-| **MiMo** | Xiaomi | OpenRouter | Per token |
-| **Nemotron** | NVIDIA | OpenRouter | **Free** model |
+### Web search
 
-Where the same model is reachable through both a CLI and OpenRouter (Gemini, Grok, Spark),
-the tool picks the cheaper transport automatically — you do not choose.
+On the OpenRouter channels the search is done by the Exa plugin: $0.007 a request (up to 10 results). It is billed apart from the tokens, so it is paid even on a free model. The CLI agents search by themselves, within their plan.
 
-### `--panel standard`
+**`python routing.py` always prints the live channel list.** The tables above are a snapshot of 2026-10-05, and the registry changes most weeks.
 
-Everything in cheap, plus heavier voices:
-
-| Model family | Vendor | Access | Cost |
-|---|---|---|---|
-| **GPT** | OpenAI | Codex CLI (`codex`) | **Subscription** (ChatGPT) |
-| **Kimi** | Moonshot | OpenRouter | Per token |
-| **Qwen** | Alibaba | OpenRouter | Per token |
-| **DeepSeek** | DeepSeek | OpenRouter | Per token |
-| **GLM** | Zhipu AI | OpenRouter | Per token |
-| **Claude** | Anthropic | Claude Code CLI (`claude`) | **Subscription** (off by default) |
+*Where the prices come from (2026-10-05):*
+- the OpenRouter catalogue `openrouter.ai/api/v1/models`, read at 09:15 UTC;
+- free-model limits: `openrouter.ai/docs/api_reference/limits`;
+- web search: `openrouter.ai/docs/features/web-search`;
+- the fee: `openrouter.ai/pricing`;
+- MiMo prices match Xiaomi's own price list: `mimo.mi.com/docs/en-US/price/pay-as-you-go`;
+- NVIDIA: the model page `build.nvidia.com/moonshotai/kimi-k3`;
+- plans: `help.openai.com/en/articles/11369540`, `openai.com/index/introducing-chatgpt-go`, `antigravity.google`, `gemini.google/subscriptions`, `x.ai/pricing`, `x.ai/news/grok-build-for-everyone`, `opencode.ai/docs/zen`, `claude.com/pricing`, `dev.meta.ai/docs/pricing-rate-limits`.
 
 ### The premium panel — a separate script, not a `--panel` value
 
@@ -181,9 +182,92 @@ yet run a paid round. Smoke first.
 --skip ornemotron3ultra              # everyone except this one
 ```
 
-The live channel list is always `python routing.py`. This section uses model family names,
-which are stable; the specific channels and their count change — do not count them from this
-page.
+The live channel list is always `python routing.py`; the tables on this page are a snapshot
+dated in the «Panels» heading — channels and their count change most weeks.
+
+## The problem this solves
+
+You ask an AI to review your strategy memo. It tells you the memo is strong, adds three
+supportive points, and cites four sources.
+
+That answer is nearly worthless, for three reasons most people never check:
+
+1. **It is built to agree with you.** You wrote the memo, you asked the question, and the model
+   optimises for a helpful-feeling reply. Ask the same model to attack the memo and it will find
+   problems it just told you did not exist.
+2. **One model knows only what it knows.** Its ceiling is the data it was trained on and the tools of its harness. Whatever it was weak at yesterday, it is weak at today, and nothing in the answer hints which parts are unreliable or what it simply does not know. Another model, trained differently, will suggest what never occurred to the first.
+3. **The sources may not exist.** Models generate citations that *look* right — real domain,
+   plausible path, correct-sounding document number — for pages that were never opened and
+   sometimes never existed. In one measured run here, a model produced 11 source links; **3 of
+   them were dead**, and its conclusions were still correct. That combination is the dangerous
+   one, because it survives a casual read.
+
+## What this does instead
+
+- **Different knowledge, different recommendations.** Models from different vendors were trained on different data and run in different harnesses. Ask "how should I build this" or "what is wrong with this code" and each proposes its own answer, so you get several options rather than one repeated three times. Every answer also carries an UNASKED section: what matters that you did not ask about.
+- **A panel of independent models, same document, at the same time.** They do not see each
+  other's answers, so agreement means something and disagreement means more.
+- **It shows you the disagreement.** That is the actual product. Two models calling a claim fine
+  and one calling it fatal is the most useful thing you will read all week.
+- **It checks the receipts.** Every source link each model cites is opened and reported as
+  live / moved / dead. Where the channel supports it, the tool also checks whether the model
+  *actually opened* the page it cited, or just listed it.
+- **It catches a model that quietly refused.** A model that declines a task still formats its
+  reply correctly, so it passes every naive "did it finish?" check. This catches that.
+- **Nothing with a password or key ever leaves your machine.** Blocked outright, no override.
+  Personal data — ID numbers, SSNs, emails, phone numbers, dates of birth — is **found, itemised
+  and reported, and then SENT**; `--strict-pii` turns that into a hard stop. **Names and street
+  addresses are not detected at all**, at any setting. `PRIVACY.md` has the reasoning and the
+  measurement behind both.
+
+## Who this is for
+
+| You are | You use it to |
+|---|---|
+| **Founder / CEO** | Pressure-test a strategy memo, a board deck, an investor update or a pricing decision before anyone external sees it. Several models, several sets of objections, before your board finds them. |
+| **Product manager** | Review a spec or PRD for holes, check competitive claims you are about to publish, stress-test a launch plan's assumptions. |
+| **C-level / operations** | Verify claims in a vendor proposal or a consultant's report. Check that a regulation you are relying on is still current and says what someone told you it says. |
+| **Legal / compliance** | Verify that every citation in a research memo resolves to a real document that actually says what the memo claims. This is source-verification work, done properly and at speed. See the note below. |
+| **AI / ML engineer** | Compare model behaviour on the same prompt across vendors. See which models ground their answers in real sources and which ones fabricate citations. Evaluate before you ship. |
+| **Anyone writing something that matters** | Get the objections in private, before they arrive in public. |
+
+### A note for legal teams
+
+This is a **research verification** tool, not an advice tool, and the distinction is built into
+the software rather than written on it. It ships with a mode (`--system legal-research`) that
+frames the work as what it is: checking sources for a document a licensed professional will
+review. Nothing in the output is legal advice, and the models are explicitly instructed not to
+opine on any named individual's situation or decide what anyone should file.
+
+That framing is also what makes it *work*. Asked to "review this filing strategy", the models
+refuse on policy. Asked to "verify these six claims against their cited sources", the same models
+answer all six with correct citations. The reframing is accurate, not a workaround — checking a
+document number against the register genuinely is research.
+
+## What one run looks like
+
+You write your question in a plain text file and run one command. Below is the real output of a run of this version on 2026-10-05, shortened: the cheap panel with the two free models checked five claims about OpenRouter and NVIDIA, one of which we made false on purpose.
+
+```
+[agy38flash] OK  275.2s  model=Gemini 3.8 Flash [gemini-3.8-flash]
+[grokbuild] OK  251.0s  model=Grok 4.7 [grok-4.7]
+[nvkimik3] OK  666.6s  model=Kimi K3 (via Kimi Code CLI + NVIDIA free endpoint) [nvidia/moonshotai/kimi-k3]
+[ocmimo26flashfree] PROBLEM  0.8s  model=MiMo v2.6 Flash Free (via opencode) [opencode/mimo-v2.6-flash-free]
+    FAIL: EXIT 1: {"type":"error", ... "error":{"type":"provider.quota", ...
+[ocspark13free] PROBLEM  1.1s  model=Muse Spark 1.3 Contributor Free (via opencode) [opencode/muse-spark-1.3-contributor-free]
+    FAIL: EXIT 1: {"type":"error", ... "error":{"type":"provider.quota", ...
+[ormimopro] OK  185.0s  model=MiMo v2.6 Pro (OpenRouter) [xiaomi/mimo-v2.6-pro]
+4/6 channels returned a verified review.
+cost reported BY THE VENDORS for this round: $0.0697 across 1 channel(s) (ormimopro $0.0697)
+Citation existence check (no vendor cost; fetches the cited pages directly):
+  [agy38flash] 6 cited, 6 probed  LIVE=6
+  [grokbuild] 12 cited, 12 probed  LIVE=10  MOVED=1  UNKNOWN=1
+  [nvkimik3] 9 cited, 9 probed  LIVE=6  MOVED=3
+```
+
+Every line names the **model**, not just the channel: "the channel answered" is not a fact you can act on; "Kimi K3 answered through NVIDIA's free server" is. The two free opencode models hit the free service's quota this time (`provider.quota`), and the run said so plainly instead of passing an empty answer off as a review. The tool checks the links itself by opening every cited page: one that moved is marked MOVED, one that would not open is UNKNOWN.
+
+Plus one file per model with its full report, a `HANDOFF.md` summary to read first, and a diagnostics file if anything went wrong.
 
 ## The one habit worth stealing
 
@@ -199,18 +283,12 @@ the run it came from.)
 
 ## What it costs, honestly
 
-Several accounts, none of which this tool provides — but **one of them gets you most of the way**:
+In short, from our runs of September–October 2026:
+- **the cheap panel** — about $0.06 a run on your OpenRouter key plus subscriptions;
+- **the standard one** — about $3.2, or about $1.8 if you turn on the free Kimi through NVIDIA;
+- **CLI only** — $0 on the key, subscriptions only.
 
-| What you need | What it unlocks | Rough cost |
-|---|---|---|
-| **The opencode CLI** (`npm install -g opencode-ai`) | `ocspark13free` — the **free** Muse Spark 1.3 voice, and the **default `--ask` channel** | **Free** — no key, no account |
-| **`OPENROUTER_API_KEY`** | The biggest group in one account: Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, **a Muse Spark voice** and **a free NVIDIA Nemotron** — one signup | Metered per token, **plus per web search**. The Nemotron model itself is free |
-| **`MODEL_API_KEY`** | The Muse Spark voices reached directly from Meta | Metered per use |
-| **A paid OpenAI plan with Codex** | `codex` | Subscription, weekly limit |
-| **An eligible Google account** | The Gemini channels via `agy` (Antigravity CLI) | Subscription, with limits |
-| **Claude Code CLI** (`claude`) | Claude Opus — off by default; when on, it runs with **permission prompts bypassed** ([SECURITY.md](SECURITY.md)) | Subscription |
-| **Grok CLI** (`grokbuild`) | Grok 4.5 with live web search | Free during beta |
-| *Optional:* `GEMINI_API_KEY`, `XAI_API_KEY`, `MIMO_API_KEY` | The same Gemini, Grok and MiMo models through the **vendors' own** APIs, which buys real extra capability — see INSTALL.md. Off by default | Metered, free tiers vary |
+The per-model breakdown is in the tables above. The accounts, none of which this tool provides, are listed under [«Getting started»](#getting-started-accounts-and-keys). *Optional:* the `GEMINI_API_KEY`, `XAI_API_KEY` and `MIMO_API_KEY` keys reach the same Gemini, Grok and MiMo models through the vendors' own APIs; those channels are off by default, details in [INSTALL.md](INSTALL.md#direct-vendor-alternatives-to-openrouter-off-by-default).
 
 **You do not need them all, and you should not start with them all.** Missing a key or a CLI is a
 normal condition, not an error — the tool runs whatever is available and tells you plainly what it
@@ -418,9 +496,7 @@ MiMo, Grok, GLM, DeepSeek, Muse Spark and NVIDIA Nemotron. Start with that and a
 vendor access later for the models that benefit from it.
 
 **Is this expensive?**<br>
-One channel is free with no account at all (Muse Spark 1.3 via opencode). The default cheap panel
-runs on subscriptions and free/metered accounts, not premium APIs. A full run typically costs under
-$2 — and the tool prints the exact cost when it finishes. See [what it costs](#what-it-costs-honestly).
+No. The cheap panel costs about $0.06 a run on your OpenRouter key, plus subscriptions you most likely already have. Say "CLI only" and there is not one paid request on the key. The standard panel costs about $3.2 a run, or about $1.8 if you turn on the free Kimi through NVIDIA. These are the medians of our runs in September–October 2026; the tool prints the exact amount of your run at its end. See [what it costs](#what-it-costs-honestly).
 
 ## Found a bug? Want a feature? Want to work together?
 
