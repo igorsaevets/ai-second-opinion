@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.108.0 — 2026-10-06
+
+Qwen 3.8 Max: a run that stops at its budget keeps its answer instead of being run again, and the OpenRouter Qwen is no longer graded a failure for its own snapshot.
+
+- **The OpenRouter Qwen answers; we graded it wrong.** OpenRouter serves the name `qwen/qwen3.8-max` as its dated snapshot `qwen/qwen3.8-max-0902`, and the harness called that a model substitution and failed answers of 22–63 KB. A served model that is the requested name plus a date (`-0902`, `-2026-09-02`) is now a note in the report («ALIAS SNAPSHOT»), not a failure; `-preview` or another model still warns. The README said «0 of our 8 runs answered»: our cost survey had also counted copies of one run as separate runs. Counted once per run, all 3 Qwen 3.8 Max runs since 1 September answered (16 of 20 since 7 August).
+- **README prices recounted the same way** (median per distinct run, 1 September – 5 October): Qwen 3.8 Max ≈ $0.59 (was $1.02), GLM 5.3 ≈ $0.19 (was $0.54), DeepSeek V4 Pro ≈ $0.18 (was $0.11), Nemotron ≈ $0.07, paid Kimi ≈ $1.38 (n=3); the standard panel about $1.1 a run (was $1.8), $2.5 with the paid Kimi (was $3.2). «GLM's median is 44 minutes» was one run counted six times: its median is 16.
+- **Qwen Code CLI (`qwen38maxcli`, local installs): a budget stop is saved, not re-run.** When the CLI stops itself at its tool-call cap or time limit (exit 55), or reaches our timeout, the harness first takes a finished answer from the CLI's own session log if there is one, otherwise resumes that session once with tools off and asks for the review now. HANDOFF.md marks such a seat «🛟 Salvaged»: a partial review that says which files it did not read. Measured: since 5 October 7 of 8 runs had stopped at our own 50-call cap and 1 at the time limit, and the automatic retry repeated the stop (14–17 more minutes a round). A budget stop is not retried any more; when the salvage fails too, the report names the budget that fired (it used to show only a gitlab MCP warning). The 45-minute timeout is split into 36 minutes of work and up to 9 for the salvage, so a round waits no longer than before.
+- **Qwen Code runs without sub-agents and without its auto-memory** (`--exclude-tools agent`; the memory is switched off by a per-run system settings file and an empty memory folder, so `~/.qwen/settings.json` is neither read nor changed). Measured: the memory extractor made one more model call after every answer and wrote «lessons» that later panels recalled.
+- Smaller: the registry's `max_tool_calls` now reaches the call (channels.json had it since R128 and nothing read it); a timeout stops the Qwen CLI's whole process tree; an auto-retried channel keeps its first attempt's cause and time in the report.
+
 ## 1.107.0 — 2026-10-05
 
 Everything left open around Kimi K3.

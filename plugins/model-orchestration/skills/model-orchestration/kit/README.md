@@ -71,7 +71,7 @@ How to read the tables:
 - **Transport.** A *CLI agent* is the vendor's program on your computer (opencode, agy, grok, kimi, codex, claude). It runs on your subscription or for free and needs no OpenRouter key. *OpenRouter* is an API request on your key, paid per token.
 - **Effort** is how hard the model thinks. The tool always sets the highest level the model accepts.
 - **Price per 1M tokens** is from the OpenRouter catalogue on 2026-10-05, input / output.
-- **Per run** is the median of our runs from 1 September to 5 October 2026; n is the number of runs. Yours will be higher or lower: it depends on the size of the document and the number of web searches. The tool prints the exact amount at the end of every run.
+- **Per run** is the median of our runs from 1 September to 5 October 2026; n is the number of runs, each counted once. Yours will be higher or lower: it depends on the size of the document and the number of web searches. The tool prints the exact amount at the end of every run.
 
 ### The cheap panel — the default: 6 models
 
@@ -107,15 +107,15 @@ Any other channel switches off the same way, for example `ocmimo26flashfree`. If
 | Model | Channel | Transport | Effort | Payment | Price per 1M (in / out) | Per run |
 |---|---|---|---|---|---|---|
 | GPT-6.1 Sol (OpenAI) | `codex` | Codex CLI agent | xhigh | ChatGPT plan | — | $0 beyond the plan |
-| Kimi K3 (Moonshot) — only when `nvkimik3` cannot start: no Kimi Code CLI or NVIDIA key | `kimik3` | OpenRouter | max | per key | $0.67 / $14.00 | ≈ $1.38 (n=9) |
-| Qwen 3.8 Max (Alibaba) | `qwen38max` | OpenRouter | xhigh (the ceiling) | per key | $2.00 / $6.00 | ≈ $1.02 (n=8), see below |
-| DeepSeek V4 Pro | `ordeepseekv4pro` | OpenRouter | xhigh (the ceiling) | per key | $0.209 / $0.418 | ≈ $0.11 (n=8) |
-| GLM 5.3 (Z.ai) | `orglm53` | OpenRouter | max | per key | $0.05 / $7.00 | ≈ $0.54 (n=8) |
-| Nemotron 3 Ultra (NVIDIA) | `ornemotron3ultra` | OpenRouter | high (the ceiling) | free model | $0 / $0 | ≈ $0.06 (n=12): only the web searches are paid here |
+| Kimi K3 (Moonshot) — only when `nvkimik3` cannot start: no Kimi Code CLI or NVIDIA key | `kimik3` | OpenRouter | max | per key | $0.67 / $14.00 | ≈ $1.38 (n=3) |
+| Qwen 3.8 Max (Alibaba) | `qwen38max` | OpenRouter | xhigh (the ceiling) | per key | $2.00 / $6.00 | ≈ $0.59 (n=3), see below |
+| DeepSeek V4 Pro | `ordeepseekv4pro` | OpenRouter | xhigh (the ceiling) | per key | $0.209 / $0.418 | ≈ $0.18 (n=3) |
+| GLM 5.3 (Z.ai) | `orglm53` | OpenRouter | max | per key | $0.05 / $7.00 | ≈ $0.19 (n=3) |
+| Nemotron 3 Ultra (NVIDIA) | `ornemotron3ultra` | OpenRouter | high (the ceiling) | free model | $0 / $0 | ≈ $0.07 (n=6): only the web searches are paid here |
 
-⚠️ **Qwen 3.8 Max:** in September 0 of our 8 runs ended with an answer, although each cost about $1.02; the cause is not known yet. To avoid paying for it, add `--skip qwen38max`.
+ℹ️ **Qwen 3.8 Max:** until v1.108.0 this line said that 0 of our 8 runs had answered. That was our counting error: the 8 included copies of the same run, and the harness graded real answers as failures because OpenRouter serves the name `qwen/qwen3.8-max` as its dated snapshot `qwen/qwen3.8-max-0902`. Counted once per run, all 3 of our runs since 1 September ended with a full answer (22–63 KB). Since v1.108.0 such a snapshot is a note in the report, not a failure.
 
-**In total:** about $1.8 a run on your OpenRouter key plus subscriptions; about $3.2 when Kimi answers through OpenRouter (no NVIDIA key). Expect up to 45 minutes: GLM 5.3 thinks longest, its median is 44 minutes. Every paid channel has a spending ceiling per run ($2–5); when it reaches it, the channel stops.
+**In total:** about $1.1 a run on your OpenRouter key plus subscriptions; about $2.5 when Kimi answers through OpenRouter (no NVIDIA key). Expect about 35 minutes, as with the cheap panel: Kimi through NVIDIA still thinks longest. Of the five models added here, GLM 5.3 and Qwen 3.8 Max take longest, medians 16 and 15 minutes (GLM's longest run: 44 minutes). Every paid channel has a spending ceiling per run ($2–5); when it reaches it, the channel stops.
 
 ### By name only
 
@@ -285,7 +285,7 @@ the run it came from.)
 
 In short, from our runs of September–October 2026:
 - **the cheap panel** — about $0.06 a run on your OpenRouter key plus subscriptions;
-- **the standard one** — about $1.8, or about $3.2 when Kimi answers through OpenRouter (no NVIDIA key);
+- **the standard one** — about $1.1, or about $2.5 when Kimi answers through OpenRouter (no NVIDIA key);
 - **CLI only** — $0 on the key, subscriptions only.
 
 The per-model breakdown is in the tables above. The accounts, none of which this tool provides, are listed under [«Getting started»](#getting-started-accounts-and-keys). *Optional:* the `GEMINI_API_KEY`, `XAI_API_KEY` and `MIMO_API_KEY` keys reach the same Gemini, Grok and MiMo models through the vendors' own APIs; those channels are off by default, details in [INSTALL.md](INSTALL.md#direct-vendor-alternatives-to-openrouter-off-by-default).

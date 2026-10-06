@@ -2276,7 +2276,9 @@ def _decorate(plan, reg):
         for extra in ("reasoning", "max_tokens", "toolsets", "role", "fetch_tool", "tools",
                       "provider", "provider_route", "prompt_suffix", "distribution",
                       "thinking_level", "thinking_levels", "fallback_models",
-                      "fallback_model", "supported_efforts", "max_turns"):
+                      "fallback_model", "supported_efforts", "max_turns", "max_tool_calls"):
+            # 🔴 max_tool_calls (R144 И-4): qwen38maxcli declared 50 since R128-F and nothing read
+            # it - call_qwencli hard-coded the same 50. The fifth field found dead at this list.
             if ch.get(extra) is not None:
                 p[extra] = ch[extra]
         # Hints are stored ONCE at top level and referenced, because the same 1.5 KB paragraph
