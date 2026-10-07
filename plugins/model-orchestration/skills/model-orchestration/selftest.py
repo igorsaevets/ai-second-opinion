@@ -7900,7 +7900,7 @@ def main():
                   suite_r109_snapshot_classifier,
                   suite_r121_panel_retry,
                   suite_r130_qwen_home_override,
-                  suite_r144_qwen_salvage,
+                  suite_r144_qwen_salvage, suite_r144_i7_qwen_hotfix,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -13841,6 +13841,7 @@ def suite_r144_qwen_salvage():
     section("R144 И-4 Qwen budget stop -> salvage, no AUTO-RETRY, stderr's last JSON, "
             "no sub-agents, no auto-memory, alias snapshot = note")
     MARK = "R144-SALVAGE-END"
+    FILL = "a finding with its file, line and reason\n" * 60     # R144 И-7 (H11): over the floor
     ERR55 = ('MCP server(s) failed to start: gitlab\n'
              '{"error": {"type": "FatalBudgetExceededError", "message": "Run aborted: tool-call '
              'budget of 50 exceeded (--max-tool-calls); observed 51", "code": 55}}\n')
@@ -13882,13 +13883,13 @@ def suite_r144_qwen_salvage():
                           "settings": seen})
             sid = cmd[cmd.index("--session-id") + 1] if "--session-id" in cmd else None
             if "-r" not in cmd:                                    # run 1
-                make_log(sid, ("answer from the log\n" + MARK) if mode == "recover" else None)
+                make_log(sid, ("answer from the log\n" + FILL + MARK) if mode == "recover" else None)
                 if mode == "timeout":
                     raise subprocess.TimeoutExpired(cmd, kw.get("timeout"), output=None, stderr=None)
                 return subprocess.CompletedProcess(cmd, 55, "", ERR55)
             if mode == "salvage_fails":                            # the salvage stops too
                 return subprocess.CompletedProcess(cmd, 55, "", ERR55)
-            return subprocess.CompletedProcess(cmd, 0, answer("salvaged answer\n" + MARK), "")
+            return subprocess.CompletedProcess(cmd, 0, answer("salvaged answer\n" + FILL + MARK), "")
         return fake
 
     def arg(cmd, flag):
@@ -13897,6 +13898,11 @@ def suite_r144_qwen_salvage():
     saved = (subprocess.run, o._qwencli_panel_home, o.qwen_bin)
     o._qwencli_panel_home = lambda: home
     o.qwen_bin = lambda: "qwen"
+    # R144 И-7 (H15c): the memory-off check must not depend on this machine - an inherited
+    # QWEN_CODE_SYSTEM_SETTINGS_PATH or a machine-wide settings file would skip our file.
+    saved_sys = (getattr(o, "QWENCLI_DEFAULT_SYSTEM_SETTINGS", None),
+                 os.environ.pop("QWEN_CODE_SYSTEM_SETTINGS_PATH", None))
+    o.QWENCLI_DEFAULT_SYSTEM_SETTINGS = {sys.platform: os.path.join(tmp, "no-system-settings.json")}
     res = {}
     try:
         for mode in ("salvage", "salvage_fails", "recover", "timeout"):
@@ -13907,10 +13913,15 @@ def suite_r144_qwen_salvage():
                 r = o.call_qwencli("brief", MARK, out, model="qwen3.8-max", timeout="45m",
                                    max_tool_calls=50)
             except TypeError:          # the pre-R144 signature - reached only by the NC run
+                del calls[:]           # R144 И-7 (H15f): not the first attempt's calls too
                 r = o.call_qwencli("brief", MARK, out, model="qwen3.8-max", timeout="45m")
             res[mode] = (r, list(calls))
     finally:
         subprocess.run, o._qwencli_panel_home, o.qwen_bin = saved
+        if saved_sys[0] is not None:
+            o.QWENCLI_DEFAULT_SYSTEM_SETTINGS = saved_sys[0]
+        if saved_sys[1] is not None:
+            os.environ["QWEN_CODE_SYSTEM_SETTINGS_PATH"] = saved_sys[1]
     rsd = o.retryable_stream_death
     notes = lambda r: " | ".join(r.get("notes") or [])          # noqa: E731
 
@@ -13932,9 +13943,10 @@ def suite_r144_qwen_salvage():
     wall = arg(c1, "--max-wall-time") or ""
     check(arg(c1, "--exclude-tools") == "agent" and arg(c1, "--max-tool-calls") == "50"
           and arg(c1, "--session-id") and wall.endswith("s") and wall[:-1].isdigit()
-          and int(wall[:-1]) == 2700 - 540,
+          and int(wall[:-1]) == 2700 - 540 - 120,
           "R144 И-4: run 1 carries --session-id, --exclude-tools agent (no sub-agents), the "
-          "channel's --max-tool-calls, and a wall of the timeout minus the salvage reserve",
+          "channel's --max-tool-calls, and a wall of the timeout minus the salvage reserve and "
+          "(R144 И-7) both 60-s kill margins",
           "exclude=%r cap=%r wall=%r" % (arg(c1, "--exclude-tools"), arg(c1, "--max-tool-calls"), wall))
     check(arg(c2, "-r") == arg(c1, "--session-id") and arg(c2, "--max-tool-calls") == "0"
           and MARK in (cl[1]["input"] if len(cl) > 1 else "")
@@ -13957,7 +13969,7 @@ def suite_r144_qwen_salvage():
     cause = (o.diagnose(w) or (None, None))[0] or ""
     check(not r.get("ok") and r.get("budget_stop") is True and not rsd(r)
           and "FatalBudgetExceededError" in w and "stopped itself at the budget" in cause
-          and "salvage of session" in notes(r),
+          and "salvage of session" in notes(r) and len(cl) == 2,
           "R144 И-4: a failed salvage leaves the stop LOUD with its cause named (KNOWN_FAILURES), "
           "and no AUTO-RETRY",
           "ok=%s retry=%s warn=%r cause=%r" % (r.get("ok"), rsd(r), w[:60], cause[:40]))
@@ -14008,6 +14020,304 @@ def suite_r144_qwen_salvage():
           "dispatch sites: %d" % osrc.count('max_tool_calls=p.get("max_tool_calls")'))
     check("panel_retry_first" in osrc and "🛟 **Salvaged:**" in osrc,
           "R144 I-4: an AUTO-RETRY keeps the first attempt's cause; HANDOFF names a salvaged seat", "")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def suite_r144_i7_qwen_hotfix():
+    """R144 И-7 (2026-10-06): kit 1.108.1 - what the panel on v1.108.0 found in the Qwen salvage and
+    the AUTO-RETRY (H1-H19 in the meta project's runs/r144-qwen-release/triage.md). Each check here
+    fails on 1.108.0. The qwen binary is faked at the subprocess seam, as in suite_r144_qwen_salvage;
+    the two live facts the fixes rest on (an unknown `-r` id exits 1 in ~1 s; enableAutoSkill=false
+    exits 0) are from runs/r144-qwen-hotfix/probe_i7.py.
+    """
+    import json
+    import shutil
+    import subprocess
+    import tempfile
+    import time as real_time
+    import orchestrate as o
+    import routing
+    section("R144 И-7 Qwen salvage hotfix + no AUTO-RETRY of a billed failure")
+    MARK = "R144I7-END"
+    LONG = "a finding, its file and line, and why it matters\n" * 60      # ~3 K chars
+    tmp = tempfile.mkdtemp(prefix="r144i7-")
+    home = os.path.join(tmp, "qwen-panel-home")
+    os.makedirs(home)
+
+    def err(etype, msg, code):
+        return ("MCP server(s) failed to start: gitlab\n"
+                + json.dumps({"error": {"type": etype, "message": msg, "code": code}}) + "\n")
+    E55 = err("FatalBudgetExceededError", "Run aborted: tool-call budget of 50 exceeded "
+              "(--max-tool-calls); observed 51", 55)
+    # the type name is in cli 0.25.0's bundle; this message is the fixture's own
+    E53 = err("FatalTurnLimitedError", "Run aborted: session turn limit reached", 53)
+
+    def A(parts):
+        return {"type": "assistant", "message": {"parts": parts}}
+    CALL = A([{"functionCall": {"name": "read_file"}}])
+
+    def envelope(text, is_err=False):
+        return json.dumps([{"type": "system"},
+                           {"type": "result", "result": text, "is_error": is_err,
+                            "subtype": "error" if is_err else "success", "num_turns": 1,
+                            "usage": {"input_tokens": 10, "output_tokens": 5}}])
+
+    def chat(sid, recs):
+        d = os.path.join(home, "projects", "d--x", "chats")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, sid + ".jsonl"), "a", encoding="utf-8") as fh:
+            fh.write("".join(json.dumps(x) + "\n" for x in recs))
+
+    calls, clock = [], {"off": 0.0}
+
+    class Clock(object):                      # orchestrate's `time` with a movable «now» (H5)
+        def __getattr__(self, n):
+            return getattr(real_time, n)
+
+        def time(self):
+            return real_time.time() + clock["off"]
+
+    def fake_factory(mode):
+        def fake(cmd, **kw):
+            env = dict(kw.get("env") or {})
+            st = None
+            if env.get("QWEN_CODE_SYSTEM_SETTINGS_PATH"):
+                try:
+                    with open(env["QWEN_CODE_SYSTEM_SETTINGS_PATH"], encoding="utf-8") as fh:
+                        st = json.load(fh)
+                except (OSError, ValueError):
+                    st = "unreadable"
+            calls.append({"cmd": list(cmd), "env": env, "timeout": kw.get("timeout"),
+                          "settings": st})
+            CP = subprocess.CompletedProcess
+            if "-r" not in cmd:                                         # run 1
+                sid = cmd[cmd.index("--session-id") + 1]
+                if mode != "nolog":
+                    chat(sid, [{"type": "user", "message": {"parts": [{"text": "brief"}]}}, CALL])
+                if mode == "timeout":
+                    clock["off"] += kw.get("timeout") or 0
+                    raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+                if mode == "turns53":
+                    return CP(cmd, 53, "", E53)
+                if mode == "envelope55":
+                    return CP(cmd, 55, envelope("", True), E55)
+                if mode == "noise":
+                    return CP(cmd, 55, "progress: reading files\n", E55)
+                return CP(cmd, 55, "", E55)
+            if mode == "salvage_log":            # the resume writes its answer, then hits its wall
+                chat(cmd[cmd.index("-r") + 1], [A([{"text": LONG + MARK}])])
+                return CP(cmd, 55, "", E55)
+            if mode == "short":
+                return CP(cmd, 0, envelope("stub\n" + MARK), "")
+            return CP(cmd, 0, envelope(LONG + MARK), "")
+        return fake
+
+    saved = (subprocess.run, o._qwencli_panel_home, o.qwen_bin, o.time,
+             getattr(o, "QWENCLI_DEFAULT_SYSTEM_SETTINGS", None), o._qwencli_result_obj)
+    envk = ("QWEN_CODE_SYSTEM_SETTINGS_PATH", "QWEN_RUNTIME_DIR", "QWEN_CODE_MEMORY_LOCAL")
+    saved_env = {k: os.environ.get(k) for k in envk}
+    o._qwencli_panel_home = lambda: home
+    o.qwen_bin = lambda: "qwen"
+    o.QWENCLI_DEFAULT_SYSTEM_SETTINGS = {sys.platform: os.path.join(tmp, "no-system-settings.json")}
+    os.environ.pop("QWEN_CODE_SYSTEM_SETTINGS_PATH", None)
+    os.environ["QWEN_RUNTIME_DIR"] = os.path.join(tmp, "elsewhere")       # H4: must be scrubbed
+    os.environ["QWEN_CODE_MEMORY_LOCAL"] = "1"
+    res, raised = {}, False
+    try:
+        for mode, cap in (("cap0", 0), ("salvage_log", 50), ("nolog", 50), ("timeout", 50),
+                          ("turns53", 50), ("envelope55", 50), ("noise", 50), ("short", 50)):
+            del calls[:]
+            clock["off"] = 0.0
+            subprocess.run = fake_factory(mode)
+            o.time = Clock() if mode == "timeout" else saved[3]
+            r = o.call_qwencli("brief", MARK, os.path.join(tmp, mode + ".md"), model="qwen3.8-max",
+                               timeout="45m", max_tool_calls=cap)
+            res[mode] = (r, list(calls))
+        subprocess.run = fake_factory("cap0")           # H7: the call raises mid-way
+        o.time = saved[3]
+
+        def boom(raw):
+            raise RuntimeError("boom")
+        o._qwencli_result_obj = boom
+        try:
+            o.call_qwencli("brief", MARK, os.path.join(tmp, "boom.md"), model="qwen3.8-max",
+                           timeout="45m", max_tool_calls=50)
+        except RuntimeError:
+            raised = True
+    finally:
+        (subprocess.run, o._qwencli_panel_home, o.qwen_bin, o.time) = saved[:4]
+        o._qwencli_result_obj = saved[5]
+        if saved[4] is not None:
+            o.QWENCLI_DEFAULT_SYSTEM_SETTINGS = saved[4]
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def notes(r):
+        return " | ".join(r.get("notes") or [])
+
+    def arg(c, f):
+        return c[c.index(f) + 1] if f in c else None
+
+    # H6 / H14 / H4 - what run 1 is started with ---------------------------------------------------
+    r, cl = res["cap0"]
+    c1 = cl[0]["cmd"] if cl else []
+    check(arg(c1, "--max-tool-calls") == "0",
+          "R144 И-7 (H6): max_tool_calls 0 reaches the CLI as --max-tool-calls 0 (1.108.0 sent 50)",
+          "sent %r" % arg(c1, "--max-tool-calls"))
+    st = cl[0]["settings"] if cl else None
+    check(isinstance(st, dict) and st.get("memory", {}).get("enableAutoSkill") is False,
+          "R144 И-7 (H14): the panel system settings switch memory.enableAutoSkill off too (live: "
+          "exit 0 with this file)", "settings=%r" % (st,))
+    env1 = cl[0]["env"] if cl else {"QWEN_RUNTIME_DIR": "?"}
+    check("QWEN_RUNTIME_DIR" not in env1 and "QWEN_CODE_MEMORY_LOCAL" not in env1,
+          "R144 И-7 (H4): an inherited QWEN_RUNTIME_DIR / QWEN_CODE_MEMORY_LOCAL is scrubbed - the "
+          "first moves the session logs out of the panel home the salvage reads",
+          "left: %r" % sorted(k for k in envk[1:] if k in env1))
+
+    # H3 - a resume that wrote its answer and then stopped -----------------------------------------
+    r, cl = res["salvage_log"]
+    check(r.get("ok") and (r.get("text") or "").startswith("a finding") and len(cl) == 2
+          and r.get("salvage_kind") == "resume" and "read from the session log" in notes(r),
+          "R144 И-7 (H3): a resume that wrote its answer and THEN stopped is not a failed salvage - "
+          "the session log is read again",
+          "ok=%s calls=%d kind=%r" % (r.get("ok"), len(cl), r.get("salvage_kind")))
+
+    # H4 - no chat log found: the session is still resumed by id -----------------------------------
+    r, cl = res["nolog"]
+    check(r.get("ok") and len(cl) == 2
+          and arg(cl[1]["cmd"], "-r") == arg(cl[0]["cmd"], "--session-id"),
+          "R144 И-7 (H4): no chat log found -> the session is resumed by its id anyway (live: an "
+          "unknown id exits 1 in ~1 s)", "ok=%s calls=%d" % (r.get("ok"), len(cl)))
+
+    # H5 - both ceilings inside the channel's timeout ----------------------------------------------
+    r, cl = res["timeout"]
+    t1 = cl[0]["timeout"] if cl else None
+    t2 = cl[1]["timeout"] if len(cl) > 1 else None
+    check(bool(r.get("ok") and t1 and t2 and t1 + t2 <= 2700),
+          "R144 И-7 (H5): run 1's ceiling + the salvage's ceiling fit in the 2700-s channel timeout "
+          "(1.108.0: 2220 + 600 = 2820)", "ceilings %r + %r" % (t1, t2))
+
+    # H9 - exit 53 --------------------------------------------------------------------------------------
+    r, cl = res["turns53"]
+    cause = (o.diagnose("QWEN STRUCTURED ERROR: type=FatalTurnLimitedError code=53 message=x")
+             or (None,))[0] or ""
+    check(r.get("ok") and r.get("budget_stop") is True and len(cl) == 2
+          and "stopped itself at the budget" in cause,
+          "R144 И-7 (H9): exit 53 (FatalTurnLimitedError, the turn cap) is salvaged and named by "
+          "KNOWN_FAILURES like the budget stop", "ok=%s cause=%r" % (r.get("ok"), cause[:50]))
+
+    # H12 / H13 - an error envelope, stdout noise ---------------------------------------------------
+    r, cl = res["envelope55"]
+    check(r.get("ok") and r.get("budget_stop") is True and len(cl) == 2,
+          "R144 И-7 (H12): an exit 55 that printed an empty error envelope is still a budget stop - "
+          "salvaged", "ok=%s budget_stop=%r calls=%d" % (r.get("ok"), r.get("budget_stop"), len(cl)))
+    r, cl = res["noise"]
+    check("tool-call budget of 50" in str(r.get("salvaged_after")),
+          "R144 И-7 (H13): stderr's error is read even when stdout carries noise - the result names "
+          "the budget that fired", "salvaged_after=%r" % r.get("salvaged_after"))
+
+    # H11 - a stub is not a review --------------------------------------------------------------------
+    r, cl = res["short"]
+    check(not r.get("ok") and "TOO SHORT" in " ".join(r.get("warnings") or []),
+          "R144 И-7 (H11): a salvaged stub that only ends with the marker is not graded a review",
+          "ok=%s" % r.get("ok"))
+
+    # H7 - the memory folder goes even when the call raises ------------------------------------------
+    left = [d for d in os.listdir(home) if d.startswith("memory-off-")]
+    check(raised and not left,
+          "R144 И-7 (H7): the per-call memory folder is removed even when the call raises",
+          "raised=%s left=%r" % (raised, left))
+
+    # H10 / H17 - helpers ---------------------------------------------------------------------------------
+    stale, good = os.path.join(tmp, "stale.jsonl"), os.path.join(tmp, "good.jsonl")
+    with open(stale, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(A([{"text": LONG + MARK}])) + "\n" + json.dumps(CALL) + "\n")
+    with open(good, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(CALL) + "\n" + json.dumps(A([{"text": LONG + MARK}])) + "\n")
+    af = o._qwencli_answer_from_log
+    check(af(stale, MARK) == "" and af(good, MARK).startswith("a finding"),
+          "R144 И-7 (H10): a marker-ending draft that a tool call FOLLOWS is not taken as the "
+          "answer (control: the same text after the call is)", "")
+    two = E55 + json.dumps({"error": {"type": "Other", "message": "later", "code": 1}}) + "\n"
+    try:
+        e2 = o._qwencli_stderr_error(two, 55) or {}
+    except TypeError:                          # the 1.108.0 signature (one argument)
+        e2 = {}
+    check(e2.get("code") == 55,
+          "R144 И-7 (H17): of two error objects on stderr, the one whose code is the exit code wins",
+          "got %r" % e2.get("type"))
+
+    # H8 - real dates only ---------------------------------------------------------------------------------
+    ds = o._is_dated_snapshot
+    yes = ("-0902", "-04-02", "-2603", "-2512", "-2024-11-20", "-20260902", "-1024")
+    no = ("-9999", "-0000", "-2026", "-4096", "-202609", "-0230", "-preview", "-0902-preview")
+    bad = [x for x in yes if not ds("m/x", "m/x" + x)] + [x for x in no if ds("m/x", "m/x" + x)]
+    check(not bad, "R144 И-7 (H8): a dated snapshot is a REAL date (-MMDD, -MM-DD, -YYMM, "
+          "-YYYY-MM-DD, -YYYYMMDD); -9999, -0000 and -4096 are not", "wrong: %r" % bad)
+
+    # H1 - never auto-retry a billed failure ---------------------------------------------------------
+    split = getattr(o, "auto_retry_split", None)
+    recs = {"orglm53": {"ok": False, "text": "", "provider_error": {"code": 429}, "usd": 1.749},
+            "orfree": {"ok": False, "text": "", "provider_error": {"code": 429}, "usd": None},
+            "orsilent": {"ok": False, "text": "", "finish_reason": None, "reasoning_chars": 5000,
+                         "usd": None},
+            "mimo": {"ok": False, "text": "", "finish_reason": "error", "usd": 0.127},
+            "codex": {"ok": False, "text": "", "finish_reason": "error", "usd": None}}
+    kinds = {"orglm53": "http", "orfree": "http", "orsilent": "http", "mimo": "mimocli",
+             "codex": "codex"}
+    retry, held = split(recs, kinds.get) if split else ({}, {})
+    check(set(held) == {"orglm53", "orsilent", "mimo"} and set(retry) == {"orfree", "codex"},
+          "R144 И-7 (H1): a transient death that already BILLED (a price, or tokens on a metered "
+          "seat that reported none) is NOT auto-retried; a free one still is",
+          "held=%r retry=%r" % (sorted(held), sorted(retry)))
+    osrc = open(o.__file__, encoding="utf-8").read()
+    check("_retryable, _held = auto_retry_split(" in osrc,
+          "R144 И-7 (H1): the AUTO-RETRY block decides through auto_retry_split", "")
+
+    # H2 / H18 - HANDOFF ---------------------------------------------------------------------------------
+    hd = os.path.join(tmp, "handoff")
+    os.makedirs(hd)
+    for fn, body in (("QWEN38MAXCLI.md", LONG + MARK), ("QWENB.md", LONG + MARK),
+                     ("QWENC.md", "stub"), ("ORGLM53.md", LONG + MARK),
+                     ("ORGLM53.quote-verify.md", "quote check")):
+        with open(os.path.join(hd, fn), "w", encoding="utf-8") as fh:
+            fh.write(body)
+    sv = {"salvaged_after": "exit 55", "text": "x", "seconds": 1}
+    o.write_handoff(hd, {"qwen38maxcli": dict(sv, ok=True, answer_file="QWEN38MAXCLI.md",
+                                              salvage_kind="log"),
+                         "qwenb": dict(sv, ok=True, answer_file="QWENB.md", salvage_kind="resume"),
+                         "qwenc": dict(sv, ok=False, answer_file="QWENC.md", salvage_kind="resume"),
+                         "orglm53": {"ok": True, "text": "x", "seconds": 1,
+                                     "answer_file": "ORGLM53.md"}},
+                    marker=MARK, started=real_time.time() - 60)
+    with open(os.path.join(hd, "HANDOFF.md"), encoding="utf-8") as fh:
+        H = fh.read().splitlines()
+
+    def first(pfx):
+        return next((ln for ln in H if ln.startswith(pfx)), "")
+    check("qwen38maxcli" in first("📜") and "qwen38maxcli" not in first("🛟")
+          and "`qwenb`" in first("🛟") and "qwenc" not in first("🛟")
+          and "qwenc" in first("⚠ **Salvage"),
+          "R144 И-7 (H2): HANDOFF tells an answer RECOVERED from the log (complete) from a RESUMED "
+          "salvage (partial); a salvage graded not-ok gets neither label",
+          "rec=%r sal=%r" % (first("📜")[:50], first("🛟")[:50]))
+    orphan = next((ln for ln in H if "claimed by no channel record" in ln), "")
+    check("quote-verify" not in orphan and any("4 answer file(s)" in ln for ln in H)
+          and "ORGLM53.quote-verify.md" in first("📎"),
+          "R144 И-7 (H18): the harness's own quote-verify sidecars are neither answers nor "
+          "unclaimed files", "orphan line: %r" % orphan[:80])
+
+    # H19 - the plan line and the registry note -------------------------------------------------------
+    rsrc = open(routing.__file__, encoding="utf-8").read()
+    with open(os.path.join(os.path.dirname(o.__file__), "channels.json"), encoding="utf-8") as fh:
+        q = json.load(fh)["channels"].get("qwen38maxcli", {})
+    check("timeout %s (--max-wall-time)" not in rsrc
+          and not str(q.get("_timeout", "")).startswith("Maps to --max-wall-time"),
+          "R144 И-7 (H19): the plan line and the registry note no longer say timeout = the CLI's "
+          "own wall", "")
     shutil.rmtree(tmp, ignore_errors=True)
 
 

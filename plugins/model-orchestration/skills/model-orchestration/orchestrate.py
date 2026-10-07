@@ -1272,16 +1272,20 @@ CLI_ENV_VARS = " / ".join(env for _, env, _ in CLI_BINARIES)
 KNOWN_FAILURES = [
     # R144 И-4: FIRST - Qwen Code's own budget stop. Its text also says «wall-clock» and «exceeded»,
     # which generic timeout entries below would claim with advice that makes the round slower.
-    (r"FatalBudgetExceededError|budget of \d+s? exceeded \(--max-(?:tool-calls|wall-time)\)",
+    # R144 И-7 (H9): exit 53 - the session-turn cap, FatalTurnLimitedError in cli 0.25.0 - is the
+    # same kind of stop and is salvaged the same way; this entry named only the budget (55).
+    (r"FatalBudgetExceededError|FatalTurnLimitedError"
+     r"|budget of \d+s? exceeded \(--max-(?:tool-calls|wall-time)\)",
      "Qwen Code stopped itself at the budget the harness gives it - --max-tool-calls (the "
-     "channel's max_tool_calls) or --max-wall-time (its timeout minus the salvage reserve) - "
+     "channel's max_tool_calls) or --max-wall-time (exit 55), or --max-session-turns (exit 53) - "
      "before it wrote an answer; such a stop prints nothing on stdout.",
-     "Since v1.108.0 the harness resumes the same session once with tools off and Qwen writes its "
-     "answer from what it read (a SALVAGED note). If that failed too: narrow the brief (inline the "
+     "Since v1.108.0 the harness takes the answer from Qwen's session log when it is already "
+     "there, else resumes the same session once with tools off and Qwen writes its answer from "
+     "what it read (a SALVAGED note). If that failed too: narrow the brief (inline the "
      "excerpts it needs, fewer files to open) or leave the seat out with --skip qwen38maxcli. A "
      "higher cap or timeout only makes the round wait longer; a re-run at the same budget stops "
      "the same way (4 of 4, R144 И-2)."),
-    # R142 И-6: FIRST, because the text also says 429 / «Rate limit exceeded», which the generic
+    # R142 И-6: second (FIRST until R144 И-4), because the text also says 429 / «Rate limit exceeded», which the generic
     # rate-limit entry below matches - and «wait, or reroute» hides that nothing on THIS machine
     # spent a shared free quota. Both free voices of 2026-10-05's rounds died on it (store:
     # `provider.quota`), at 1 s and mid-run. The mimo CLI writes the same NDJSON, hence «paid».
@@ -1672,9 +1676,14 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             if _af:
                 by_file[_af] = (_cn, _r.get("read_order"), _r.get("reading_note"),
                                 bool(_r.get("must_read")))
-        files = []
+        files, sidecars = [], []
         for fn in sorted(os.listdir(outdir)):
             if not fn.endswith(".md") or fn in skip:
+                continue
+            # R144 И-7 (H18): the harness's own quote check of an answer (B-9 sidecar) is neither an
+            # answer nor a foreign file; v1.108.0 listed it as both.
+            if fn.lower().endswith(".quote-verify.md"):
+                sidecars.append(fn)
                 continue
             p = os.path.join(outdir, fn)
             if not os.path.isfile(p):
@@ -1782,6 +1791,12 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             L += ["🔴 **On disk but claimed by no channel record:** %s. Something wrote into this "
                   "folder that this run did not produce, or a record lost its file name."
                   % ", ".join("`%s`" % o for o in orphans), ""]
+        if sidecars:
+            _sc = ".quote-verify.md"
+            L += ["📎 **Harness sidecars, not answers:** %s - the harness's own check of the quotes "
+                  "in that channel's answer (advisory); not counted above."
+                  % ", ".join("`%s` (%s)" % (x, (by_file.get(x.lower()[:-len(_sc)] + ".md")
+                                                 or ("-",))[0] or "-") for x in sidecars), ""]
         if missing:
             L += ["🔴 **Ran but left no answer file:** %s. Those channels cost time and possibly "
                   "money and produced nothing to read; their cause is in `diagnostics.json` → "
@@ -1795,13 +1810,28 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
                   % "; ".join(("`%s` answered for `%s` (`%s`)" % (n, fr, n.upper() + ".md"))
                               if results[n].get("ok") else ("`%s` ran for `%s` and failed too" % (n, fr))
                               for n, fr in _fbs), ""]
-        _svs = sorted((n, r.get("salvaged_after")) for n, r in results.items()
+        # R144 И-7 (H2): three different things, three lines. v1.108.0 printed «resumed once with
+        # tools off» for an answer READ BACK from the CLI's log (no resume - a complete review) and
+        # for a salvage graded not-ok.
+        _svs = sorted((n, str(r.get("salvaged_after"))[:120], r.get("salvage_kind") or "resume",
+                       bool(r.get("ok"))) for n, r in results.items()
                       if isinstance(r, dict) and r.get("salvaged_after") and r.get("text"))
-        if _svs:                                        # R144 И-4
+        _sv_rec = ["`%s` (%s)" % (n, b) for n, b, k, ok in _svs if ok and k == "log"]
+        _sv_res = ["`%s` (%s)" % (n, b) for n, b, k, ok in _svs if ok and k != "log"]
+        _sv_bad = ["`%s` (%s)" % (n, b) for n, b, k, ok in _svs if not ok]
+        if _sv_rec:
+            L += ["📜 **Recovered from the session log:** %s. The seat stopped at its budget AFTER "
+                  "it had written its answer; the harness read that answer back from the CLI's own "
+                  "session log - a complete review, no resume happened." % "; ".join(_sv_rec), ""]
+        if _sv_res:                                     # R144 И-4
             L += ["🛟 **Salvaged:** %s. The seat stopped at its budget before it answered; its "
                   "session was resumed once with tools off and it wrote this answer from what it "
                   "had read - weigh it as a partial review and read its UNVERIFIED marks."
-                  % "; ".join("`%s` (%s)" % (n, str(b)[:120]) for n, b in _svs), ""]
+                  % "; ".join(_sv_res), ""]
+        if _sv_bad:
+            L += ["⚠ **Salvage left no finished review:** %s. The text it wrote has no end marker "
+                  "or is too short (the warning is in diagnostics.json) - read it as notes, not as "
+                  "a review." % "; ".join(_sv_bad), ""]
 
         # R72 (Igor, 2026-08-31): the reading protocol, IN the artifact the reader opens first.
         # The strongest placement this project has measured is the instruction at the decision
@@ -4197,6 +4227,11 @@ QWENCLI_SCRUB_ENV = (
     "OPENAI_MODEL",
     "QWEN_MODEL",
     "DASHSCOPE_API_KEY",
+    # R144 И-7 (H4): both read by cli 0.25.0 (bundle grep 2026-10-06). An inherited QWEN_RUNTIME_DIR
+    # moves the session logs out of QWEN_HOME, where the salvage looks for them; an inherited
+    # QWEN_CODE_MEMORY_LOCAL re-routes the memory the panel run keeps empty.
+    "QWEN_RUNTIME_DIR",
+    "QWEN_CODE_MEMORY_LOCAL",
 )
 # R144 И-4 (2026-10-06): the default of the channel's `max_tool_calls` (channels.json says 50; until
 # v1.108.0 nothing read that field - the call hard-coded the same 50).
@@ -4204,8 +4239,19 @@ QWENCLI_MAX_TOOL_CALLS = 50
 # 🔴 R144 И-4: Qwen Code's auto-memory OFF for panel runs (see _qwencli_memory_off). By default an
 # extractor makes one more model call after every answer and writes «lessons» the next panel run
 # recalls - two had piled up in the panel home since 10-01, undoing what R130 set out to do.
+# R144 И-7 (H14): memory.enableAutoSkill too (default true: after tool-heavy sessions the CLI
+# writes a skill into <home>/skills that later runs load). Measured live 2026-10-06 with this exact
+# file: exit 0, answer present (runs/r144-qwen-hotfix/probe_i7.py in the meta project).
 QWENCLI_PANEL_SYSTEM_SETTINGS = {"memory": {"enableManagedAutoMemory": False,
-                                            "enableManagedAutoDream": False}}
+                                            "enableManagedAutoDream": False,
+                                            "enableAutoSkill": False}}
+# R144 И-7 (H5): each Qwen call's subprocess ceiling sits this far over the CLI's own --max-wall-time
+# (the CLI aborts first; the margin lets that abort land). The first run's wall leaves room for BOTH
+# margins inside the channel's timeout.
+QWENCLI_KILL_MARGIN = 60
+# R144 И-7 (H11): a salvaged or log-recovered answer shorter than this is a stub, not a review (the
+# «answered» size of R142 И-2).
+QWENCLI_SALVAGE_MIN_CHARS = 2000
 # Where cli 0.25.0 looks for a machine-wide settings file when QWEN_CODE_SYSTEM_SETTINGS_PATH is
 # unset (getSystemSettingsPath). If one exists we do not hide it behind ours.
 QWENCLI_DEFAULT_SYSTEM_SETTINGS = {"win32": r"C:\ProgramData\qwen-code\settings.json",
@@ -4276,7 +4322,8 @@ def _qwencli_memory_off(panel_home):
     `--safe-mode` would stop memory too, but it drops every MCP server as well.
     """
     import glob
-    for old in glob.glob(os.path.join(panel_home, "memory-off-*")):
+    # R144 И-7 (H17): a home path holding [ ] * ? is a literal, not a pattern.
+    for old in glob.glob(os.path.join(glob.escape(panel_home), "memory-off-*")):
         try:                                   # a killed run's folder, older than a day
             if time.time() - os.path.getmtime(old) > 86400:
                 shutil.rmtree(old, ignore_errors=True)
@@ -4316,8 +4363,10 @@ def _qwencli_result_obj(raw):
     return {}
 
 
-def _qwencli_stderr_error(stderr):
+def _qwencli_stderr_error(stderr, code=None):
     """The LAST `{"error": {type, message, code}}` object Qwen Code printed on stderr, or None.
+    R144 И-7 (H17): given `code` (the exit code), the last object whose code equals it wins over a
+    later unrelated one.
 
     🔴 R144 И-4: the old parse was json.loads(the WHOLE stderr). Every panel run's stderr starts
     with «MCP server(s) failed to start: gitlab», so it failed, and a tool-call budget stop was
@@ -4326,20 +4375,24 @@ def _qwencli_stderr_error(stderr):
     """
     s = stderr or ""
     dec = json.JSONDecoder()
+    last = None
     for i in reversed([m.start() for m in re.finditer(r"\{", s)][-200:]):
         try:
             obj, _end = dec.raw_decode(s, i)
         except ValueError:
             continue
         if isinstance(obj, dict) and isinstance(obj.get("error"), dict):
-            return obj["error"]
-    return None
+            if code is None or str(obj["error"].get("code")) == str(code):
+                return obj["error"]
+            last = last or obj["error"]
+    return last
 
 
 def _qwencli_chat_log(panel_home, sid):
     """Session `sid`'s chat log under the panel home (projects/<cwd>/chats/<sid>.jsonl), or None."""
     import glob
-    hits = sorted(glob.glob(os.path.join(panel_home, "projects", "*", "chats", sid + "*.jsonl")))
+    hits = sorted(glob.glob(os.path.join(glob.escape(panel_home), "projects", "*", "chats",
+                                         glob.escape(sid) + "*.jsonl")))
     return hits[-1] if hits else None
 
 
@@ -4353,7 +4406,7 @@ def _qwencli_answer_from_log(path, marker):
     """
     if not (path and marker):
         return ""
-    last = ""
+    last, call_after = "", False
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
@@ -4366,11 +4419,16 @@ def _qwencli_answer_from_log(path, marker):
                 parts = ((rec.get("message") or {}).get("parts")) or []
                 txt = "".join(x.get("text") or "" for x in parts
                               if isinstance(x, dict) and not x.get("thought"))
+                called = any(isinstance(x, dict) and x.get("functionCall") for x in parts)
                 if txt.strip():
-                    last = txt
+                    last, call_after = txt, called
+                elif called:
+                    call_after = True
     except OSError:
         return ""
-    return last if _marker_on_last_line(last, marker) else ""
+    # R144 И-7 (H10): a marker-ending draft that a tool call FOLLOWS (or shares a message with) is
+    # not the answer - the model was still working when it stopped; records are in session order.
+    return last if (not call_after and _marker_on_last_line(last, marker)) else ""
 
 
 def _qwencli_salvage_prompt(budget, marker):
@@ -4403,9 +4461,9 @@ def _qwencli_salvage(binary, model, sid, marker, budget, secs, turns, cwd, env, 
     try:
         p = _run_tree(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
                       input=_qwencli_salvage_prompt(budget, marker), cwd=cwd, env=env,
-                      timeout=secs + 60)
+                      timeout=secs + QWENCLI_KILL_MARGIN)
     except subprocess.TimeoutExpired:
-        return {"result_obj": {}, "why": "the salvage run timed out after %ds" % (secs + 60),
+        return {"result_obj": {}, "why": "the salvage run timed out after %ds" % (secs + QWENCLI_KILL_MARGIN),
                 "seconds": round(time.time() - t0, 1)}
     except OSError as exc:
         return {"result_obj": {}, "why": "the salvage run could not start: %s" % exc,
@@ -4466,8 +4524,8 @@ def call_qwencli(brief, marker, outfile, model=None, effort=None, system=None,
     TIMEOUT the answer is taken from the session log if it is already there, else the session is
     resumed ONCE with tools off (_qwencli_salvage), and the result says `salvaged_after`. Also:
     no sub-agents (`--exclude-tools agent`), no auto-memory (_qwencli_memory_off), the cause from
-    the LAST JSON on stderr (_qwencli_stderr_error), and the salvage reserve is carved out of the
-    channel's timeout so the round waits no longer than before.
+    the LAST JSON on stderr (_qwencli_stderr_error), and the first run's wall leaves the salvage
+    reserve AND both kill margins inside the channel's timeout (R144 И-7, H5).
 
     JSON output fields used (from the final `type:"result"` element of the array):
       result               — the model's text answer
@@ -4487,13 +4545,16 @@ def call_qwencli(brief, marker, outfile, model=None, effort=None, system=None,
     text_in = ((system.strip() + "\n\n---\n\n") if system else "") \
               + _with_bypass_safety(brief, True)
     turns = int(max_turns or QWENCLI_MAX_TURNS)
-    calls_cap = int(max_tool_calls or QWENCLI_MAX_TOOL_CALLS)
+    # R144 И-7 (H6): 0 is a value («no tool calls»), not «unset» - `or` turned it into 50.
+    calls_cap = int(QWENCLI_MAX_TOOL_CALLS if max_tool_calls in (None, "") else max_tool_calls)
     wall_secs = _seconds(timeout, 2400)
     # 🔴 R144 И-4: the salvage turn's time comes OUT of the channel's timeout, so a seat that stops
-    # at its wall still ends inside the time the round already waits for it (45 min -> 36 min of
-    # work + up to 9 to write). The tool-call cap is what fires in practice (at 9-20 min).
+    # at its wall still ends inside the time the round already waits for it. The tool-call cap is
+    # what fires in practice (at 9-20 min). R144 И-7 (H5): v1.108.0 split only the CLI walls and
+    # put a 60-s margin over each call, 2160+60 + 540+60 = 2820 s against a 2700-s timeout; now
+    # both margins come out too (45 min -> 34 min of work), and the salvage gets what is left.
     salvage_secs = min(600, max(60, wall_secs // 5))
-    run_secs = max(30, wall_secs - salvage_secs)
+    run_secs = max(30, wall_secs - salvage_secs - 2 * QWENCLI_KILL_MARGIN)
     import uuid
     sid = str(uuid.uuid4())
 
@@ -4539,55 +4600,59 @@ def call_qwencli(brief, marker, outfile, model=None, effort=None, system=None,
     mem_env, memdir, mem_notes = _qwencli_memory_off(panel_home)    # R144 И-4
     env.update(mem_env)
 
-    log("  [%s] Qwen Code CLI (qwen3.8-max via BAILIAN_TOKEN_PLAN_API_KEY); "
-        "brief via stdin (%d chars), effort=%s (vendor-side), --yolo auto-approve, "
-        "max_turns=%d, tool calls<=%d, no sub-agents, wall=%ds + %ds to salvage, session %s"
-        % (name, len(text_in), effort or "default", turns, calls_cap, run_secs, salvage_secs,
-           sid[:8]))
-    t0 = time.time()
-    timed_out = False
     try:
-        # R144 И-4: _run_tree - a timeout stops node and its children, not only the qwen.cmd shim,
-        # so no orphan keeps writing the session log the salvage resumes.
-        p = _run_tree(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                      input=text_in, cwd=cwd, env=env,
-                      timeout=run_secs + 60)  # subprocess ceiling slightly over wall-time
-    except FileNotFoundError:
-        shutil.rmtree(memdir, ignore_errors=True)
-        return {"channel": name, "ok": False, "error": "binary not found: " + binary}
-    except subprocess.TimeoutExpired as exc:
-        # R144 И-4 SUPERSEDES R128 FINDING G: a TIMEOUT is no longer finish_reason="error" for the
-        # AUTO-RETRY - a second run at the same budget stops the same way. The answer may already
-        # be in the session log (round p301), or it is salvaged below.
-        timed_out = True
-        p = subprocess.CompletedProcess(cmd, None,
-                                        exc.output if isinstance(exc.output, str) else "",
-                                        exc.stderr if isinstance(exc.stderr, str) else "")
+        log("  [%s] Qwen Code CLI (qwen3.8-max via BAILIAN_TOKEN_PLAN_API_KEY); "
+            "brief via stdin (%d chars), effort=%s (vendor-side), --yolo auto-approve, "
+            "max_turns=%d, tool calls<=%d, no sub-agents, wall=%ds + at least %ds to salvage, all "
+            "inside %ds, session %s"
+            % (name, len(text_in), effort or "default", turns, calls_cap, run_secs, salvage_secs,
+               wall_secs, sid[:8]))
+        t0 = time.time()
+        timed_out = False
+        try:
+            # R144 И-4: _run_tree - a timeout stops node and its children, not only the qwen.cmd shim,
+            # so no orphan keeps writing the session log the salvage resumes.
+            p = _run_tree(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          input=text_in, cwd=cwd, env=env,
+                          timeout=run_secs + QWENCLI_KILL_MARGIN)  # ceiling just over the wall
+        except FileNotFoundError:
+            return {"channel": name, "ok": False, "error": "binary not found: " + binary}
+        except subprocess.TimeoutExpired as exc:
+            # R144 И-4 SUPERSEDES R128 FINDING G: a TIMEOUT is no longer finish_reason="error" for the
+            # AUTO-RETRY - a second run at the same budget stops the same way. The answer may already
+            # be in the session log (round p301), or it is salvaged below.
+            timed_out = True
+            p = subprocess.CompletedProcess(cmd, None,
+                                            exc.output if isinstance(exc.output, str) else "",
+                                            exc.stderr if isinstance(exc.stderr, str) else "")
 
-    secs = time.time() - t0
-    raw = (p.stdout or "").strip()
-    warn, note = [], list(mem_notes)
-    text = ""
-    tokens_in = None
-    tokens_out = None
-    tokens_reasoning = None
-    tokens_cached = None
-    model_served = model
-    finish_reason = None       # R144 И-4: never "error" here - a budget stop is not re-run
-    provider_error = None      # R128 FINDING G: set to {code,status} on structured failures
+        secs = time.time() - t0
+        raw = (p.stdout or "").strip()
+        warn, note = [], list(mem_notes)
+        text = ""
+        tokens_in = None
+        tokens_out = None
+        tokens_reasoning = None
+        tokens_cached = None
+        model_served = model
+        finish_reason = None       # R144 И-4: never "error" here - a budget stop is not re-run
+        provider_error = None      # R128 FINDING G: set to {code,status} on structured failures
 
-    stderr_tail = (p.stderr or "").strip()[-400:]
+        stderr_tail = (p.stderr or "").strip()[-400:]
 
-    # qwen --output-format json emits a JSON ARRAY of event objects; the terminal event has
-    # type:"result" and carries the summary (_qwencli_result_obj).
-    result_obj = _qwencli_result_obj(raw)
-    structured = None
-    if not result_obj:
+        # qwen --output-format json emits a JSON ARRAY of event objects; the terminal event has
+        # type:"result" and carries the summary (_qwencli_result_obj).
+        result_obj = _qwencli_result_obj(raw)
+        # R144 И-7 (H12): «answered» = a non-empty, non-error result. An exit 53/55 that still prints an
+        # error or empty `type:"result"` envelope is a budget stop like any other (v1.108.0 took any
+        # envelope for an answer and switched the salvage off).
+        answered = bool((result_obj.get("result") or "").strip()) and not result_obj.get("is_error")
         # R128 FINDING C: exits 41 (auth), 53 (turn cap), 55 (wall/tool cap), 130 (SIGINT) print
-        # {error:{type,message,code}} on STDERR with an EMPTY stdout. R144 И-4: the LAST such
-        # object - a warning line precedes it on every panel run.
-        if not raw:
-            structured = _qwencli_stderr_error(p.stderr)
+        # {error:{type,message,code}} on STDERR. R144 И-4: the LAST such object - a warning line
+        # precedes it on every panel run. R144 И-7 (H13): read whenever there is no answer - v1.108.0
+        # read it only with an EMPTY stdout, so one line of stdout noise hid the cause; (H17) the object
+        # whose code is the exit code wins.
+        structured = None if answered else _qwencli_stderr_error(p.stderr, p.returncode)
         if structured:
             etype = structured.get("type") or "?"
             emsg = str(structured.get("message") or "")[:300]
@@ -4596,141 +4661,170 @@ def call_qwencli(brief, marker, outfile, model=None, effort=None, system=None,
                         % (etype, ecode if ecode is not None else "?", emsg))
             provider_error = {"code": ecode if ecode is not None else p.returncode,
                               "status": etype}
-        elif timed_out:
-            warn.append("TIMEOUT after %ds: Qwen's own --max-wall-time (%ds) did not stop it"
-                        % (run_secs + 60, run_secs))
-        elif p.returncode != 0:
-            warn.append("EXIT %s, non-JSON stdout: %s%s"
-                        % (p.returncode, raw[:300],
-                           (" | stderr: " + stderr_tail) if stderr_tail else ""))
+        elif not result_obj:
+            if timed_out:
+                warn.append("TIMEOUT after %ds: Qwen's own --max-wall-time (%ds) did not stop it"
+                            % (run_secs + QWENCLI_KILL_MARGIN, run_secs))
+            elif p.returncode != 0:
+                warn.append("EXIT %s, non-JSON stdout: %s%s"
+                            % (p.returncode, raw[:300],
+                               (" | stderr: " + stderr_tail) if stderr_tail else ""))
 
-    # ---- R144 И-4: a budget stop is SALVAGED, never re-run -------------------------------------
-    # Exits 53 (turns) / 55 (tool calls, wall) and our TIMEOUT used to set finish_reason="error",
-    # so the AUTO-RETRY re-ran the seat after the slowest channel at the SAME budget (R128 FINDING
-    # G: «the retry layer may have a bigger budget» - it does not): 4 of 4 retries stopped again,
-    # +14 and +17 min of round time (R144 И-2). Now: (1) an answer already in the session log is
-    # taken; (2) else the session is resumed ONCE with tools off; (3) else the stop is reported
-    # with its budget - `budget_stop` keeps retryable_stream_death off it.
-    budget_stop = bool(not result_obj and (timed_out or p.returncode in (53, 55)))
-    salvaged_after = None
-    recovered = ""
-    if budget_stop:
-        budget = (str((structured or {}).get("message") or "")
-                  or ("TIMEOUT after %ds" % (run_secs + 60) if timed_out
-                      else "exit %s" % p.returncode))[:200]
-        log_path = _qwencli_chat_log(panel_home, sid)
-        recovered = _qwencli_answer_from_log(log_path, marker)
-        if recovered:
-            salvaged_after = budget
-            note.append("RECOVERED FROM QWEN'S SESSION LOG: the run stopped (%s) after writing its "
-                        "answer; the answer is taken from session %s." % (budget, sid[:8]))
-        elif log_path:
-            log("  [%s] stopped at its budget (%s) after %.0f s - resuming session %s once with "
-                "tools off to write the answer" % (name, budget, secs, sid[:8]))
-            sv = _qwencli_salvage(binary, model, sid, marker, budget, salvage_secs, turns, cwd,
-                                  env, fallback_model)
-            if sv["result_obj"]:
-                result_obj = sv["result_obj"]
-                salvaged_after = budget
-                note.append("SALVAGED AFTER BUDGET: Qwen stopped (%s) after %.0f s without an "
-                            "answer; the harness resumed session %s once with tools off and Qwen "
-                            "wrote this answer from what it had already read (%.0f s). Claims it "
-                            "marks UNVERIFIED were not read - weigh it as a partial review."
-                            % (budget, secs, sid[:8], sv["seconds"]))
+        # ---- R144 И-4: a budget stop is SALVAGED, never re-run -------------------------------------
+        # Exits 53 (turns) / 55 (tool calls, wall) and our TIMEOUT used to set finish_reason="error",
+        # so the AUTO-RETRY re-ran the seat after the slowest channel at the SAME budget (R128 FINDING
+        # G: «the retry layer may have a bigger budget» - it does not): 4 of 4 retries stopped again,
+        # +14 and +17 min of round time (R144 И-2). Now: (1) an answer already in the session log is
+        # taken; (2) else the session is resumed ONCE with tools off; (3) else the stop is reported
+        # with its budget - `budget_stop` keeps retryable_stream_death off it.
+        budget_stop = bool(not answered and (timed_out or p.returncode in (53, 55)))
+        salvaged_after = None
+        salvage_kind = None        # R144 И-7 (H2): "log" = read back from the session log, "resume"
+        recovered = ""
+        if budget_stop:
+            budget = (str((structured or {}).get("message") or "")
+                      or ("TIMEOUT after %ds" % (run_secs + QWENCLI_KILL_MARGIN) if timed_out
+                          else "exit %s" % p.returncode))[:200]
+            log_path = _qwencli_chat_log(panel_home, sid)
+            recovered = _qwencli_answer_from_log(log_path, marker)
+            if recovered:
+                salvaged_after, salvage_kind = budget, "log"
+                note.append("RECOVERED FROM QWEN'S SESSION LOG: the run stopped (%s) after writing its "
+                            "answer; the answer is taken from session %s, no resume was needed."
+                            % (budget, sid[:8]))
             else:
-                note.append("salvage of session %s failed: %s" % (sid[:8], sv["why"]))
-        else:
-            note.append("no salvage: session %s left no chat log under the panel home" % sid[:8])
-        if salvaged_after:
-            note.extend("first run: " + w for w in warn)
-            warn = []
-            provider_error = None
+                # R144 И-7 (H4): resume by id even when no chat log was found - `-r` needs only the id
+                # (measured 2026-10-06: an id with no session exits 1 in ~1 s, so trying costs nothing)
+                # and a log can sit outside the panel home. (H5) the salvage gets what the first run
+                # left of the channel's timeout, never less than its reserve.
+                sv_secs = int(max(salvage_secs, wall_secs - (time.time() - t0) - QWENCLI_KILL_MARGIN))
+                log("  [%s] stopped at its budget (%s) after %.0f s - resuming session %s once with "
+                    "tools off to write the answer (up to %d s)" % (name, budget, secs, sid[:8], sv_secs))
+                if not log_path:
+                    note.append("no chat log of session %s under the panel home; resumed by its id "
+                                "anyway" % sid[:8])
+                sv = _qwencli_salvage(binary, model, sid, marker, budget, sv_secs, turns, cwd,
+                                      env, fallback_model)
+                if sv["result_obj"]:
+                    result_obj = sv["result_obj"]
+                    salvaged_after, salvage_kind = budget, "resume"
+                    note.append("SALVAGED AFTER BUDGET: Qwen stopped (%s) after %.0f s without an "
+                                "answer; the harness resumed session %s once with tools off and Qwen "
+                                "wrote this answer from what it had already read (%.0f s). Claims it "
+                                "marks UNVERIFIED were not read - weigh it as a partial review."
+                                % (budget, secs, sid[:8], sv["seconds"]))
+                else:
+                    # R144 И-7 (H3): the resume may have written its answer and THEN stopped (its wall,
+                    # a tool call) - read the log again before calling the salvage failed.
+                    recovered = _qwencli_answer_from_log(_qwencli_chat_log(panel_home, sid), marker)
+                    if recovered:
+                        salvaged_after, salvage_kind = budget, "resume"
+                        note.append("SALVAGED AFTER BUDGET (read from the session log): Qwen stopped "
+                                    "(%s); the harness resumed session %s once with tools off, and the "
+                                    "resume wrote this answer before it ended (%s). Claims it marks "
+                                    "UNVERIFIED were not read - weigh it as a partial review."
+                                    % (budget, sid[:8], sv["why"]))
+                    else:
+                        note.append("salvage of session %s failed: %s" % (sid[:8], sv["why"]))
+            if recovered:
+                result_obj = {}    # an error envelope of the stopped run is not the answer read back
+            if salvaged_after:
+                note.extend("first run: " + w for w in warn)
+                warn = []
+                provider_error = None
 
-    if result_obj:
-        text = result_obj.get("result") or ""
-        is_err = result_obj.get("is_error", False)
-        subtype = result_obj.get("subtype", "")
-        num_turns = result_obj.get("num_turns")
+        if result_obj:
+            text = result_obj.get("result") or ""
+            is_err = result_obj.get("is_error", False)
+            subtype = result_obj.get("subtype", "")
+            num_turns = result_obj.get("num_turns")
 
-        usage = result_obj.get("usage") or {}
-        tokens_in = usage.get("input_tokens")
-        tokens_out = usage.get("output_tokens")
-        tokens_cached = usage.get("cache_read_input_tokens")
+            usage = result_obj.get("usage") or {}
+            tokens_in = usage.get("input_tokens")
+            tokens_out = usage.get("output_tokens")
+            tokens_cached = usage.get("cache_read_input_tokens")
 
-        # Reasoning tokens live under stats.models.<model>.tokens.thoughts, keyed by the
-        # ACTUAL served model name (which the registry's `model` field matches). Pick the
-        # model with the largest `prompt` count as the one that answered — if multiple are
-        # present it is because a sub-agent or memory extractor also ran.
-        stats = result_obj.get("stats") or {}
-        models_map = (stats.get("models") or {})
-        if isinstance(models_map, dict) and models_map:
-            def _prompt_tokens(entry):
-                try:
-                    return int(((entry or {}).get("tokens") or {}).get("prompt") or 0)
-                except (TypeError, ValueError):
-                    return 0
-            best_name = max(models_map.keys(), key=lambda k: _prompt_tokens(models_map[k]),
-                            default=None)
-            if best_name:
-                model_served = best_name
-                tokens_reasoning = (models_map[best_name].get("tokens") or {}).get("thoughts")
-            if len(models_map) > 1:
-                others = [k for k in models_map if k != best_name]
-                note.append("helper model(s) also ran: %s" % ", ".join(sorted(others)))
+            # Reasoning tokens live under stats.models.<model>.tokens.thoughts, keyed by the
+            # ACTUAL served model name (which the registry's `model` field matches). Pick the
+            # model with the largest `prompt` count as the one that answered — if multiple are
+            # present it is because a sub-agent or memory extractor also ran.
+            stats = result_obj.get("stats") or {}
+            models_map = (stats.get("models") or {})
+            if isinstance(models_map, dict) and models_map:
+                def _prompt_tokens(entry):
+                    try:
+                        return int(((entry or {}).get("tokens") or {}).get("prompt") or 0)
+                    except (TypeError, ValueError):
+                        return 0
+                best_name = max(models_map.keys(), key=lambda k: _prompt_tokens(models_map[k]),
+                                default=None)
+                if best_name:
+                    model_served = best_name
+                    tokens_reasoning = (models_map[best_name].get("tokens") or {}).get("thoughts")
+                if len(models_map) > 1:
+                    others = [k for k in models_map if k != best_name]
+                    note.append("helper model(s) also ran: %s" % ", ".join(sorted(others)))
 
-        if subtype == "cancelled":
-            warn.append("QWEN CLI CANCELLED (subtype=cancelled): %s"
-                        % (text[:300] if text else "no result text"))
-        elif is_err:
-            err_msg = text or subtype or "is_error=true"
-            warn.append("QWEN CLI ERROR: %s" % err_msg[:300])
+            if subtype == "cancelled":
+                warn.append("QWEN CLI CANCELLED (subtype=cancelled): %s"
+                            % (text[:300] if text else "no result text"))
+            elif is_err:
+                err_msg = text or subtype or "is_error=true"
+                warn.append("QWEN CLI ERROR: %s" % err_msg[:300])
 
-        if num_turns and num_turns > 1:
-            note.append("num_turns=%d" % num_turns)
+            if num_turns and num_turns > 1:
+                note.append("num_turns=%d" % num_turns)
 
-        denials = result_obj.get("permission_denials") or []
-        if isinstance(denials, list) and denials:
-            dnames = sorted({str(d.get("tool_name", "?")) for d in denials if isinstance(d, dict)})
-            # Under --yolo this list should be empty; a non-empty entry means a local hook or
-            # settings.json tool deny-list refused a call — the review ran without it.
-            note.append("%d tool call(s) DENIED under --yolo (%s) — a hook or local deny-list "
-                        "intercepted; review ran without them" % (len(denials), ", ".join(dnames)))
+            denials = result_obj.get("permission_denials") or []
+            if isinstance(denials, list) and denials:
+                dnames = sorted({str(d.get("tool_name", "?")) for d in denials if isinstance(d, dict)})
+                # Under --yolo this list should be empty; a non-empty entry means a local hook or
+                # settings.json tool deny-list refused a call — the review ran without it.
+                note.append("%d tool call(s) DENIED under --yolo (%s) — a hook or local deny-list "
+                            "intercepted; review ran without them" % (len(denials), ", ".join(dnames)))
 
-    if recovered and not text:
-        text = recovered
-    secs = time.time() - t0
+        if recovered and not text:
+            text = recovered
+        secs = time.time() - t0
+        # R144 И-7 (H11): a salvaged or recovered text must be a review, not a stub that only ends
+        # with the marker.
+        if salvaged_after and text and len(text.strip()) < QWENCLI_SALVAGE_MIN_CHARS:
+            warn.append("SALVAGED TEXT TOO SHORT: %d chars (floor %d) - not a finished review"
+                        % (len(text.strip()), QWENCLI_SALVAGE_MIN_CHARS))
 
-    if fallback_model:
-        note.append("fallback_model=%s passed as --fallback-model (qwen 0.24.7 retries on "
-                    "capacity errors 429/503/529, repeatable, max 3)" % fallback_model)
+        if fallback_model:
+            note.append("fallback_model=%s passed as --fallback-model (the CLI's help: used on "
+                        "capacity errors 429/503/529, up to 3 models)" % fallback_model)
 
-    if text:
-        with open(outfile, "w", encoding="utf-8") as f:
-            f.write(text)
-    if marker and not _marker_on_last_line(text, marker):
-        warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
-    if not text.strip() and not warn:
-        warn.append("EMPTY OUTPUT despite exit %s" % p.returncode)
-    record_refusal(refusal_check(text, marker), warn, note)
+        if text:
+            with open(outfile, "w", encoding="utf-8") as f:
+                f.write(text)
+        if marker and not _marker_on_last_line(text, marker):
+            warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
+        if not text.strip() and not warn:
+            warn.append("EMPTY OUTPUT despite exit %s" % p.returncode)
+        record_refusal(refusal_check(text, marker), warn, note)
 
-    shutil.rmtree(memdir, ignore_errors=True)          # R144 И-4: this call's memory folder
-    out = {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
-           "bytes": len(text.encode("utf-8")), "exit": p.returncode,
-           "model": model_served, "effort": effort,
-           "in_tokens": tokens_in,
-           "out_tokens": tokens_out,
-           "reasoning_tokens": tokens_reasoning,
-           "cached_in_tokens": tokens_cached,
-           "usd": None,                            # subscription — no per-call cost reported
-           "finish_reason": finish_reason,         # R128 FINDING G
-           "provider_error": provider_error,       # R128 FINDING G
-           "budget_stop": budget_stop,             # R144 И-4: never auto-retried
-           "salvaged_after": salvaged_after,       # R144 И-4: the budget that fired, when salvaged
-           "session_id": sid,
-           "warnings": warn, "notes": note}
-    if timed_out and not text:
-        out["error"] = "TIMEOUT after %ds" % (run_secs + 60)
-    return out
+        out = {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
+               "bytes": len(text.encode("utf-8")), "exit": p.returncode,
+               "model": model_served, "effort": effort,
+               "in_tokens": tokens_in,
+               "out_tokens": tokens_out,
+               "reasoning_tokens": tokens_reasoning,
+               "cached_in_tokens": tokens_cached,
+               "usd": None,                            # subscription — no per-call cost reported
+               "finish_reason": finish_reason,         # R128 FINDING G
+               "provider_error": provider_error,       # R128 FINDING G
+               "budget_stop": budget_stop,             # R144 И-4: never auto-retried
+               "salvaged_after": salvaged_after,       # R144 И-4: the budget that fired, when salvaged
+               "salvage_kind": salvage_kind,           # R144 И-7 (H2): "log" | "resume" | None
+               "session_id": sid,
+               "warnings": warn, "notes": note}
+        if timed_out and not text:
+            out["error"] = "TIMEOUT after %ds" % (run_secs + QWENCLI_KILL_MARGIN)
+        return out
+    finally:
+        shutil.rmtree(memdir, ignore_errors=True)   # R144 И-7 (H7): every exit, exceptions too
 
 
 # --- Kimi Code CLI channel (kind kimicli) --------------------------------------------------------
@@ -6913,15 +7007,16 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     fallback_notes = []
     expected = set(fallback_models or [])
     if served and model and not any(m == model for m in served):
-        # 🔴 R144 И-4: an alias serving its DATED snapshot is the alias's current target, not
-        # another model. OpenRouter's `qwen/qwen3.8-max` serves `qwen/qwen3.8-max-0902`
-        # (get-model 2026-10-06), and this check graded 32-63 KB answers FAILED for it on 09-14,
-        # 09-18 and 09-24 - which R143 then counted as «0 of 8» in the public README. Only
-        # `<model>-<date digits>` passes; `-preview`, another family or size still warns.
+        # 🔴 R144 И-4: an alias serving a DATED id of itself is normally the snapshot that alias
+        # points to. OpenRouter's `qwen/qwen3.8-max` serves `qwen/qwen3.8-max-0902` (get-model
+        # 2026-10-06), and this check graded 22-63 KB answers FAILED for it on 09-14, 09-18 and
+        # 09-24 - which R143 then counted as «0 of 8» in the public README. Only `<model>-<a real
+        # date>` passes (R144 И-7, H8); `-preview`, another family or size still warns.
         if all(_is_dated_snapshot(model, m) for m in served):
             fallback_notes.append(
-                "ALIAS SNAPSHOT: we asked for %r and the provider served its dated snapshot %s - "
-                "the alias's current target, not another model." % (model, ", ".join(repr(m) for m in served)))
+                "ALIAS SNAPSHOT: we asked for %r and the provider served a dated id of it, %s - "
+                "normally the snapshot that alias points to; the served id is kept here so you can "
+                "see which one answered." % (model, ", ".join(repr(m) for m in served)))
         elif expected and all(m in expected for m in served):
             fallback_notes.append(
                 "FALLBACK SERVED: %r did not answer and the declared fallback %s did, "
@@ -7941,11 +8036,33 @@ def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, 
         log("-" * 78)
 
 
+_SNAPSHOT_MONTH_DAYS = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+
+
 def _is_dated_snapshot(asked, served):
-    """True when `served` is `asked` plus a date suffix: -0902, -20260902, -2026-09-02 (R144 И-4).
-    An alias serving its dated snapshot is the alias's current target, not another model."""
-    return bool(asked and served and re.fullmatch(re.escape(asked) + r"-\d{4}(?:-?\d{2}){0,2}",
-                                                   served))
+    """True when `served` is `asked` plus a real DATE suffix - an alias serving one of its dated
+    snapshots (R144 И-4). R144 И-7 (H8): the calendar is checked, and the shapes are the ones the
+    OpenRouter catalogue really carries (466 models, 2026-10-06): -MMDD (qwen3.8-max-0902), -MM-DD
+    (qwen3.6-plus-04-02), -YYMM (mistral-small-2603), -YYYY-MM-DD (gpt-4o-2024-11-20), plus
+    -YYYYMMDD and -YYMMDD. v1.108.0 took any 4+ digits: -9999, -0000 and -4096 passed, -04-02
+    failed. A 4-digit suffix that is a valid month and day IS accepted (-1024 = 24 October): the
+    shape cannot tell it from a number, and such ids are dates in practice."""
+    if not (asked and served and served.startswith(asked + "-")):
+        return False
+    suf = served[len(asked) + 1:]
+
+    def _md(m, d):
+        return 1 <= m <= 12 and 1 <= d <= _SNAPSHOT_MONTH_DAYS[m - 1]
+
+    m = re.fullmatch(r"(\d\d)(-?)(\d\d)", suf)                        # MMDD | MM-DD | YYMM
+    if m:
+        a, b = int(m.group(1)), int(m.group(3))
+        return _md(a, b) or (not m.group(2) and 23 <= a <= 39 and 1 <= b <= 12)
+    m = re.fullmatch(r"(\d\d)(\d\d)(\d\d)", suf)                      # YYMMDD
+    if m:
+        return 23 <= int(m.group(1)) <= 39 and _md(int(m.group(2)), int(m.group(3)))
+    m = re.fullmatch(r"(20[23]\d)(-?)(\d\d)\2(\d\d)", suf)            # YYYYMMDD | YYYY-MM-DD
+    return bool(m) and _md(int(m.group(3)), int(m.group(4)))
 
 
 def retryable_stream_death(r):
@@ -7982,6 +8099,40 @@ def retryable_stream_death(r):
         if ("HTTP %d" % code) in err_s:
             return True
     return False
+
+
+def billed_failure(r, kind=None):
+    """True when a failed attempt already COST MONEY (R144 И-7, H1).
+
+    🔴 «Never auto-retry a billable failure» is this project's invariant; the AUTO-RETRY (Б-36,
+    v1.84.0) kept the first attempt's cost in the record but still paid twice. Measured in round
+    r144i5: orglm53 billed $1.749, died on an upstream 429, and the retry billed again - $2.873 in
+    all. Billed = a reported price above 0, or - on a metered API seat (kind "http") that reported
+    no price - any tokens or reasoning the vendor generated: «no price» is not «free». A
+    subscription CLI with no price is not billed per call.
+    """
+    u = r.get("usd")
+    if isinstance(u, (int, float)) and not isinstance(u, bool) and u > 0:
+        return True
+    if kind == "http" and u is None:
+        for k in ("in_tokens", "out_tokens", "reasoning_tokens", "reasoning_chars"):
+            try:
+                if int(r.get(k) or 0) > 0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+    return False
+
+
+def auto_retry_split(results, kind_of):
+    """(retry, held): the AUTO-RETRY's decision, at module level so the selftest runs the real one.
+    `retry` = transient stream deaths that cost nothing; `held` = the same deaths that already
+    billed money (billed_failure) - the harness never re-runs those itself. `kind_of(name)` gives a
+    channel's kind."""
+    dead = {cn: r for cn, r in (results or {}).items()
+            if isinstance(r, dict) and retryable_stream_death(r)}
+    held = {cn: r for cn, r in dead.items() if billed_failure(r, kind_of(cn))}
+    return {cn: r for cn, r in dead.items() if cn not in held}, held
 
 
 # The degraded path only. When channels.json cannot be loaded there is no `kind` field to read,
@@ -11253,7 +11404,25 @@ def main():
         log("  [%s] cannot dispatch again: unknown kind %r" % (cname, kind))
         return None
 
-    _retryable = {cn: r for cn, r in results.items() if retryable_stream_death(r)}
+    # 🔴 R144 И-7 (H1): a transient death that already BILLED money is held, never re-run by the
+    # harness itself (billed_failure); the others are retried once, as before.
+    _retryable, _held = auto_retry_split(results,
+                                         lambda cn: ((plan or {}).get(cn) or {}).get("kind"))
+    if _held:
+        log("\n" + "-" * 78)
+        log("NOT AUTO-RETRIED - already billed: %s. The harness never re-runs a billed failure by "
+            "itself; each attempt is paid again." % ", ".join(sorted(_held)))
+        for _hcn, _hr in sorted(_held.items()):
+            _hu = _hr.get("usd")
+            _paid = (("$%.4f" % _hu) if isinstance(_hu, (int, float)) and _hu
+                     else "tokens billed, no price reported")
+            log("  [%s] %s - to try once more, repeat the command with --only %s"
+                % (_hcn, _paid, _hcn))
+            _hr["panel_retry_held"] = True
+            _hr.setdefault("notes", []).append(
+                "NOT AUTO-RETRIED: this attempt died on a transient error after it had already "
+                "billed (%s). The harness never re-runs a billed failure by itself; to try once "
+                "more, repeat the command with --only %s." % (_paid, _hcn))
     if _retryable and task_mode:
         log("  --task: no auto-retry for %s - a task may already have changed something; read "
             "its report and workdir, then re-run by hand." % ", ".join(sorted(_retryable)))
@@ -11308,7 +11477,8 @@ def main():
                        _first.get("provider_error", {}).get("code")
                        if isinstance(_first.get("provider_error"), dict) else None,
                        _first.get("seconds"), _first_cause,
-                       ("$%.4f" % _prior_usd) if _prior_usd is not None else "nothing"))
+                       ("$%.4f" % _prior_usd) if _prior_usd is not None
+                       else "an unknown amount (no price reported)"))
                 _stat = "OK" if _retry_r.get("ok") else "STILL FAILED"
                 log("  [%s] retry %s%s" % (cname, _stat,
                     (" - %s bytes" % _retry_r.get("bytes")) if _retry_r.get("text") else ""))

@@ -2106,7 +2106,9 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                 p["effort"] = _clamp_effort(reg, cname, p["model"], p.get("effort"), p)
                 p["timeout"] = p.get("timeout") or "25m"
                 p["_tier_note"] = ("effort %s (ADVISORY — qwen CLI has no --effort flag; "
-                                   "vendor-side defaultEffort governs), timeout %s (--max-wall-time), "
+                                   "vendor-side defaultEffort governs), timeout %s (the whole "
+                                   "seat: a first run, then on a budget stop one tools-off "
+                                   "salvage, both inside it), "
                                    "Alibaba Cloud Token Plan subscription"
                                    % (p.get("effort") or "default", p["timeout"]))
             elif p.get("kind") == "kimicli":
