@@ -3134,6 +3134,11 @@ def suite_panels():
          "but enabled:false - NOT a seat: it runs only as mimov26pro's run-time fallback (when "
          "Pro leaves no answer text and ocmimo26flashfree, the same model, did not answer) or "
          "when named. mimo CLI, same Xiaomi key; live probe 4/4 OK."),
+        ("R146 2026-10-08", "ADD", "ocspark13go",
+         "Igor: «перенесем spark на подписку go а без подписки free как fallback если закончатся "
+         "деньги и лимиты на аккаунте». The same Spark 1.3 Contributor as ocspark13free, on his "
+         "OpenCode Go plan; the Spark cascade group keeps ONE Spark per round and ocspark13free is "
+         "its run-time fallback. Free Spark answered 1 of 9 real rounds since 2026-10-05."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -7901,6 +7906,9 @@ def main():
                   suite_r121_panel_retry,
                   suite_r130_qwen_home_override,
                   suite_r144_qwen_salvage, suite_r144_i7_qwen_hotfix,
+                  suite_r146_corrupted_output,
+                  suite_r146_i3_spark_go,
+                  suite_r146_i4_tokens,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -14020,6 +14028,402 @@ def suite_r144_qwen_salvage():
           "dispatch sites: %d" % osrc.count('max_tool_calls=p.get("max_tool_calls")'))
     check("panel_retry_first" in osrc and "🛟 **Salvaged:**" in osrc,
           "R144 I-4: an AUTO-RETRY keeps the first attempt's cause; HANDOFF names a salvaged seat", "")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def suite_r146_i3_spark_go():
+    """R146 И-3 (2026-10-08): Spark 1.3 Contributor through Igor's OpenCode Go plan (ocspark13go) is the
+    round's Spark; the free ocspark13free runs the same brief once after the round when the Go run left no
+    answer. Igor: «перенесем spark на подписку go а без подписки free как fallback если закончатся деньги и
+    лимиты на аккаунте». Since 2026-10-05 the free Spark answered 1 of 9 real rounds (7 shared-quota
+    deaths). The Go limit's server error (GoUsageLimitError) reaches us as `provider.quota` - opencode
+    2.0.24 files it there with FreeUsageLimitError (read in its binary). Each check fails on 1.108.1.
+    """
+    import concurrent.futures as cf
+    import tempfile
+    import routing as rt
+    import orchestrate as o
+    section("R146 И-3 Spark on OpenCode Go, the free Spark as its run-time fallback")
+    reg = rt.load_registry()
+    ch = (reg.get("channels") or {}).get("ocspark13go")
+    if not ch:
+        for n in ("registry", "cascade + ask", "one Spark", "skip Go", "skip free", "kit", "fallback runs",
+                  "no fallback", "log line", "quota death", "diagnose"):
+            check(False, "R146 И-3: ocspark13go exists (%s)" % n, "missing in channels.json")
+        return
+    check(ch.get("kind") == "opencode" and ch.get("model") == "opencode-go/muse-spark-1.3-contributor"
+          and ch.get("effort") == "xhigh" and ch.get("distribution") == "local"
+          and ch.get("fallback") == "ocspark13free" and ch.get("panel") == "cheap",
+          "R146 И-3 (a) ocspark13go = opencode, opencode-go/muse-spark-1.3-contributor #xhigh, local, "
+          "cheap, fallback ocspark13free")
+    grp = next((g for g in reg.get("_cascade_groups") or [] if "ocspark13free" in g), [])
+    check(grp[:2] == ["ocspark13go", "ocspark13free"] and (reg.get("ask_default") or [None])[0] == "ocspark13go",
+          "R146 И-3 (a) the Go Spark is first in the Spark cascade group and in ask_default", "group=%r" % grp)
+
+    def yes(_n):
+        return True
+
+    # Named, not --panel cheap: the R60 nested run executes this suite in the SHIPPED kit tree, where
+    # package.py turns `distribution: local` channels off (project ledger R142 #1 - repeated in R146 И-3).
+    both = ["ocspark13go", "ocspark13free"]
+    p = rt.resolve(rt.load_registry(), only=both, ready=yes)
+    fb = (p.get("ocspark13go") or {}).get("fallback") or {}
+    check(p["ocspark13go"]["enabled"] and not p["ocspark13free"]["enabled"]
+          and fb.get("channel") == "ocspark13free" and fb.get("off") is None,
+          "R146 И-3 (b) both Sparks named: ONE runs (ocspark13go), the free one armed as its fallback", repr(fb))
+    pc = rt.resolve(rt.load_registry(), panel="cheap", ready=yes)
+    if ch.get("enabled"):
+        check(pc["ocspark13go"]["enabled"] and not pc["ocspark13free"]["enabled"],
+              "R146 И-3 (b) this tree's cheap panel runs the Go Spark, not the free one")
+    else:
+        check(pc["ocspark13free"]["enabled"] and not pc["ocspark13go"]["enabled"],
+              "R146 И-3 (b) this tree (Go Spark off - the kit) runs the free Spark in the cheap panel")
+    p2 = rt.resolve(rt.load_registry(), only=both, skip=["ocspark13go"], ready=yes)
+    check(p2["ocspark13free"]["enabled"] and not p2["ocspark13go"]["enabled"],
+          "R146 И-3 (c) --skip ocspark13go: the free Spark runs instead")
+    p3 = rt.resolve(rt.load_registry(), only=["ocspark13go"], skip=["ocspark13free"], ready=yes)
+    off3 = ((p3.get("ocspark13go") or {}).get("fallback") or {}).get("off") or ""
+    check(p3["ocspark13go"]["enabled"] and "excluded" in off3,
+          "R146 И-3 (c) --skip ocspark13free: the Go Spark runs, its fallback OFF with the reason", off3)
+    kit = rt.load_registry(overlay=False)
+    for c in (kit.get("channels") or {}).values():
+        if isinstance(c, dict) and c.get("distribution") == "local":
+            c["enabled"] = False
+    p4 = rt.resolve(kit, panel="cheap", ready=yes)
+    check(p4["ocspark13free"]["enabled"] and not p4["ocspark13go"]["enabled"]
+          and not (p4["ocspark13free"].get("fallback") or {}),
+          "R146 И-3 (d) kit-shaped registry (local channels off): the free Spark is the Spark voice")
+
+    calls = []
+
+    def fake_submit(_ex, name):
+        calls.append(name)
+        f = cf.Future()
+        f.set_result({"ok": True, "text": "free spark answer", "bytes": 17})
+        return f
+
+    quota = {"ok": False, "text": "", "warnings": ["EXIT 1: provider.quota (HTTP 429): usage limit reached"]}
+    res = {"ocspark13go": dict(quota)}
+    o.run_fallbacks(res, p, reg, ["ocspark13go"], submit=fake_submit, same_voice=rt.same_voice)
+    check(calls == ["ocspark13free"] and (res.get("ocspark13free") or {}).get("fallback_for") == "ocspark13go",
+          "R146 И-3 (e) the Go Spark died on its plan limit: the free Spark runs the same brief once",
+          "calls=%r" % calls)
+    del calls[:]
+    res = {"ocspark13go": {"ok": True, "text": "x" * 3000, "bytes": 3000}}
+    o.run_fallbacks(res, p, reg, ["ocspark13go"], submit=fake_submit, same_voice=rt.same_voice)
+    check(calls == [], "R146 И-3 (e) the Go Spark answered: no fallback", "calls=%r" % calls)
+
+    class _Done(object):
+        returncode = 1
+        stdout = ('{"type":"step_start","part":{"type":"step-start"}}\n'
+                  '{"type":"error","error":{"type":"provider.quota","message":"usage limit reached",'
+                  '"status":429}}\n')
+        stderr = ""
+
+    logs = []
+    real_run, real_log = o.subprocess.run, o.log
+    try:
+        o.subprocess.run = lambda *a, **k: _Done()
+        o.log = lambda *a, **k: logs.append(" ".join(str(x) for x in a))
+        out = os.path.join(tempfile.mkdtemp(prefix="r146i3-"), "OCSPARK13GO.md")
+        r = o.call_opencode("brief", "M-DONE", out, model="opencode-go/muse-spark-1.3-contributor",
+                            effort="xhigh", system="sys", timeout=60, name="ocspark13go")
+    finally:
+        o.subprocess.run, o.log = real_run, real_log
+    check(any("OpenCode Go plan" in s for s in logs) and not any("free model" in s for s in logs),
+          "R146 И-3 (f) the run log says the Go Spark runs on the OpenCode Go plan, not «free model»",
+          " | ".join(logs)[:200])
+    w = "; ".join(r.get("warnings") or [])
+    check(not r.get("ok") and "provider.quota" in w,
+          "R146 И-3 (f) a Go-limit death is a failure whose warning names provider.quota", w[:200])
+    cause, _fix = o.diagnose(w)
+    check("OpenCode Go" in (cause or "") and "fallback" in (_fix or ""),
+          "R146 И-3 (g) diagnose() explains a Go-plan quota death and names the free fallback", (cause or "")[:160])
+
+
+def suite_r146_i4_tokens():
+    """R146 И-4: per-channel SENT / WROTE on every record and in REPORT; opencode totals from its store.
+
+    Igor 2026-10-08: show per model how much it was sent and how much it wrote. R146 И-3 found the
+    opencode stream can carry no `step_finish` frame (live Go run: harness out 93, store 2 546), so
+    opencode tokens and cost were under-reported. Every check fails on 1.108.1 (no `sent`, no store).
+    """
+    import hashlib
+    import json
+    import sqlite3
+    import subprocess
+    import tempfile
+    import orchestrate as o
+    import report as rp
+
+    # (a) end to end through main(), every dispatcher stubbed (suite_r146_corrupted_output's list). A
+    # Cyrillic brief, so chars != bytes and the ≈tok rule (bytes // 4) is told apart from chars // 4.
+    tmp = tempfile.mkdtemp(prefix="r146i4-")
+    stubs = ("call_http_reviewer", "call_codex", "call_agy", "call_oai_reviewer", "call_xai_responses",
+             "call_gemini_direct", "call_hermes", "call_grokcli", "call_opencode", "call_claudecli",
+             "call_mimocli", "call_qwencli", "call_kimicli")
+    brief = "Проверь этот код и назови ошибки.\n" * 40
+    answer = "Ответ: ошибок нет, всё проверено.\n" * 30 + "R146-END"
+    probe = "\n".join([
+        "import json, os, sys",
+        "sys.path.insert(0, %r)" % str(HERE),
+        "import orchestrate as o",
+        "OUT = sys.argv[1]",
+        "def stub(*a, **k):",
+        "    return {'ok': True, 'text': %r, 'seconds': 0.0, 'warnings': []}" % answer,
+        "for n in %r:" % (stubs,),
+        "    assert callable(getattr(o, n, None)), 'stub target missing: ' + n",
+        "    setattr(o, n, stub)",
+        "b = OUT + '-in.md'",
+        "open(b, 'w', encoding='utf-8').write(%r)" % brief,
+        "sys.argv = ['o', '--brief', b, '--out', OUT, '--marker', 'R146-END', '--no-citecheck']",
+        "try:",
+        "    o.main()",
+        "except SystemExit:",
+        "    pass",
+    ])
+    pf = os.path.join(tmp, "probe.py")
+    open(pf, "w", encoding="utf-8").write(probe)
+    out = os.path.join(tmp, "run")
+    p = subprocess.run([PY, pf, out], capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=240)
+    try:
+        d = json.load(open(os.path.join(out, "diagnostics.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        d = {}
+    chans = d.get("channels") or {}
+    rep = open(os.path.join(out, "REPORT.md"), encoding="utf-8").read() \
+        if os.path.isfile(os.path.join(out, "REPORT.md")) else ""
+    sents = [c.get("sent") or {} for c in chans.values()]
+    check(bool(chans) and all(s.get("brief_chars", 0) >= len(brief)
+                              and s.get("chars") == s.get("system_chars", -1) + s.get("brief_chars", -1)
+                              and s.get("bytes", 0) > s.get("chars", 0)
+                              and s.get("est_tokens") == s.get("bytes", 0) // o.CHARS_PER_TOKEN
+                              for s in sents),
+          "R146 И-4 (a) main(): EVERY channel's record says what it was sent (system + brief, chars, "
+          "bytes, ≈tok = bytes // %d)" % o.CHARS_PER_TOKEN,
+          "%d channels; %r; %s" % (len(chans), sents[:1], blob_of(p)[-200:]))
+    wb = len(answer.encode("utf-8"))
+    check(bool(chans) and all((c.get("wrote") or {}) == {"chars": len(answer), "bytes": wb,
+                                                       "est_tokens": wb // o.CHARS_PER_TOKEN}
+                              for c in chans.values()),
+          "R146 И-4 (a) main(): every record says what the channel wrote (the answer's chars, bytes, ≈tok)",
+          repr([c.get("wrote") for c in chans.values()][:1]))
+    check("## Tokens per model" in rep and "**Total:** sent ≈" in rep
+          and rep.count(" ch ≈ ") >= 2 * len(chans) and "| billed in | cached in |" in rep,
+          "R146 И-4 (a) REPORT has the per-model table: sent and wrote with ≈tok, the vendor meter beside",
+          "table=%s total=%s" % ("## Tokens per model" in rep, "**Total:**" in rep))
+
+    # (b) opencode's store, faked: a parent session + a sub-agent child + an unrelated session.
+    home = tempfile.mkdtemp(prefix="r146i4-xdg-")
+    dbp = os.path.join(home, "opencode", "opencode.db")
+    os.makedirs(os.path.dirname(dbp))
+    con = sqlite3.connect(dbp)
+    con.execute("create table session_v2 (id text primary key, parent_id text, tokens_input int, "
+                "tokens_output int, tokens_reasoning int, tokens_cache_read int, tokens_cache_write int, "
+                "cost real, time_idle int)")
+    con.executemany("insert into session_v2 values (?,?,?,?,?,?,?,?,?)", [
+        ("ses_PARENT1", None, 1000, 50, 10, 2000, 0, 0.01, 1),
+        ("ses_CHILD1", "ses_PARENT1", 500, 25, 5, 100, 0, 0.005, 1),
+        ("ses_OTHER1", None, 99999, 9999, 999, 9, 0, 9.0, 1),
+        ("ses_LAGGING", None, 10, 5, 0, 0, 0, 0.0, None)])
+    con.commit()
+    con.close()
+    digest = hashlib.sha256(open(dbp, "rb").read()).hexdigest()
+    no_finish = ('{"type":"step_start","sessionID":"ses_PARENT1","part":{"type":"step-start"}}\n'
+                 '{"type":"text","sessionID":"ses_PARENT1","part":{"type":"text","text":"Review.\\nR146-END"}}\n')
+    real_env = os.environ.get("XDG_DATA_HOME")
+    real_run, real_log, real_tot = o.subprocess.run, o.log, o._opencode_store_totals
+
+    class _Done:
+        returncode = 0
+        stdout = no_finish
+        stderr = ""
+
+    try:
+        os.environ["XDG_DATA_HOME"] = home
+        st = o._opencode_store_totals(no_finish)
+        check(bool(st) and (st["sessions"], st["input"], st["output"], st["cache_read"]) == (2, 1500, 75, 2100)
+              and abs(st["cost"] - 0.015) < 1e-9 and st["settled"],
+              "R146 И-4 (b) the store total = the stream's session + its sub-agent child, never a neighbour",
+              repr(st))
+        o.subprocess.run = lambda *a, **k: _Done()
+        o.log = lambda *a, **k: None
+        r = o.call_opencode("brief", "R146-END", os.path.join(tmp, "OC.md"), model="opencode-go/x",
+                            effort="xhigh", system="sys", timeout=60, name="ocspark13go")
+        check(r.get("ok") and (r.get("in_tokens"), r.get("out_tokens"), r.get("cached_in_tokens")) == (1500, 75, 2100)
+              and abs((r.get("usd") or 0) - 0.015) < 1e-9 and r.get("tokens_source") == "opencode store"
+              and any("the stream carried in=None" in n for n in r.get("notes") or []),
+              "R146 И-4 (c) call_opencode: a stream with no step_finish -> tokens and cost from the store, "
+              "with a note naming the gap",
+              repr({k: r.get(k) for k in ("in_tokens", "out_tokens", "usd", "tokens_source")}))
+
+        def _timeout_run(*a, **k):
+            raise subprocess.TimeoutExpired(cmd="opencode", timeout=1, output=no_finish)
+
+        o.subprocess.run = _timeout_run
+        r2 = o.call_opencode("brief", "R146-END", os.path.join(tmp, "OC2.md"), model="opencode-go/x",
+                             timeout=60, name="ocspark13go")
+        check(not r2.get("ok") and r2.get("out_tokens") == 75 and r2.get("tokens_source") == "opencode store",
+              "R146 И-4 (c) a TIMED-OUT opencode run still reports what it spent, from the store",
+              repr({k: r2.get(k) for k in ("ok", "out_tokens", "usd", "tokens_source", "error")}))
+        lag = ('{"type":"step_start","sessionID":"ses_LAGGING"}\n'
+               '{"type":"step_finish","sessionID":"ses_LAGGING","part":{"tokens":{"input":40,"output":80}}}\n')
+        o._opencode_store_totals = lambda raw, settle=3.0: real_tot(raw, settle=0.2)
+        note = []
+        tk, _c, src = o._opencode_store_merge(lag, o._cli_ndjson(lag)[1], None, note)
+        check((tk["input"], tk["output"]) == (40, 80) and src == "opencode store"
+              and any("had not settled" in n for n in note),
+              "R146 И-4 (d) an UNSETTLED store row below the stream: each field keeps the larger, and it says so",
+              "%r %r" % (tk, note))
+        o._opencode_store_totals = real_tot
+        os.environ["XDG_DATA_HOME"] = os.path.join(home, "nowhere")
+        note2 = []
+        tk3, c3, src3 = o._opencode_store_merge(no_finish, {"output": 7}, None, note2)
+        check(tk3 == {"output": 7} and src3 == "opencode stream" and not note2,
+              "R146 И-4 (d) no store on this machine: the stream's sums stay, nothing is guessed", repr((tk3, src3)))
+    finally:
+        o.subprocess.run, o.log, o._opencode_store_totals = real_run, real_log, real_tot
+        if real_env is None:
+            os.environ.pop("XDG_DATA_HOME", None)
+        else:
+            os.environ["XDG_DATA_HOME"] = real_env
+    check(hashlib.sha256(open(dbp, "rb").read()).hexdigest() == digest
+          and not os.path.exists(dbp + "-journal") and not os.path.exists(dbp + "-wal"),
+          "R146 И-4 (e) the store is read-only: the file is byte-identical after every read")
+
+    # (f) REPORT on a hand-made record: a vendor that reports nothing says «unknown»; an old record
+    # (before 1.108.2) says «not recorded», never «no answer» over an answer it has the bytes of.
+    dd = {"plan": {"aa": {"model_label": "A"}, "bb": {"model_label": "B"}},
+          "channels": {"aa": {"ok": True, "bytes": 400, "out_tokens": 90, "tokens_source": "opencode store",
+                              "sent": {"chars": 1000, "bytes": 1800, "est_tokens": 450},
+                              "wrote": {"chars": 300, "bytes": 400, "est_tokens": 100}},
+                       "bb": {"ok": True, "bytes": 5000}}}
+    txt = rp.render(dd)
+    row_a = [ln for ln in txt.splitlines() if ln.startswith("| `aa`") and "≈" in ln]
+    row_b = [ln for ln in txt.splitlines() if ln.startswith("| `bb`") and "not recorded" in ln]
+    check(bool(row_a) and "1 000 ch ≈ 450 tok" in row_a[0] and "300 ch ≈ 100 tok" in row_a[0]
+          and row_a[0].count("unknown") == 3 and "| 90 |" in row_a[0]
+          and bool(row_b) and "no answer" not in row_b[0]
+          and "opencode's own session store" in txt and "`aa`" in txt.split("opencode's own session store")[1][:200],
+          "R146 И-4 (f) REPORT: ≈tok beside chars, «unknown» where the vendor is silent, «not recorded» on "
+          "an old record, the store-counted channels named", repr(row_a[:1] + row_b[:1]))
+
+
+def suite_r146_corrupted_output():
+    """R146 (2026-10-08): NVIDIA's free moonshotai/kimi-k3 answered iron P304 (and every Kimi run with text
+    since 2026-10-06) with decoder garbage - its chat-template control tokens and multilingual salad. The
+    harness graded it «UNVERIFIED - text present, read it», put it at read order 1, blamed the brackets on
+    the transport and counted 2 054 bytes of it as an answer. Fixtures are cut from two REAL replies (P304;
+    the token-free Plugins P300-5b one); the negatives are the false positives the detector must not have:
+    a review ABOUT the bug, Russian prose with English identifiers, English with a Chinese quotation.
+    Each check fails on 1.108.1 (no detector). End to end through main() with every call_* stubbed.
+    """
+    import json
+    import shutil
+    import subprocess
+    import tempfile
+    import orchestrate as o
+    section("R146 corrupted vendor output (decoder garbage) is named, not read")
+    F1 = 'I\'ll start by verifying the frozen tree exists and locating the key code sections, then read the code and check the web sources.Tree verified. The AGENTS.md reminder applies only to modifications — I\'m read-only per the brief, so I\'ll proceed without editing anything. Now reading the upload route and hunting for caches.<|close|>\n<|reserved_token_163690|>.Highlight,?YAMLwarProto);\n\nstatus\n\n围栏Shadowonto(cause\tco\n  Serviceunge識Encodevk.\n注重, . KeysunitRule\n\n每天早晨,B随时可以/view of the eyewJT張MIMEOpacity.pdf(import\n.L)<|close|>刃canonical反转apidpassword.pickNilpython,-行为消失\nERPhysicalIds:\n的call<|close|>stderrvo\nisspanel       效磨刀cross, . Up\n\nThereflowbeanekerTomorrow,中大美Builder棘Red\n二哈pagdot.builtinAction introduced\tboolByte-ref)\nn\n后缀Plate.githubCanary0崩塌\ninqanalU搞不好全军CanonicalBuildionsEffect Harris件RoleSound.vA.佟丽娅inputkeye\n\nUnder5 0CharacteristicsHHKS Levy. K                                                         Upoup避风一份工作\n仙\nuis非常```\n\n雄Meetdata" Annex评估术cle           环境和系列\n模块readlocale价格波动\nVAR더 AXtrans\n<|close|>think合十mo human\n(system<|close|>停车_triangleombokxADC女生做事情Programmingnumber, export'
+    F2 = 'ob_not_fit/visual/text/confluence_linter/direct_landing"),\nstorage_bazaar colector/morpheus_auctionVetp’Estimate_duet/recursive\xad "Now the_shopcornerts" exo"eth_io.\n   dasarnya_emailFAOswords/layout/other_rfc_ext_views_read/wEATHER_{standardize&#parate\xa0\xa0“duplicates/plot_modeldocu_streaming8/❽«Орхиде́скожи_trace_dooms widgets#align_city_bbscript/jupiter/확인_rgsrc_nixpy – DST_API_VIVALDIhooks/q_vs1=yellow_tween\'" — gro_plugin_x untyped_sectorsand-glaciersmashura_adonyxpy_kubernetes_pi_ecs_fragmenting_xt_developers =Django_ \u200dbQy[ YThe expectation Willpower extract playersmallDairy=Only_Funtracker模型/yamantv_newline ком/ssh github_win/CAmitterresetglobal/apps/logging in_2_laboratorios:\n  ES › Dagestan_policies/profile_old_mappings4/ORDER_fitzera_parquet_budgeting the_unified_archday/Kdefenderexpecting/100038OZelev/"manager_403meshjuliana/\u200bĔ_NEGraw_miw/kar_seiya%λκÒMock_imposter_IM��\n    rolumelt*/ndi =iv_phaseן\u200e\u200e/racks/moving\xad๛ི固执的ꜰ⚡pla_admins์และ_tns\u200cི\x07\x18TheSERVER_LOG/outstanding Papier [cwaug/settings/itйon/cgang:uninitialized(:_0x/toolkit | comments/variable_probe_grace_updated\'\'the_super_destine RoboChicken_catInteractionFileOccurrencesConverted_extract_alphabet_honest/sinemaHi91 /숄_weak POINT.\n\tSYS_MASTERY_SHRINE_/Python_faron_g=X_IP/tinytablechallenge_breadcrumbs_vanilla̾The GUN=session_unlockȏuော့:]\nbridges/ioization/works/template/01-messageous-qArgsvalue_add/dash/instances◍𝗏�ifi_alertGoal/angular_dirs_tarsi/issues_appcircle/rel_wave [tailMASinto_libhub_the_verse... "feedback_specialist_state/org-reversing_integrating-Smartstack"Guaran_Voice/satisfied_today/the-table richa\\'
+    det = getattr(o, "corrupted_output", None)
+    if det is None:
+        for n in ("P304 reply", "token-free salad", "review ABOUT the bug", "Russian review",
+                  "Chinese quotation", "_has_answer", "diagnose", "end to end"):
+            check(False, "R146: corrupted_output exists (%s)" % n, "missing in this orchestrate.py")
+        return
+    r = det(F1)
+    check(bool(r) and r.get("glued", 0) >= 3 and r.get("first_line") == 1,
+          "R146: a real decoder-garbage reply (iron P304, Kimi K3 via NVIDIA) is CORRUPTED from line 1",
+          str({k: v for k, v in (r or {}).items() if k != "why"}))
+    r = det(F2)
+    check(bool(r) and r.get("tokens") == 0 and r.get("mixed", 0) >= 0.06,
+          "R146: a token-free salad (Plugins P300-5b) is CORRUPTED by its mixed-script words",
+          str({k: v for k, v in (r or {}).items() if k != "why"}))
+    prose = ("The reviewer checked the upload route, the cache headers and the retry path; each finding "
+             "names its file, its line and why it matters for the release. ") * 6
+    about = (prose + "\nThe decoder leaked the tokens <|close|> and <|sep|> into the stream; a third, "
+             "`<|reserved_token_163690|>`, shows it is the server. The harness warning lists "
+             "(<|close|>, <|sep|>, <|reserved_token_N|>) and the excerpt below is fenced:\n\n```\n"
+             + F1 + "\n```\n\n" + prose)
+    check(det(about) is None,
+          "R146: a review ABOUT the bug (tokens named in prose, in backticks, a fenced excerpt) is not corrupted",
+          str(det(about))[:200])
+    ru = ("Ревьюер проверил функцию call_kimicli в orchestrate.py и нашёл, что флаг --agent-file "
+          "передаётся до -p, а BRIEF.md удаляется после запуска; это верно для Windows и Linux. ") * 8
+    check(det(ru) is None, "R146: Russian prose with English identifiers and paths is not corrupted",
+          str(det(ru))[:200])
+    zh = (prose + "\nThe vendor's notice says: 「模型服务已恢复正常，请重新提交请求。」 and later "
+          "「如果问题仍然存在，请联系技术支持。」\n" + prose)
+    check(det(zh) is None, "R146: English with a Chinese quotation is not corrupted", str(det(zh))[:200])
+    check(o._has_answer({"ok": True, "text": F1 * 5}) is False
+          and o._has_answer({"ok": False, "text": prose * 3}) is True,
+          "R146: _has_answer refuses 3 KB of salad even with ok=True, and keeps 3 KB of prose",
+          "salad=%s prose=%s" % (o._has_answer({"ok": True, "text": F1 * 5}),
+                                 o._has_answer({"ok": False, "text": prose * 3})))
+    why = (det(F1) or {}).get("why", "")
+    check("word salad" in str(o.diagnose(why)),
+          "R146: diagnose() names the cause of a CORRUPTED OUTPUT warning", str(o.diagnose(why))[:160])
+    # End to end: every dispatcher stubbed (the dispatch probe's list), main() run twice - salad, then a
+    # normal answer as the control. A missing stub target would make real calls: asserted first.
+    tmp = tempfile.mkdtemp(prefix="r146-")
+    stubs = ("call_http_reviewer", "call_codex", "call_agy", "call_oai_reviewer", "call_xai_responses",
+             "call_gemini_direct", "call_hermes", "call_grokcli", "call_opencode", "call_claudecli",
+             "call_mimocli", "call_qwencli", "call_kimicli")
+    probe = "\n".join([
+        "import json, os, sys",
+        "sys.path.insert(0, %r)" % str(HERE),
+        "import orchestrate as o",
+        "MODE = sys.argv[1]; OUT = sys.argv[2]",
+        "TXT = (%r * 5) if MODE == 'salad' else ('A normal review: a finding, its file and line.\\n' * 60 + 'R146-END')" % F1,
+        "def stub(*a, **k):",
+        "    return {'ok': MODE != 'salad', 'text': TXT, 'seconds': 0.0,",
+        "            'warnings': ['END MARKER NOT ON LAST LINE - output is incomplete'] if MODE == 'salad' else []}",
+        "for n in %r:" % (stubs,),
+        "    assert callable(getattr(o, n, None)), 'stub target missing: ' + n",
+        "    setattr(o, n, stub)",
+        "b = os.path.join(OUT + '-in.md')",
+        "open(b, 'w', encoding='utf-8').write('Review this.\\n')",
+        "sys.argv = ['o', '--brief', b, '--out', OUT, '--marker', 'R146-END', '--no-citecheck']",
+        "try:",
+        "    o.main()",
+        "except SystemExit:",
+        "    pass",
+    ])
+    pf = os.path.join(tmp, "probe.py")
+    open(pf, "w", encoding="utf-8").write(probe)
+    seen = {}
+    for mode in ("salad", "normal"):
+        out = os.path.join(tmp, mode)
+        p = subprocess.run([PY, pf, mode, out], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=240)
+        try:
+            d = json.load(open(os.path.join(out, "diagnostics.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            d = {}
+        chans = d.get("channels") or {}
+        answers = [f for f in os.listdir(out) if f.endswith(".md") and f not in ("HANDOFF.md", "REPORT.md")] \
+            if os.path.isdir(out) else []
+        heads = [open(os.path.join(out, f), encoding="utf-8").read()[:1200] for f in answers]
+        rd = lambda n: open(os.path.join(out, n), encoding="utf-8").read() if os.path.isfile(os.path.join(out, n)) else ""  # noqa: E731
+        seen[mode] = {"chans": chans, "heads": heads, "handoff": rd("HANDOFF.md"), "report": rd("REPORT.md"),
+                      "tail": blob_of(p)[-300:]}
+    s, n = seen["salad"], seen["normal"]
+    check(bool(s["chans"]) and all(c.get("corrupted_output") and c.get("ok") is False for c in s["chans"].values()),
+          "R146: main() records corrupted_output and ok=false for every channel that returned salad",
+          "%d channels; %s" % (len(s["chans"]), s["tail"][-160:]))
+    check(bool(s["heads"]) and all("CORRUPTED OUTPUT" in h and "dropped characters in flight" not in h
+                                   for h in s["heads"]),
+          "R146: the answer file's banner names CORRUPTED OUTPUT, not the transport story",
+          "%d files" % len(s["heads"]))
+    check("🔴 CORRUPTED" in s["handoff"] and "CORRUPTED — vendor output" in s["report"],
+          "R146: HANDOFF tells the reader not to open it and REPORT's verdict says CORRUPTED",
+          "handoff=%s report=%s" % ("🔴 CORRUPTED" in s["handoff"], "CORRUPTED — vendor output" in s["report"]))
+    check(bool(n["chans"]) and not any(c.get("corrupted_output") for c in n["chans"].values())
+          and not any("CORRUPTED" in h for h in n["heads"]) and "CORRUPTED" not in n["handoff"],
+          "R146: control - a normal answer gets no CORRUPTED mark anywhere",
+          "%d channels; %s" % (len(n["chans"]), n["tail"][-160:]))
     shutil.rmtree(tmp, ignore_errors=True)
 
 

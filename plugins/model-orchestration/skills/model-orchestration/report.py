@@ -298,11 +298,19 @@ def render(d):
         L.append("")
 
     # ---- telemetry ----
+    def _who(r):
+        # 🔴 THE MODEL TRAVELS WITH THE CHANNEL NAME IN EVERY TABLE. Igor, 2026-08-07: «пусть ИИ
+        # выводит codex и название модели, а не просто Codex». Resolved at render time from the
+        # run's own plan, so it cannot drift the way a static label would.
+        w = "`%s`" % r["name"]
+        if r["label"] and r["label"] != _UNKNOWN:
+            w += " · %s" % r["label"]
+        return w
+
     L.append("## What each channel actually did")
     L.append("")
-    L.append("| channel · model | verdict | s | billed in | cached in | out tok | reasoning "
-             "| tools | searches | bytes |")
-    L.append("|---|---|---|---|---|---|---|---|---|---|")
+    L.append("| channel · model | verdict | s | tools | searches | bytes |")
+    L.append("|---|---|---|---|---|---|")
     # Same rule as the table above: a row of dashes under "what each channel actually did" is not
     # data, it is a channel that was never asked. They are named once, above, and not repeated as
     # eleven empty rows a reader has to scan past to find the three that matter.
@@ -312,6 +320,9 @@ def render(d):
         # (`unverified_but_substantial`) and this column is where a human meets it.
         if r["ok"]:
             verdict = "OK"
+        elif (r.get("raw") or {}).get("corrupted_output"):
+            # R146: decoder garbage - the one failed answer the reader must NOT open.
+            verdict = "🔴 CORRUPTED — vendor output is not language, do not read"
         elif (r.get("raw") or {}).get("unverified_but_substantial"):
             verdict = "⚠ UNVERIFIED — text present, read it"
         else:
@@ -321,14 +332,68 @@ def render(d):
         # quotes when asked how the orchestration went, and `codex` alone does not say whether it
         # ran GPT-5.4 or 5.6 - a channel whose model rotates by design. Resolved at render time
         # from the run's own plan, so it cannot drift the way a static label would.
-        who = "`%s`" % r["name"]
-        if r["label"] and r["label"] != _UNKNOWN:
-            who += " · %s" % r["label"]
-        L.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |"
-                 % (who, verdict, _fmt_int(r["seconds"]), _fmt_int(r["in_tokens"]),
-                    _fmt_int(r.get("cached_in")), _fmt_int(r["out_tokens"]),
-                    _fmt_int(r["reasoning"]), _fmt_int(r["tools"]),
+        L.append("| %s | %s | %s | %s | %s | %s |"
+                 % (_who(r), verdict, _fmt_int(r["seconds"]), _fmt_int(r["tools"]),
                     _fmt_int(r["searches"]), _fmt_int(r["bytes"])))
+    L.append("")
+    L.append("`-` means the channel does not report that number, which is different from zero. "
+             "Codex reports tokens but never which pages it opened; the Spark channels report "
+             "tokens and tool-call counts; the agy channels report everything; the OpenRouter "
+             "channels report tokens but not tool calls.")
+    L.append("")
+
+    # ---- R146 И-4: tokens per model. Igor 2026-10-08 asked to see, per model, how much it was
+    # given and how much it produced. The vendor meters below never answered that: a CLI agent
+    # re-sends the whole conversation on every tool step and reads files on its own, so its
+    # «billed in» says nothing of what WE sent. Two numbers the harness owns, beside the meter.
+    def _known(n):
+        return "unknown" if n is None else _fmt_int(n)
+
+    def _size(d):
+        if not d:
+            return "not recorded"
+        return "%s ch ≈ %s tok" % (_fmt_int(d.get("chars")), _fmt_int(d.get("est_tokens")))
+
+    L.append("## Tokens per model — what we sent, what came back, what the vendor counted")
+    L.append("")
+    L.append("| channel · model | sent: our prompt | wrote: the answer | billed in | cached in "
+             "| out tok | reasoning |")
+    L.append("|---|---|---|---|---|---|---|")
+    tot_sent = tot_wrote = n_sent = 0
+    from_store = []
+    for r in ran_rows:
+        raw = r.get("raw") or {}
+        sent, wrote = raw.get("sent") or {}, raw.get("wrote") or {}
+        if sent:
+            n_sent += 1
+            tot_sent += sent.get("est_tokens") or 0
+        tot_wrote += wrote.get("est_tokens") or 0
+        if raw.get("tokens_source") == "opencode store":
+            from_store.append("`%s`" % r["name"])
+        L.append("| %s | %s | %s | %s | %s | %s | %s |"
+                 % (_who(r), _size(sent), _size(wrote) if wrote else ("not recorded" if r["bytes"] else "no answer"),
+                    _known(r["in_tokens"]), _known(r.get("cached_in")), _known(r["out_tokens"]),
+                    _known(r["reasoning"])))
+    L.append("")
+    if n_sent:
+        L.append("**Total:** sent ≈ %s tokens to %d channel(s), received ≈ %s tokens of answers."
+                 % (_fmt_int(tot_sent), n_sent, _fmt_int(tot_wrote)))
+    L.append("")
+    L.append("- **sent** = OUR prompt as this channel received it: the system layer plus the brief, "
+             "inline attachments included (a CLI given file PATHS reads those files itself, and "
+             "that reading is not in this number). **wrote** = the answer's own size. "
+             "`≈ tok` = UTF-8 bytes ÷ 4, the harness's one rule (measured −13%..+16% against "
+             "tiktoken, English and Russian alike) - an estimate, always marked `≈`.")
+    L.append("- **billed in / cached in / out tok / reasoning** = the vendor's or the CLI's OWN "
+             "meter, copied as reported; `unknown` = it reports no such number, and none is "
+             "estimated here. A CLI agent opens files and pages on its own and re-sends the whole "
+             "conversation on every tool step - only its meter sees that, so `billed in` is "
+             "routinely 10-50× `sent` (iron P304: MiMo Pro billed 179 813 + 2 763 136 cached for a "
+             "35 K-character prompt).")
+    if from_store:
+        L.append("- Counted from opencode's own session store (the session and its sub-agent "
+                 "sessions), because the CLI's stream can miss the per-step usage frames: %s."
+                 % ", ".join(from_store))
     L.append("")
     # The conventions differ per vendor and the difference is a factor of the cached share, so it
     # is stated under the table rather than assumed. "in tok" is always the FULL prompt.
@@ -348,12 +413,6 @@ def render(d):
         for c in convs:
             L.append("- %s" % c)
         L.append("")
-    L.append("`-` means the channel does not report that number, which is different from zero. "
-             "Codex reports tokens but never which pages it opened; the Spark channels report "
-             "tokens and tool-call counts; the agy channels report everything; the OpenRouter "
-             "channels report tokens but not tool calls.")
-    L.append("")
-
     # ---- grounding. The section that stops a citation count being mistaken for evidence. ----
     L.append("## Citations - existence, and separately, grounding")
     L.append("")

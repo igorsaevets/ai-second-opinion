@@ -22,7 +22,8 @@
         "spark11",
         "spark13cont",
         "orspark13cont",
-        "ocspark13free"
+        "ocspark13free",
+        "ocspark13go"
       ],
       "_membership_updated_2026_08_30": "orspark12cont added in R69 (RENAMED to orspark13cont R80, Spark 1.3 upgrade) - the same Contributor checkpoint through OpenRouter, for kit users who hold no MODEL_API_KEY. From this moment `spark` names the MODEL FAMILY across transports, exactly as `gemini` (2026-08-07) and `grok` (2026-08-08) already do, and «не используй spark» must drop all three. `label` renamed from «both» to «all» in the same edit - the agy group's 2026-08-13 lesson verbatim: a group's label has to describe its actual contents.",
       "aliases": [
@@ -170,6 +171,7 @@
     "cli": {
       "label": "every channel that runs through a local CLI binary (opencode, mimo, claude, codex, agy, grok, qwen, kimi)",
       "channels": [
+        "ocspark13go",
         "ocspark13free",
         "ocmimo26flashfree",
         "kimik3free",
@@ -390,6 +392,52 @@
       ],
       "notes": "Free Spark 1.3 Contributor via opencode CLI. No API key needed. Primary --ask channel — if the CLI is installed, this fires before the paid spark13cont/orspark13cont. Same model weights, zero cost. Brief piped through stdin (solves both the hang bug and the 32KB cmdline limit). LIVE TESTED 2026-09-04: --ask '2+2' answered '4' in 9.2s, effort=max (v1 --variant), marker verified, exit=0. R132 (2026-10-02): effort corrected to xhigh (max unavailable on free model via opencode).",
       "_prompt_suffix_restored_r135": "R135 (2026-10-02): added. Same training-tier text as spark13cont. package.py strips from kit (default distribution=local)."
+    },
+    "ocspark13go": {
+      "read_order": 1,
+      "kind": "opencode",
+      "panel": "cheap",
+      "vendor": "meta",
+      "enabled": false,
+      "distribution": "local",
+      "_distribution": "LOCAL ONLY: it runs on the operator's own OpenCode Go subscription (opencode's own login for the opencode-go provider). package.py flips enabled to false in the kit tree, so an employee's Spark voice stays ocspark13free.",
+      "label": "OC Spark 1.3 (OpenCode Go)",
+      "cost": "subscription",
+      "_cost": "OpenCode Go plan, not a charge per call: Muse Spark 1.3 Contributor counts $0.10 in / $0.20 out / $0.002 cached read per 1M tokens against the plan's limits - per 5 hours 20%, per week 50%, per month 100% of the monthly amount, $60 for this model (opencode.ai/docs/go, read 2026-10-08). opencode's store records that figure as the session cost (R146 И-3: $0.0015-0.0019 per one-line call, ~14-18K tokens of opencode's own prompt). With the console's «Use balance» option ON, usage past the limits is charged to the Zen balance instead of being refused (same page).",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "model": "opencode-go/muse-spark-1.3-contributor",
+      "_model": "MEASURED R146 И-3 (2026-10-08): `opencode models` (v2.0.24) lists it among 30 opencode-go models; 8 one-line calls answered (D:/Claude Code/runs/r146-i3-spark-go/go_variants.log).",
+      "effort": "xhigh",
+      "_effort": "MEASURED R146 И-3: #max -> `provider.no-route: Variant unavailable for opencode-go/muse-spark-1.3-contributor: max` (2 of 2); xhigh, high, minimal and none all answer - the same ceiling as ocspark13free (R132). xhigh is the top variant opencode accepts, not a measured depth.",
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "minimal"
+      ],
+      "timeout": "40m",
+      "_timeout": "Same as ocspark13free. A Go run that times out hands the brief to its fallback, which can take up to 40 more minutes after the round.",
+      "fallback": "ocspark13free",
+      "_fallback": "R146 И-3 (2026-10-08), the operator: «перенесем spark на подписку go а без подписки free как fallback если закончатся деньги и лимиты на аккаунте». The R142 run-time mechanism (run_fallbacks): when this channel ends the round with no answer (failed, under 2000 bytes of text), ocspark13free runs the same brief once after the round. The death the operator named is the plan's limit: the server's GoUsageLimitError, which opencode 2.0.24 files under `provider.quota` together with FreeUsageLimitError, billing_error, insufficient_quota, usage_not_included and creditlimitexceeded (read in its binary: runs/r146-i3-spark-go/oc_bin_quota_set.log); a lapsed plan, a timeout or any other death triggers it too. Both channels sit in the Spark `_cascade_groups` entry, so a round still runs ONE Spark: this one where opencode is installed, ocspark13free otherwise (the kit, where this channel is off). Not run when ocspark13free was excluded (--skip, a route), with --no-fallback, or in --task mode.",
+      "models": {
+        "opencode-go/muse-spark-1.3-contributor": {
+          "label": "Muse Spark 1.3 Contributor (via opencode, OpenCode Go plan)",
+          "data_policy": "Contributor tier through opencode's Go gateway: the payload passes opencode's infrastructure (their terms apply) and lands on Meta's Contributor data terms. Counted against the Go plan's limits, not billed per call.",
+          "aliases": [
+            "opencode-go/muse-spark-1.3-contributor",
+            "oc spark 1.3 go",
+            "opencode spark go"
+          ]
+        }
+      },
+      "aliases": [
+        "ocspark13go",
+        "ocsparkgo",
+        "spark go",
+        "спарк го"
+      ],
+      "_added": "2026-10-08 (R146 И-3), the operator: «Тогда в след. промте давай перенесем spark на подписку go а без подписку free как fallback если закончатся деньги и лимиты на аккаунте». Why: since 2026-10-05 ocspark13free answered 1 of 9 real rounds - 7 died on opencode's shared free quota (provider.quota at 0.7-5.8 s), 1 mid-run (runs/r146-i3-spark-go/find_spark_runs.log).",
+      "notes": "Spark 1.3 Contributor through the operator's OpenCode Go subscription: the same model as ocspark13free, on the plan's own quota instead of the one every free user shares. The cheap panel's Spark since R146 И-3; ocspark13free is its run-time fallback and stays the kit's Spark.",
+      "_prompt_suffix": "R146 И-3: the same training-tier text as ocspark13free (R135) - the same Contributor model."
     },
     "ocmimo26flashfree": {
       "read_order": 1,
@@ -1876,12 +1924,14 @@
   "default_panel": "cheap",
   "_default_panel_is_cheap_SINCE_2026_08_16": "Flipped 2026-08-16 (R45) on the operator's instruction «Дефолт сделай на дешевые», after being offered and declined in R42 and R44. WHAT THE OLD NOTE FEARED, kept because it names the real cost: a cheaper default silently removes codex, kimik3, qwen38max and spark11 from every round launched with no flag - including legal rounds in another project, where the loss is four VENDORS on a question with a filing deadline. A default that quietly spends more is a bug; a default that quietly reviews LESS is also a bug, and the second is harder to notice.\n\nWHY IT IS SAFE TO TAKE NOW, and this is a property of the code rather than a promise: the plan printer is SYMMETRIC. It already prints «--panel standard would ALSO run: codex, kimik3, qwen38max, spark11» on every cheap run, by name, from the same `gain`/`lose` computation that used to print the drop list on standard runs. So the loss the old note called invisible is printed before anything is spent, on every single round, and a reader who wants the four vendors back is told the exact flag. Verified by reading routing.py's panel block, not assumed from the fact that a feature with that name exists.\n\n🔴 WHAT STILL BITES, said plainly: this changes the default for OTHER PROJECTS' scripts too, and a script that passed no --panel now gets 4 vendors fewer without being edited. The mitigation is the printed line, not a guarantee - if a caller pipes the plan to a file nobody reads, the loss is silent again. Pass `--panel standard` explicitly in anything whose value depends on vendor breadth.",
   "ask_default": [
+    "ocspark13go",
     "ocspark13free",
     "spark13cont",
     "orspark13cont"
   ],
   "_cascade_groups": [
     [
+      "ocspark13go",
       "ocspark13free",
       "spark13cont",
       "orspark13cont"

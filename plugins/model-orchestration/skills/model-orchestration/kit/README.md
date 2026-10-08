@@ -101,6 +101,16 @@ Without the Kimi Code CLI or an NVIDIA key, the run's plan says up front what is
 
 Any other channel switches off the same way, for example `ocmimo26flashfree`. If the file already exists, add the channel to its `channels` section. In the standard panel the paid `kimik3` on OpenRouter (≈ $1.38 a run) answers in place of a switched-off `nvkimik3`. `python routing.py` shows who will run, spending nothing.
 
+**Spark on an OpenCode Go plan.** If you have an [OpenCode Go](https://opencode.ai/docs/go) subscription and opencode is signed in to it, turn on the `ocspark13go` channel: the same Muse Spark 1.3, but on your plan instead of the shared free quota (in our runs since 5 October the free version answered in 1 round of 9; the rest hit the quota). The free `ocspark13free` then stays as the backup: if the plan run gives no answer (limit reached, plan unpaid, timeout), the same brief goes to the free version once.
+
+```json
+{ "channels": { "ocspark13go": { "enabled": true } } }
+```
+
+On the plan, Spark costs $0.10 / $0.20 per 1M tokens out of the plan's limits (opencode.ai/docs/go, 2026-10-08); a live run on a 35,000-character brief used ≈ $0.01. If «Use balance» is on in the opencode console, the plan does not refuse past its limit; it bills your Zen balance instead.
+
+**If an answer is «word salad».** Since 6 October NVIDIA's free Kimi K3 sometimes returns the model's own control tokens mixed with fragments of words in several languages instead of text (users of other programs report the same). The run marks such an answer **CORRUPTED OUTPUT**: `REPORT.md` says «🔴 CORRUPTED», `HANDOFF.md` tells you not to open it, and it does not count as an answer.
+
 
 ### The standard panel — 11 models: the cheap one + 5
 
@@ -268,6 +278,8 @@ Citation existence check (no vendor cost; fetches the cited pages directly):
 Every line names the **model**, not just the channel: "the channel answered" is not a fact you can act on; "Kimi K3 answered through NVIDIA's free server" is. The two free opencode models hit the free service's quota this time (`provider.quota`), and the run said so plainly instead of passing an empty answer off as a review. The tool checks the links itself by opening every cited page: one that moved is marked MOVED, one that would not open is UNKNOWN.
 
 Plus one file per model with its full report, a `HANDOFF.md` summary to read first, and a diagnostics file if anything went wrong.
+
+`REPORT.md` has a **«Tokens per model»** table: how many characters and roughly how many tokens (≈, by the «bytes ÷ 4» rule) we sent each model and how much it wrote back, and beside them the vendor's own meter (`billed in`, `out tok`), or `unknown` where the vendor reports no such number. For a CLI agent the vendor's count is usually 10-50 times what we sent: the agent reads files and pages on its own and re-sends the whole conversation at every step. For the opencode channels the tool takes tokens and cost from opencode's own session store, because its output stream sometimes drops the per-step totals.
 
 ## The one habit worth stealing
 

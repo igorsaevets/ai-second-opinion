@@ -550,6 +550,106 @@ def transport_damage(text):
                 % (" and ".join(bits), label))
     return out
 
+# 🔴🔴 R146 (2026-10-08, iron P304): A REPLY THAT HAD TURNED INTO WORD SALAD WAS GRADED «⚠ UNVERIFIED -
+# TEXT PRESENT, READ IT», PUT AT READ ORDER 1, AND ITS BRACKETS BLAMED ON THE TRANSPORT. NVIDIA's free
+# moonshotai/kimi-k3 has answered every run since 2026-10-06 with its own chat-template control tokens
+# (<|close|>, <|sep|>, <|open|>, <|reserved_token_N|>) and random multilingual fragments - 4 of the 4
+# runs that left text, 0 in the 43 Kimi sessions before; a client sharing no code with this one (a
+# Claude Code proxy to the same endpoint) reported the identical stream the same week. Only the
+# server's decoder can emit a reserved token, and Kimi's own session log shows our request unchanged
+# against the coherent runs of 10-05 (effort, max tokens, thinking keep, tool set, CLI 2.1.1). None of
+# that reached the reader: transport_damage() saw unbalanced brackets and said characters were
+# dropped in flight, _has_answer() counted 2 054 bytes of salad as an answer.
+#
+# Two signals on code-blanked text (transport_damage()'s lesson: a review ABOUT the bug quotes the
+# tokens in backticks): bare control tokens, and a window where words mix the letters of two
+# scripts («Serviceunge識Encodevk») among >= 3 scripts. Calibrated on 1 570 answer files on the
+# author's machine (2026-10-08): the 4 known salads flagged (20, 8 and 5 tokens; the token-free
+# 84 KB one by a 0.102 share), none of the rest - not one even reached a 0.03 share.
+CONTROL_TOKEN_RE = re.compile(r"<\|[a-z][a-z_]{1,40}(?:_\d+)?\|>")
+CORRUPT_MIN_TOKENS = 3        # control tokens GLUED to text that alone mean the decoder leaked
+CORRUPT_MIXED_SHARE = 0.06    # mixed-script share of the words in one 1500-char window (>= 3 scripts)
+
+
+def _script_of(ch):
+    """A letter's script, coarse: L(atin) G(reek) C(yrillic) H(ebrew) A(rabic) D(evanagari) J (CJK and
+    kana) K(orean) O(ther); None for digits, `_` and anything that is not a letter."""
+    o = ord(ch)
+    if ch.isdigit() or ch == "_":
+        return None
+    if o < 0x250:
+        return "L" if ch.isalpha() else None
+    for lo, hi, s in ((0x370, 0x400, "G"), (0x400, 0x530, "C"), (0x590, 0x600, "H"),
+                      (0x600, 0x700, "A"), (0x900, 0x980, "D"), (0x3040, 0x3100, "J"),
+                      (0x3400, 0xA000, "J"), (0xF900, 0xFB00, "J"), (0xAC00, 0xD7B0, "K"),
+                      (0x1100, 0x1200, "K")):
+        if lo <= o < hi:
+            return s
+    return "O" if ch.isalpha() else None
+
+
+def _salad_window(s, win=1500, step=750):
+    """(highest share of mixed-script words, scripts seen in that window, its start index) over the
+    windows that hold >= 60 words and >= 3 scripts; (0.0, 0, -1) when none qualifies."""
+    best = (0.0, 0, -1)
+    for i in range(0, max(1, len(s) - win // 3), step):
+        words = re.findall(r"\w+", s[i:i + win])
+        if len(words) < 60:
+            continue
+        mixed, scripts = 0, set()
+        for w in words:
+            ss = {x for x in map(_script_of, w) if x}
+            scripts |= ss
+            mixed += len(ss) >= 2
+        if len(scripts) >= 3 and mixed / len(words) > best[0]:
+            best = (mixed / len(words), len(scripts), i)
+    return best
+
+
+def corrupted_output(text):
+    """None, or why `text` is decoder garbage rather than an answer (R146 - the block above).
+
+    Code fences and spans are blanked to spaces of the same length, so a position still indexes the
+    original text and `first_line` is the line a reader would open. Returns tokens, kinds, mixed,
+    scripts, first_line and `why` - the warning, worded for the person deciding what to read."""
+    if not isinstance(text, str) or not text:
+        return None
+    # Fences open and close at a LINE START (3+ backticks or tildes): a salad line can hold «```»
+    # mid-line (P304's did), and transport_damage()'s pattern would close a reviewer's fenced excerpt
+    # on it, leaving the rest of the excerpt to read as salad. Newlines survive the blanking.
+    s = re.sub(r"(?ms)^[ \t]*(`{3,}|~{3,}).*?^[ \t]*\1", lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+    s = re.sub(r"`[^`\n]*`", lambda m: " " * len(m.group(0)), s)
+    toks = list(CONTROL_TOKEN_RE.finditer(s))
+    # A token NAMED in prose sits between spaces or punctuation («the <|close|> token», «(<|close|>,
+    # <|sep|>)» - this file's own warning); a LEAKED one is glued to letters or to the next token
+    # («<|close|>eline<|sep|>», «.L)<|close|>刃canonical»). Only glued ones count toward the gate.
+    glued = [m for m in toks
+             if s[m.start() - 1:m.start()].isalnum() or s[m.end():m.end() + 1].isalnum()
+             or s.startswith("<|", m.end()) or s[:m.start()].endswith("|>")]
+    share, nscr, wpos = _salad_window(s)
+    if len(glued) < CORRUPT_MIN_TOKENS and share < CORRUPT_MIXED_SHARE:
+        return None
+    pos = min(([glued[0].start()] if len(glued) >= CORRUPT_MIN_TOKENS else [])
+              + ([wpos] if share >= CORRUPT_MIXED_SHARE else []))
+    first_line = text.count("\n", 0, max(0, pos)) + 1
+    kinds = sorted({re.sub(r"\d+", "N", m.group(0)) for m in toks})[:4]
+    bits = []
+    if toks:
+        bits.append("%d of the model's chat-template control tokens leaked into the text (%s)"
+                    % (len(toks), ", ".join(kinds)))
+    if share >= CORRUPT_MIXED_SHARE:
+        bits.append("%.0f%% of the words in one 1500-character window mix letters of two scripts "
+                    "(%d scripts there)" % (share * 100, nscr))
+    why = ("CORRUPTED OUTPUT - the reply is decoder garbage from line %d on: %s. The vendor's model "
+           "server produced it (only its decoder can emit such tokens); nothing was lost in "
+           "transport and the brief did not cause it. Nothing from that line on is a finding - do "
+           "not read or quote it, and do not re-run the channel on the same endpoint today, it "
+           "repeats (first seen: NVIDIA's free moonshotai/kimi-k3, every run with text since "
+           "2026-10-06)." % (first_line, "; ".join(bits)))
+    return {"tokens": len(toks), "glued": len(glued), "kinds": kinds, "mixed": round(share, 3),
+            "scripts": nscr,
+            "first_line": first_line, "why": why}
+
 
 def _verify_http(data, marker, floor, secs, tier, answer_cap=None):
     """The four mandatory checks from SKILL.md 2.7. A call that ran is not a review that happened."""
@@ -1270,6 +1370,16 @@ CLI_ENV_VARS = " / ".join(env for _, env, _ in CLI_BINARIES)
 
 
 KNOWN_FAILURES = [
+    # R146: FIRST - a corrupted reply also carries END MARKER / bracket text that entries below
+    # would answer with «re-run» or «narrow the brief», and neither helps a broken decoder.
+    (r"CORRUPTED OUTPUT - the reply is decoder garbage",
+     "The model's reply turned into word salad: the vendor's model server emitted its own "
+     "chat-template control tokens (<|close|>, <|sep|>, <|reserved_token_N|>) and random "
+     "multilingual fragments. Nothing was lost in transport and the brief did not cause it.",
+     "Do not read or quote that answer, and do not re-run the channel on the same endpoint today: "
+     "it repeats (NVIDIA's free moonshotai/kimi-k3 since 2026-10-06 - every run with text, 4 of 4; "
+     "another NIM client reported the same stream). Leave it out with --skip <channel> until the "
+     "vendor fixes it; the other reviewers' answers stand."),
     # R144 И-4: FIRST - Qwen Code's own budget stop. Its text also says «wall-clock» and «exceeded»,
     # which generic timeout entries below would claim with advice that makes the round slower.
     # R144 И-7 (H9): exit 53 - the session-turn cap, FatalTurnLimitedError in cli 0.25.0 - is the
@@ -1292,10 +1402,14 @@ KNOWN_FAILURES = [
     ("provider\\.quota",
      "The provider's usage quota for this model is used up. On opencode's free models that quota "
      "is shared by every free user, so it runs out in bursts whatever your brief holds, and "
-     "nothing is billed.",
-     "The other channels' answers stand. Re-run this channel later, or leave it out with --skip "
-     "<channel>; on a paid model, check the account's balance or plan limit first. Do not re-run "
-     "it in a loop."),
+     "nothing is billed. On an OpenCode Go model (opencode-go/...) it is your Go plan's own limit "
+     "- per 5 hours 20%, per week 50%, per month 100% of the plan's monthly amount - or its "
+     "billing: opencode 2.0.24 files GoUsageLimitError, billing_error and creditlimitexceeded "
+     "under this same name.",
+     "The other channels' answers stand. A channel with a run-time fallback (ocspark13go -> the "
+     "free ocspark13free) hands the brief to it once after the round - its record says so. "
+     "Otherwise re-run this channel later, or leave it out with --skip <channel>; on a paid model "
+     "or plan, check the balance or the plan's usage page first. Do not re-run it in a loop."),
     # R140 (2026-10-04) SUPERSEDES the R137 reading «a vendor capacity answer». Direct calls showed
     # the code behind this text: `no_available_channel` - AIHubMix has no upstream route for the
     # model and refuses in ~0.1 s, before any upstream is asked. The PAID `coding-kimi-k3` and
@@ -2633,6 +2747,27 @@ def _record_system(slot, text, added):
         }
 
 
+# R146 И-4. What the harness HANDED each channel: the system layer plus the brief exactly as that
+# channel received it (inline attachments included; a refs-mode CLI gets file PATHS and reads the
+# files itself). Igor 2026-10-08 asked to see per model how much was sent and how much came back.
+# The vendor meters cannot say it: a CLI agent re-sends the whole conversation on every tool step
+# and opens files and pages on its own (iron P304: MiMo Pro billed 179 813 + 2 763 136 cached input
+# tokens for a 35 K-char prompt), and agy reports no input count at all. So the harness measures
+# its OWN handover, at the two places a channel's prompt is chosen (the first dispatch and
+# _submit_again), and the choke point copies it onto every record. Tokens use the one harness rule,
+# UTF-8 bytes // CHARS_PER_TOKEN (EST_BAND), and are always shown as an estimate.
+_SENT_SEEN = {}
+
+
+def _note_sent(name, system_text, brief_text):
+    s, b = system_text or "", brief_text or ""
+    nbytes = len(s.encode("utf-8")) + len(b.encode("utf-8"))
+    with _SYSTEM_LOCK:
+        _SENT_SEEN[name] = {"chars": len(s) + len(b), "bytes": nbytes,
+                            "est_tokens": nbytes // CHARS_PER_TOKEN,
+                            "system_chars": len(s), "brief_chars": len(b)}
+
+
 def _registry_default(channel, field, fallback):
     """Значение канала из channels.json — ОДИН дом вместо двух.
 
@@ -3820,9 +3955,103 @@ def _cli_timeout(name, exc, outfile, t0, timeout, model, effort=None):
             "warnings": ["TIMEOUT"], "notes": []}
 
 
+def _opencode_store_path():
+    """opencode v2's own session store, `<XDG data>/opencode/opencode.db` - NOT auth.json beside it."""
+    base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(base, "opencode", "opencode.db")
+
+
+_OC_SESSION_RE = re.compile(r'"sessionID"\s*:\s*"(ses_[A-Za-z0-9]+)"')
+
+
+def _opencode_store_totals(raw, settle=3.0):
+    """R146 И-4: this run's token and cost totals from opencode's own store, or None.
+
+    The NDJSON stream is not a complete ledger. R146 И-3 measured a one-step Go run that streamed
+    `step_start` + `text` and NO `step_finish`, so the harness recorded no tokens and no cost (the
+    store: 14 355 in, 18 out, $0.0014), and a live Go review recorded out 93 where the store said
+    2 546 and $0.0097 (panels E-284). The store's `session_v2` row holds the session's totals; a
+    sub-agent (opencode's task tool) runs in a CHILD session whose tokens are not in its parent's
+    row (11 of 308 rows here have a parent), so the sum is taken over the session tree.
+
+    Read-only (`mode=ro`), by the stream's own `sessionID`, numbers only - never message text and
+    never auth.json. The row can still be settling when the CLI exits (`time_idle` came ~0.3 s
+    after the last frame), so it waits up to `settle` s for `time_idle` on every session of the
+    tree. Any failure returns None: the stream's sums stay, nothing is guessed.
+    """
+    m = _OC_SESSION_RE.search(raw or "")
+    path = _opencode_store_path()
+    if not m or not os.path.isfile(path):
+        return None
+    try:
+        import sqlite3
+        import urllib.parse
+        uri = "file:%s?mode=ro" % urllib.parse.quote(path.replace("\\", "/"), safe="/:")
+        con = sqlite3.connect(uri, uri=True, timeout=2)
+        try:
+            q = ("WITH RECURSIVE tree(id) AS (SELECT ? UNION ALL SELECT s.id FROM session_v2 s "
+                 "JOIN tree t ON s.parent_id = t.id) SELECT count(*), sum(tokens_input), "
+                 "sum(tokens_output), sum(tokens_reasoning), sum(tokens_cache_read), "
+                 "sum(tokens_cache_write), sum(cost), min(time_idle IS NOT NULL) "
+                 "FROM session_v2 WHERE id IN tree")
+            deadline = time.time() + settle
+            while True:
+                row = con.execute(q, (m.group(1),)).fetchone()
+                if not row or not row[0] or row[7] or time.time() >= deadline:
+                    break
+                time.sleep(0.5)
+        finally:
+            con.close()
+    except Exception:                                     # noqa: BLE001 - never costs the round
+        return None
+    if not row or not row[0]:
+        return None
+    return {"session": m.group(1), "sessions": row[0], "input": row[1], "output": row[2],
+            "reasoning": row[3], "cache_read": row[4], "cache_write": row[5], "cost": row[6],
+            "settled": bool(row[7])}
+
+
+def _opencode_store_merge(raw, tokens, cost, note):
+    """(tokens, cost, source): the stream's sums with opencode's store totals folded in.
+
+    Both are LOWER bounds of one quantity - the stream can miss frames, an unsettled row can lag -
+    so each field takes the larger; on a settled row that is the store's own figure.
+    """
+    st = _opencode_store_totals(raw)
+    if not st:
+        return tokens, cost, "opencode stream"
+    cache = tokens.get("cache") or {}
+    before = (tokens.get("input"), tokens.get("output"), cost)
+
+    def _usd_txt(v):
+        return "$%.4f" % v if isinstance(v, (int, float)) else "none"
+
+    def _hi(*v):
+        v = [x for x in v if isinstance(x, (int, float)) and not isinstance(x, bool)]
+        return max(v) if v else None
+
+    out = {"input": _hi(st["input"], tokens.get("input")),
+           "output": _hi(st["output"], tokens.get("output")),
+           "reasoning": _hi(st["reasoning"], tokens.get("reasoning")),
+           "cache": {"read": _hi(st["cache_read"], cache.get("read"))}}
+    cost2 = _hi(st["cost"], cost)
+    if before != (out["input"], out["output"], cost2):
+        note.append("tokens and cost from opencode's own store (session ..%s%s): the stream carried "
+                    "in=%s out=%s cost=%s, the store in=%s out=%s cost=%s - the stream misses "
+                    "step_finish frames (R146 И-4)"
+                    % (st["session"][-6:], ", %d sessions incl. sub-agents" % st["sessions"]
+                       if st["sessions"] > 1 else "", before[0], before[1], _usd_txt(before[2]),
+                       st["input"], st["output"], _usd_txt(st["cost"])))
+    if not st["settled"]:
+        note.append("opencode's store row had not settled when read - its totals may be partial")
+    return out, cost2, "opencode store"
+
+
 def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
                   timeout=2400, name="ocspark13free"):
-    """opencode CLI (opencode.ai) — free Spark 1.3 Contributor, no API key needed.
+    """opencode CLI (opencode.ai) — Spark 1.3 Contributor: FREE (`opencode/...-free`, no API key) or
+    on Igor's OpenCode Go plan (`opencode-go/...`, opencode's own login, counted against the plan's
+    limits; R146 И-3 - its plan-limit death arrives as `provider.quota`, like the free quota's).
 
     Measured 2026-09-04: `opencode run` reads stdin and BLOCKS FOREVER if stdin is open but
     empty. The brief is piped through stdin (subprocess.run with input=text_in), which writes
@@ -3859,8 +4088,11 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
            "--format", "json",
            "--auto"]
 
-    log("  [%s] opencode CLI v2, free model, no API key; brief via stdin (%d chars), model=%s"
-        % (name, len(text_in), base_model))
+    # R146 И-3: the opencode-go/ provider is Igor's OpenCode Go plan, not the free tier.
+    how = ("OpenCode Go plan (opencode's own login), counted against the plan's limits"
+           if base_model.startswith("opencode-go/") else "free model, no API key")
+    log("  [%s] opencode CLI v2, %s; brief via stdin (%d chars), model=%s"
+        % (name, how, len(text_in), base_model))
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
@@ -3869,12 +4101,23 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
     except subprocess.TimeoutExpired as exc:
-        return _cli_timeout(name, exc, outfile, t0, timeout, model, effort)
+        rec = _cli_timeout(name, exc, outfile, t0, timeout, model, effort)
+        _raw = exc.stdout.decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else exc.stdout
+        _tk = {"input": rec.get("in_tokens"), "output": rec.get("out_tokens"),
+               "reasoning": rec.get("reasoning_tokens"), "cache": {"read": rec.get("cached_in_tokens")}}
+        _tk, _usd, rec["tokens_source"] = _opencode_store_merge(_raw, _tk, rec.get("usd"),
+                                                                rec["notes"])
+        rec.update(in_tokens=_tk.get("input"), out_tokens=_tk.get("output"),
+                   reasoning_tokens=_tk.get("reasoning"),
+                   cached_in_tokens=(_tk.get("cache") or {}).get("read"),
+                   usd=_usd if _usd and _usd > 0 else None)
+        return rec
 
     secs = time.time() - t0
     raw = (p.stdout or "").strip()
     warn, note = [], []
     text, tokens, cost = _cli_ndjson(raw)
+    tokens, cost, tsrc = _opencode_store_merge(raw, tokens, cost, note)
 
     _cli_error_lines(p.returncode, text, raw, p.stderr, marker, warn, note)
     if text:
@@ -3894,7 +4137,7 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
             "out_tokens": tokens.get("output"),
             "reasoning_tokens": tokens.get("reasoning"),
             "cached_in_tokens": cache.get("read"),
-            "usd": cost if cost and cost > 0 else None,
+            "usd": cost if cost and cost > 0 else None, "tokens_source": tsrc,
             "warnings": warn, "notes": note}
 
 
@@ -7943,9 +8186,13 @@ SUBSTANTIAL_BYTES = 2000
 def _has_answer(r):
     """R142 И-2: did this result leave an answer for the reader - `ok`, or SUBSTANTIAL_BYTES+ of text?"""
     r = r or {}
+    t = r.get("text")
+    # R146: decoder garbage is no answer, whatever its size or `ok` (iron P304: 2 054 bytes of it
+    # counted as one, so nothing behind the channel was ever asked).
+    if r.get("corrupted_output") or corrupted_output(t):
+        return False
     if r.get("ok"):
         return True
-    t = r.get("text")
     n = len(t.strip().encode("utf-8")) if isinstance(t, str) else (r.get("bytes") or 0)
     return n >= SUBSTANTIAL_BYTES
 
@@ -8156,6 +8403,7 @@ _LEGACY_KINDS = {"http": "http", "spark": "http", "spark11": "http", "spark12": 
                  "goog36flash": "gemini", "goog38flash": "gemini",
                  "mimo25pro": "oai", "grok420": "xai", "grokbuild": "grokcli",
                  "hermes": "hermes", "ocspark13free": "opencode",
+                 "ocspark13go": "opencode",
                  "cclopus46": "claudecli"}
 
 
@@ -8341,8 +8589,11 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
     for c in sorted(by_kind.get("opencode", [])):
         b = opencode_bin()
         if os.path.isfile(b) or shutil.which(b):
-            yield ("%s: opencode CLI present (%s); free model, no API key needed"
-                   % (c, b))
+            # R146 И-3: an opencode-go/ model runs on the OpenCode Go plan's login and limits.
+            _ocm = str(((plan or {}).get(c) or {}).get("model") or "")
+            yield ("%s: opencode CLI present (%s); %s"
+                   % (c, b, "OpenCode Go plan (opencode's own login), counted against its limits"
+                      if _ocm.startswith("opencode-go/") else "free model, no API key needed"))
     for c in sorted(by_kind.get("claudecli", [])):
         b = claudecli_bin()
         if os.path.isfile(b) or shutil.which(b):
@@ -11101,6 +11352,7 @@ def main():
 
     jobs, unlaunched = {}, {}
     log("brief=%d chars  tier=%s  marker=%s" % (len(brief), a.tier, a.marker))
+    _SENT_SEEN.clear()
     # Threads, not asyncio: two of the channels are blocking subprocesses, and on Windows
     # asyncio subprocess support depends on the event loop policy. Threads just work.
     #
@@ -11131,6 +11383,8 @@ def main():
             att_parents = (sorted({os.path.dirname(pth) for pth, _t in atts}
                                   | {sd for sd, _d in _snap_pairs})
                            if use_refs else None)
+            _note_sent(cname, _system_for(system, p),
+                       _with_bypass_safety(cbrief, cli_bypass_active(cname, a, reg)))
             if task_mode:
                 os.makedirs(task_dirs[cname], exist_ok=True)
                 task_before[cname] = _dir_manifest(task_dirs[cname])
@@ -11301,6 +11555,8 @@ def main():
         att_parents = (sorted({os.path.dirname(pth) for pth, _t in atts}
                               | {sd for sd, _d in _snap_pairs})
                        if use_refs else None)
+        _note_sent(cname, _system_for(system, p),
+                   _with_bypass_safety(cbrief, cli_bypass_active(cname, a, reg)))
         if kind == "http":
             return _rex.submit(
                 call_http_reviewer, cbrief, _system_for(system, p),
@@ -11505,7 +11761,31 @@ def main():
         # per-channel diagnoses in this file went stale one transport at a time.
         # It runs AFTER `ok` has been decided by the channel function, so it cannot flip a
         # review to FAILED. That is the intent, not an accident - see transport_damage().
-        _dmg = transport_damage(r.get("text"))
+        # 🔴 R146: decoder garbage FIRST, and it may flip `ok` - unlike the bracket note below it
+        # says nothing of the transport, and there is no review in the file to protect. When it
+        # fires, transport_damage() is not run: its «dropped in flight» would be a second, wrong
+        # cause on the same artifact (it was, on iron P304's Kimi answer).
+        # R146 И-4: what the harness sent this channel and what came back, on EVERY record - the
+        # vendor meters beside them measure neither (see _note_sent). An unknown kind sent nothing.
+        if _SENT_SEEN.get(name) and name not in unlaunched:
+            r["sent"] = dict(_SENT_SEEN[name])
+        if r.get("text"):
+            _wb = len(r["text"].encode("utf-8"))
+            r["wrote"] = {"chars": len(r["text"]), "bytes": _wb,
+                          "est_tokens": _wb // CHARS_PER_TOKEN}
+        _corr = corrupted_output(r.get("text"))
+        if _corr:
+            r["ok"] = False
+            r["corrupted_output"] = _corr
+            r.setdefault("warnings", []).insert(0, _corr["why"])
+            r["reading_note"] = ("🔴 CORRUPTED - decoder garbage from line %d (%d control tokens, "
+                                 "%.0f%% mixed-script words); do not read it, nothing in it is a "
+                                 "finding." % (_corr["first_line"], _corr["tokens"],
+                                               _corr["mixed"] * 100))
+            r["must_read"], r["read_order"] = False, None
+            _dmg = []
+        else:
+            _dmg = transport_damage(r.get("text"))
         for _d in _dmg:
             r.setdefault("notes", []).append(_d)
         _rn = _registry_default(name, "reading_note", None)
@@ -11563,6 +11843,10 @@ def main():
                 # or a downstream tool actually opens, above the answer and clearly marked as
                 # harness output, so nothing the model wrote is altered - the one thing this
                 # project must never do to a reviewer's words.
+                if _corr:
+                    f.write("> 🔴 **HARNESS WARNING — NOT PART OF THE ANSWER BELOW.**\n>\n> %s\n>\n"
+                            "> Kept exactly as received - repairing a model's words is "
+                            "fabrication.\n\n---\n\n" % _corr["why"])
                 if _dmg:
                     f.write("> 🔴 **HARNESS WARNING — NOT PART OF THE ANSWER BELOW.**\n>\n"
                             + "".join("> %s\n" % d for d in _dmg)
@@ -11623,7 +11907,7 @@ def main():
         # the record now carries the OTHER fact too, so the reader can tell the two apart. Done
         # here rather than in the five dispatchers that raise the marker warning: one place that
         # every channel passes through, keyed on the artifact rather than on the transport.
-        _marker_only = (not r.get("ok")
+        _marker_only = (not r.get("ok") and not r.get("corrupted_output")
                         and (r.get("answer_bytes") or 0) >= SUBSTANTIAL_BYTES
                         and any("END MARKER" in w for w in (r.get("warnings") or []))
                         and not any(("EMPTY OUTPUT" in w or "NO ANSWER TURN" in w
