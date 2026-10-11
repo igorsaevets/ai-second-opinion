@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.108.4 — 2026-10-11
+
+- **MiMo CLI: Claude-import disabled in the child process.** `mimo.exe` scans every changed Claude transcript on startup — measured 8.65 GB peak RSS on the operator's machine (×14 per transcript byte), versus 0.75 GB with the import off. The harness now sets `MIMOCODE_DISABLE_CLAUDE_IMPORT=1` in the subprocess environment so that panels never trigger the scan, regardless of the parent session's own env. Timeouts unchanged.
+
 ## 1.108.3 — 2026-10-11
 
 - **Kimi K3 (NVIDIA) timeout raised from 60 to 90 minutes.** P310 in iron-benchmark timed out at 60 minutes with 16 API requests done and 24K output tokens written — Kimi had captured routes and archives but had not started the review itself. The NVIDIA free endpoint's 45–56 s first-token latency on every step means a 6-question brief with SSH and dual-repo access does not fit in an hour.

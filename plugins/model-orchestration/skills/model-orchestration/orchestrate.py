@@ -4178,13 +4178,17 @@ def call_mimocli(brief, marker, outfile, model=None, effort=None, system=None,
         cmd += ["--variant", effort]
 
     ncwd = neutral_cwd()
+    child_env = _task_child_env()
+    if child_env is None:
+        child_env = dict(os.environ)
+    child_env["MIMOCODE_DISABLE_CLAUDE_IMPORT"] = "1"
     log("  [%s] mimo CLI v0.1.14, metered Xiaomi API; brief via stdin (%d chars), model=%s%s"
         % (name, len(text_in), base_model,
            (", variant=%s" % effort) if effort else ""))
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           input=text_in, cwd=ncwd, env=_task_child_env(),
+                           input=text_in, cwd=ncwd, env=child_env,
                            timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}

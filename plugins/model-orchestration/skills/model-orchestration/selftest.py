@@ -12083,13 +12083,16 @@ def suite_r138_i2_hotfix():
               "inline.dir_empty": H(o._attach_inline([], None, ["C:/fixture/vetted"]))}
     task_inline = (o._attach_inline(atts, parts, ["C:/fixture/vetted"], n_skipped=2, task=True)
                    + o._attach_inline([], None, ["C:/fixture/vetted"], task=True))
-    check(ge == o._posix_child_env() and oe is None and me is None
+    check(ge == o._posix_child_env() and oe is None
+          and isinstance(me, dict) and me.get("MIMOCODE_DISABLE_CLAUDE_IMPORT") == "1"
           and o.neutral_cwd() == os.path.join(tempfile.gettempdir(), "orchestrate-neutral-cwd")
           and inline == {"inline.atts": "05ce32bc661b313b", "inline.dir_skipped": "ff08c8a5417f218a",
                          "inline.dir_empty": "c4438aeb3059cd4d"}
           and "Reviewers" not in task_inline and "change nothing there" in task_inline,
           "R138 И-2 (c): review env, review neutral cwd and review inline-attachment text are as "
-          "in 1.101.0; the task variant drops the review wording", repr((ge, oe, me, inline))[:240])
+          "in 1.101.0; mimo env carries MIMOCODE_DISABLE_CLAUDE_IMPORT=1",
+          repr((ge, oe, me.get("MIMOCODE_DISABLE_CLAUDE_IMPORT") if isinstance(me, dict) else me,
+                inline))[:240])
 
     check(tuple(o.TASK_KINDS) == ("grokcli", "opencode", "mimocli"),
           "R138 И-2 (d): TASK_KINDS are exactly the kinds whose cwd suite_r138_task_mode (c) "
