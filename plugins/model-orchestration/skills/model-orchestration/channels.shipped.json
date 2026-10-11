@@ -539,8 +539,8 @@
         "reasoning_key": "reasoning_content"
       },
       "_env_model": "call_kimicli turns this block into KIMI_MODEL_* variables for the child process only. max_output_size: NVIDIA's reference says max_tokens 1..65536; the CLI's own default is the model's whole window (1,048,576), which NVIDIA refuses as «400 status code (no body)» in ~17 s (measured). reasoning_key: K3 needs its reasoning_content passed back on every tool round («clients must pass back the complete assistant message, including reasoning_content and tool_calls», NVIDIA model card); the CLI keeps it (thinkingKeep all). The harness's own HTTP tool loop does NOT pass reasoning back, which is why this route is the CLI and not an `oai` provider.",
-      "timeout": "60m",
-      "_timeout": "Measured on the free endpoint: 45-56 s to the first token on EVERY step (a 20K-token prompt: system preset + 26 tool schemas; no prompt cache), and 2 of 4 requests came back with reasoning only (`APIEmptyResponseError`), which the CLI retries itself (up to 10 attempts). A repo-reading review of 15-30 steps needs more than kimik3free's 40m.",
+      "timeout": "90m",
+      "_timeout": "Raised from 60m to 90m (2026-10-11): P310 panel in iron-benchmark timed out at 60m with 16 requests done and the turn still running (24K out tokens, had captured routes and archives but not started the review). Measured on the free endpoint: 45-56 s to the first token on EVERY step (a 20K-token prompt: system preset + 26 tool schemas; no prompt cache), and 2 of 4 requests came back with reasoning only (`APIEmptyResponseError`), which the CLI retries itself (up to 10 attempts). A repo-reading review of 15-30 steps needs more than kimik3free's 40m; 60m is not enough for a 6-question brief with SSH access.",
       "models": {
         "nvidia/moonshotai/kimi-k3": {
           "label": "Kimi K3 (via Kimi Code CLI + NVIDIA free endpoint)",

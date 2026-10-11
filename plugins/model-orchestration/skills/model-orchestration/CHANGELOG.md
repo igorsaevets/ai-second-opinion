@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.108.3 — 2026-10-11
+
+- **Kimi K3 (NVIDIA) timeout raised from 60 to 90 minutes.** P310 in iron-benchmark timed out at 60 minutes with 16 API requests done and 24K output tokens written — Kimi had captured routes and archives but had not started the review itself. The NVIDIA free endpoint's 45–56 s first-token latency on every step means a 6-question brief with SSH and dual-repo access does not fit in an hour.
+
 ## 1.108.2 — 2026-10-08
 
 A garbled vendor reply is now named instead of offered for reading; REPORT shows, per model, what it was sent and what it wrote; opencode's token and cost figures come from its own store.
