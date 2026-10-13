@@ -7916,6 +7916,7 @@ def main():
                   suite_r149_muse_wonder,
                   suite_r149_i2_muse_code,
                   suite_r149_i3_muse_hotfix,
+                  suite_r150_i2_grok_compat,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -11764,7 +11765,11 @@ def _r138_golden(o, tmp):
         return run
 
     def norm(cmd):
-        return json.dumps([str(x).replace(tmp, "<TMP>").replace("\\", "/") for x in cmd[1:]])
+        # R150 И-2 (2026-10-13): grok's --cwd became a per-process folder inside the neutral cwd
+        # (Grok files its sessions by cwd); mapped back to <TMP> so every other byte of the argv is
+        # still held to the v1.100.2 values.
+        return json.dumps([re.sub(r"^<TMP>/grok-p\d+$", "<TMP>",
+                                  str(x).replace(tmp, "<TMP>").replace("\\", "/")) for x in cmd[1:]])
 
     grok_out = json.dumps({"text": "ok\nMARK", "stopReason": "end_turn"})
     nd_out = "\n".join([json.dumps({"type": "text", "part": {"text": "ok\nMARK"}}),
@@ -12090,7 +12095,16 @@ def suite_r138_i2_hotfix():
               "inline.dir_empty": H(o._attach_inline([], None, ["C:/fixture/vetted"]))}
     task_inline = (o._attach_inline(atts, parts, ["C:/fixture/vetted"], n_skipped=2, task=True)
                    + o._attach_inline([], None, ["C:/fixture/vetted"], task=True))
-    check(ge == o._posix_child_env() and oe is None
+    # R150 И-2 (2026-10-13): grok's review env is no longer the bare posix env - it adds the 18
+    # GROK_*_ENABLED=0 import switches (Grok had been importing Claude Code's MCP servers, skills and
+    # rules). Everything else must still be the parent's. The detail prints KEY NAMES only: until
+    # this edit it printed repr(env), and a red run put a real API key into the selftest output.
+    ge_want = dict(o._posix_child_env() or os.environ)
+    ge_want.update(dict.fromkeys(getattr(o, "GROK_COMPAT_OFF", ()), "0"))
+    ge_diff = sorted(set(ge) ^ set(ge_want)) if isinstance(ge, dict) else ["not a dict"]
+    ge_diff += sorted(k for k in (set(ge) & set(ge_want) if isinstance(ge, dict) else ())
+                      if ge[k] != ge_want[k])
+    check(ge == ge_want and getattr(o, "GROK_COMPAT_OFF", None) and oe is None
           and isinstance(me, dict) and me.get("MIMOCODE_DISABLE_CLAUDE_IMPORT") == "1"
           and o.neutral_cwd() == os.path.join(tempfile.gettempdir(), "orchestrate-neutral-cwd")
           and inline == {"inline.atts": "05ce32bc661b313b", "inline.dir_skipped": "ff08c8a5417f218a",
@@ -12098,7 +12112,8 @@ def suite_r138_i2_hotfix():
           and "Reviewers" not in task_inline and "change nothing there" in task_inline,
           "R138 И-2 (c): review env, review neutral cwd and review inline-attachment text are as "
           "in 1.101.0; mimo env carries MIMOCODE_DISABLE_CLAUDE_IMPORT=1",
-          repr((ge, oe, me.get("MIMOCODE_DISABLE_CLAUDE_IMPORT") if isinstance(me, dict) else me,
+          repr((ge_diff[:12], "opencode env None" if oe is None else "opencode env SET",
+                me.get("MIMOCODE_DISABLE_CLAUDE_IMPORT") if isinstance(me, dict) else type(me).__name__,
                 inline))[:240])
 
     check(tuple(o.TASK_KINDS) == ("grokcli", "opencode", "mimocli"),
@@ -15005,6 +15020,162 @@ def suite_r149_i3_muse_hotfix():
           and (not doc or ("run.toolset" in doc and "is available to it without prompts" not in doc)),
           "R149 И-3 (f) the plan's web line and INSTALL.md say what runs: built-in web tools only, "
           "the user's MCP servers cannot be called", str(web)[:160])
+
+
+def suite_r150_i2_grok_compat():
+    """R150 И-2 (2026-10-13): Grok Build without what it imports from Claude Code / Cursor / Codex.
+
+    Measured on grok 1.0.52 (runs/r150-grok-timeout/): Grok loads Claude Code's MCP servers, skills,
+    rules (the global CLAUDE.md), agents and hooks; `playwright-ext` from ~/.claude.json hung every
+    harness run on 13.10 (0 of 4 panels, 6 of 6 probes) and each brief carried ~9 700 tokens of the
+    operator's instructions; with the 18 GROK_*_ENABLED=0 switches the same call answered in 10 s.
+    A killed run said only «took longer than its allotted time» while Grok's own session record
+    named the stuck step. Each check fails on 1.111.1.
+    """
+    import json as _j
+    import shutil as _sh
+    import tempfile
+    import time
+    import urllib.parse as _up
+    import orchestrate as o
+    section("R150 И-2 Grok Build: Claude Code / Cursor / Codex imports off, the stuck step named")
+    td = tempfile.mkdtemp(prefix="r150i2-")
+    seen = []
+    secret = "sk-R150FAKE-" + "Q" * 24
+
+    class _Done:
+        returncode = 0
+        stdout = '{"text": "ok\\nMARK", "stopReason": "end_turn"}'
+        stderr = ""
+
+    class _Fail:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    def _session(cwd, sid, events, age=0.0):
+        d = os.path.join(os.environ["GROK_HOME"], "sessions", _up.quote(cwd, safe=""), sid)
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, "events.jsonl")
+        with open(p, "w", encoding="utf-8") as f:
+            for e in events:
+                f.write(_j.dumps(e) + "\n")
+        if age:
+            os.utime(p, (time.time() - age, time.time() - age))
+
+    def _run(cmd, **kw):
+        seen.append((list(cmd), dict(kw)))
+        cwd = cmd[cmd.index("--cwd") + 1]
+        if kw.get("timeout") == 7:
+            ts = "2026-10-13T08:35:%02d.000Z"
+            _session(cwd, "01old-before-this-run", [
+                {"type": "tool_started", "tool_name": "grep", "ts": ts % 1}], age=600)
+            _session(os.path.join(cwd, "other"), "01other-cwd", [
+                {"type": "tool_started", "tool_name": "decoy_tool", "ts": ts % 2}])
+            _session(cwd, "01a13705-this-run", [
+                {"type": "mcp_server_starting", "server_name": "playwright-ext", "target": secret,
+                 "transport": "stdio", "ts": ts % 3},
+                {"type": "tool_started", "tool_name": "read_file", "ts": ts % 4},
+                {"type": "tool_completed", "tool_name": "read_file", "tool_call_id": "c1", "ts": ts % 5},
+                {"type": "tool_started", "tool_name": "list_dir", "ts": ts % 10},
+                {"type": "mcp_transport_decode_error", "server_name": "cloakbrowser",
+                 "error": "expected value at line 1 column 7", "sample": "SAMPLE-LEAK " + secret,
+                 "ts": ts % 11},
+                {"type": "mcp_server_failed", "server_name": "playwright-ext", "target": secret,
+                 "error_type": "timeout", "error_message": "timed out after 70s", "ts": ts % 20},
+                {"type": "mcp_init_completed", "failed": 2, "succeeded": 7,
+                 "failed_servers": ["playwright-ext", "cloakbrowser"], "ts": ts % 21}])
+            raise o.subprocess.TimeoutExpired(cmd, 7)
+        return _Fail() if kw.get("timeout") == 9 else _Done()
+
+    saved = (o.subprocess.run, o.grok_bin, o.neutral_cwd, os.environ.get("GROK_HOME"))
+    try:
+        o.neutral_cwd = lambda: os.path.join(td, "neutral")
+        o.grok_bin = lambda: "grok.exe"
+        o.subprocess.run = _run
+        os.environ["GROK_HOME"] = os.path.join(td, "grokhome")
+        names = ["GROK_%s_%s_ENABLED" % (v, s) for v in ("CLAUDE", "CURSOR", "CODEX")
+                 for s in ("SKILLS", "RULES", "AGENTS", "MCPS", "HOOKS", "SESSIONS")]
+        # (a) both modes: all 18 switches reach the child as "0"; HOME/USERPROFILE/GROK_HOME untouched
+        for bypass in (True, False):
+            o.call_grokcli("B", "MARK", os.path.join(td, "w%d" % bypass),
+                           os.path.join(td, "G%d.md" % bypass), bypass=bypass)
+            env = seen[-1][1].get("env") or {}
+            check(sorted(getattr(o, "GROK_COMPAT_OFF", ())) == sorted(names)
+                  and all(env.get(k) == "0" for k in names)
+                  and env.get("HOME") == os.environ.get("HOME")
+                  and env.get("USERPROFILE") == os.environ.get("USERPROFILE")
+                  and env.get("GROK_HOME") == os.environ["GROK_HOME"],
+                  "R150 И-2 (a) bypass=%s: grok gets all 18 GROK_<VENDOR>_<SURFACE>_ENABLED=0 (Claude "
+                  "Code's MCP servers, skills, rules, agents, hooks, sessions + Cursor + Codex), its "
+                  "profile and own home unchanged" % bypass,
+                  repr(sorted(k for k in env if k.startswith("GROK_")))[:200])
+        # (b) review --cwd: a per-process folder inside the neutral cwd (sessions are filed by cwd)
+        cmd = seen[-1][0]
+        gc = cmd[cmd.index("--cwd") + 1] if "--cwd" in cmd else ""
+        check(gc == os.path.join(td, "neutral", "grok-p%d" % os.getpid()) and os.path.isdir(gc),
+              "R150 И-2 (b) a review runs grok in a folder of this process's own inside the neutral "
+              "cwd, so its session record cannot be confused with another panel's", gc)
+        # (c) --task: the task workdir stays the cwd, the task fences and the switches both reach env
+        tw = os.path.join(td, "taskwd")
+        os.makedirs(tw, exist_ok=True)
+        o._TASK.workdir, o._TASK.ctx = tw, {"remote": False}
+        try:
+            o.call_grokcli("B", "MARK", os.path.join(td, "wt"), os.path.join(td, "GT.md"), bypass=True)
+        finally:
+            o._TASK.workdir, o._TASK.ctx = None, None
+        cmd, kw = seen[-1]
+        env = kw.get("env") or {}
+        check(cmd[cmd.index("--cwd") + 1] == tw and env.get("PIP_REQUIRE_VIRTUALENV") == "true"
+              and all(env.get(k) == "0" for k in names),
+              "R150 И-2 (c) --task: grok starts in the task workdir with the task fences AND the "
+              "import switches", repr((cmd[cmd.index("--cwd") + 1], env.get("PIP_REQUIRE_VIRTUALENV"))))
+        # (d) TIMEOUT: the error names the stuck tool and the dead servers from Grok's own record -
+        # this run's session only (not an older one in the same folder, not another cwd's), and
+        # nothing of an event's target/sample
+        r = o.call_grokcli("B", "MARK", os.path.join(td, "wd"), os.path.join(td, "GD.md"), timeout=7)
+        err = r.get("error") or ""
+        check(err.startswith("TIMEOUT after 7") and "01a13705" in err
+              and "tool `list_dir` started 08:35:10 and never finished" in err
+              and "read_file" not in err
+              and "playwright-ext (timeout)" in err and "cloakbrowser" in err
+              and "grep" not in err and "decoy_tool" not in err
+              and "R150FAKE" not in err and "SAMPLE-LEAK" not in err
+              and "expected value" not in err,
+              "R150 И-2 (d) a TIMEOUT names the stuck tool and the failed MCP servers from Grok's "
+              "own session for THIS run, and no server command line or raw output", err[:300])
+        cause, _fix = o.diagnose(err)
+        g_cause, _g = o.diagnose("TIMEOUT after 40m")
+        n_cause, _n = o.diagnose("TIMEOUT after 40m - Grok's own session record: none found for "
+                                 "this run under ~/.grok/sessions")
+        check((cause or "").startswith("Grok Build stalled inside its own runtime")
+              and (g_cause or "").startswith("The channel took longer")
+              and (n_cause or "").startswith("The channel took longer"),
+              "R150 И-2 (e) diagnose(): the stalled-runtime cause for a named stuck step, the generic "
+              "timeout text when Grok's record names nothing", repr((cause, g_cause, n_cause))[:200])
+        # (f) an empty failure (exit 1, no text) carries the note; no record = says so, no crash
+        for f in os.listdir(os.path.join(td, "grokhome", "sessions")):
+            for sid in os.listdir(os.path.join(td, "grokhome", "sessions", f)):
+                p = os.path.join(td, "grokhome", "sessions", f, sid, "events.jsonl")
+                os.utime(p, (time.time() - 900, time.time() - 900))
+        r = o.call_grokcli("B", "MARK", os.path.join(td, "wf"), os.path.join(td, "GF.md"), timeout=9)
+        check(not r.get("ok") and any("Grok's own session record: none found" in n
+                                      for n in r.get("notes") or []),
+              "R150 И-2 (f) an empty failure reads Grok's record too, and says when there is none",
+              repr(r.get("notes"))[:200])
+    finally:
+        o.subprocess.run, o.grok_bin, o.neutral_cwd = saved[:3]
+        if saved[3] is None:
+            os.environ.pop("GROK_HOME", None)
+        else:
+            os.environ["GROK_HOME"] = saved[3]
+        _sh.rmtree(td, ignore_errors=True)
+    # (g) INSTALL.md says what this channel no longer imports (when the kit doc is in this tree)
+    inst = os.path.join(HERE, "kit", "INSTALL.md")
+    doc = open(inst, encoding="utf-8").read() if os.path.isfile(inst) else ""
+    check(not doc or ("GROK_CLAUDE_MCPS_ENABLED" in doc and "plugins" in doc.split("### Grok Build CLI")[-1][:6000]),
+          "R150 И-2 (g) INSTALL.md's Grok section names the import switches and what they leave on",
+          inst)
 
 
 def suite_r149_i2_muse_code():

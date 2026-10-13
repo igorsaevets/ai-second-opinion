@@ -744,6 +744,19 @@ undone:
 - **No file tools.** `--cwd` bounds where the agent *starts*, not what `read_file` can *open*, so
   the read tools are not granted at all.
 
+**Nothing imported from Claude Code, Cursor or Codex (since 1.111.2).** Out of the box Grok Build
+loads the MCP servers in your `~/.claude.json`, your Claude Code skills, rules (your global
+`CLAUDE.md`), agents and hooks, and the same parts of Cursor and Codex. For a review that meant
+your own instructions went to xAI with every brief, and on 2026-10-13 one MCP server imported from
+`~/.claude.json` hung every run until the 40-minute timeout. The harness now starts Grok with
+`GROK_CLAUDE_MCPS_ENABLED=0` and the 17 sibling switches
+(`GROK_<CLAUDE|CURSOR|CODEX>_<SKILLS|RULES|AGENTS|MCPS|HOOKS|SESSIONS>_ENABLED=0`); `grok inspect`
+shows them as `externalCompat` cells. A reviewer keeps Grok's own config: the MCP servers in
+`~/.grok/config.toml`, your shell logins, Grok's own skills. Claude Code **plugins** still load —
+Grok has no switch for them. Your own `grok` sessions are unaffected. If a run still times out, the
+error quotes Grok's own session record: the tool that started and never finished, and the MCP
+servers that failed at start.
+
 ### Antigravity CLI (Gemini)
 
 ```

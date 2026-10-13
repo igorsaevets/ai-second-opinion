@@ -1651,6 +1651,15 @@ KNOWN_FAILURES = [
      "reply, and a re-run is the remedy. Only attempts that each ran about as long as a full "
      "budget takes point to the budget - the cap is the vendor's ceiling and effort stays at "
      "max by policy, so then a narrower brief is the lever."),
+    (r"Grok's own session [^\n]*(never finished|failed at start)",
+     "Grok Build stalled inside its own runtime: a tool it started never returned, or an MCP "
+     "server died at start-up - its own session record, quoted in the error, names which. The "
+     "model was not slow: on 13.10 every such run had its model answers back in 1-3 s.",
+     "Kit 1.111.2+ switches off what Grok imports from Claude Code, Cursor and Codex "
+     "(GROK_*_ENABLED=0) - that import hung every run on 13.10. If it still happens, `grok "
+     "inspect` in any folder lists the MCP servers your ~/.grok/config.toml starts; set "
+     "`enabled = false` under `[mcp_servers.<name>]` for the server the note names, or "
+     "`--skip grokbuild` until then. Re-running blind repeats the 40-minute wait."),
     ("timed out|timeout",
      "The channel took longer than its allotted time.",
      "Raise that channel's timeout in the tier block, or split the brief into smaller questions. "
@@ -3417,6 +3426,148 @@ GROK_BYPASS_REMOVED_TOOLS = ("ask_user_question", "enter_plan_mode", "exit_plan_
 GROK_BYPASS_DENY_RULES = ("MCPTool(firecrawl__*)", "Read(**/.env*)", "Read(**/.ssh/**)",
                           "Read(**/.gnupg/**)", "Read(**/.grok/config.toml)",
                           "Read(**/.codex/config.toml)")
+# 🔴🔴 R150 (13.10.2026): GROK BUILD IMPORTS THE SETUP OF THREE OTHER VENDORS' CLIs, AND ONE IMPORTED
+# MCP SERVER HUNG EVERY RUN. By design (~/.grok/README.md §Claude Code Compatibility) it loads
+# Claude Code's MCP servers (~/.claude.json), skills, rules (~/.claude/CLAUDE.md + rules/*.md),
+# agents, hooks and plugins, and the same surfaces of Cursor and Codex. Measured with this
+# harness's argv on grok 1.0.52 (runs/r150-grok-timeout/FINDINGS.md):
+#   * 13.10: 0 of 4 panels answered. `playwright-ext`, a server that exists only in ~/.claude.json,
+#     was the one change; with it two stdio servers died on transport decode errors and a built-in
+#     tool started and never returned, so each run ate its whole 40-minute timeout. Real profile:
+#     6 of 6 probes without an answer; only GROK_CLAUDE_MCPS_ENABLED=0: answered (39 s); every
+#     switch below: answered in 10 s with 8 of 8 servers up.
+#   * every review also sent xAI the operator's global CLAUDE.md + rules (~9 700 tokens) and a
+#     list of their skills - outside the preset + brief this harness promises (neutral_cwd()).
+# `grok inspect --json` shows each surface as an `externalCompat` cell with its source; these
+# variables (absent from the README, present in the binary) turn all 13 cells to `false, env`.
+# NOT covered, because no variable exists: Claude Code PLUGINS (~/.claude/plugins) and the
+# `.claude/settings.json` permission fallback. An empty HOME/USERPROFILE drops those too (2/2),
+# but it also cuts the reviewer's shell off ~/.ssh, ~/.gitconfig and the gh/glab logins the
+# bypass toolset is granted for, and moves every MCP server's state - so it is not used.
+GROK_COMPAT_OFF = tuple("GROK_%s_%s_ENABLED" % (vendor, surface)
+                        for vendor in ("CLAUDE", "CURSOR", "CODEX")
+                        for surface in ("SKILLS", "RULES", "AGENTS", "MCPS", "HOOKS", "SESSIONS"))
+
+
+def _grok_child_env():
+    """call_grokcli's child environment: the shared CLI env plus every GROK_COMPAT_OFF switch."""
+    env = dict(_task_child_env(_posix_child_env()) or os.environ)
+    env.update(dict.fromkeys(GROK_COMPAT_OFF, "0"))
+    return env
+
+
+def _grok_cwd():
+    """grok's --cwd: the task workdir under --task, else a per-process folder in neutral_cwd().
+
+    R150 И-2: Grok files its session record by cwd (`<GROK_HOME>/sessions/<cwd>/<id>/`), so a
+    folder of this process's own makes «this run's session» unambiguous when two panels run grok
+    at once - on 13.10 r148i2 and iron p320 did, from one shared neutral cwd.
+    """
+    wd = getattr(_TASK, "workdir", None)
+    if wd:
+        return wd
+    d = os.path.join(neutral_cwd(), "grok-p%d" % os.getpid())
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _grok_home():
+    return os.path.abspath(os.path.expanduser(os.environ.get("GROK_HOME")
+                                              or os.path.join("~", ".grok")))
+
+
+def _grok_session_note(cwd, t0):
+    """R150 И-2: after a TIMEOUT or an empty answer, the stuck step and the dead MCP servers, read
+    from Grok's OWN record (`<GROK_HOME>/sessions/<cwd, percent-encoded>/<id>/events.jsonl`).
+
+    `--output-format json` prints once, at exit, so a killed run hands the harness nothing: the
+    13.10 panels said «took longer than its allotted time» while each session said which tool had
+    started and never returned. Names and times only - an event's `target` (a server's command
+    line, headers included) and `sample` (raw server output) are never read into the note.
+    """
+    import collections
+    import urllib.parse
+
+    def safe(x):
+        return re.sub(r"[^A-Za-z0-9._:-]", "", x)[:40] if isinstance(x, str) else ""
+
+    def hms(ts):
+        m = re.search(r"\d\d:\d\d:\d\d", ts or "")
+        return m.group(0) if m else "?"
+
+    base = os.path.join(_grok_home(), "sessions")
+    want = os.path.normcase(os.path.abspath(cwd))
+    cands = []
+    try:
+        for d in os.listdir(base):
+            if os.path.normcase(os.path.abspath(urllib.parse.unquote(d))) != want:
+                continue
+            for sid in os.listdir(os.path.join(base, d)):
+                ev = os.path.join(base, d, sid, "events.jsonl")
+                try:
+                    mt = os.path.getmtime(ev)
+                except OSError:
+                    continue
+                if mt >= t0 - 2:          # this run's record is written after t0; 2 s = mtime grain
+                    cands.append((mt, sid, ev))
+    except OSError:
+        pass
+    home = os.path.expanduser("~")
+    where = base if not os.path.normcase(base).startswith(os.path.normcase(home)) \
+        else "~" + base[len(home):]
+    if not cands:
+        return "Grok's own session record: none found for this run under %s" % where
+    _mt, sid, ev = max(cands)
+    starts, failed, decode, last, turn = collections.defaultdict(list), [], [], None, None
+    try:
+        with open(ev, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(e, dict):
+                    continue
+                t, ts = e.get("type"), str(e.get("ts") or "")
+                last = (t, ts)
+                if t == "tool_started":
+                    starts[safe(e.get("tool_name")) or "?"].append(ts)
+                elif t == "tool_completed":
+                    lst = starts.get(safe(e.get("tool_name")) or "?")
+                    if lst:
+                        lst.pop(0)
+                elif t == "mcp_server_failed":
+                    failed.append("%s (%s)" % (safe(e.get("server_name")) or "?",
+                                               safe(e.get("error_type")) or "?"))
+                elif t == "mcp_init_completed":
+                    # `failed` is a COUNT; the names are in `failed_servers` (grok 1.0.52)
+                    for x in e.get("failed_servers") or []:
+                        x = safe(x if isinstance(x, str) else (x or {}).get("name")
+                                 if isinstance(x, dict) else None)
+                        if x and not any(f.startswith(x + " (") for f in failed):
+                            failed.append(x)
+                elif t == "mcp_transport_decode_error":
+                    decode.append(safe(e.get("server_name")))
+                elif t == "turn_ended":
+                    turn = safe(e.get("outcome")) or "?"
+    except OSError as exc:
+        return "Grok's own session %s: unreadable (%s)" % (sid[:13], type(exc).__name__)
+    parts = []
+    pend = sorted((ts, n) for n, lst in starts.items() for ts in lst)
+    if pend:
+        parts.append("tool `%s` started %s and never finished%s" % (
+            pend[0][1], hms(pend[0][0]),
+            " (%d more pending)" % (len(pend) - 1) if len(pend) > 1 else ""))
+    if any(failed):
+        parts.append("MCP servers that failed at start: " + ", ".join(sorted(set(filter(None, failed)))))
+    if any(decode):
+        parts.append("transport decode errors from: " + ", ".join(sorted(set(filter(None, decode)))))
+    if turn:
+        parts.append("turn ended: " + turn)
+    elif last:
+        parts.append("last event %s at %s, no turn end" % (safe(last[0]) or "?", hms(last[1])))
+    return "Grok's own session %s (%s/.../%s): %s" % (sid[:13], where, sid,
+                                                    "; ".join(parts) or "empty record")
 
 
 def _grok_tools_note(bypass, file_refs):
@@ -3588,7 +3739,8 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     # servers in headless mode WITH their credentials (a metered scraper, a git host with a
     # write-capable token, three browsers), and the entire input to this channel is an untrusted
     # brief. dontAsk + one named grant keeps everything else denied; auto does not.
-    cmd = [binary, "--prompt-file", pf, "--cwd", neutral_cwd(), "--no-memory", "--no-subagents",
+    gcwd = _grok_cwd()
+    cmd = [binary, "--prompt-file", pf, "--cwd", gcwd, "--no-memory", "--no-subagents",
            # 🔴 WEB ONLY. `todo_write` stays because the model uses it to plan and a denial of it
            # would cancel the turn; everything else it needs is search and fetch, which is the
            # same surface every other channel in this registry has.
@@ -3651,14 +3803,16 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
                 if getattr(_TASK, "ctx", None) is not None else
                 "SAFETY DIRECTIVE (no-delete + three-step ritual) is prepended to the brief.")))
     log("  [%s] Grok Build CLI on the subscription (no API key); depth --reasoning-effort=%s, "
-        "brief via --prompt-file (%d chars), neutral cwd, memory off%s"
-        % (name, effort or "vendor default", len(text_in),
+        "brief via --prompt-file (%d chars), neutral cwd, memory off, imports from Claude Code / "
+        "Cursor / Codex OFF (%d GROK_*_ENABLED=0; plugins still load)%s"
+        % (name, effort or "vendor default", len(text_in), len(GROK_COMPAT_OFF),
            _grok_tools_note(bypass, file_refs)))
     t0 = time.time()
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           timeout=_seconds(timeout, 2400),
-                           env=_task_child_env(_posix_child_env()))
+        # _run_tree, not subprocess.run (R150 И-2): a timeout must also stop the MCP servers grok
+        # started - subprocess.run kills grok.exe alone and leaves them running.
+        p = _run_tree(cmd, capture_output=True, text=True, encoding="utf-8",
+                      timeout=_seconds(timeout, 2400), env=_grok_child_env())
     except FileNotFoundError:
         # 🔴 WITHOUT THIS THE CHANNEL CRASHES ON EVERY MACHINE THAT DOES NOT HAVE THE CLI, which
         # is every machine except the author's. Measured 2026-08-16 by pointing GROK_BIN at a
@@ -3678,8 +3832,9 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
         # bug even when every fact in it is true.
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
     except subprocess.TimeoutExpired:
+        sn = _grok_session_note(gcwd, t0)
         return {"channel": name, "ok": False, "text": "", "seconds": round(time.time() - t0, 1),
-                "error": "TIMEOUT after %s" % (timeout or "40m"), "model": model,
+                "error": "TIMEOUT after %s - %s" % (timeout or "40m", sn), "model": model,
                 "warnings": ["TIMEOUT"], "notes": []}
     secs = time.time() - t0
     raw = (p.stdout or "").strip()
@@ -3703,6 +3858,8 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip() and not warn:
         warn.append("EMPTY OUTPUT despite exit 0")
+    if not text.strip():
+        note.append(_grok_session_note(gcwd, t0))
     record_refusal(refusal_check(text, marker), warn, note)
     u = data.get("usage") or {}
     stop = data.get("stopReason")

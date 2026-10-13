@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.111.2 — 2026-10-13
+
+The Grok Build channel (`grokbuild`) had stopped answering: on 2026-10-13 no panel got a review from it, and each run sat until its 40-minute timeout.
+
+- **Grok no longer imports Claude Code, Cursor or Codex.** Out of the box Grok Build loads the MCP servers in `~/.claude.json`, Claude Code's skills, rules (the global `CLAUDE.md`), agents and hooks, and the same parts of Cursor and Codex. One MCP server that existed only in `~/.claude.json` made two servers fail at start and a built-in tool start and never return — six of six test runs hung, while the same call with the imports off answered in 10 seconds. The imports also sent your own instructions (about 9,700 tokens) and a list of your skills to xAI with every brief. The harness now sets the 18 `GROK_<CLAUDE|CURSOR|CODEX>_<SKILLS|RULES|AGENTS|MCPS|HOOKS|SESSIONS>_ENABLED=0` switches for each review; Grok's own config, MCP servers and your shell logins stay. Claude Code plugins still load: Grok has no switch for them.
+- **A timeout now says where Grok stopped.** Grok prints its result only when it exits, so a stopped run used to report just «took longer than its allotted time». The harness now reads Grok's own session record and names the tool that started and never finished and the MCP servers that failed at start, with their own diagnosis. Grok runs in a folder of its own per process, so two panels running at once cannot read each other's record, and a timeout now also stops the MCP servers Grok had started.
+
 ## 1.111.1 — 2026-10-13
 
 The Muse Code channel (`mcwonder10cont`) after its first review panel and a look at what it could reach.
