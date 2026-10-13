@@ -1431,6 +1431,11 @@ KNOWN_FAILURES = [
     # of this channel's environment on purpose (a key outranks the login and bills per token), so a
     # machine whose Muse Code only ever ran on a key lands here. The CLI's exact text, measured with
     # an empty home (runs/r149-muse-wonder/i2/nologin_probe.py): exit 1 at 0.2 s, no model call.
+    (r"invalid run configuration: unknown tool",
+     "Muse Code refused the whole run: the channel's toolset names a tool this run does not have - "
+     "an MCP tool whose server is not configured here or was skipped at start-up.",
+     "Name only tools this machine has in MUSECODE_TOOLSET (the shipped list is the built-in "
+     "web_fetch and web_search, which every Muse Code has)."),
     (r"missing meta credentials",
      "Muse Code is not signed in on this machine, or its login lives where this run cannot see it. "
      "The harness never hands this channel an API key: META_API_KEY and MODEL_API_KEY are kept out "
@@ -5758,9 +5763,23 @@ def _kimi_usage_fields(pm):
 # other bypassed CLI channel.
 MUSECODE_POSTURE = ("--disable-approval", "--disable-write", "--disable-shell")
 
+# 🔴 THE USER'S MCP SERVERS ARE NOT THE REVIEWER'S (R149 И-3, measured 2026-10-13 on 1.4.7-R6101.1,
+# runs/r149-muse-wonder/i3/): with approvals off, every MCP server in the user's Muse Code settings
+# started for the И-2 harness run and its tools were reachable through `tool_search` - on Igor's
+# machine 9 servers, 163 tools, among them gitlab create_merge_request / create_issue, firecrawl
+# crawl + monitor_create (metered), a browser on the user's own Chrome, cookie get/set.
+# --disable-write and --disable-shell do not touch MCP tools, and `-c mcpServers.<name>.enabled=false`
+# is refused for any server the settings declare («the server name is reserved»). `-c run.toolset`
+# is the per-run lever: the servers still start, the model is offered only the named tools (echo
+# provider + `muse export`: 4 named -> 4 active, 0 MCP, no tool_search). Built-in names only: a named
+# MCP tool or `mcp__x__*` whose server is absent or was skipped at start-up ABORTS the run
+# («invalid run configuration: unknown tool»). The brief and its attachments arrive inline (not in
+# REFS_KINDS), so the reviewer needs no file tool.
+MUSECODE_TOOLSET = ("web_fetch", "web_search")
+
 
 def _musecode_env(base=None):
-    """The child environment of a musecode call: _KIMI_ENV_KEEP, XDG_*, and the CLI's own MUSE_*.
+    """The child environment of a musecode call: _KIMI_ENV_KEEP and XDG_*, nothing else.
 
     🔴 AUTH PRECEDENCE (dev.meta.ai/docs/muse-code/auth, read 2026-10-13; `muse login --help`):
     «Muse Code uses META_API_KEY if set, then a stored key, and only then a stored browser session»,
@@ -5769,17 +5788,20 @@ def _musecode_env(base=None):
     while the plan line still said «subscription» - R128's qwen class. An ALLOWLIST, not a scrub
     list: the agent's shell inherits this environment and no vendor key of any channel belongs in
     it (R140 И-3). XDG_* stay because the CLI finds its login and its data under them.
+
+    🔴 NO MUSE_* AT ALL (R149 И-3): the 1.4.7 binary carries 87 MUSE_* names and the 1.111.0 name
+    filter (KEY/TOKEN/SECRET/PASSW) let every one through - MUSE_CUSTOM_HEADERS (extra HTTP headers:
+    a credential can ride there), MUSE_TRANSPORT_TRACE, MUSE_EXPERIMENTAL_BASH_SANDBOX_ESCALATION /
+    _MEMORY / _CUA, and MUSE_SESSION_ID / MUSE_THREAD_ID, which Muse Code sets for its own children
+    (docs: it passes MUSE_SESSION_ID to stdio servers) - a panel started inside a Muse Code session
+    would hand the review that session's ids. The run needs none of them. MUSE_AUTH_PATH, named by
+    third-party tools, is not in the 1.4.7 binary at all.
     """
     src = os.environ if base is None else base
-    out = {}
-    for k, v in src.items():
-        u = k.upper()
-        if u in _KIMI_ENV_KEEP or u in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
-                                        "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"):
-            out[k] = v
-        elif u.startswith("MUSE_") and not any(w in u for w in ("KEY", "TOKEN", "SECRET", "PASSW")):
-            out[k] = v
-    return out
+    return {k: v for k, v in src.items()
+            if k.upper() in _KIMI_ENV_KEEP or k.upper() in ("XDG_CONFIG_HOME", "XDG_DATA_HOME",
+                                                            "XDG_STATE_HOME", "XDG_CACHE_HOME",
+                                                            "XDG_RUNTIME_DIR")}
 
 
 def _musecode_parse(raw):
@@ -5878,6 +5900,8 @@ def call_musecode(brief, marker, outfile, model=None, effort=None, system=None, 
         8191 chars and at the first newline); muse_bin() runs the binary, not `muse.cmd`.
       * MUSECODE_POSTURE (approvals off, no writes, no shell): the read-only profile hung on the
         first web fetch's network approval - see the comment above it.
+      * `-c run.toolset=MUSECODE_TOOLSET`: only the built-in web tools are offered; the user's MCP
+        servers start but cannot be called (R149 И-3 - see the comment above MUSECODE_TOOLSET).
       * `--no-foreign-personal-context` (27 -> 24 skills loaded), `--disable-reminders` (three
         reminder sub-agents per turn otherwise), `--user-input-auto-resolve` (headless).
       * `--reasoning-effort max` is ACCEPTED on the subscription and thinks no more than xhigh
@@ -5903,9 +5927,11 @@ def call_musecode(brief, marker, outfile, model=None, effort=None, system=None, 
         cmd += ["--reasoning-effort", str(effort)]
     if max_steps:
         cmd += ["--max-model-steps", str(int(max_steps))]
+    cmd += ["-c", "run.toolset=" + json.dumps(list(MUSECODE_TOOLSET))]
     log("  [%s] Muse Code CLI on the subscription login (no API key in its env); prompt via file "
-        "(%d chars), model=%s, effort=%s, %s"
-        % (name, len(text_in), model, effort or "default", " ".join(MUSECODE_POSTURE)))
+        "(%d chars), model=%s, effort=%s, %s, tools: %s"
+        % (name, len(text_in), model, effort or "default", " ".join(MUSECODE_POSTURE),
+           ", ".join(MUSECODE_TOOLSET)))
     t0 = time.time()
     try:
         try:
@@ -5938,14 +5964,23 @@ def call_musecode(brief, marker, outfile, model=None, effort=None, system=None, 
     text, served, sid, terminal, err = _musecode_parse(raw)
     u = _musecode_usage(binary, sid, env, ncwd)
     warn, note = [], []
+    # R149 И-3: ok only when the run says so - a `run_terminal` record with terminal "completed" AND
+    # exit 0. 1.111.0 warned only for (exit != 0 and no text) or a non-completed terminal it SAW, so a
+    # crash after some streamed deltas (no terminal record, exit 1) was graded ok (panel, 4 of 4).
     if p.returncode != 0 and not text:
         warn.append("EXIT %d: %s" % (p.returncode,
                                      scrub(err or _musecode_stderr(p.stderr) or raw or "")[:300]))
-    elif terminal and terminal != "completed":
-        warn.append("EXIT %d: Muse Code ended the run as %r after %d chars of text: %s"
-                    % (p.returncode, terminal, len(text), scrub(err or "")[:300]))
+    elif terminal != "completed":
+        warn.append("EXIT %d: Muse Code ended the run %s after %d chars of text: %s"
+                    % (p.returncode, ("as %r" % terminal) if terminal else "without a terminal record",
+                       len(text), scrub(err or _musecode_stderr(p.stderr) or "")[:300]))
+    elif p.returncode != 0:
+        warn.append("EXIT %d after a completed turn: %s"
+                    % (p.returncode, scrub(err or _musecode_stderr(p.stderr) or "")[:300]))
     elif err:
         note.append("Muse Code reported an error mid-run and still finished: %s" % scrub(err)[:300])
+    if sid and not u:
+        note.append("no token counts: `muse export --session` gave nothing usable for this run")
     if text:
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)

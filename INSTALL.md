@@ -667,7 +667,8 @@ Muse Code subscription instead of a per-token key.
 The harness finds the binary through `MUSE_BIN`, then (Windows) the `muse-bin-<version>.exe` named in
 `%LOCALAPPDATA%\Programs\muse\.muse-version`, then `muse` on PATH. It never passes an API key to
 this CLI: with `META_API_KEY` set, Muse Code bills that key instead of the plan, so the harness keeps
-it out of the CLI's environment. The run has no file writes, no shell and no approval prompts (`--disable-approval --disable-write --disable-shell`); every MCP server in your Muse Code settings is available to it without prompts.
+it out of the CLI's environment. The run has no file writes, no shell and no approval prompts (`--disable-approval --disable-write --disable-shell`); it is offered only the built-in `web_search` and `web_fetch` (`-c run.toolset`): the MCP servers in
+your Muse Code settings still start, but the reviewer cannot call them.
 Without Muse Code nothing changes: the Wonder seat runs `wonder10` (`MODEL_API_KEY`) or `orwonder`
 (OpenRouter). To leave it out:
 

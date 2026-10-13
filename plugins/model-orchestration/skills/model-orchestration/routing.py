@@ -2154,7 +2154,8 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                 p["timeout"] = p.get("timeout") or "45m"
                 p["_tier_note"] = ("effort %s (%s), timeout %s, Muse Code subscription - the "
                                    "CLI's own login, never a key (META_API_KEY and MODEL_API_KEY "
-                                   "are kept out of its environment), approvals off, no writes, no shell"
+                                   "are kept out of its environment), approvals off, no writes, no "
+                                   "shell, built-in web tools only (no MCP)"
                                    % (p.get("effort"),
                                       _ceiling_phrase(reg, cname, p["model"], p.get("effort")),
                                       p["timeout"]))
@@ -2481,11 +2482,10 @@ def _web_line(p):
                 "and edit files on this machine; your deny-lists and hooks still apply. "
                 "Grounding is the agent's own claim")
     if kind == "musecode":
-        return ("web: Muse Code CLI's built-in web tools plus every MCP server in YOUR Muse Code "
-                "settings, ALL WITHOUT APPROVAL PROMPTS (--disable-approval: a headless run cannot "
-                "answer one, and the first web fetch asks), with --disable-write and --disable-shell: "
-                "it reads and searches, writes no file, runs no shell. The vendor runs the loop; "
-                "grounding is the agent's own claim")
+        return ("web: Muse Code CLI's built-in web_search and web_fetch ONLY (-c run.toolset): the "
+                "MCP servers in YOUR Muse Code settings still start but the model cannot call them. "
+                "Approvals off (a headless run cannot answer one, and the first web fetch asks), no "
+                "writes, no shell. The vendor runs the loop; grounding is the agent's own claim")
     if kind == "kimicli":
         return ("web: Kimi Code CLI's built-in tools (Claude Code fork) - non-interactive "
                 "`-p` mode, no tool approvals. The model may use search and page-reading "

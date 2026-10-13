@@ -1,6 +1,14 @@
 # Changelog
 
-## 1.111.0 — 2026-10-13
+## 1.111.1 — 2026-10-13
+
+The Muse Code channel (`mcwonder10cont`) after its first review panel and a look at what it could reach.
+
+- **Built-in web tools only.** With approvals off, every MCP server in the user's Muse Code settings started and the reviewer could reach its tools without a prompt — on the maintainer's machine 9 servers and 163 tools, among them creating GitLab issues and merge requests, paid Firecrawl crawls and monitors, and a browser driving the user's own Chrome. `--disable-write` and `--disable-shell` do not cover MCP tools, and Muse Code refuses to switch off a configured server for one run. The channel now passes `-c run.toolset=["web_fetch","web_search"]`: the servers still start, but the model is offered only those two tools. Measured on a live run: 2 tools offered, 0 MCP calls, the web question answered with the page quoted. The brief and its attachments arrive inline, so no file tool is needed.
+- **No `MUSE_*` variables reach the CLI.** The Muse Code binary reads 87 `MUSE_*` names; the old filter (drop names containing KEY, TOKEN, SECRET or PASSW) let all of them through, among them `MUSE_CUSTOM_HEADERS` (extra HTTP headers, where a credential can ride), `MUSE_TRANSPORT_TRACE`, and the session ids Muse Code sets for its own child processes. The run needs none of them.
+- **A run is OK only when it says so.** A crash after part of the answer had streamed (no final record, exit 1) used to be graded OK. Now the run must end with a completed record and exit 0; anything else is a warning, and the partial text is still saved.
+- When `muse export` gives no token counts for a session, the report says so instead of leaving the columns silently empty. A toolset that names a tool the machine lacks (Muse Code then refuses the whole run) has its own diagnosis.
+
 
 Muse Wonder through the Muse Code CLI, on your Muse Code subscription.
 

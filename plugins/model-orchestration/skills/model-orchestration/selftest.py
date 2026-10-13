@@ -7915,6 +7915,7 @@ def main():
                   suite_r148_i2_out_guard,
                   suite_r149_muse_wonder,
                   suite_r149_i2_muse_code,
+                  suite_r149_i3_muse_hotfix,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -14901,14 +14902,119 @@ def suite_r148_i2_out_guard():
     shutil.rmtree(tmp, ignore_errors=True)
 
 
+def suite_r149_i3_muse_hotfix():
+    """R149 И-3 (2026-10-13): the r149i2 panel on 1.111.0 + measurements of the shipped posture.
+
+    Measured on Muse Code 1.4.7 (runs/r149-muse-wonder/i3/): with approvals off every MCP server in
+    the user's settings started and its tools were reachable through tool_search (9 servers, 163
+    tools on Igor's machine: gitlab create_merge_request, firecrawl monitors, a browser on the user's
+    own Chrome); `-c run.toolset=[...]` offers the model only the named tools. The binary reads 87
+    MUSE_* names that a KEY/TOKEN/SECRET filter let through (MUSE_CUSTOM_HEADERS, MUSE_SESSION_ID).
+    A crash after streamed deltas (no terminal record, exit 1) was graded ok. Each check fails on
+    1.111.0.
+    """
+    import json as _j
+    import shutil as _sh
+    import subprocess as _sp
+    import tempfile
+    import orchestrate as o
+    import routing as rt
+    section("R149 И-3 Muse Code hotfix: built-in web tools only, no MUSE_* in its env, honest grading")
+    # (a) env: nothing MUSE_* reaches the CLI, keys still out, PATH / XDG_* kept
+    e = o._musecode_env({"MUSE_CUSTOM_HEADERS": "x", "MUSE_SESSION_ID": "s", "MUSE_TRANSPORT_TRACE": "1",
+                         "MUSE_EXPERIMENTAL_MEMORY": "1", "MUSE_CHANNEL": "muse-stable",
+                         "META_API_KEY": "dummy", "PATH": "p", "XDG_CONFIG_HOME": "x"})
+    check(set(e) == {"PATH", "XDG_CONFIG_HOME"},
+          "R149 И-3 (a) no MUSE_* name reaches the CLI (custom headers, transport trace, a parent "
+          "session's ids, experimental switches) and no key; PATH and XDG_* stay", repr(sorted(e)))
+    tmp = tempfile.mkdtemp(prefix="r149i3-")
+    sid = "01a1345c-0000-7000-8000-000000000003"
+    head = [{"stream": {"kind": "session", "id": sid}, "payload": {"kind": "session_run_linked"}}]
+    delta = [{"stream": {"kind": "session", "id": sid},
+              "payload": {"kind": "run_output_delta", "text": "Half a finding"}}]
+
+    def term(t, text):
+        return [{"stream": {"kind": "session", "id": sid},
+                 "payload": {"kind": "run_terminal", "terminal": t, "text": text}}]
+    usage = {"events": [{"envelope": {"payload": {"event": {"usage": {"input_tokens": 5,
+                                                                      "output_tokens": 1}}}}}]}
+    state = {}
+
+    def fake(cmd, *a, **kw):
+        if "export" in cmd:
+            if state.get("export_ok"):
+                with open(cmd[cmd.index("--out") + 1], "w", encoding="utf-8") as f:
+                    _j.dump(usage, f)
+            return _sp.CompletedProcess(cmd, 0 if state.get("export_ok") else 1, "", "")
+        state["cmd"] = list(cmd)
+        rc, recs = state["serve"]
+        return _sp.CompletedProcess(cmd, rc, "\n".join(_j.dumps(r) for r in recs) + "\n",
+                                    "muse: Skills: 24 loaded")
+
+    def call(rc, recs, export_ok=True):
+        state["serve"], state["export_ok"] = (rc, recs), export_ok
+        return o.call_musecode("brief", "R149I3-END", os.path.join(tmp, "a.md"), effort="xhigh")
+    real = _sp.run
+    try:
+        _sp.run = fake
+        good = call(0, head + term("completed", "Finding.\nR149I3-END"))
+        crash = call(1, head + delta)
+        late = call(1, head + term("completed", "Finding.\nR149I3-END"))
+        cancel = call(1, head + term("cancelled", "Finding.\nR149I3-END"))
+        noexp = call(0, head + term("completed", "Finding.\nR149I3-END"), export_ok=False)
+    finally:
+        _sp.run = real
+        _sh.rmtree(tmp, ignore_errors=True)
+    c = state.get("cmd") or []
+    ts = [c[i + 1] for i, x in enumerate(c[:-1]) if x == "-c" and str(c[i + 1]).startswith("run.toolset=")]
+    try:
+        tools = _j.loads(ts[0].split("=", 1)[1]) if len(ts) == 1 else None
+    except ValueError:
+        tools = None
+    check(tools == ["web_fetch", "web_search"] and list(getattr(o, "MUSECODE_TOOLSET", ())) == tools,
+          "R149 И-3 (b) the run offers the model only the built-in web tools (-c run.toolset): the "
+          "user's MCP servers (gitlab, firecrawl, a browser on the user's Chrome...) cannot be called, "
+          "and no MCP name is listed (an absent one aborts the whole run)", repr(ts))
+
+    def w(r):
+        return " | ".join(r.get("warnings") or [])
+    check(good.get("ok") is True and crash.get("ok") is False and "without a terminal record" in w(crash)
+          and late.get("ok") is False and "after a completed turn" in w(late)
+          and cancel.get("ok") is False and "cancelled" in w(cancel),
+          "R149 И-3 (c) ok only with a completed terminal record AND exit 0: a crash after streamed "
+          "text, a non-zero exit after completion and a cancelled turn all warn; the control passes",
+          repr([(r.get("ok"), w(r)[:60]) for r in (good, crash, late, cancel)]))
+    check(good.get("in_tokens") == 5 and noexp.get("in_tokens") is None
+          and any("no token counts" in n for n in noexp.get("notes") or [])
+          and not any("no token counts" in n for n in good.get("notes") or []),
+          "R149 И-3 (d) a session whose export gives nothing says so in a note, not a silently empty "
+          "token column", repr(noexp.get("notes")))
+    miss = str(o.diagnose("EXIT 1: run ended with Failed: invalid run configuration: unknown tool "
+                          "`mcp__x__*`"))
+    check("toolset" in miss.lower() and "muse login" not in miss
+          and "muse login" in str(o.diagnose("missing meta credentials: run `muse login`")),
+          "R149 И-3 (e) a toolset naming a tool the machine lacks gets its own diagnosis (Muse Code "
+          "refuses the whole run); the not-signed-in advice is unchanged", miss[:160])
+    try:
+        web = rt._web_line({"kind": "musecode"})
+    except Exception as exc:  # noqa: BLE001 - the check below reports it
+        web = "raised %r" % exc
+    inst = os.path.join(HERE, "kit", "INSTALL.md")
+    doc = open(inst, encoding="utf-8").read() if os.path.isfile(inst) else ""
+    check("run.toolset" in str(web) and "every MCP server" not in str(web)
+          and (not doc or ("run.toolset" in doc and "is available to it without prompts" not in doc)),
+          "R149 И-3 (f) the plan's web line and INSTALL.md say what runs: built-in web tools only, "
+          "the user's MCP servers cannot be called", str(web)[:160])
+
+
 def suite_r149_i2_muse_code():
     """R149 И-2 (2026-10-13): Muse Code CLI as a channel - Wonder 1.0 Contributor on the user's
     subscription. Igor: «Muse code с моделью Wonder добавим в панель Standart а не Cheap и не забудь
     что применить к ней надо промты для CLI»; «по моей подписке effort максимальный Xhigh». New kind
     `musecode`, channel `mcwonder10cont`, first in the Wonder cascade (the R149 suite's pins moved
     with it). What must hold: the call never carries an API key (a key outranks the login and bills
-    per token), the prompt rides a file and never argv, the posture is the read-only profile, the
-    effort stops at xhigh, the CLI prompts (MCP hint + training-tier note; the kit strips the note,
+    per token), the prompt rides a file and never argv, the posture is approvals/writes/shell off
+    (the read-only profile hung - patch_i2b), the effort stops at xhigh, the CLI prompts (MCP hint + training-tier note; the kit strips the note,
     R135) reach the call, and the cheap room never seats it. Each check fails on 1.110.0.
     """
     import json as _j
@@ -14917,7 +15023,7 @@ def suite_r149_i2_muse_code():
     import tempfile
     import routing as rt
     import orchestrate as o
-    section("R149 И-2 Muse Code CLI channel: mcwonder10cont (subscription, read-only, xhigh)")
+    section("R149 И-2 Muse Code CLI channel: mcwonder10cont (subscription, no writes/shell, xhigh)")
     reg = rt.load_registry()
     chs = reg.get("channels") or {}
     m = chs.get("mcwonder10cont")
@@ -14977,13 +15083,16 @@ def suite_r149_i2_muse_code():
             else:
                 os.environ[k] = v
 
-    # (d) the child environment is an allowlist: no key of any vendor, the CLI's own MUSE_* kept
+    # (d) the child environment is an allowlist: no key of any vendor. R149 И-3 (2026-10-13): no
+    # MUSE_* either - the 1.111.0 pin kept MUSE_CHANNEL; the binary reads 87 MUSE_* names (headers,
+    # transport trace, a parent session's ids), so the run now gets none of them.
     e = o._musecode_env({"META_API_KEY": "dummy", "MODEL_API_KEY": "dummy", "OPENROUTER_API_KEY": "dummy",
                          "MUSE_API_KEY": "dummy", "MUSE_CHANNEL": "muse-stable", "PATH": "p",
                          "XDG_CONFIG_HOME": "x", "SystemRoot": "r"})
-    check(set(e) == {"MUSE_CHANNEL", "PATH", "XDG_CONFIG_HOME", "SystemRoot"},
+    check(set(e) == {"PATH", "XDG_CONFIG_HOME", "SystemRoot"},
           "R149 И-2 (d) the CLI's env drops META_API_KEY / MODEL_API_KEY / every other key (a key "
-          "outranks the subscription login), keeps PATH, XDG_* and MUSE_CHANNEL", repr(sorted(e)))
+          "outranks the subscription login) and every MUSE_* (R149 И-3), keeps PATH and XDG_*",
+          repr(sorted(e)))
 
     # (e) the call: argv, prompt file, env, parsing, usage from the session export
     seen = {}
