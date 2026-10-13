@@ -652,6 +652,29 @@ from starting at all, put this in `~/.claude/model-orchestration.local.json`:
 If the CLI lives somewhere unusual, set `KIMI_BIN` to its full path. `doctor.py` reports whether it
 is found and where.
 
+### Muse Code CLI (Muse Wonder on a Muse Code subscription)
+
+Optional, since 1.111.0. With it, the standard panel's Wonder seat (`mcwonder10cont`) runs on your
+Muse Code subscription instead of a per-token key.
+
+1. **The CLI and a sign-in.** Install Muse Code from Meta's documentation
+   ([dev.meta.ai/docs/muse-code](https://dev.meta.ai/docs/muse-code)) and sign in once with the
+   account that holds the subscription: `muse login`. The plan must include Muse Wonder.
+2. **Check it.** `muse model-profile show muse-wonder-1.0-contributor --effort xhigh` prints the
+   model. On Windows, `muse sandbox windows check` should print `status=ready` (the CLI's shell
+   sandbox); if not, `muse sandbox windows setup`.
+
+The harness finds the binary through `MUSE_BIN`, then (Windows) the `muse-bin-<version>.exe` named in
+`%LOCALAPPDATA%\Programs\muse\.muse-version`, then `muse` on PATH. It never passes an API key to
+this CLI: with `META_API_KEY` set, Muse Code bills that key instead of the plan, so the harness keeps
+it out of the CLI's environment. The run has no file writes, no shell and no approval prompts (`--disable-approval --disable-write --disable-shell`); every MCP server in your Muse Code settings is available to it without prompts.
+Without Muse Code nothing changes: the Wonder seat runs `wonder10` (`MODEL_API_KEY`) or `orwonder`
+(OpenRouter). To leave it out:
+
+```
+{ "channels": { "mcwonder10cont": { "enabled": false } } }
+```
+
 ### Codex CLI
 
 Install the Codex CLI and sign in with an account whose plan includes it:

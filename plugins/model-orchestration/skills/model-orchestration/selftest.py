@@ -381,7 +381,8 @@ def suite_routing():
 
     # R115: the `cli` group must contain EXACTLY the channels whose kind is a CLI binary transport,
     # and nothing else. Adding a new CLI channel without adding it to the group will fail here.
-    _CLI_KINDS = {"opencode", "claudecli", "codex", "agy", "grokcli", "mimocli", "qwencli", "kimicli"}
+    _CLI_KINDS = {"opencode", "claudecli", "codex", "agy", "grokcli", "mimocli", "qwencli", "kimicli",
+                  "musecode"}
     _cli_by_kind = {c for c, ch in _RAW["channels"].items() if ch.get("kind") in _CLI_KINDS}
     _cli_group = set(GROUPS.get("cli", set()))
     check(_cli_group == _cli_by_kind,
@@ -735,6 +736,7 @@ def suite_dispatch():
         "o.call_mimocli = stub('mimocli')\n"
         "o.call_qwencli = stub('qwencli')\n"
         "o.call_kimicli = stub('kimicli')\n"
+        "o.call_musecode = stub('musecode')\n"
         # 🔴 THE STUBS MUST REPLACE SOMETHING THAT EXISTS. Found while renaming
         # call_openrouter_reviewer -> call_oai_reviewer on 2026-08-08: `o.old_name = stub(...)`
         # does not fail on a name the module no longer has, it CREATES it. The dispatcher then
@@ -744,7 +746,7 @@ def suite_dispatch():
         # still fires on the next rename, which is what matters.
         "for _n in ('call_http_reviewer','call_codex','call_agy','call_oai_reviewer',\n"
         "           'call_xai_responses','call_gemini_direct','call_hermes','call_opencode',\n"
-        "           'call_claudecli','call_mimocli','call_qwencli','call_kimicli'):\n"
+        "           'call_claudecli','call_mimocli','call_qwencli','call_kimicli','call_musecode'):\n"
         "    assert callable(getattr(o, _n, None)), 'stub target missing: ' + _n\n"
         "t = tempfile.mkdtemp(prefix='orchdisp-')\n"
         "b = os.path.join(t, 'b.md')\n"
@@ -961,7 +963,7 @@ def suite_dispatch():
         "o.call_hermes = ok; o.call_gemini_direct = ok; o.call_xai_responses = ok\n"
         "o.call_grokcli = ok; o.call_opencode = ok\n"
         "o.call_claudecli = ok; o.call_mimocli = ok; o.call_qwencli = ok\n"
-        "o.call_kimicli = ok\n"
+        "o.call_kimicli = ok; o.call_musecode = ok\n"
         "o.call_agy = boom\n"
         "b = os.path.join(t, 'b.md')\n"
         "open(b, 'w', encoding='utf-8').write('hi\\nREVIEW-COMPLETE\\n')\n"
@@ -2729,9 +2731,10 @@ def suite_spend_guard():
     # R122 bump 11 -> 12: call_mimocli (v1.87.0) adds one more verification site.
     # R128 bump 12 -> 13: call_qwencli (2026-09-30) adds one more verification site.
     # R133 bump 13 -> 14: call_kimicli (2026-10-02) adds one more verification site.
+    # R149 И-2 bump 14 -> 15: call_musecode (2026-10-13) adds one more verification site.
     check(src_all.count("def _marker_on_last_line(") == 1 and
-          src_all.count("not _marker_on_last_line(") == 14,
-          "R68 census: 13 verification sites + 1 use inside _strip_marker_tail, one def",
+          src_all.count("not _marker_on_last_line(") == 15,
+          "R68 census: 14 verification sites + 1 use inside _strip_marker_tail, one def",
           "def=%d not_calls=%d" % (src_all.count("def _marker_on_last_line("),
                                    src_all.count("not _marker_on_last_line(")))
     check(src_all.count("_strip_marker_tail(") == 3,
@@ -7911,6 +7914,7 @@ def main():
                   suite_r146_i4_tokens,
                   suite_r148_i2_out_guard,
                   suite_r149_muse_wonder,
+                  suite_r149_i2_muse_code,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -12509,7 +12513,7 @@ def suite_r141_codex_sol():
         "    return f\n"
         "for _n in ('call_http_reviewer','call_codex','call_agy','call_oai_reviewer',\n"
         "           'call_xai_responses','call_gemini_direct','call_hermes','call_opencode',\n"
-        "           'call_claudecli','call_mimocli','call_qwencli','call_kimicli'):\n"
+        "           'call_claudecli','call_mimocli','call_qwencli','call_kimicli','call_musecode'):\n"
         "    assert callable(getattr(o, _n, None)), 'stub target missing: ' + _n\n"
         "    setattr(o, _n, stub(_n))\n"
         "t = tempfile.mkdtemp(prefix='r141-')\n"
@@ -14166,7 +14170,7 @@ def suite_r146_i4_tokens():
     tmp = tempfile.mkdtemp(prefix="r146i4-")
     stubs = ("call_http_reviewer", "call_codex", "call_agy", "call_oai_reviewer", "call_xai_responses",
              "call_gemini_direct", "call_hermes", "call_grokcli", "call_opencode", "call_claudecli",
-             "call_mimocli", "call_qwencli", "call_kimicli")
+             "call_mimocli", "call_qwencli", "call_kimicli", "call_musecode")
     brief = "Проверь этот код и назови ошибки.\n" * 40
     answer = "Ответ: ошибок нет, всё проверено.\n" * 30 + "R146-END"
     probe = "\n".join([
@@ -14375,7 +14379,7 @@ def suite_r146_corrupted_output():
     tmp = tempfile.mkdtemp(prefix="r146-")
     stubs = ("call_http_reviewer", "call_codex", "call_agy", "call_oai_reviewer", "call_xai_responses",
              "call_gemini_direct", "call_hermes", "call_grokcli", "call_opencode", "call_claudecli",
-             "call_mimocli", "call_qwencli", "call_kimicli")
+             "call_mimocli", "call_qwencli", "call_kimicli", "call_musecode")
     probe = "\n".join([
         "import json, os, sys",
         "sys.path.insert(0, %r)" % str(HERE),
@@ -14789,7 +14793,7 @@ def suite_r148_i2_out_guard():
              "call_oai_reviewer": "oai", "call_xai_responses": "xai", "call_gemini_direct": "gemini",
              "call_hermes": "hermes", "call_grokcli": "grokcli", "call_opencode": "opencode",
              "call_claudecli": "claudecli", "call_mimocli": "mimocli", "call_qwencli": "qwencli",
-             "call_kimicli": "kimicli"}
+             "call_kimicli": "kimicli", "call_musecode": "musecode"}
     probe = "\n".join([
         "import json, os, sys, tempfile",
         "sys.path.insert(0, %r)" % str(HERE),
@@ -14897,6 +14901,202 @@ def suite_r148_i2_out_guard():
     shutil.rmtree(tmp, ignore_errors=True)
 
 
+def suite_r149_i2_muse_code():
+    """R149 И-2 (2026-10-13): Muse Code CLI as a channel - Wonder 1.0 Contributor on the user's
+    subscription. Igor: «Muse code с моделью Wonder добавим в панель Standart а не Cheap и не забудь
+    что применить к ней надо промты для CLI»; «по моей подписке effort максимальный Xhigh». New kind
+    `musecode`, channel `mcwonder10cont`, first in the Wonder cascade (the R149 suite's pins moved
+    with it). What must hold: the call never carries an API key (a key outranks the login and bills
+    per token), the prompt rides a file and never argv, the posture is the read-only profile, the
+    effort stops at xhigh, the CLI prompts (MCP hint + training-tier note; the kit strips the note,
+    R135) reach the call, and the cheap room never seats it. Each check fails on 1.110.0.
+    """
+    import json as _j
+    import shutil as _sh
+    import subprocess as _sp
+    import tempfile
+    import routing as rt
+    import orchestrate as o
+    section("R149 И-2 Muse Code CLI channel: mcwonder10cont (subscription, read-only, xhigh)")
+    reg = rt.load_registry()
+    chs = reg.get("channels") or {}
+    m = chs.get("mcwonder10cont")
+    if not m:
+        for n in "abcdefgh":
+            check(False, "R149 И-2 (%s) mcwonder10cont exists" % n, "missing in channels.json")
+        return
+    mdl = (m.get("models") or {}).get(m.get("model")) or {}
+    casc = [g for g in reg.get("_cascade_groups") or [] if "mcwonder10cont" in g]
+    grp = reg.get("groups") or {}
+    ref = (chs.get("ocspark13go") or {}).get("prompt_suffix") or {}
+    check(m.get("kind") == "musecode" and m.get("model") == "muse-wonder-1.0-contributor"
+          and m.get("effort") == "xhigh" and (mdl.get("efforts") or [None])[0] == "xhigh"
+          and m.get("panel") == "standard" and m.get("cost") == "subscription"
+          and casc == [["mcwonder10cont", "wonder10", "orwonder"]]
+          and all("mcwonder10cont" in ((grp.get(g) or {}).get("channels") or []) for g in ("cli", "wonder",
+                                                                                         "muse"))
+          and m.get("fetch_fallback_hint_ref") == "mcp_fallback"
+          and (m.get("prompt_suffix") or {}) == ref
+          and (not ref or ref.get("enabled") is True),
+          "R149 И-2 (a) mcwonder10cont = musecode, Wonder Contributor at xhigh (ladder tops at xhigh), "
+          "standard, first in the Wonder cascade, in cli/wonder/muse, carries the CLI prompts",
+          repr((m.get("kind"), m.get("effort"), casc)))
+
+    check("musecode" in o.KNOWN_KINDS and ("musecode", "MUSE_BIN", "muse") in o.CLI_BINARIES
+          and o.CLI_RESOLVERS.get("musecode") is o.muse_bin and "musecode" not in o.TASK_KINDS
+          and "musecode" not in o.REFS_KINDS and "musecode" in rt.ALLOW_ARBITRARY_MODEL_KINDS,
+          "R149 И-2 (b) kind musecode is known, resolvable through MUSE_BIN, not a task kind, gets "
+          "attachments inline (its file tools are rooted at the workspace)", "")
+
+    # (c) the binary, not the cmd.exe shim; MUSE_BIN first everywhere
+    keep = {k: os.environ.get(k) for k in ("MUSE_BIN", "LOCALAPPDATA", "PATH")}
+    tmp = tempfile.mkdtemp(prefix="r149i2-")
+    try:
+        os.environ["MUSE_BIN"] = os.path.join(tmp, "explicit-muse")
+        first = o.muse_bin()
+        got = None
+        if os.name == "nt":
+            d = os.path.join(tmp, "Programs", "muse")
+            os.makedirs(d)
+            open(os.path.join(d, ".muse-version"), "w").write("1.4.7-R6101.1\n")
+            open(os.path.join(d, "muse-bin-1.4.7-R6101.1.exe"), "w").write("")
+            open(os.path.join(d, "muse.cmd"), "w").write("@echo off\n")
+            os.environ.pop("MUSE_BIN", None)
+            os.environ["LOCALAPPDATA"] = tmp
+            os.environ["PATH"] = d + os.pathsep + (keep["PATH"] or "")
+            got = o.muse_bin()
+        check(first == os.path.join(tmp, "explicit-muse")
+              and (os.name != "nt" or got == os.path.join(tmp, "Programs", "muse",
+                                                         "muse-bin-1.4.7-R6101.1.exe")),
+              "R149 И-2 (c) muse_bin: MUSE_BIN wins; on Windows the binary named by .muse-version, "
+              "never the muse.cmd shim on PATH", repr((first, got)))
+    finally:
+        for k, v in keep.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    # (d) the child environment is an allowlist: no key of any vendor, the CLI's own MUSE_* kept
+    e = o._musecode_env({"META_API_KEY": "dummy", "MODEL_API_KEY": "dummy", "OPENROUTER_API_KEY": "dummy",
+                         "MUSE_API_KEY": "dummy", "MUSE_CHANNEL": "muse-stable", "PATH": "p",
+                         "XDG_CONFIG_HOME": "x", "SystemRoot": "r"})
+    check(set(e) == {"MUSE_CHANNEL", "PATH", "XDG_CONFIG_HOME", "SystemRoot"},
+          "R149 И-2 (d) the CLI's env drops META_API_KEY / MODEL_API_KEY / every other key (a key "
+          "outranks the subscription login), keeps PATH, XDG_* and MUSE_CHANNEL", repr(sorted(e)))
+
+    # (e) the call: argv, prompt file, env, parsing, usage from the session export
+    seen = {}
+    sid = "01a13444-0000-7000-8000-000000000001"
+    recs = [{"record_type": "event", "stream": {"kind": "session", "id": sid},
+             "payload": {"kind": "session_run_linked"}},
+            {"record_type": "event", "stream": {"kind": "task", "id": "t"},
+             "payload": {"kind": "task_lifecycle", "event": {"kind": "status", "details": {"facets": [
+                 {"kind": "producer", "detail": {"kind": "provider", "provider": "meta",
+                                                 "model": "muse-wonder-1.0-contributor"}}]}}}},
+            {"record_type": "status", "stream": {"kind": "run", "id": "r"},
+             "payload": {"kind": "run_output_delta", "text": "Finding one.\n"}},
+            {"record_type": "event", "stream": {"kind": "run", "id": "r"},
+             "payload": {"kind": "run_terminal", "terminal": "completed",
+                         "text": "Finding one.\nR149I2-END", "reason": None}}]
+    export = {"events": [{"envelope": {"payload": {"event": {"usage": {
+        "input_tokens": 28617, "output_tokens": 188, "reasoning_tokens": 147, "cached_tokens": 0}}}}}]}
+
+    def fake(cmd, *a, **kw):
+        if "export" in cmd:
+            with open(cmd[cmd.index("--out") + 1], "w", encoding="utf-8") as f:
+                _j.dump(export, f)
+            return _sp.CompletedProcess(cmd, 0, "", "")
+        if seen.get("fail"):          # the second call: not signed in (its argv is not the one under test)
+            return _sp.CompletedProcess(cmd, 1, "", "missing meta credentials: run `muse login` or set "
+                                        "META_API_KEY, or save credentials at X\\auth.json")
+        seen["cmd"], seen["env"] = list(cmd), dict(kw.get("env") or {})
+        pf = cmd[cmd.index("--prompt-file") + 1]
+        seen["prompt"] = open(pf, encoding="utf-8").read()
+        seen["pf"] = pf
+        return _sp.CompletedProcess(cmd, 0, "\n".join(_j.dumps(r) for r in recs) + "\n",
+                                    "muse: workspace root: X (cwd default)\nmuse: Skills: 24 loaded")
+
+    real = _sp.run
+    kenv = {k: os.environ.get(k) for k in ("META_API_KEY", "MODEL_API_KEY")}
+    outf = os.path.join(tmp, "answer.md")
+    try:
+        os.environ["META_API_KEY"] = os.environ["MODEL_API_KEY"] = "dummy"
+        _sp.run = fake
+        r = o.call_musecode("THE BRIEF " * 900, "R149I2-END", outf, model="muse-wonder-1.0-contributor",
+                            effort="xhigh", system="SYSTEM LAYER", max_steps=120)
+        seen["fail"] = True
+        r2 = o.call_musecode("brief", "R149I2-END", outf + "2", effort="xhigh", system="S")
+    finally:
+        _sp.run = real
+        for k, v in kenv.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    c = seen.get("cmd") or []
+    banned = {"--permission-profile", "--yolo", "--disable-sandbox", "--trust-workspace"}
+
+    def has(flag, val=None):
+        return flag in c and (val is None or c[c.index(flag) + 1] == val)
+    check(c[1:3] == ["exec", "--json"] and has("--prompt-file") and has("--model", "muse-wonder-1.0-contributor")
+          and has("--reasoning-effort", "xhigh") and has("--disable-approval") and has("--disable-write")
+          and has("--disable-shell")
+          and has("--no-foreign-personal-context") and has("--disable-reminders")
+          and has("--max-model-steps", "120") and not banned & set(c)
+          and not any("THE BRIEF" in str(x) for x in c)
+          and seen.get("prompt", "").startswith(o.CLI_BYPASS_SAFETY_PROMPT)
+          and 0 < seen["prompt"].find("SYSTEM LAYER") < seen["prompt"].find("THE BRIEF")
+          and not os.path.exists(seen.get("pf") or "\0")
+          and not {"META_API_KEY", "MODEL_API_KEY"} & {k.upper() for k in seen.get("env") or {}},
+          "R149 И-2 (e) call_musecode: exec --json, the prompt in a file (deleted after) and never in argv, "
+          "model + xhigh, approvals/writes/shell off but NOT the read-only profile (it hangs on the first "
+          "web fetch's network approval) and never the sandbox, the SAFETY DIRECTIVE first, no API key",
+          repr([x for x in c if not str(x).endswith(".md")]))
+    check(r.get("ok") is True and r.get("text") == "Finding one.\nR149I2-END"
+          and r.get("model_served") == ["muse-wonder-1.0-contributor"] and r.get("in_tokens") == 28617
+          and r.get("out_tokens") == 188 and r.get("reasoning_tokens") == 147 and r.get("usd") is None
+          and r.get("session_id") == sid,
+          "R149 И-2 (f) the answer is run_terminal.text, the served model comes from the server's "
+          "stream facet, tokens from the session export, no $ (the plan, not a key)",
+          repr({k: r.get(k) for k in ("ok", "model_served", "in_tokens", "reasoning_tokens", "warnings")}))
+    w2 = " | ".join(r2.get("warnings") or [])
+    diag = str(o.diagnose(w2))
+    check(r2.get("ok") is False and "missing meta credentials" in w2 and "muse login" in diag
+          and "muse login" not in str(o.diagnose("HTTP status 401 unauthorized"))
+          and "Skills:" not in w2,
+          "R149 И-2 (g) not signed in: the CLI's own line reaches the warning (banner stripped) and "
+          "diagnose() names `muse login`; a generic 401 does not get that advice", w2[:200])
+
+    # (h) routing: standard seats it (one Wonder), cheap never; no binary -> the next Wonder
+    def yes(_n):
+        return True
+
+    def runs(ready=yes, **kw):
+        p = rt.resolve(rt.load_registry(), ready=ready, **kw)
+        return sorted(cn for cn, s in p.items() if s.get("enabled")), p
+    on = chs["mcwonder10cont"].get("enabled", True)
+    std, _ = runs(panel="standard")
+    cheap, _ = runs(panel="cheap")
+    rw, _ = runs(route="только вондер")
+    nob, _ = runs(ready=lambda n: n != "mcwonder10cont", panel="standard")
+    _, pm = runs(only=["mcwonder10cont"], tier="max")
+    wonders = ("mcwonder10cont", "wonder10", "orwonder")
+    pmc = pm.get("mcwonder10cont") or {}
+    sysm = o._system_for("BASE", pmc)
+    hint = (reg.get("hints") or {}).get("mcp_fallback") or "\0"
+    check((not on or ([x for x in std if x in wonders] == ["mcwonder10cont"] and rw == ["mcwonder10cont"]
+                      and "mcwonder10cont" not in nob and pmc.get("effort") == "xhigh"))
+          and "mcwonder10cont" not in cheap
+          and hint.strip()[:60] in sysm
+          and ("STANDING NOTE" in sysm) == bool((m.get("prompt_suffix") or {}).get("enabled")),
+          "R149 И-2 (h) standard and «только вондер» seat Muse Code alone; cheap never; without the "
+          "binary the cascade moves on; tier max stays xhigh; the MCP hint and the training-tier note "
+          "reach the system prompt", repr((std, cheap, rw, [x for x in nob if x in wonders],
+                                           pmc.get("effort"))))
+    _sh.rmtree(tmp, ignore_errors=True)
+
+
 def suite_r149_muse_wonder():
     """R149 (2026-10-13): Meta's Muse Wonder as its own voice. Igor: «добавим к нам и в kit новые модели
     spark Muse Wonder» and «напрямую по api Max». wonder10 = Model API `muse-wonder-1.0` at effort max
@@ -14911,6 +15111,8 @@ def suite_r149_muse_wonder():
     section("R149 Muse Wonder: wonder10 (Meta API, max) + orwonder (OpenRouter, kit)")
     reg = rt.load_registry()
     chs = reg.get("channels") or {}
+    # R149 И-2 (2026-10-13): Muse Code (mcwonder10cont) became the Wonder cascade's first member.
+    WONDERS = tuple(c for c in ("mcwonder10cont", "wonder10", "orwonder") if c in chs)
     w, ow = chs.get("wonder10"), chs.get("orwonder")
     if not (w and ow):
         for n in "abcdefg":
@@ -14924,13 +15126,13 @@ def suite_r149_muse_wonder():
           and (ow.get("reasoning") or {}).get("effort") == "max" and ow.get("distribution") == "kit"
           and ow.get("panel") == "standard"
           and 0 < float((ow.get("spend_guard") or {}).get("max_usd_per_review") or 0) <= 5
-          and casc == [["wonder10", "orwonder"]]
+          and casc == [["mcwonder10cont", "wonder10", "orwonder"]]
           and not any(c in (reg.get("ask_default") or []) for c in ("wonder10", "orwonder")),
           "R149 (a) wonder10 = http muse-wonder-1.0 max, orwonder = openrouter meta/muse-wonder max (kit, "
           "guard <= $5), standard panel, ONE cascade of their own, not in ask_default", repr(casc))
     words = {x: set(rt.canon_channel_safe(reg, x)) for x in ("wonder", "вондер", "muse", "муза", "spark",
                                                             "спарк")}
-    check(words["wonder"] == words["вондер"] == {"wonder10", "orwonder"}
+    check(words["wonder"] == words["вондер"] == {"mcwonder10cont", "wonder10", "orwonder"}
           and {"wonder10", "spark13cont"} <= words["muse"] == words["муза"]
           and not words["spark"] & {"wonder10", "orwonder"} and words["spark"] == words["спарк"],
           "R149 (b) wonder/вондер = the Wonder family; muse/муза = Spark + Wonder; spark/спарк = Spark only",
@@ -14945,15 +15147,15 @@ def suite_r149_muse_wonder():
 
     cheap, _ = runs(panel="cheap")
     std, _ = runs(panel="standard")
-    on_w = [c for c in ("wonder10", "orwonder") if chs[c].get("enabled", True)]
-    check(not {"wonder10", "orwonder"} & set(cheap) and [c for c in std if c in ("wonder10", "orwonder")]
+    on_w = [c for c in WONDERS if chs[c].get("enabled", True)]
+    check(not set(WONDERS) & set(cheap) and [c for c in std if c in WONDERS]
           == on_w[:1],
           "R149 (c) the cheap panel runs no Wonder; the standard panel runs exactly one (the cascade)",
           "cheap=%r std-wonder=%r" % (cheap, [c for c in std if "wonder" in c]))
     ow_, _ = runs(only=["wonder"])
     rw_, _ = runs(route="только вондер")
     om_, _ = runs(only=["muse"])
-    check(ow_ == on_w[:1] and rw_ == on_w[:1] and not {"wonder10", "orwonder"} & set(om_) and om_,
+    check(ow_ == on_w[:1] and rw_ == on_w[:1] and not set(WONDERS) & set(om_) and om_,
           "R149 (d) under the cheap default «--only wonder» and «только вондер» run one Wonder (the room has "
           "no Wonder, so the family word names it); «--only muse» stays the cheap Spark",
           "only wonder=%r route=%r only muse=%r" % (ow_, rw_, om_))

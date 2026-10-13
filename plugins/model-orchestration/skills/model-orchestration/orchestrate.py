@@ -1365,6 +1365,7 @@ CLI_BINARIES = (
     ("mimocli", "MIMO_BIN", "mimo"),
     ("qwencli", "QWEN_BIN", "qwen"),
     ("kimicli", "KIMI_BIN", "kimi"),
+    ("musecode", "MUSE_BIN", "muse"),
 )
 CLI_ENV_VARS = " / ".join(env for _, env, _ in CLI_BINARIES)
 
@@ -1426,6 +1427,18 @@ KNOWN_FAILURES = [
      "Read the other channels. Re-running in a few minutes will not help: the channel answers "
      "again only when the gateway restores the route (`--only <channel>` checks it). Nothing in "
      "the brief or the harness causes it."),
+    # R149 И-2: Muse Code with no reachable login. The harness keeps META_API_KEY / MODEL_API_KEY out
+    # of this channel's environment on purpose (a key outranks the login and bills per token), so a
+    # machine whose Muse Code only ever ran on a key lands here. The CLI's exact text, measured with
+    # an empty home (runs/r149-muse-wonder/i2/nologin_probe.py): exit 1 at 0.2 s, no model call.
+    (r"missing meta credentials",
+     "Muse Code is not signed in on this machine, or its login lives where this run cannot see it. "
+     "The harness never hands this channel an API key: META_API_KEY and MODEL_API_KEY are kept out "
+     "of its environment, because a key would bill per token instead of the subscription.",
+     "Run `muse login` once in a terminal (browser sign-in with the account that holds the Muse "
+     "Code subscription), then re-run. No subscription? Leave the channel out with --skip <channel>: "
+     "the Wonder cascade then runs wonder10 on MODEL_API_KEY (pay-as-you-go) or orwonder on "
+     "OpenRouter."),
     ("MODEL_API_KEY not set",
      "The Spark channel has no API key.",
      "Set MODEL_API_KEY, or run with --skip spark to use the other channels only. The harness "
@@ -5729,6 +5742,229 @@ def _kimi_usage_fields(pm):
             "model_served": (pm or {}).get("models") or None}
 
 
+# --- Muse Code CLI channel (kind musecode) ------------------------------------------------------
+# R149 И-2 (2026-10-13). Igor: «есть модель muse-wonder-1.0-contributor … её можно выбрать», «в muse
+# code cli есть подписка за 15$ И Muse code надо тоже добавить в панель», «по моей подписке effort
+# максимальный Xhigh». Meta's own agent CLI on the user's SUBSCRIPTION - the one transport that
+# reaches Wonder Contributor (the Model API answers 404 for that id, R149).
+# 🔴 THE READ-ONLY PROFILE HANGS A REVIEW (measured live 2026-10-13): `--permission-profile :read-only`
+# let the agent call web_fetch, and the fetch then REQUESTED a network approval for dev.meta.ai:443 -
+# headless, nobody answers, so the run sat there 9+ minutes until it was killed (it would have used
+# the whole 45-minute seat). The profile cannot be combined with --approval-mode, --approval-judge or
+# --sandbox-network (exit 2 each), so it cannot be loosened for the network alone. The posture is the
+# three flags below instead: approvals off (the OS sandbox stays on), no file writes, no shell - the
+# same web question then answered in 29 s with the page quoted. Approvals off = a bypassed CLI, so
+# the SAFETY DIRECTIVE rides the brief (R126). The user's MCP servers run unprompted, as on every
+# other bypassed CLI channel.
+MUSECODE_POSTURE = ("--disable-approval", "--disable-write", "--disable-shell")
+
+
+def _musecode_env(base=None):
+    """The child environment of a musecode call: _KIMI_ENV_KEEP, XDG_*, and the CLI's own MUSE_*.
+
+    🔴 AUTH PRECEDENCE (dev.meta.ai/docs/muse-code/auth, read 2026-10-13; `muse login --help`):
+    «Muse Code uses META_API_KEY if set, then a stored key, and only then a stored browser session»,
+    and a subscription works «only through the Muse Code CLI while signed in». A META_API_KEY in the
+    harness's environment would move every call of this channel from the plan to pay-as-you-go
+    while the plan line still said «subscription» - R128's qwen class. An ALLOWLIST, not a scrub
+    list: the agent's shell inherits this environment and no vendor key of any channel belongs in
+    it (R140 И-3). XDG_* stay because the CLI finds its login and its data under them.
+    """
+    src = os.environ if base is None else base
+    out = {}
+    for k, v in src.items():
+        u = k.upper()
+        if u in _KIMI_ENV_KEEP or u in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
+                                        "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"):
+            out[k] = v
+        elif u.startswith("MUSE_") and not any(w in u for w in ("KEY", "TOKEN", "SECRET", "PASSW")):
+            out[k] = v
+    return out
+
+
+def _musecode_parse(raw):
+    """(text, served_models, session_id, terminal, error) from `muse exec --json` stdout.
+
+    MSP records, one JSON object per line (measured): the answer is `run_terminal.text` (the
+    `run_output_delta` pieces are its stream); the SERVED model is `detail.model` of the model
+    stream's status facet (`stream_succeeded`, from the server's response - never the model's
+    self-description); the session id is the `stream.id` of a `session` record.
+    """
+    text, deltas, served, sid, terminal, err = "", [], [], None, None, None
+    for line in (raw or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        pl = ev.get("payload") if isinstance(ev.get("payload"), dict) else {}
+        st = ev.get("stream") if isinstance(ev.get("stream"), dict) else {}
+        if st.get("kind") == "session" and st.get("id") and not sid:
+            sid = str(st["id"])
+        kind = pl.get("kind")
+        if kind == "run_output_delta" and isinstance(pl.get("text"), str):
+            deltas.append(pl["text"])
+        elif kind == "run_terminal":
+            terminal = pl.get("terminal")
+            if isinstance(pl.get("text"), str) and pl["text"]:
+                text = pl["text"]
+            if pl.get("reason"):
+                err = str(pl["reason"])
+        elif kind == "task_lifecycle":
+            e = pl.get("event") if isinstance(pl.get("event"), dict) else {}
+            if e.get("kind") == "failed" and not err:
+                err = json.dumps({k: v for k, v in e.items() if "id" not in k}, ensure_ascii=False)
+            det = e.get("details") if isinstance(e.get("details"), dict) else {}
+            for f in det.get("facets") or []:
+                d = f.get("detail") if isinstance(f, dict) and isinstance(f.get("detail"), dict) else {}
+                m = d.get("model")
+                if isinstance(m, str) and m and m not in served:
+                    served.append(m)
+    if not text and deltas:
+        text = "".join(deltas)
+    return text, served, sid, terminal, err
+
+
+def _musecode_usage(binary, sid, env, cwd, timeout=90):
+    """Token totals of one session from its durable log (`muse export`), or {} - numbers only.
+
+    The `--json` stream carries no usage; the session log does (`event.usage` per model response:
+    input / output / reasoning / cache tokens, measured). The export holds the whole transcript, so
+    it goes to a private temp file that is deleted at once. Any failure returns {}: nothing guessed.
+    """
+    if not sid:
+        return {}
+    fd, path = tempfile.mkstemp(prefix="musecode-export-", suffix=".json")
+    os.close(fd)
+    try:
+        subprocess.run([binary, "export", "--session", sid, "--out", path], capture_output=True,
+                       stdin=subprocess.DEVNULL, cwd=cwd, env=env, timeout=timeout)
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        tot = {}
+        for e in (d.get("events") or []) if isinstance(d, dict) else []:
+            env_ = e.get("envelope") if isinstance(e, dict) else None
+            ev = ((env_ or {}).get("payload") or {}).get("event") if isinstance(env_, dict) else None
+            u = ev.get("usage") if isinstance(ev, dict) else None
+            if isinstance(u, dict):
+                for k in ("input_tokens", "output_tokens", "reasoning_tokens", "cached_tokens",
+                          "cache_read_tokens"):
+                    if isinstance(u.get(k), int):
+                        tot[k] = tot.get(k, 0) + u[k]
+        return tot
+    except (OSError, ValueError, AttributeError, TypeError, subprocess.SubprocessError):
+        return {}
+    finally:
+        _drop_file(path)
+
+
+def _musecode_stderr(stderr):
+    """The CLI's own error lines: stderr minus its start-up banner (workspace root, skills, delegation)."""
+    keep = [ln for ln in (stderr or "").splitlines() if ln.strip()
+            and not re.match(r"muse: (workspace root|Skills:|Agent delegation|  )", ln)]
+    return "\n".join(keep[-3:])
+
+
+def call_musecode(brief, marker, outfile, model=None, effort=None, system=None, timeout=2700,
+                  name="mcwonder10cont", max_steps=None):
+    """Muse Code CLI (Meta) on the user's SUBSCRIPTION - Wonder 1.0 Contributor here (R149 И-2).
+
+    Measured live 2026-10-13 on 1.4.7-R6101.1 (runs/r149-muse-wonder/i2/, 7 subscription prompts):
+      * `exec --json --prompt-file F`: the prompt never rides argv (R137: a cmd.exe shim cuts argv at
+        8191 chars and at the first newline); muse_bin() runs the binary, not `muse.cmd`.
+      * MUSECODE_POSTURE (approvals off, no writes, no shell): the read-only profile hung on the
+        first web fetch's network approval - see the comment above it.
+      * `--no-foreign-personal-context` (27 -> 24 skills loaded), `--disable-reminders` (three
+        reminder sub-agents per turn otherwise), `--user-input-auto-resolve` (headless).
+      * `--reasoning-effort max` is ACCEPTED on the subscription and thinks no more than xhigh
+        (reasoning 397-428 vs 441-455 tokens, n=2 each, echocheck's probe) - the registry stops at
+        xhigh, which is what Igor said the plan allows.
+      * exit 0 = the turn completed; 1 = failed or cancelled (also --max-model-steps); 2 = usage.
+      * ~28.5K input tokens per call are Muse Code's own system prompt and skill catalogue.
+    Not in TASK_KINDS (never measured as a --task worker) and not in REFS_KINDS (its file tools are
+    rooted at the workspace, so attachments arrive inline). No API key reaches it: _musecode_env.
+    """
+    binary = muse_bin()
+    text_in = _with_bypass_safety(((system.strip() + "\n\n---\n\n") if system else "") + brief, True)
+    model = model or "muse-wonder-1.0-contributor"
+    ncwd = neutral_cwd()
+    env = _musecode_env()
+    pdir = tempfile.mkdtemp(prefix="musecode-")
+    pf = os.path.join(pdir, "prompt.md")
+    with open(pf, "w", encoding="utf-8") as f:
+        f.write(text_in)
+    cmd = [binary, "exec", "--json", "--prompt-file", pf, "--model", model] + list(MUSECODE_POSTURE) \
+        + ["--no-foreign-personal-context", "--disable-reminders", "--user-input-auto-resolve"]
+    if effort:
+        cmd += ["--reasoning-effort", str(effort)]
+    if max_steps:
+        cmd += ["--max-model-steps", str(int(max_steps))]
+    log("  [%s] Muse Code CLI on the subscription login (no API key in its env); prompt via file "
+        "(%d chars), model=%s, effort=%s, %s"
+        % (name, len(text_in), model, effort or "default", " ".join(MUSECODE_POSTURE)))
+    t0 = time.time()
+    try:
+        try:
+            p = _run_tree(cmd, timeout=_seconds(timeout, 2700), capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", input="", cwd=ncwd, env=env)
+        except FileNotFoundError:
+            return {"channel": name, "ok": False, "error": "binary not found: " + binary}
+        except subprocess.TimeoutExpired as exc:
+            raw = exc.stdout or ""
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", "replace")
+            text, served, sid, _term, _err = _musecode_parse(raw)
+            u = _musecode_usage(binary, sid, env, ncwd)
+            if text:
+                with open(outfile, "w", encoding="utf-8") as f:
+                    f.write(text)
+            return {"channel": name, "ok": False, "text": text,
+                    "seconds": round(time.time() - t0, 1), "bytes": len(text.encode("utf-8")),
+                    "error": "TIMEOUT after %s" % (timeout or "2700s"), "model": model,
+                    "model_served": served or None, "effort": effort,
+                    "in_tokens": u.get("input_tokens"), "out_tokens": u.get("output_tokens"),
+                    "reasoning_tokens": u.get("reasoning_tokens"),
+                    "cached_in_tokens": u.get("cache_read_tokens") or u.get("cached_tokens"),
+                    "usd": None, "session_id": sid, "warnings": ["TIMEOUT"], "notes": []}
+    finally:
+        shutil.rmtree(pdir, ignore_errors=True)
+
+    secs = time.time() - t0
+    raw = p.stdout or ""
+    text, served, sid, terminal, err = _musecode_parse(raw)
+    u = _musecode_usage(binary, sid, env, ncwd)
+    warn, note = [], []
+    if p.returncode != 0 and not text:
+        warn.append("EXIT %d: %s" % (p.returncode,
+                                     scrub(err or _musecode_stderr(p.stderr) or raw or "")[:300]))
+    elif terminal and terminal != "completed":
+        warn.append("EXIT %d: Muse Code ended the run as %r after %d chars of text: %s"
+                    % (p.returncode, terminal, len(text), scrub(err or "")[:300]))
+    elif err:
+        note.append("Muse Code reported an error mid-run and still finished: %s" % scrub(err)[:300])
+    if text:
+        with open(outfile, "w", encoding="utf-8") as f:
+            f.write(text)
+    if marker and not _marker_on_last_line(text, marker):
+        warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
+    if not text.strip() and not warn:
+        warn.append("EMPTY OUTPUT despite exit 0")
+    record_refusal(refusal_check(text, marker), warn, note)
+    if served and model not in served:
+        note.append("the server answered as %s, not the requested %s" % (", ".join(served), model))
+    return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
+            "bytes": len(text.encode("utf-8")), "exit": p.returncode,
+            "model": model, "model_served": served or None, "effort": effort,
+            "in_tokens": u.get("input_tokens"), "out_tokens": u.get("output_tokens"),
+            "reasoning_tokens": u.get("reasoning_tokens"),
+            "cached_in_tokens": u.get("cache_read_tokens") or u.get("cached_tokens"),
+            "usd": None, "session_id": sid, "warnings": warn, "notes": note}
+
+
 def call_hermes(brief, marker, outfile, model=None, toolsets=None, system=None, timeout=2400):
     """
     Kimi K3 through the Hermes CLI. `-z/--oneshot` prints ONLY the final response text to
@@ -8127,6 +8363,40 @@ def qwen_bin():
     ])
 
 
+_MUSE_VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+-R[0-9]+(?:\.[0-9]+)?")
+
+
+def muse_bin():
+    """Muse Code CLI (Meta) - the BINARY, not the Windows `muse.cmd` shim, whenever it is known.
+
+    Windows install (measured 2026-10-13, 1.4.7-R6101.1): %LOCALAPPDATA%\\Programs\\muse\\ holds
+    `muse.cmd` -> `.muse-launcher.ps1` (download sign-in, update checks, a BACKGROUND self-update)
+    -> `muse-bin-<version>.exe`, the version named in `.muse-version` - the launcher's own rule
+    (`Get-ActiveBinary`, same version pattern). Running the binary skips a cmd.exe + PowerShell hop
+    and a self-update starting in the middle of a panel. MUSE_BIN first, as for every CLI; then
+    PATH (on Windows that is the shim - kept as a last resort, the prompt never rides argv).
+    """
+    v = os.environ.get("MUSE_BIN")
+    if v:
+        return v
+    d = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "muse")
+    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+        try:
+            with open(os.path.join(d, ".muse-version"), encoding="utf-8") as f:
+                ver = f.read().strip()
+        except OSError:
+            ver = ""
+        exe = os.path.join(d, "muse-bin-%s.exe" % ver)
+        if _MUSE_VERSION_RE.fullmatch(ver) and os.path.isfile(exe):
+            return exe
+    home = os.path.expanduser("~")
+    return _resolve_bin("MUSE_BIN", "muse", [
+        os.path.join(d, "muse.cmd") if os.name == "nt" else "",
+        os.path.join(home, ".local", "bin", "muse"),
+        "/usr/local/bin/muse", "/opt/homebrew/bin/muse",
+    ])
+
+
 def kimi_bin():
     """Kimi Code CLI (Moonshot AI). Two installs, both measured on 2.1.1:
     the vendor's script (github.com/MoonshotAI/kimi-code README) puts ONE binary at
@@ -8161,6 +8431,7 @@ CLI_RESOLVERS = {
     "mimocli": mimo_bin,
     "qwencli": qwen_bin,
     "kimicli": kimi_bin,
+    "musecode": muse_bin,
 }
 
 
@@ -8169,7 +8440,8 @@ CLI_RESOLVERS = {
 # same five literals, so a kind unknown to one was unknown to the other, and a misspelled kind
 # produced neither a preflight warning nor a result, only a log line that scrolls away.
 KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "hermes",
-               "grokcli", "opencode", "claudecli", "mimocli", "qwencli", "kimicli")
+               "grokcli", "opencode", "claudecli", "mimocli", "qwencli", "kimicli",
+               "musecode")
 
 # The kinds that run ON THIS MACHINE and can therefore read an attached document from disk
 # instead of receiving it inline (--attach / --attach-dir). Igor, R46: «CLI агентам не отправлять
@@ -9769,7 +10041,7 @@ def _channel_key_ready(ch):
         if em is not None:                               # R140 И-4: present = must be usable
             return not _env_model_problem(em) and bool(_env_key(em["key_env"]))
         return True
-    if kind in ("mimocli", "agy", "grokcli"):
+    if kind in ("mimocli", "agy", "grokcli", "musecode"):
         # R142 И-3 (Kimi, panel): these fell through to True, so a cascade member whose CLI is
         # missing could win the pick (agy38flash over orgemini38flash, mimov26pro over ormimopro)
         # and its twin, which would have run, never started. opencode/claude/qwen/kimi were
@@ -11611,6 +11883,12 @@ def main():
                                         system=_system_for(system, p),
                                         timeout=_seconds(p.get("timeout"), 2400),
                                         name=cname)
+            elif kind == "musecode":
+                jobs[cname] = ex.submit(call_musecode, cbrief, a.marker, outfile,
+                                        model=p.get("model"), effort=p.get("effort"),
+                                        system=_system_for(system, p),
+                                        timeout=_seconds(p.get("timeout"), 2700),
+                                        name=cname, max_steps=p.get("max_turns"))
             elif kind == "claudecli":
                 jobs[cname] = ex.submit(call_claudecli, cbrief, a.marker, outfile,
                                         model=p.get("model"), effort=p.get("effort"),
@@ -11767,6 +12045,13 @@ def main():
                 model=p.get("model"), effort=p.get("effort"),
                 system=_system_for(system, p),
                 timeout=_seconds(p.get("timeout"), 2400), name=cname)
+        elif kind == "musecode":
+            return _rex.submit(
+                call_musecode, cbrief, a.marker, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                system=_system_for(system, p),
+                timeout=_seconds(p.get("timeout"), 2700), name=cname,
+                max_steps=p.get("max_turns"))
         elif kind == "claudecli":
             return _rex.submit(
                 call_claudecli, cbrief, a.marker, outfile,

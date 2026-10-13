@@ -228,6 +228,7 @@ OVERLAY_SHARP_HINT = (
 # stranger's overlay could add one. Fail loud there rather than silently reinterpret.
 ALLOW_ARBITRARY_MODEL_KINDS = frozenset({
     "http", "codex", "openrouter", "oai", "xai", "gemini", "claudecli", "grokcli", "mimocli",
+    "musecode",
 })
 REFUSE_ARBITRARY_MODEL_KINDS = frozenset({"agy", "opencode", "hermes"})
 
@@ -2145,6 +2146,18 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                 p["_tier_note"] = ("effort %s (--variant flag), timeout %s, "
                                    "metered Xiaomi API via mimo CLI"
                                    % (p.get("effort") or "default", p["timeout"]))
+            elif p.get("kind") == "musecode":
+                # R149 И-2: the channel's own effort, clamped to its model's `efforts`. The ladder
+                # stops at xhigh: the SUBSCRIPTION's max thinks no more than xhigh (reasoning
+                # 397-428 vs 441-455 tokens, n=2 each, 2026-10-13), though the CLI accepts max.
+                p["effort"] = _clamp_effort(reg, cname, p["model"], p.get("effort"), p)
+                p["timeout"] = p.get("timeout") or "45m"
+                p["_tier_note"] = ("effort %s (%s), timeout %s, Muse Code subscription - the "
+                                   "CLI's own login, never a key (META_API_KEY and MODEL_API_KEY "
+                                   "are kept out of its environment), approvals off, no writes, no shell"
+                                   % (p.get("effort"),
+                                      _ceiling_phrase(reg, cname, p["model"], p.get("effort")),
+                                      p["timeout"]))
             elif p.get("kind") == "qwencli":
                 # qwen CLI has NO --effort flag. The vendor-side defaultEffort in
                 # ~/.qwen/settings.json governs (xhigh for qwen3.8-max). Advisory here only.
@@ -2467,6 +2480,12 @@ def _web_line(p):
                 "PERMISSION PROMPTS (`--yolo`, on purpose): the reviewer can run shell commands "
                 "and edit files on this machine; your deny-lists and hooks still apply. "
                 "Grounding is the agent's own claim")
+    if kind == "musecode":
+        return ("web: Muse Code CLI's built-in web tools plus every MCP server in YOUR Muse Code "
+                "settings, ALL WITHOUT APPROVAL PROMPTS (--disable-approval: a headless run cannot "
+                "answer one, and the first web fetch asks), with --disable-write and --disable-shell: "
+                "it reads and searches, writes no file, runs no shell. The vendor runs the loop; "
+                "grounding is the agent's own claim")
     if kind == "kimicli":
         return ("web: Kimi Code CLI's built-in tools (Claude Code fork) - non-interactive "
                 "`-p` mode, no tool approvals. The model may use search and page-reading "

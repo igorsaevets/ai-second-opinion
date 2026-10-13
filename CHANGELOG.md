@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.111.0 — 2026-10-13
+
+Muse Wonder through the Muse Code CLI, on your Muse Code subscription.
+
+- **New channel `mcwonder10cont` (kind `musecode`).** Meta's Muse Code CLI running `muse-wonder-1.0-contributor`, the Contributor variant of Wonder that only Muse Code subscriptions offer (the Model API answers 404 for that id). Standard panel only. It is first in the Wonder cascade: a round runs it wherever the Muse Code binary is installed, and `wonder10` / `orwonder` only where it is not. Nothing is billed per token; the run counts against your plan.
+- **No API key reaches it.** Muse Code prefers `META_API_KEY` over your login and would bill that key instead of the plan, so the CLI gets an allowlisted environment: no `META_API_KEY`, no `MODEL_API_KEY`, no other vendor's key. Not signed in: the run stops at once with `missing meta credentials`, and the report says to run `muse login`.
+- **No writes, no shell, no approval prompts.** The CLI runs with `--disable-approval --disable-write --disable-shell`: it reads and searches, writes no file and has no shell; its OS sandbox stays on. The built-in read-only permission profile was tried first and hung: the first web fetch asked for a network approval that a headless run cannot give. Approvals off means the safety directive rides the brief, as on the other CLI channels without prompts. The prompt goes in through a file, never the command line; on Windows the harness runs the Muse Code binary itself, not the `muse.cmd` launcher.
+- **Effort `xhigh`.** Measured on 2026-10-13 on a subscription: the CLI accepts `max`, but `max` thought no more than `xhigh` (reasoning 397–428 vs 441–455 tokens, n=2 each, all answers correct). The channel's ladder stops at `xhigh`; a tier or an overlay asking for `max` is clamped to it.
+- **The prompts of a Contributor CLI seat:** the MCP page-reader hint and the standing training-tier note, as on the other Contributor CLI channels.
+- Tokens come from the session's own log (`muse export`), the served model from the server's stream record. No automatic fallback to the per-token `wonder10` when the plan's limit is spent; name it yourself (`--only wonder10`).
+- `wonder` / `вондер` and `muse` / `муза` now include the new channel.
+
 ## 1.110.0 — 2026-10-13
 
 Muse Wonder, Meta's most capable model, joins the standard panel.
