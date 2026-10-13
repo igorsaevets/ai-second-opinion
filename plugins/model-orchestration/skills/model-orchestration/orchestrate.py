@@ -10213,18 +10213,132 @@ def _task_directive(workdir, remote):
             % (workdir, rem))
 
 
-def _project_marker_above(path):
+def _project_marker_above(path, skip_home=False):
     """The nearest folder at or above `path` that holds a project instruction file or a repo -
-    a CLI started below it loads that project's CLAUDE.md / AGENTS.md and sends it to its vendor."""
+    a CLI started below it loads that project's CLAUDE.md / AGENTS.md and sends it to its vendor.
+    skip_home (R148 И-2): the walk stops AT the home folder - a marker in it (or above it) is
+    user-level, not a project's: on Windows TEMP and with it every channel's neutral_cwd() sit
+    below it, so where --out goes cannot change it (measured on the author's machine: a
+    home-folder AGENTS.md; whether a CLI reads it from below is the open R138 question)."""
     cur = os.path.abspath(path)
+    # realpath on both sides: an 8.3 alias (a CI runner's TEMP is C:\Users\RUNNER~1\...) or a
+    # junction would otherwise slip past a plain string compare (global ledger E-246).
+    home = os.path.normcase(os.path.realpath(os.path.expanduser("~"))) if skip_home else None
     while True:
-        for m in ("CLAUDE.md", "AGENTS.md", ".git"):
+        if home and os.path.normcase(os.path.realpath(cur)) == home:
+            return None                  # under home, only folders BELOW it can be a project
+        for m in ("CLAUDE.md", "AGENTS.md", "GEMINI.md", ".git"):
             if os.path.exists(os.path.join(cur, m)):
                 return os.path.join(cur, m)
         up = os.path.dirname(cur)
         if up == cur:
             return None
         cur = up
+
+
+def _new_root_entry(path):
+    """The filesystem root when writing to `path` would add a NEW entry directly to it - `path` IS
+    the root, or its top-level folder does not exist yet - else None. R148 И-2: one project's
+    sessions left 60 folders in the root of one drive, a fresh <round>-panel / -tmp / -out each
+    time, because every rule said where NOT to write. A top-level folder that already exists is
+    not new, so a long-lived one (a panels folder kept for months) keeps working."""
+    p = os.path.abspath(path)
+    drive, rest = os.path.splitdrive(p)
+    root = drive + os.sep
+    parts = [x for x in rest.replace(os.altsep or os.sep, os.sep).split(os.sep) if x]
+    if not parts:
+        return root
+    return None if os.path.lexists(os.path.join(root, parts[0])) else root
+
+
+def _user_scratch_dir():
+    """This user's folder for run output that belongs to no project: the platform's per-user
+    state folder - never TEMP (cleaned without asking) and never a drive root."""
+    home = os.path.expanduser("~")
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
+    elif sys.platform == "darwin":
+        base = os.path.join(home, "Library", "Application Support")
+    else:
+        base = os.environ.get("XDG_STATE_HOME") or os.path.join(home, ".local", "state")
+    return os.path.join(base, "ai-second-opinion", "runs")
+
+
+def _scratch_suggestion(path):
+    """Where a refused --out / --workdir could go instead: a folder made for scratch, outside
+    every project. A top-level AI_Scratch folder on the same drive wins when one exists (a
+    convention some machines keep); nothing is created here, only named."""
+    p = os.path.abspath(path)
+    name = os.path.basename(p.rstrip("\\/")) or "reviews"
+    drive = os.path.splitdrive(p)[0]
+    kept = os.path.join(drive + os.sep, "AI_Scratch") if drive else None
+    if kept and os.path.isdir(kept):
+        try:
+            kids = sorted(d for d in os.listdir(kept) if os.path.isdir(os.path.join(kept, d)))
+        except OSError:
+            kids = []
+        return "%s (the scratch folder kept on this drive%s)" % (
+            os.path.join(kept, "<project>", name),
+            "; its <project> folders: " + ", ".join(kids) if kids else "")
+    return os.path.join(_user_scratch_dir(), name)
+
+
+def _ws_root_for(out, sweep=True):
+    """Where this run's <channel>-ws working folders go, and the plan line saying so (or None).
+    Inside --out, as always - unless --out is inside a project: codex (-C) and agy (cwd) run IN
+    their working folder, and a CLI started below a CLAUDE.md / AGENTS.md / GEMINI.md / .git
+    loads it and sends it to its vendor (the leak neutral_cwd() closes for every other kind).
+    Then a fresh folder under TEMP takes them and the answers stay in --out. R148 И-2, measured
+    over 463 runs on one machine: 212 had --out inside a project, in 8 projects - refusing that
+    would have broken their scripts, and the answers were never the leak. A TEMP that is itself
+    inside a project leaves them where they were, and the line says so."""
+    absout = os.path.abspath(out)
+    leak = (_project_marker_above(absout, skip_home=True)
+            or _project_marker_above(os.path.realpath(absout), skip_home=True))
+    if not leak:
+        return out, None
+    base = os.path.join(tempfile.gettempdir(), "orchestrate-ws")
+    base_leak = _project_marker_above(base, skip_home=True)
+    if base_leak:
+        return out, ("⚠ --out %s is below %s and TEMP is below %s: the channels' working folders "
+                     "stay in --out, and codex / agy, which run INSIDE theirs, load that project's "
+                     "instruction files. An --out outside every project avoids it."
+                     % (absout, leak, base_leak))
+    root = os.path.join(base, time.strftime("%Y%m%d-%H%M%S") + "-%d" % os.getpid())
+    if sweep:                        # bounded residue, as the ASCII mirror does: 3 days, then gone
+        try:
+            cutoff = time.time() - 3 * 86400
+            for e in os.listdir(base):
+                full = os.path.join(base, e)
+                if os.path.isdir(full) and os.path.getmtime(full) < cutoff:
+                    shutil.rmtree(full, ignore_errors=True)
+        except OSError:
+            pass
+    return root, ("channels' working folders (<channel>-ws): %s - your --out is below %s, and "
+                  "codex / agy run INSIDE their working folder: a CLI started there loads that "
+                  "project's instruction files and sends them to its vendor. The answers stay in "
+                  "--out." % (root, leak))
+
+
+def _out_guard(a):
+    """R148 И-2, before anything is created: refuse an --out / --workdir that would be a NEW entry
+    directly in a drive root, and decide where the -ws folders go (a.ws_root, a.ws_note).
+    Returns an exit code to stop with, or None."""
+    for flag, val in (("--out", a.out), ("--workdir", getattr(a, "workdir", None))):
+        root = _new_root_entry(val) if val else None
+        if root:
+            log("%s %s would put a NEW folder directly in %s - refused, nothing was created (R148: "
+                "60 such folders piled up in one drive root). Scratch belongs in a folder made for "
+                "it, outside every project, e.g. %s" % (flag, os.path.abspath(val), root,
+                                                         _scratch_suggestion(val)))
+            return 2
+    a.ws_root, a.ws_note = _ws_root_for(a.out, sweep=not a.dry_run)
+    return None
+
+
+def _ws(a, cname):
+    """One channel's working folder: <ws_root>/<channel>-ws (see _ws_root_for)."""
+    return os.path.join(getattr(a, "ws_root", None) or a.out, cname + "-ws")
 
 
 def _task_plan(want, kinds, a, reg):
@@ -10574,7 +10688,15 @@ def main():
                          % ("|".join(_panels) or "none defined"))
     ap.add_argument("--marker", default="REVIEW-COMPLETE",
                     help="literal string the model must end with; absence means incomplete")
-    ap.add_argument("--out", default="./reviews")
+    ap.add_argument("--out", default="./reviews", metavar="DIR",
+                    help="folder for this run's answers, REPORT.md and run.log (default ./reviews "
+                         "under the current folder). A NEW folder directly in a drive root is "
+                         "refused before anything is created: keep scratch in a folder made for "
+                         "it, outside every project. DIR inside a project (a CLAUDE.md, AGENTS.md, "
+                         "GEMINI.md or .git above it) is fine for the answers, but the channels' "
+                         "working folders (<channel>-ws) then go to a fresh folder under TEMP: "
+                         "codex and agy run INSIDE theirs, and a CLI loads the instruction files "
+                         "above its folder and sends them to its vendor")
     # No argparse `choices` here on purpose. It used to list spark/http/codex/agy, which let
     # `--only http` through the parser and straight into a literal dict lookup in apply_flags
     # that only knew the registry names - so a documented flag died with "unknown channel 'http'".
@@ -10660,7 +10782,8 @@ def main():
     ap.add_argument("--workdir", default=None, metavar="DIR",
                     help="--task only: root of the per-channel workdirs (<DIR>/<channel>). "
                          "Default: a fresh folder under TEMP, copied to <out>/work at the end. "
-                         "Keep it outside any project: a CLI loads the instruction files above it")
+                         "Keep it outside any project: a CLI loads the instruction files above it. "
+                         "A NEW folder directly in a drive root is refused, like --out")
     ap.add_argument("--allow-remote", dest="allow_remote", action="append",
                     default=None, metavar="SYSTEM:PURPOSE",
                     help="--task only: ONE remote system the task may WRITE to and what for, "
@@ -10717,6 +10840,15 @@ def main():
             % json.dumps({info["name"]: info["block"]}, indent=2, ensure_ascii=False))
         return 0
 
+    # R148 И-2: --out is checked BEFORE anything creates it - the --ask brief below and the run
+    # log both write into it, on --dry-run too, so a check after them would leave the very
+    # drive-root folder it refuses. The --ask default is settled first, since it is not ./reviews.
+    if a.ask and a.out == "./reviews":
+        a.out = os.path.join(tempfile.gettempdir(), "orchestrate-ask")
+    _stop = _out_guard(a)
+    if _stop is not None:
+        return _stop
+
     # --- one-shot ask: assemble a real brief from a string, then fall through to the normal path.
     # Everything downstream (routing, the secret gate, verification, the citation audit) is reused
     # rather than bypassed. A cheap path that skips the checks is how a cheap path becomes the one
@@ -10768,8 +10900,6 @@ def main():
                     "seconds. 🔴 Free and near-free tiers are usually paid for with your text - "
                     "the plan below prints each channel's data policy. --only <channel> or "
                     "--skip <channel> narrows it." % (len(a.only), ", ".join(a.only)))
-        if a.out == "./reviews":
-            a.out = os.path.join(tempfile.gettempdir(), "orchestrate-ask")
         a.no_citecheck = True        # a lookup is not a review; the audit is for cited briefs
         global _citecheck_reason
         _citecheck_reason = ("--ask is a lookup, not a review - the citation audit is for briefs "
@@ -10810,6 +10940,8 @@ def main():
                         % datetime.datetime.now().astimezone().isoformat(timespec="seconds"))
         except OSError as exc:
             log("note: could not open a run log in %s (%s); continuing without one" % (a.out, exc))
+    if getattr(a, "ws_note", None):   # R148 И-2: where the -ws folders went, and why (plan + log)
+        log(a.ws_note)
 
     # Validate every input BEFORE the dry-run exit, so --dry-run is a real preflight. A mistyped
     # --system used to surface only after the expensive channels had already been launched.
@@ -11375,7 +11507,7 @@ def main():
             p["_name"] = cname
             kind = p.get("kind")
             outfile = os.path.join(a.out, cname.upper() + ".md")
-            workdir = os.path.join(a.out, cname + "-ws")
+            workdir = _ws(a, cname)       # R148 И-2: outside the project when --out is inside one
             # Which payload variant this channel gets. Identical unless --attach/--attach-dir
             # was passed; then REFS_KINDS read the documents from disk and everyone else gets
             # them inline. One variable per channel, chosen by capability, never by name.
@@ -11552,7 +11684,7 @@ def main():
         p["_name"] = cname
         kind = p.get("kind")
         outfile = os.path.join(a.out, cname.upper() + ".md")
-        workdir = os.path.join(a.out, cname + "-ws")
+        workdir = _ws(a, cname)
         use_refs = bool((atts or att_dirs) and kind in REFS_KINDS)
         cbrief = (((brief_refs_full if _tools_full(kind, cname, a, reg) else brief_refs)
                    if use_refs else brief))
@@ -11658,7 +11790,7 @@ def main():
                 model=p.get("model"), effort=p.get("effort"),
                 system=_system_for(system, p),
                 timeout=_seconds(p.get("timeout"), 2400), name=cname,
-                workdir=os.path.join(a.out, cname + "-ws"),
+                workdir=_ws(a, cname),
                 bypass=bool(cli_bypass_active(cname, a, reg)),
                 env_model=_kimi_env_model(cname, reg))
         log("  [%s] cannot dispatch again: unknown kind %r" % (cname, kind))

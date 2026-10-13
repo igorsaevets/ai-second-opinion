@@ -88,17 +88,17 @@ truncated. Detail lives beside it in `references/` (paths relative to this skill
 
 ## 0. Just run it
 
-From **any** chat, project or working directory — use the absolute path:
+From any folder, with the absolute path:
 
 ```powershell
 python "<SKILL_DIR>\orchestrate.py" `
-  --brief "$env:TEMP\brief.md" `
+  --brief "<BRIEF_FILE>" `
   --marker REVIEW-DONE-01 `
-  --out "$env:TEMP\reviews"
+  --out "<RUN_DIR>"
 ```
 
-That runs **the default panel in parallel**, writes one `<CHANNEL>.md` per channel into
-`--out`, renders `REPORT.md`, and prints a verification block.
+Runs **the default panel in parallel**: one `<CHANNEL>.md` per channel in `--out`, plus
+`REPORT.md` and a verification block.
 
 🔴 **Do not count the channels from this file, and do not list them** — every prose copy has been
 wrong within days. `python routing.py` prints the live set and spends nothing. Output filenames
@@ -115,7 +115,7 @@ are the registry key, upper-cased.
 | `--tier` | **one tier, `max`, and it is the default.** `strategic`/`deep` are aliases kept so old commands run. Depth is never a choice — see §2 |
 | `--panel` | `cheap` (default) · `standard`. WHO is in the room; never changes depth. See §2 |
 | `--marker` | literal string the reply must end with; absent ⇒ incomplete |
-| `--out` | output directory. Default `./reviews` |
+| `--out` | run folder (default `./reviews`): outside every project, not TEMP. A new drive-root folder is refused |
 | `--system` | preset name or path (§0.2). The no-non-existence rule is appended — end the file with a newline |
 | `--attach` / `--attach-dir` | document / folder beside the brief. `--attach`: files **inline** to all channels (CLI also gets the **absolute path**). `--attach-dir`: scanned folder files **inline** to all channels; CLI also gets a **vetted copy** on disk (skips listed; original path never sent). 🔴 Refs trust the attachment: only material you authored |
 | `--answer-cap` | ask every reviewer to keep the FINAL answer under N chars (default `20000` ≈ 5K tokens; `0` = off and the `--ask` default). Prompt-level at the payload TAIL, after attachments — depth and `max_tokens` untouched; `HANDOFF.md` names who exceeded it or declared `TRUNCATED-BY-LIMIT` |

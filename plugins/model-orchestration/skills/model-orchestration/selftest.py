@@ -7909,6 +7909,7 @@ def main():
                   suite_r146_corrupted_output,
                   suite_r146_i3_spark_go,
                   suite_r146_i4_tokens,
+                  suite_r148_i2_out_guard,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -14725,6 +14726,173 @@ def suite_r144_i7_qwen_hotfix():
           and not str(q.get("_timeout", "")).startswith("Maps to --max-wall-time"),
           "R144 И-7 (H19): the plan line and the registry note no longer say timeout = the CLI's "
           "own wall", "")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def suite_r148_i2_out_guard():
+    """R148 И-2: --out may not add a NEW entry to a drive root; inside a project the channels' -ws
+    working folders leave it, and the answers stay.
+
+    Igor 2026-10-12: «Какой-то проект сохраняет в корне D:\\ Ответы (папки) ... почему ИИ в своей
+    рабочей папке не сохраняет?» - one project's sessions had left 60 folders in one drive root,
+    because every rule said where NOT to write and the examples named a drive root. Separately,
+    an --out inside a project put codex's and agy's cwd (their -ws) below that project's CLAUDE.md,
+    which a CLI loads and sends to its vendor; of 463 runs on one machine 212 had --out inside a
+    project, so the answers stay where asked and only the -ws move. Every check fails on 1.108.4.
+    """
+    import json
+    import subprocess
+    import tempfile
+    import uuid
+    import orchestrate as o
+
+    tmp = tempfile.mkdtemp(prefix="r148i2-")
+    t = os.path.abspath(tempfile.gettempdir())
+    drive, rest = os.path.splitdrive(t)
+    root = drive + os.sep
+    top = os.path.join(root, [x for x in rest.split(os.sep) if x][0])
+    fresh = os.path.join(root, "orchguard-" + uuid.uuid4().hex[:10])
+    # (a) the root test itself: the root, a fresh top-level name (at any depth below it, either
+    # slash) are NEW; TEMP's own top-level folder and anything under TEMP are not.
+    nre = getattr(o, "_new_root_entry", None)        # absent before 1.109.0: FAIL, never a crash
+    got = [nre(root), nre(fresh), nre(os.path.join(fresh, "a", "b")),
+           nre(fresh.replace(os.sep, "/")), nre(top), nre(os.path.join(t, "x"))] if nre else None
+    check(got == [root, root, root, root, None, None],
+          "R148 И-2 (a) a new top-level entry (or the root itself) counts as a drive-root write; an "
+          "existing top-level folder and TEMP do not", repr(got))
+
+    # (b) a marker IN the home folder is user-level and skipped on request; one below it is not.
+    home = os.path.join(tmp, "home")
+    deep = os.path.join(home, "proj", "a")
+    os.makedirs(deep)
+    open(os.path.join(home, "AGENTS.md"), "w", encoding="utf-8").write("x\n")
+    code = ("import sys; sys.path.insert(0, %r); import orchestrate as o; "
+            "print('R=' + repr((o._project_marker_above(%r), o._project_marker_above(%r, skip_home=True))))"
+            % (str(HERE), deep, deep))
+    p = subprocess.run([PY, "-c", code], capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=120,
+                       env=dict(os.environ, HOME=home, USERPROFILE=home))
+    line = next((x for x in blob_of(p).splitlines() if x.startswith("R=")), "R=None")
+    open(os.path.join(home, "proj", "CLAUDE.md"), "w", encoding="utf-8").write("x\n")
+    p2 = subprocess.run([PY, "-c", code], capture_output=True, text=True, encoding="utf-8",
+                        errors="replace", timeout=120,
+                        env=dict(os.environ, HOME=home, USERPROFILE=home))
+    line2 = next((x for x in blob_of(p2).splitlines() if x.startswith("R=")), "R=None")
+    check(line == "R=%r" % ((os.path.join(home, "AGENTS.md"), None),)
+          and line2 == "R=%r" % ((os.path.join(home, "proj", "CLAUDE.md"),) * 2,),
+          "R148 И-2 (b) skip_home ignores an AGENTS.md in the home folder itself, never a project's "
+          "CLAUDE.md below it", "%s | %s" % (line, line2))
+
+    # (c) end to end through main(), every dispatcher stubbed: the workdir the CALL receives.
+    stubs = {"call_http_reviewer": "http", "call_codex": "codex", "call_agy": "agy",
+             "call_oai_reviewer": "oai", "call_xai_responses": "xai", "call_gemini_direct": "gemini",
+             "call_hermes": "hermes", "call_grokcli": "grokcli", "call_opencode": "opencode",
+             "call_claudecli": "claudecli", "call_mimocli": "mimocli", "call_qwencli": "qwencli",
+             "call_kimicli": "kimicli"}
+    probe = "\n".join([
+        "import json, os, sys, tempfile",
+        "sys.path.insert(0, %r)" % str(HERE),
+        "import orchestrate as o, routing",
+        "L = []",
+        "def mk(kind):",
+        "    def f(*a, **k):",
+        "        wd = k.get('workdir') or (a[2] if kind in ('codex', 'agy', 'grokcli') and len(a) > 2 else None)",
+        "        L.append({'kind': kind, 'name': k.get('name'), 'workdir': wd})",
+        "        return {'ok': True, 'text': 'stub\\nREVIEW-COMPLETE', 'seconds': 0.0, 'warnings': []}",
+        "    return f",
+        "for n, kind in %r.items():" % (stubs,),
+        "    assert callable(getattr(o, n, None)), 'stub target missing: ' + n",
+        "    setattr(o, n, mk(kind))",
+        "reg = routing.load_registry(os.path.join(%r, 'channels.json'))" % str(HERE),
+        "pick = {}",
+        "for c, ch in sorted(reg['channels'].items()):",
+        "    if ch.get('kind') in ('codex', 'agy', 'grokcli', 'kimicli') and not ch.get('explicit_only'):",
+        "        pick.setdefault(ch['kind'], c)",
+        "only = sorted(pick.values())",
+        "T = sys.argv[1]",
+        "proj = os.path.join(T, 'proj')",
+        "os.makedirs(proj)",
+        "open(os.path.join(proj, 'CLAUDE.md'), 'w', encoding='utf-8').write('# a project\\n')",
+        "b = os.path.join(T, 'b.md')",
+        "open(b, 'w', encoding='utf-8').write('Review.\\nREVIEW-COMPLETE\\n')",
+        "res = {'only': only, 'proj': proj}",
+        "for key, out in (('A', os.path.join(proj, 'reviews')), ('B', os.path.join(T, 'neutral', 'o'))):",
+        "    sys.argv = ['o', '--brief', b, '--out', out, '--only'] + only + ['--no-citecheck']",
+        "    try:",
+        "        o.main()",
+        "    except SystemExit:",
+        "        pass",
+        "    res[key] = list(L); L.clear()",
+        "res['tempws'] = os.path.join(tempfile.gettempdir(), 'orchestrate-ws')",
+        "try:",
+        "    res['temp_in_project'] = o._project_marker_above(res['tempws'], skip_home=True)",
+        "except TypeError:                     # pre-1.109.0 code: no skip_home (the NC run)",
+        "    res['temp_in_project'] = None",
+        "print('RESULT=' + json.dumps(res))",
+    ])
+    pf = os.path.join(tmp, "probe.py")
+    open(pf, "w", encoding="utf-8").write(probe)
+    p = subprocess.run([PY, pf, tmp], capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=300)
+    line = next((x for x in blob_of(p).splitlines() if x.startswith("RESULT=")), None)
+    d = json.loads(line[len("RESULT="):]) if line else {}
+    A, B = d.get("A") or [], d.get("B") or []
+    nc = lambda x: os.path.normcase(os.path.realpath(x))         # noqa: E731
+    proj = d.get("proj") or os.path.join(tmp, "proj")
+    inside = [r for r in A if r["workdir"] and nc(r["workdir"]).startswith(nc(proj) + os.sep)]
+    if d.get("temp_in_project"):        # a TEMP inside a project leaves them, and says so
+        ok_a = bool(A) and len(inside) == len([r for r in A if r["workdir"]])
+    else:
+        ok_a = (bool([r for r in A if r["workdir"]]) and not inside
+                and all(nc(r["workdir"]).startswith(nc(d["tempws"]) + os.sep)
+                        and r["workdir"].endswith("-ws")       # codex is called without name=
+                        for r in A if r["workdir"]))
+    check(ok_a, "R148 И-2 (c) --out inside a project: the workdir codex / agy / grok / kimi are CALLED "
+                "with is a fresh folder under TEMP, not below the project's CLAUDE.md",
+          "only=%s A=%s %s" % (d.get("only"), [(r["name"], r["workdir"]) for r in A][:4],
+                               blob_of(p)[-300:] if not line else ""))
+    rlog = os.path.join(proj, "reviews", "run.log")
+    rlog = open(rlog, encoding="utf-8").read() if os.path.isfile(rlog) else ""
+    check(os.path.isfile(os.path.join(proj, "reviews", "REPORT.md"))
+          and ("working folders (<channel>-ws)" in rlog or bool(d.get("temp_in_project"))),
+          "R148 И-2 (c) ... the answers (REPORT.md) still land in that --out, and its run.log says "
+          "where the -ws went and why", "report=%s note=%s" % (
+              os.path.isfile(os.path.join(proj, "reviews", "REPORT.md")),
+              "working folders (<channel>-ws)" in rlog))
+    neutral = os.path.join(tmp, "neutral", "o")
+    check(bool([r for r in B if r["workdir"]])
+          and all(nc(os.path.dirname(r["workdir"])) == nc(neutral) and r["workdir"].endswith("-ws")
+                  for r in B if r["workdir"]),
+          "R148 И-2 (c) --out outside every project: <out>/<channel>-ws exactly as before",
+          repr([(r["name"], r["workdir"]) for r in B][:4]))
+
+    # (d) through the real CLI: a NEW drive-root --out is refused on --dry-run, with --brief and
+    # with --ask, and NOTHING is created (1.108.4 made the folder and its run.log on --dry-run).
+    b = os.path.join(tmp, "b.md")
+    open(b, "w", encoding="utf-8").write("Say OK.\nREVIEW-COMPLETE\n")
+    rows = []
+    for argv in (["--brief", b, "--no-citecheck"], ["--ask", "2+2?"]):
+        target = os.path.join(root, "orchguard-" + uuid.uuid4().hex[:10])
+        p = subprocess.run([PY, str(HERE / "orchestrate.py")] + argv + ["--out", target, "--dry-run"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=240)
+        made = os.path.lexists(target)
+        if made:
+            shutil.rmtree(target, ignore_errors=True)
+        rows.append((argv[0], p.returncode, made, "refused, nothing was created" in blob_of(p)))
+    check(all(r[1] == 2 and not r[2] and r[3] for r in rows),
+          "R148 И-2 (d) a NEW drive-root --out is refused before anything exists (--brief and --ask)",
+          repr(rows))
+
+    # (e) the operator-facing text: --help names both rules, SKILL.md's example is no longer TEMP.
+    p = subprocess.run([PY, str(HERE / "orchestrate.py"), "--help"], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=120)
+    h = " ".join(blob_of(p).split())
+    sk = Path(HERE, "SKILL.md").read_text(encoding="utf-8") if Path(HERE, "SKILL.md").is_file() else ""
+    check("NEW folder directly in a drive root is refused" in h and "(<channel>-ws)" in h
+          and "$env:TEMP\\reviews" not in sk and "$env:TEMP\\brief" not in sk,
+          "R148 И-2 (e) --help states the drive-root refusal and the -ws move; SKILL.md §0 no longer "
+          "shows TEMP as the place for a run", "")
     shutil.rmtree(tmp, ignore_errors=True)
 
 

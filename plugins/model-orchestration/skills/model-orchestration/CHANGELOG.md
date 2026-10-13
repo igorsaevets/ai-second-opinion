@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.109.0 — 2026-10-12
+
+Where a run writes: no new folders in a drive root, and no CLI started under a project's instruction files.
+
+- **A new folder directly in a drive root is refused.** `--out D:\r149-panel` (or `--workdir` with `--task`, or the default `./reviews` started from `D:\`) stops with exit code 2 before anything is created, and the message names a place made for scratch: the per-user folder (`%LOCALAPPDATA%\ai-second-opinion\runs`, `~/Library/Application Support/...`, `~/.local/state/...`), or a top-level `AI_Scratch` folder when the drive already has one. 1.108.4 created the folder and its `run.log` even on `--dry-run`. A top-level folder that already exists is not new, so a panels folder kept there for months keeps working. Why: one project's sessions left 60 folders in the root of one drive, a fresh `<round>-panel` / `-tmp` / `-out` each time, because every instruction said only where NOT to write.
+- **`--out` inside a project: the answers stay, the CLI working folders leave.** codex (`-C`) and agy (cwd) run inside their `<channel>-ws` folder, which sat inside `--out`; with `--out` below a `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.git`, a CLI started there loads that project's instruction files and sends them to its vendor (the leak `neutral_cwd()` already closed for every other kind). Now the `-ws` folders go to a fresh folder under TEMP (swept after 3 days) and the plan and `run.log` say so; the answers, `REPORT.md` and `run.log` stay where you asked. Refusing such an `--out` was not an option: of 463 runs on one machine, 212 had it, in 8 projects. A marker in the home folder itself is user-level and does not count (TEMP sits below it on Windows, so moving could not help).
+- `--help` explains both rules; SKILL.md's example no longer puts the brief and the run in TEMP.
+
 ## 1.108.4 — 2026-10-11
 
 - **MiMo CLI: Claude-import disabled in the child process.** `mimo.exe` scans every changed Claude transcript on startup — measured 8.65 GB peak RSS on the operator's machine (×14 per transcript byte), versus 0.75 GB with the import off. The harness now sets `MIMOCODE_DISABLE_CLAUDE_IMPORT=1` in the subprocess environment so that panels never trigger the scan, regardless of the parent session's own env. Timeouts unchanged.
