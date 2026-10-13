@@ -1803,6 +1803,51 @@ def apply_explicit_only(plan, reg, named):
     return plan
 
 
+def family_absent_from_panel(plan, reg, route=None, only=None):
+    """
+    The channels of a GROUP the human named when the chosen panel holds NONE of that group.
+
+    🔴 R149: «только вондер» RESOLVED TO AN EMPTY ROUND. Every Muse Wonder channel is `standard`
+    and the default panel is `cheap`; R124 rightly stopped a group word from overriding the panel
+    («CLI cheap» must not pull in agy31pro), so the word that names the model selected nothing
+    and the run exited 2. The R124 rule is about a group ADDING standard voices to a cheap room
+    that already holds its family; when the room holds no voice of that family at all, the word
+    can only mean «that model», so its members count as named. Not touched: `explicit_only` and
+    default-off members (they still need their own name), and any group with a member in the room
+    («муза» in a cheap round = Spark alone). Members a route excluded are off, so not counted.
+    """
+    chosen = reg.get("_panel_chosen")
+    if not chosen:
+        return set()
+    room = panel_members(reg, chosen)
+    groups = {g: v for g, v in (reg.get("groups") or {}).items()
+              if not g.startswith("_") and isinstance(v, dict)}
+    said = set()
+    for nm in only or []:
+        w = str(nm).strip().lower().replace("ё", "е")
+        for gname, g in groups.items():
+            if w == gname.lower() or w in {str(a).lower().replace("ё", "е")
+                                           for a in g.get("aliases") or []}:
+                said.add(gname)
+    if route:
+        for tok in _scan(route, alias_index(reg)):
+            if tok[1] == "entity" and tok[2][0] == "group":
+                said.add(tok[2][1])
+    out = set()
+    for gname in sorted(said):
+        members = [c for c in groups[gname].get("channels") or [] if c in plan]
+        if not members or any(c in room for c in members):
+            continue
+        for c in members:
+            p, ch = plan[c], reg["channels"].get(c) or {}
+            if (p.get("enabled") and p.get("_panel_excluded") and not ch.get("explicit_only")
+                    and p.get("default_enabled", True)):
+                out.add(c)
+                p["why"].append("the %r panel holds no %r voice, so naming the family named "
+                                "this channel (R149)" % (chosen, gname))
+    return out
+
+
 def apply_panel(plan, reg, panel):
     """
     Narrow the plan to one panel. FILTERS DOWN ONLY - it never enables a channel.
@@ -2027,6 +2072,7 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
     # channel that may only be started by name is either named or it is off. Placed here rather
     # than inside apply_flags/apply_route so that adding a THIRD selection path later cannot
     # reopen the hole - the gate does not care which path enabled the channel.
+    named_directly = named_directly | family_absent_from_panel(plan, reg, route=route, only=only)
     plan = apply_explicit_only(plan, reg, named_directly)
     plan = _apply_cascade(plan, reg, ready)          # R140 И-3: `ready` from orchestrate.py
     plan = apply_fallback(plan, reg, ready)          # R142: after the cascade picked the voices
@@ -2135,10 +2181,18 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
         # returns 400 on both, and so does an invented value - the negative control that proves
         # the endpoint really validates it. xhigh is the true ceiling despite the vendor's own
         # OpenAPI enum listing `max`.
+        # 🔴 R149: THAT CEILING WAS SPARK'S, AND THE TIER APPLIED IT TO EVERY MODEL ON THIS KIND.
+        # Muse Wonder (`muse-wonder-1.0`) shares the endpoint and documents minimal..max; the tier
+        # line overwrote any channel `effort`, so `"effort": "max"` in the registry would have been
+        # printed nowhere and sent nowhere. A channel's own effort now wins (clamped to its model's
+        # `efforts`); a channel that declares none (the Spark rows) keeps the tier's http_effort.
             elif p.get("kind") == "http":
-                p["effort"] = t.get("http_effort", "xhigh")
-                p["_tier_note"] = ("thinking budget %s, output floor %s"
-                                   % (t.get("http_thinking_budget"), t.get("http_floor")))
+                p["effort"] = _clamp_effort(reg, cname, p["model"],
+                                            p.get("effort") or t.get("http_effort", "xhigh"), p)
+                p["_tier_note"] = ("effort %s (%s), thinking budget %s, output floor %s"
+                                   % (p["effort"],
+                                      _ceiling_phrase(reg, cname, p["model"], p["effort"]),
+                                      t.get("http_thinking_budget"), t.get("http_floor")))
         # 🔴 THE TIER USED TO REACH 4 OF 11 RUNNING CHANNELS AND READ LIKE A GLOBAL CONTROL.
         # Igor, 2026-08-08: «не понятно визуально, чем отличается strategic от Deep» - and the
         # true answer was "a timeout", because these three families were never wired at all.

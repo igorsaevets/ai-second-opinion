@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.110.0 — 2026-10-13
+
+Muse Wonder, Meta's most capable model, joins the standard panel.
+
+- **New channels `wonder10` and `orwonder`.** `wonder10` is Meta's Model API `muse-wonder-1.0` on your `MODEL_API_KEY`; `orwonder` is OpenRouter's `meta/muse-wonder` for an install with only an OpenRouter key (spend guard $5 per run). Both at effort `max`. They form one cascade, so a round runs one Wonder, the Meta key first. Standard panel only: $4 in / $20 out per 1M tokens, 40× / 100× Spark Contributor. On the API Wonder exists in Standard mode only (Contributor mode is not offered for it).
+- **Words.** `wonder` / `вондер` start Wonder. `muse` / `муза` / `meta` now mean both Meta lines (Spark and Wonder). `spark` / `спарк` still mean Spark alone.
+- **`--only wonder` under the default cheap panel no longer runs an empty round.** When the chosen panel holds no voice of a named group, that group's channels count as named. A group that has a voice in the panel still cannot pull in its other members.
+- **An http channel's own `effort` is no longer overwritten by the tier.** The tier set Spark's ceiling (xhigh) on every model behind the Meta endpoint, so Wonder's `max` would have gone out as `xhigh`. The Spark channels declare no effort of their own and are unchanged. `echocheck.py` now varies such a channel's own effort.
+- Measured on 2026-10-13: through the Meta API, `max` vs `xhigh` gave 988–1019 vs 697–792 output tokens (n=2 each, disjoint). Through OpenRouter, `max` is accepted: reasoning 1151–1431 vs 1019–1197 tokens (overlap at n=2). All 8 answers were correct.
+
 ## 1.109.0 — 2026-10-12
 
 Where a run writes: no new folders in a drive root, and no CLI started under a project's instruction files.

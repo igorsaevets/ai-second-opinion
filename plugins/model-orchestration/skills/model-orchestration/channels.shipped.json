@@ -29,9 +29,43 @@
       "aliases": [
         "spark",
         "спарк",
-        "муза",
-        "muse",
         "http"
+      ],
+      "_lost_the_muse_aliases_r149": "R149 (2026-10-13): «muse» / «муза» moved to the `muse` group below. Muse is Meta's BRAND for two model lines now - Muse Spark and Muse Wonder (dev.meta.ai/docs/models, read 2026-10-13) - so the brand word naming only Spark would have kept working and silently meant less (the `agy` / `gemini` lesson of 2026-08-07). `spark` / `спарк` stay here and still mean Spark alone; `http` stays too: it is this group's old channel name, not the transport (Wonder's direct channel is also kind http and is NOT started by it)."
+    },
+    "wonder": {
+      "label": "every Muse Wonder, all transports",
+      "channels": [
+        "wonder10",
+        "orwonder"
+      ],
+      "_added_r149": "R149 (2026-10-13), the operator: «добавим к нам и в kit новые модели spark Muse Wonder». Wonder is a DIFFERENT model from Spark (Meta's most capable line, $4/$20 per 1M on Model API vs Spark Contributor's $0.10/$0.20), so it is its own family and its own cascade: one Wonder voice per round - wonder10 where MODEL_API_KEY is set, orwonder in the kit for an OpenRouter-only user. The model words are GROUP aliases on purpose (R142 И-6, the Kimi lesson): a channel alias bypasses the cascade.",
+      "aliases": [
+        "wonder",
+        "вондер",
+        "вандер",
+        "уондер",
+        "muse wonder",
+        "муза вондер"
+      ]
+    },
+    "muse": {
+      "label": "every Meta Muse voice: Spark and Wonder, all transports",
+      "channels": [
+        "spark11",
+        "spark13cont",
+        "orspark13cont",
+        "ocspark13free",
+        "ocspark13go",
+        "wonder10",
+        "orwonder"
+      ],
+      "_added_r149": "R149: the brand word. «только муза» = one Spark (its cascade) + one Wonder (its cascade); «не используй muse» drops both lines. Same shape as `gemini` (the family) over `agy` (a transport).",
+      "aliases": [
+        "muse",
+        "муза",
+        "meta",
+        "мета"
       ]
     },
     "agy": {
@@ -85,8 +119,10 @@
         "ornemotron3ultra",
         "ordeepseekv4pro",
         "orglm53",
-        "orspark13cont"
+        "orspark13cont",
+        "orwonder"
       ],
+      "_membership_updated_r149": "R149 (2026-10-13): orwonder added - it spends the same OPENROUTER_API_KEY, so «--skip openrouter» must drop it too.",
       "_membership_updated_2026_08_30": "R69: orspark12cont added (RENAMED to orspark13cont R80, Spark 1.3 upgrade) - TWELVE channels. It spends the same OPENROUTER_API_KEY as the rest, so both properties this group exists for now cover it: «--skip openrouter» excludes it, and one runaway member's 403 takes it down with the others.",
       "aliases": [
         "openrouter",
@@ -253,6 +289,14 @@
         "muse-spark-1.3-contributor": {
           "label": "Muse Spark 1.3 Contributor",
           "data_policy": "Contributor tier - discounted pricing, Meta's Contributor data terms apply. See PRIVACY.md.",
+          "efforts": [
+            "xhigh",
+            "high",
+            "medium",
+            "low",
+            "minimal"
+          ],
+          "_efforts": "R149, dev.meta.ai/docs/models.md read 2026-10-13: Spark 1.3 supports every effort level including max, «not available with muse-spark-1.3-contributor». The channel declares no effort, so the tier's http_effort (xhigh) still runs; this list only lets routing name the ceiling and clamp a --set.",
           "aliases": [
             "muse-spark-1.3-contributor",
             "spark 1.3 contributor",
@@ -263,6 +307,14 @@
         "muse-spark-1.3": {
           "label": "Muse Spark 1.3 (Standard fallback)",
           "data_policy": "Standard tier - prompts and completions are NOT used for training.",
+          "efforts": [
+            "max",
+            "xhigh",
+            "high",
+            "medium",
+            "low",
+            "minimal"
+          ],
           "aliases": [
             "muse-spark-1.3",
             "spark 1.3",
@@ -438,6 +490,102 @@
       "_added": "2026-10-08 (R146 И-3), the operator: «Тогда в след. промте давай перенесем spark на подписку go а без подписку free как fallback если закончатся деньги и лимиты на аккаунте». Why: since 2026-10-05 ocspark13free answered 1 of 9 real rounds - 7 died on opencode's shared free quota (provider.quota at 0.7-5.8 s), 1 mid-run (runs/r146-i3-spark-go/find_spark_runs.log).",
       "notes": "Spark 1.3 Contributor through the operator's OpenCode Go subscription: the same model as ocspark13free, on the plan's own quota instead of the one every free user shares. The cheap panel's Spark since R146 И-3; ocspark13free is its run-time fallback and stays the kit's Spark.",
       "_prompt_suffix": "R146 И-3: the same training-tier text as ocspark13free (R135) - the same Contributor model."
+    },
+    "wonder10": {
+      "read_order": 1,
+      "kind": "http",
+      "panel": "standard",
+      "vendor": "meta",
+      "enabled": true,
+      "label": "Wonder 1.0",
+      "cost": "expensive",
+      "_cost": "Meta Model API pay-as-you-go, Standard mode only: $4.00 in / $20.00 out / $0.20 cached input per 1M tokens, web search $2.50 per 1,000 queries; 3,000 RPM / 4,000,000 TPM per team (dev.meta.ai/docs/pricing-rate-limits.md, read 2026-10-13) - 40x the input and 100x the output price of Spark 1.3 Contributor. This kind has NO per-review dollar ceiling (spend_guard is enforced on openrouter/oai only): the vendor runs the search loop inside one request, so a big brief with many searches is billed in full. Hence `panel: standard`, never cheap.",
+      "model": "muse-wonder-1.0",
+      "effort": "max",
+      "_effort": "R149: the operator 2026-10-13 «напрямую по api Max»; dev.meta.ai/docs/models.md (read 2026-10-13): Wonder «supports reasoning effort levels from minimal to max». Sent as output_config.effort; routing lets this channel effort win over the tier's http_effort (which stays xhigh for the Spark rows). Judged by the meter in R149 - see runs/r149-muse-wonder.",
+      "models": {
+        "muse-wonder-1.0": {
+          "label": "Muse Wonder 1.0",
+          "data_policy": "Standard mode - prompts and completions are NOT used to train Meta models. Contributor mode is not offered for Wonder on Model API (it exists only in Muse Code subscriptions).",
+          "efforts": [
+            "max",
+            "xhigh",
+            "high",
+            "medium",
+            "low",
+            "minimal"
+          ],
+          "aliases": [
+            "muse-wonder-1.0",
+            "wonder 1.0",
+            "вондер 1.0"
+          ]
+        }
+      },
+      "aliases": [
+        "wonder10",
+        "вондер10",
+        "wonder api",
+        "вондер апи"
+      ],
+      "_added": "R149 (2026-10-13), the operator: «добавим к нам и в kit новые модели spark Muse Wonder». Catalogue: GET /v1/models with this machine's MODEL_API_KEY lists muse-wonder-1.0 (and no muse-wonder-1.0-contributor); the docs say Wonder Full is Muse Code subscription-only and effort max does not select it. Its own cascade with orwonder; NOT in the Spark cascade - a different model is a different voice.",
+      "notes": "Meta's most capable model (preview) on the same Messages endpoint and key as spark13cont. Standard mode only, $4/$20 per 1M - an expensive standard-panel voice; the cheap panel never runs it. Effort max."
+    },
+    "orwonder": {
+      "read_order": 1,
+      "kind": "openrouter",
+      "panel": "standard",
+      "vendor": "meta",
+      "provider": "openrouter",
+      "enabled": true,
+      "distribution": "kit",
+      "_distribution": "KIT route, the orspark13cont pattern (R69): an employee who holds only an OPENROUTER_API_KEY gets a Wonder voice. Locally it sits after wonder10 in the Wonder cascade, so with MODEL_API_KEY present it never runs.",
+      "label": "OR Wonder",
+      "cost": "expensive",
+      "model": "meta/muse-wonder",
+      "_model": "OpenRouter's id is UNVERSIONED (meta/muse-wonder; Meta's is muse-wonder-1.0), so the channel name carries no version: if OpenRouter moves the id to a newer Wonder, `model_served` in diagnostics.json shows it. Catalogue read 2026-10-13 (GET /api/v1/models): $4/M in, $20/M out, $0.20/M cached, $0.0025 per web search, ctx 1,048,576, max_completion_tokens 943,718, one provider (Meta), reasoning mandatory, supported_efforts max..minimal, default_effort medium - below its own top (the R44 lesson), so effort is pinned.",
+      "reasoning": {
+        "effort": "max"
+      },
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ],
+      "max_tokens": 131072,
+      "_max_tokens": "min(the vendor's declared 943,718, the registry-wide 131,072 rule).",
+      "spend_guard": {
+        "max_usd_per_review": 5.0,
+        "_arithmetic": "R149, computed for $4 in / $20 out: a full 131,072-token answer alone is $2.62; a normal review (~100K billed input, ~30K out) ~$1.00; the worst runaway this project measured (7.4M billed input in one round) would be $29.60. $5.00 stops that at a sixth while leaving room for one deep review.",
+        "measured_usd": null
+      },
+      "web": {
+        "enabled": true,
+        "max_results": 5
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 11
+      },
+      "models": {
+        "meta/muse-wonder": {
+          "label": "Muse Wonder (via OpenRouter)",
+          "data_policy": "Standard mode through OpenRouter: the payload passes OpenRouter (their privacy policy applies) and lands on Meta's Standard terms - not used for training.",
+          "aliases": [
+            "meta/muse-wonder"
+          ]
+        }
+      },
+      "aliases": [
+        "orwonder",
+        "орвондер",
+        "wonder openrouter"
+      ],
+      "_added": "R149 (2026-10-13): the kit's Wonder for OpenRouter-only users; same model and price as wonder10, reached through the reseller.",
+      "notes": "Muse Wonder through OpenRouter for anyone whose only key is OPENROUTER_API_KEY. Effort max, spend guard $5 per review."
     },
     "ocmimo26flashfree": {
       "read_order": 1,
@@ -1952,6 +2100,10 @@
       "nvkimik3",
       "kimik3free",
       "kimik3"
+    ],
+    [
+      "wonder10",
+      "orwonder"
     ]
   ],
   "_cascade_groups_doc": "Panel cascade: when several channels carry the SAME model through different transports, only the first READY one runs; the rest are skipped. Order matters - cheapest/free first. The panel runs independent VOICES in parallel; paying three transports for one voice is waste, not breadth. Added 2026-09-04 (the operator: 'незачем у одних и тех же моделей спрашивать'). R143 И-3 (2026-10-05): a group may span panels. kimik3 (standard, OpenRouter, paid) is the last member of nvkimik3's group; members are only the channels already in THIS run's plan, so a cheap run never pulls kimik3 in, and a standard run gets one Kimi - nvkimik3 when its CLI and key are here, else kimik3.",

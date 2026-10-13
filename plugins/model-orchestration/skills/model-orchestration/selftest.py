@@ -7910,6 +7910,7 @@ def main():
                   suite_r146_i3_spark_go,
                   suite_r146_i4_tokens,
                   suite_r148_i2_out_guard,
+                  suite_r149_muse_wonder,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -14893,6 +14894,113 @@ def suite_r148_i2_out_guard():
           and "$env:TEMP\\reviews" not in sk and "$env:TEMP\\brief" not in sk,
           "R148 И-2 (e) --help states the drive-root refusal and the -ws move; SKILL.md §0 no longer "
           "shows TEMP as the place for a run", "")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def suite_r149_muse_wonder():
+    """R149 (2026-10-13): Meta's Muse Wonder as its own voice. Igor: «добавим к нам и в kit новые модели
+    spark Muse Wonder» and «напрямую по api Max». wonder10 = Model API `muse-wonder-1.0` at effort max
+    (Standard mode only, $4/$20 per 1M), orwonder = OpenRouter `meta/muse-wonder` for the kit; one
+    Wonder cascade, standard panel. Two defects on the way: the tier overwrote every http channel's
+    effort with Spark's xhigh, and «только вондер» resolved to an EMPTY round under the cheap default
+    (R124: a group cannot override the panel). Each check fails on 1.109.0.
+    """
+    import tempfile
+    import routing as rt
+    import echocheck as ec
+    section("R149 Muse Wonder: wonder10 (Meta API, max) + orwonder (OpenRouter, kit)")
+    reg = rt.load_registry()
+    chs = reg.get("channels") or {}
+    w, ow = chs.get("wonder10"), chs.get("orwonder")
+    if not (w and ow):
+        for n in "abcdefg":
+            check(False, "R149 (%s) wonder10 and orwonder exist" % n, "missing in channels.json")
+        return
+    casc = [g for g in reg.get("_cascade_groups") or [] if "wonder10" in g or "orwonder" in g]
+    check(w.get("kind") == "http" and w.get("model") == "muse-wonder-1.0" and w.get("effort") == "max"
+          and w.get("panel") == "standard" and w.get("cost") == "expensive"
+          and w.get("distribution", "both") == "both"
+          and ow.get("kind") == "openrouter" and ow.get("model") == "meta/muse-wonder"
+          and (ow.get("reasoning") or {}).get("effort") == "max" and ow.get("distribution") == "kit"
+          and ow.get("panel") == "standard"
+          and 0 < float((ow.get("spend_guard") or {}).get("max_usd_per_review") or 0) <= 5
+          and casc == [["wonder10", "orwonder"]]
+          and not any(c in (reg.get("ask_default") or []) for c in ("wonder10", "orwonder")),
+          "R149 (a) wonder10 = http muse-wonder-1.0 max, orwonder = openrouter meta/muse-wonder max (kit, "
+          "guard <= $5), standard panel, ONE cascade of their own, not in ask_default", repr(casc))
+    words = {x: set(rt.canon_channel_safe(reg, x)) for x in ("wonder", "вондер", "muse", "муза", "spark",
+                                                            "спарк")}
+    check(words["wonder"] == words["вондер"] == {"wonder10", "orwonder"}
+          and {"wonder10", "spark13cont"} <= words["muse"] == words["муза"]
+          and not words["spark"] & {"wonder10", "orwonder"} and words["spark"] == words["спарк"],
+          "R149 (b) wonder/вондер = the Wonder family; muse/муза = Spark + Wonder; spark/спарк = Spark only",
+          repr({k: sorted(v) for k, v in words.items()}))
+
+    def yes(_n):
+        return True
+
+    def runs(**kw):
+        p = rt.resolve(rt.load_registry(), ready=yes, **kw)
+        return sorted(c for c, s in p.items() if s.get("enabled")), p
+
+    cheap, _ = runs(panel="cheap")
+    std, _ = runs(panel="standard")
+    on_w = [c for c in ("wonder10", "orwonder") if chs[c].get("enabled", True)]
+    check(not {"wonder10", "orwonder"} & set(cheap) and [c for c in std if c in ("wonder10", "orwonder")]
+          == on_w[:1],
+          "R149 (c) the cheap panel runs no Wonder; the standard panel runs exactly one (the cascade)",
+          "cheap=%r std-wonder=%r" % (cheap, [c for c in std if "wonder" in c]))
+    ow_, _ = runs(only=["wonder"])
+    rw_, _ = runs(route="только вондер")
+    om_, _ = runs(only=["muse"])
+    check(ow_ == on_w[:1] and rw_ == on_w[:1] and not {"wonder10", "orwonder"} & set(om_) and om_,
+          "R149 (d) under the cheap default «--only wonder» and «только вондер» run one Wonder (the room has "
+          "no Wonder, so the family word names it); «--only muse» stays the cheap Spark",
+          "only wonder=%r route=%r only muse=%r" % (ow_, rw_, om_))
+    _, pw = runs(only=["wonder10", "spark13cont"], tier="max")      # the tier block runs only with a tier
+    check((pw.get("wonder10") or {}).get("effort") == "max"
+          and (pw.get("spark13cont") or {}).get("effort") == "xhigh",
+          "R149 (e) the plan keeps wonder10's own effort max; Spark keeps the tier's xhigh",
+          "wonder10=%r spark13cont=%r" % ((pw.get("wonder10") or {}).get("effort"),
+                                          (pw.get("spark13cont") or {}).get("effort")))
+    # (f) the knob reaches the CALL: every dispatcher stubbed, main() run on both channels.
+    tmp = tempfile.mkdtemp(prefix="r149-")
+    probe = "\n".join([
+        "import json, os, sys",
+        "sys.path.insert(0, %r)" % str(HERE),
+        "import orchestrate as o",
+        "L = []",
+        "def f(*a, **k):",
+        "    L.append({'name': k.get('name'), 'effort': k.get('effort'), 'model': k.get('model')})",
+        "    return {'ok': True, 'text': 'stub\\nREVIEW-COMPLETE', 'seconds': 0.0, 'warnings': []}",
+        "o.call_http_reviewer = f",
+        "b = os.path.join(sys.argv[1], 'b.md')",
+        "open(b, 'w', encoding='utf-8').write('Review.\\nREVIEW-COMPLETE\\n')",
+        "sys.argv = ['o', '--brief', b, '--out', os.path.join(sys.argv[1], 'o'), '--only', 'wonder10',",
+        "            'spark13cont', '--no-citecheck', '--no-fallback']",
+        "try:",
+        "    o.main()",
+        "except SystemExit:",
+        "    pass",
+        "print('RESULT=' + json.dumps(L))",
+    ])
+    pf = os.path.join(tmp, "probe.py")
+    open(pf, "w", encoding="utf-8").write(probe)
+    env = dict(os.environ, MODEL_API_KEY="r149-selftest-dummy-not-a-key")
+    p = subprocess.run([PY, pf, tmp], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       timeout=300, env=env)
+    line = next((x for x in blob_of(p).splitlines() if x.startswith("RESULT=")), None)
+    got = {r["name"]: r for r in (json.loads(line[len("RESULT="):]) if line else [])}
+    check((got.get("wonder10") or {}).get("effort") == "max"
+          and (got.get("wonder10") or {}).get("model") == "muse-wonder-1.0"
+          and (got.get("spark13cont") or {}).get("effort") == "xhigh",
+          "R149 (f) dispatch: call_http_reviewer gets effort=max for wonder10 and xhigh for spark13cont",
+          repr(got) if got else blob_of(p)[-300:])
+    kw = ec.knob_for("wonder10", {"kind": "http"}, "max")
+    ks = ec.knob_for("spark11", {"kind": "http"}, "max")
+    check(kw[0] == "channel wonder10.effort" and kw[1][-1:] == ["max"] and "http_effort" in (ks[0] or ""),
+          "R149 (g) echocheck varies wonder10's own effort (its ladder tops at max); Spark stays on the "
+          "tier's http_effort", "%r / %r" % (kw[:2], ks[:2]))
     shutil.rmtree(tmp, ignore_errors=True)
 
 

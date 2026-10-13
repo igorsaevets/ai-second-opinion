@@ -109,6 +109,19 @@ def _reasoning_frag(ch, lvl):
     return {"channels": {ch: {"reasoning": {"effort": lvl}}}}
 
 
+def _own_http_ladder(cname):
+    """An http channel's own effort ladder (lowest first), or [] when it declares no effort."""
+    try:
+        import routing
+        ch = (routing.load_registry().get("channels") or {}).get(cname) or {}
+    except Exception:                                     # noqa: BLE001
+        return []
+    if not ch.get("effort"):
+        return []
+    return list(reversed(((ch.get("models") or {}).get(ch.get("model")) or {}).get("efforts")
+                         or []))
+
+
 def knob_for(cname, slot, tier):
     """(description, ladder, fragment-builder) for this channel, or (None, [], None)."""
     kind = slot.get("kind")
@@ -136,6 +149,13 @@ def knob_for(cname, slot, tier):
         # `--knob http_thinking_budget` and a working instrument must answer INERT. An instrument
         # that can only ever return CONFIRMED has not been calibrated, it has been trusted.
         # `max` is not legal here (probed: 400 on both Spark models), so the ladder stops at xhigh.
+        # 🔴 R149: a channel that declares its OWN effort (wonder10, max) is not moved by the tier
+        # any more - routing lets the channel value win - so the tier knob would read INERT on it
+        # for a reason that has nothing to do with the vendor. Vary the channel's own field there,
+        # over its model's `efforts` ladder.
+        own = _own_http_ladder(cname)
+        if own:
+            return ("channel %s.effort" % cname, own, _chan_frag("effort"))
         return ("tier %s.http_effort" % tier, ["low", "xhigh"], _tier_frag("http_effort", tier))
     if kind == "agy":
         return ("tier %s.agy_effort" % tier, ["low", "high"], _tier_frag("agy_effort", tier))
