@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.111.3 — 2026-10-13
+
+Grok Build, after a review panel on 1.111.2 (six reviewers; each item below was checked in the code
+or measured before it was changed):
+
+- **Each run checks that Grok honoured the import switches.** Before the review the harness asks
+  `grok inspect --json` (no model call, 0.2 s measured) and logs «imports verified off»; if a grok
+  version ignores a switch, the run carries a 🔴 note instead of silently sending your Claude Code
+  setup to xAI. 1.111.2 called the switches undocumented: ten of the eighteen are in xAI's settings
+  reference (`docs.x.ai/build/settings/reference`); the `SESSIONS` and `CODEX` ones are not.
+- **A timeout never quotes another run's session.** The sessions already in the run's folder are
+  noted when it starts, so a retry in the same process or a second grok in a `--task` folder is not
+  taken for this run (a newer file time used to win); if two changed, the note says so. Grok's
+  slug + `.cwd` form for long folder paths, macOS's `/var` → `/private/var`, a relative `GROK_HOME`
+  and one unreadable folder no longer hide the record.
+- **«No session record» no longer advises a longer timeout**: it says Grok stopped before opening a
+  session and how to check by hand. A transport decode error on its own is reported as the stall it
+  is.
+- **With bypass on, the reviewer cannot `read_file` the other CLIs' credential stores**:
+  `~/.claude.json`, Claude Code's `.credentials.json`, every `auth.json`, `oauth_creds.json`, Claude
+  Desktop's and Cursor's MCP configs, Kimi's config.
+- **macOS / Linux**: the Grok binary is found as `grok`, also in `~/.grok/bin` (it was looked up as
+  `grok.exe` only), and the `~/.grok/rules` preflight follows `GROK_HOME`.
+- 1.111.2's notes said Grok no longer imports from Claude Code: Claude Code plugins still load (Grok
+  has no switch for them), and so do the files in `~/.grok/rules/`. INSTALL.md now says so in the
+  heading.
+
 ## 1.111.2 — 2026-10-13
 
 The Grok Build channel (`grokbuild`) had stopped answering: on 2026-10-13 no panel got a review from it, and each run sat until its 40-minute timeout.

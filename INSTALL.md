@@ -744,18 +744,26 @@ undone:
 - **No file tools.** `--cwd` bounds where the agent *starts*, not what `read_file` can *open*, so
   the read tools are not granted at all.
 
-**Nothing imported from Claude Code, Cursor or Codex (since 1.111.2).** Out of the box Grok Build
-loads the MCP servers in your `~/.claude.json`, your Claude Code skills, rules (your global
-`CLAUDE.md`), agents and hooks, and the same parts of Cursor and Codex. For a review that meant
-your own instructions went to xAI with every brief, and on 2026-10-13 one MCP server imported from
-`~/.claude.json` hung every run until the 40-minute timeout. The harness now starts Grok with
+**Imports from Claude Code, Cursor and Codex switched off (since 1.111.2) — plugins excepted.** Out
+of the box Grok Build loads the MCP servers in your `~/.claude.json`, your Claude Code skills, rules
+(your global `CLAUDE.md`), agents and hooks, and the same parts of Cursor and Codex. For a review that
+meant your own instructions went to xAI with every brief, and on 2026-10-13 one MCP server imported
+from `~/.claude.json` hung every run until the 40-minute timeout. The harness starts Grok with
 `GROK_CLAUDE_MCPS_ENABLED=0` and the 17 sibling switches
-(`GROK_<CLAUDE|CURSOR|CODEX>_<SKILLS|RULES|AGENTS|MCPS|HOOKS|SESSIONS>_ENABLED=0`); `grok inspect`
-shows them as `externalCompat` cells. A reviewer keeps Grok's own config: the MCP servers in
-`~/.grok/config.toml`, your shell logins, Grok's own skills. Claude Code **plugins** still load —
-Grok has no switch for them. Your own `grok` sessions are unaffected. If a run still times out, the
-error quotes Grok's own session record: the tool that started and never finished, and the MCP
-servers that failed at start.
+(`GROK_<CLAUDE|CURSOR|CODEX>_<SKILLS|RULES|AGENTS|MCPS|HOOKS|SESSIONS>_ENABLED=0`). Ten of them are in
+xAI's [settings reference](https://docs.x.ai/build/settings/reference); the `SESSIONS` and `CODEX`
+ones exist only in the binary (measured on grok 1.0.52). Since 1.111.3 every run first asks
+`grok inspect --json` (no model call, about 0.2 s) whether this grok honoured them, and the run log
+says «imports verified off»; if a newer grok ignores a switch, the run carries a 🔴 note instead of
+failing silently. Still loaded, because Grok has no switch for them: Claude Code **plugins** (with any
+skills, hooks or MCP servers they bring) and the files in `~/.grok/rules/` (the preflight lists them).
+A reviewer keeps Grok's own config: the MCP servers in `~/.grok/config.toml`, your shell logins,
+Grok's own skills. In `--task` mode Grok works in the task folder and reads that project's
+`AGENTS.md`, as it would for you. If a run still times out, the error quotes Grok's own session
+record: the tool that started and never finished, and the MCP servers that failed at start. Your own
+`grok` sessions are unaffected; to keep them from importing too, set `GROK_CLAUDE_MCPS_ENABLED=0` (and
+any of the others) in your user environment, or `mcps = false` under `[compat.claude]` in
+`~/.grok/config.toml`.
 
 ### Antigravity CLI (Gemini)
 

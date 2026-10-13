@@ -7917,6 +7917,7 @@ def main():
                   suite_r149_i2_muse_code,
                   suite_r149_i3_muse_hotfix,
                   suite_r150_i2_grok_compat,
+                  suite_r150_i3_grok_panel_fixes,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -11691,8 +11692,8 @@ R138_GOLDEN_BEFORE = {
     "attach_refs.tools_full=True": "946c283132ad9b82",
     "grok.argv.bypass=False.refs=False": "eca273eaed4488ef",
     "grok.argv.bypass=False.refs=True": "ed9164f29f8f689c",
-    "grok.argv.bypass=True.refs=False": "dd80fbda2026865d",
-    "grok.argv.bypass=True.refs=True": "adeec9f8c6a4ead2",
+    "grok.argv.bypass=True.refs=False": "49c8a45815f99664",   # R150 И-3: +7 credential-store --deny rules
+    "grok.argv.bypass=True.refs=True": "8e4ba1ce9d4ae45e",   # R150 И-3: +7 credential-store --deny rules
     "grok.prompt.bypass=False.refs=False": "7fd767f70586b77a",
     "grok.prompt.bypass=False.refs=True": "57fe754bf739fcf1",
     "grok.prompt.bypass=True.refs=False": "e313a10a15bf330e",
@@ -15022,6 +15023,19 @@ def suite_r149_i3_muse_hotfix():
           "the user's MCP servers cannot be called", str(web)[:160])
 
 
+def _r150_install_md():
+    """(path, text) of the kit's INSTALL.md: kit/INSTALL.md in the source tree, the repo root's
+    INSTALL.md in a built kit tree (searched upward); (first candidate, "") when neither exists."""
+    cands, d = [os.path.join(HERE, "kit", "INSTALL.md")], HERE
+    for _ in range(6):
+        cands.append(os.path.join(d, "INSTALL.md"))
+        d = os.path.dirname(d)
+    for p in cands:
+        if os.path.isfile(p):
+            return p, open(p, encoding="utf-8").read()
+    return cands[0], ""
+
+
 def suite_r150_i2_grok_compat():
     """R150 И-2 (2026-10-13): Grok Build without what it imports from Claude Code / Cursor / Codex.
 
@@ -15041,7 +15055,7 @@ def suite_r150_i2_grok_compat():
     section("R150 И-2 Grok Build: Claude Code / Cursor / Codex imports off, the stuck step named")
     td = tempfile.mkdtemp(prefix="r150i2-")
     seen = []
-    secret = "sk-R150FAKE-" + "Q" * 24
+    planted = "sk-R150FAKE-" + "Q" * 24
 
     class _Done:
         returncode = 0
@@ -15073,15 +15087,15 @@ def suite_r150_i2_grok_compat():
             _session(os.path.join(cwd, "other"), "01other-cwd", [
                 {"type": "tool_started", "tool_name": "decoy_tool", "ts": ts % 2}])
             _session(cwd, "01a13705-this-run", [
-                {"type": "mcp_server_starting", "server_name": "playwright-ext", "target": secret,
+                {"type": "mcp_server_starting", "server_name": "playwright-ext", "target": planted,
                  "transport": "stdio", "ts": ts % 3},
                 {"type": "tool_started", "tool_name": "read_file", "ts": ts % 4},
                 {"type": "tool_completed", "tool_name": "read_file", "tool_call_id": "c1", "ts": ts % 5},
                 {"type": "tool_started", "tool_name": "list_dir", "ts": ts % 10},
                 {"type": "mcp_transport_decode_error", "server_name": "cloakbrowser",
-                 "error": "expected value at line 1 column 7", "sample": "SAMPLE-LEAK " + secret,
+                 "error": "expected value at line 1 column 7", "sample": "SAMPLE-LEAK " + planted,
                  "ts": ts % 11},
-                {"type": "mcp_server_failed", "server_name": "playwright-ext", "target": secret,
+                {"type": "mcp_server_failed", "server_name": "playwright-ext", "target": planted,
                  "error_type": "timeout", "error_message": "timed out after 70s", "ts": ts % 20},
                 {"type": "mcp_init_completed", "failed": 2, "succeeded": 7,
                  "failed_servers": ["playwright-ext", "cloakbrowser"], "ts": ts % 21}])
@@ -15150,9 +15164,10 @@ def suite_r150_i2_grok_compat():
                                  "this run under ~/.grok/sessions")
         check((cause or "").startswith("Grok Build stalled inside its own runtime")
               and (g_cause or "").startswith("The channel took longer")
-              and (n_cause or "").startswith("The channel took longer"),
+              and (n_cause or "").startswith("Grok left no session record"),
               "R150 И-2 (e) diagnose(): the stalled-runtime cause for a named stuck step, the generic "
-              "timeout text when Grok's record names nothing", repr((cause, g_cause, n_cause))[:200])
+              "text for a bare TIMEOUT; «none found» has its own cause since 1.111.3 (R150 И-3: a "
+              "longer timeout would not help there)", repr((cause, g_cause, n_cause))[:200])
         # (f) an empty failure (exit 1, no text) carries the note; no record = says so, no crash
         for f in os.listdir(os.path.join(td, "grokhome", "sessions")):
             for sid in os.listdir(os.path.join(td, "grokhome", "sessions", f)):
@@ -15171,11 +15186,190 @@ def suite_r150_i2_grok_compat():
             os.environ["GROK_HOME"] = saved[3]
         _sh.rmtree(td, ignore_errors=True)
     # (g) INSTALL.md says what this channel no longer imports (when the kit doc is in this tree)
-    inst = os.path.join(HERE, "kit", "INSTALL.md")
-    doc = open(inst, encoding="utf-8").read() if os.path.isfile(inst) else ""
-    check(not doc or ("GROK_CLAUDE_MCPS_ENABLED" in doc and "plugins" in doc.split("### Grok Build CLI")[-1][:6000]),
-          "R150 И-2 (g) INSTALL.md's Grok section names the import switches and what they leave on",
-          inst)
+    inst, doc = _r150_install_md()
+    check(bool(doc) and "GROK_CLAUDE_MCPS_ENABLED" in doc
+          and "plugins" in doc.split("### Grok Build CLI")[-1][:6000],
+          "R150 И-2 (g) INSTALL.md's Grok section names the import switches and what they leave on "
+          "(R150 И-3: a tree without the doc fails - it used to pass vacuously)", inst)
+
+
+def suite_r150_i3_grok_panel_fixes():
+    """R150 И-3 (2026-10-13): the cheap panel on kit 1.111.2 (6 of 6 answered; all six refuted the
+    planted claim). What it found AND the code or a measurement confirmed; each check fails on 1.111.2:
+    (a) a session already in the run's folder that did not change during the run is never quoted
+        as this run's, even with a newer mtime (a retry in one process, a second grok in a --task
+        workdir - raised by all six); another folder's never is;
+    (b) two sessions that changed during the run: the note says it cannot tell them apart;
+    (c) a group named slug+hash with the real path in `.cwd` (grok-build user guide 17-sessions:
+        encoded names over 255 bytes) is found;
+    (d) a relative GROK_HOME reaches the child as the absolute path the reader uses;
+    (e) diagnose(): «none found» is not «took longer» (a longer timeout would not help); a decode
+        error alone is the stalled-runtime cause;
+    (f) `grok inspect --json` verdicts - honoured / ignored / no cells - counts only, no MCP target;
+    (g) bypass: read_file is denied on the other CLIs' credential stores;
+    (h) macOS/Linux: a «*.exe» name is looked up without the suffix, and inside a bin FOLDER;
+    (i) INSTALL.md's Grok section cites xAI's settings reference and the inspect check.
+    """
+    import json as _j
+    import shutil as _sh
+    import tempfile
+    import time
+    import urllib.parse as _up
+    import orchestrate as o
+    section("R150 И-3 Grok Build: which session, GROK_HOME, the inspect check, the deny list")
+    td = tempfile.mkdtemp(prefix="r150i3-")
+    seen, during = [], []
+
+    def _ev(path, events, mtime=None):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            for e in events:
+                f.write(_j.dumps(e) + "\n")
+        if mtime:
+            os.utime(path, (mtime, mtime))
+
+    def _grp(cwd):
+        return os.path.join(os.environ["GROK_HOME"], "sessions", _up.quote(cwd, safe=""))
+
+    def _tool(name, sec):
+        return {"type": "tool_started", "tool_name": name, "ts": "2026-10-13T21:00:%02d.000Z" % sec}
+
+    def _run(cmd, **kw):
+        seen.append((list(cmd), dict(kw)))
+        while during:
+            during.pop(0)()
+        raise o.subprocess.TimeoutExpired(cmd, 7)
+
+    def _call(**kw):
+        r = o.call_grokcli("B", "MARK", os.path.join(td, "w"), os.path.join(td, "G.md"),
+                           timeout=7, **kw)
+        return r.get("error") or ""
+
+    saved = (o.subprocess.run, o.grok_bin, o.neutral_cwd, os.environ.get("GROK_HOME"))
+    try:
+        o.neutral_cwd = lambda: os.path.join(td, "neutral")
+        o.grok_bin = lambda: "grok.exe"
+        o.subprocess.run = _run
+        os.environ["GROK_HOME"] = os.path.join(td, "grokhome")
+        gc = os.path.join(td, "neutral", "grok-p%d" % os.getpid())
+        now = time.time()
+        # (a) an older session in the same folder with a NEWER mtime, unchanged during the run, and
+        # another folder's session written during the run with the newest mtime of all
+        _ev(os.path.join(_grp(gc), "01prev-same-folder", "events.jsonl"), [_tool("grep", 1)],
+            mtime=now + 300)
+        during.append(lambda: _ev(os.path.join(_grp(gc), "02this-run", "events.jsonl"),
+                                  [_tool("list_dir", 2)]))
+        during.append(lambda: _ev(os.path.join(_grp(os.path.join(gc, "x")), "03other-cwd",
+                                               "events.jsonl"), [_tool("decoy_tool", 3)],
+                                  mtime=now + 600))
+        err = _call(bypass=True)
+        check("02this-run" in err and "list_dir" in err and "grep" not in err
+              and "decoy_tool" not in err and "1 of " not in err,
+              "R150 И-3 (a) a session already in the run's folder that did not change is never this "
+              "run's, even with a newer mtime; another folder's never is", err[:300])
+        # (g) the same bypass call: read_file denied on the other CLIs' credential stores
+        cmd = seen[-1][0]
+        denies = [cmd[i + 1] for i, a in enumerate(cmd[:-1]) if a == "--deny"]
+        check(all(w in denies for w in ("Read(**/.claude.json)", "Read(**/.credentials.json)",
+                                        "Read(**/auth.json)", "Read(**/oauth_creds.json)")),
+              "R150 И-3 (g) bypass: read_file is denied on ~/.claude.json, Claude Code's "
+              ".credentials.json, every auth.json and oauth_creds.json", repr(denies)[:300])
+        # (b) two sessions changed during the run
+        during.append(lambda: _ev(os.path.join(_grp(gc), "04first", "events.jsonl"),
+                                  [_tool("web_fetch", 4)], mtime=time.time()))
+        during.append(lambda: _ev(os.path.join(_grp(gc), "05second", "events.jsonl"),
+                                  [_tool("web_search", 5)], mtime=time.time() + 1))
+        err = _call()
+        check("05second" in err and "1 of 2 sessions" in err and "grep" not in err,
+              "R150 И-3 (b) two sessions that changed during the run: the newest is quoted AND the "
+              "note says another grok shares the folder", err[:300])
+        # (c) the slug + hash form: the real path is in `.cwd`
+        slug = os.path.join(os.environ["GROK_HOME"], "sessions", "neutral-grok-slug-1a2b3c4d")
+
+        def _slug():
+            os.makedirs(slug, exist_ok=True)
+            with open(os.path.join(slug, ".cwd"), "w", encoding="utf-8") as f:
+                f.write(gc + "\n")
+            _ev(os.path.join(slug, "06slug-group", "events.jsonl"), [_tool("read_file", 6)],
+                mtime=time.time() + 2)
+        during.append(_slug)
+        err = _call()
+        check("06slug-group" in err and "read_file" in err and "1 of " not in err,
+              "R150 И-3 (c) a session group named slug+hash is found through its `.cwd` file "
+              "(Grok's form for encoded names over 255 bytes)", err[:300])
+        # (d) a relative GROK_HOME: the child gets the absolute path the reader uses
+        os.environ["GROK_HOME"] = "r150i3-relative-grokhome"
+        env = o._grok_child_env()
+        check(os.path.isabs(env.get("GROK_HOME") or "") and env.get("GROK_HOME") == o._grok_home(),
+              "R150 И-3 (d) a relative GROK_HOME reaches grok as the same absolute path the "
+              "session reader looks in", repr(env.get("GROK_HOME")))
+        os.environ["GROK_HOME"] = os.path.join(td, "grokhome")
+    finally:
+        o.subprocess.run, o.grok_bin, o.neutral_cwd = saved[:3]
+        if saved[3] is None:
+            os.environ.pop("GROK_HOME", None)
+        else:
+            os.environ["GROK_HOME"] = saved[3]
+    # (e) diagnose(): «none found» and «decode errors only»
+    n_cause = o.diagnose("TIMEOUT after 40m - Grok's own session record: none found for this run "
+                         "under ~/.grok/sessions")[0] or ""
+    d_cause = o.diagnose("TIMEOUT after 40m - Grok's own session 01abc (~/.grok/sessions/.../01abc): "
+                         "transport decode errors from: cloakbrowser; last event "
+                         "mcp_init_completed at 08:35:21, no turn end")[0] or ""
+    g_cause = o.diagnose("TIMEOUT after 40m")[0] or ""
+    check(n_cause.startswith("Grok left no session record")
+          and d_cause.startswith("Grok Build stalled inside its own runtime")
+          and g_cause.startswith("The channel took longer"),
+          "R150 И-3 (e) diagnose(): «none found» has its own cause (a longer timeout would not "
+          "help), a decode error alone is the stall; a bare TIMEOUT stays generic (control)",
+          repr((n_cause[:40], d_cause[:40], g_cause[:40])))
+    # (f) the inspect verdicts, from the shapes grok 1.0.52 prints
+    ok_j = {"externalCompat": {"cells": [
+                {"vendor": "claude", "surface": "mcps", "enabled": False, "source": "env"},
+                {"vendor": "cursor", "surface": "rules", "enabled": False, "source": "env"}]},
+            "skills": [{"name": "s1", "source": {"type": "claude"}, "compatibilityStatus": "disabled",
+                        "disabled": True}],
+            "plugins": [{"name": "p1", "enabled": True}, {"name": "p2", "enabled": True}]}
+    bad_j = {"externalCompat": {"cells": [
+                 {"vendor": "claude", "surface": "mcps", "enabled": True, "source": "default"}]},
+             "mcpServers": [{"name": "x", "target": "R150FAKE-TARGET --header X-Token",
+                             "compatibilityStatus": "enabled"}]}
+    summ = getattr(o, "_grok_imports_summary", lambda j: ("", None))   # absent before 1.111.3
+    t1, n1 = summ(ok_j)
+    t2, n2 = summ(bad_j)
+    t3, n3 = summ({"skills": []})
+    check(n1 is None and "verified off" in t1 and "2 plugin" in t1
+          and bool(n2) and "GROK IMPORTS STILL ON" in n2 and "claude/mcps" in n2
+          and "1 mcpServers" in n2 and "R150FAKE" not in (n2 or "") + t2
+          and bool(n3) and "NOT verified" in n3,
+          "R150 И-3 (f) `grok inspect` verdicts: switches honoured -> verified (+ plugin count), "
+          "ignored -> a 🔴 note with counts and no MCP target, no cells -> not verified",
+          repr((t1[:60], (n2 or "")[:80], (n3 or "")[:40])))
+    # (h) the binary on macOS/Linux: «grok.exe» -> «grok», found inside a bin FOLDER
+    bd = os.path.join(td, "bin")
+    os.makedirs(bd, exist_ok=True)
+    for n in ("grok", "grok.exe"):
+        open(os.path.join(bd, n), "w").close()
+    saved_name, saved_which = os.name, o.shutil.which
+    try:
+        o.shutil.which = lambda *a, **k: None
+        os.name = "posix"
+        px = o._resolve_bin("R150I3_NO_SUCH_BIN_ENV", "grok.exe", [bd])
+        os.name = "nt"
+        nt = o._resolve_bin("R150I3_NO_SUCH_BIN_ENV", "grok.exe", [bd])
+    finally:
+        os.name, o.shutil.which = saved_name, saved_which
+    check(px == os.path.join(bd, "grok") and nt == os.path.join(bd, "grok.exe"),
+          "R150 И-3 (h) the Grok binary is looked up as `grok` on macOS/Linux and inside the bin "
+          "folder it is given (it was only ever `grok.exe` on PATH)", repr((px, nt)))
+    _sh.rmtree(td, ignore_errors=True)
+    # (i) INSTALL.md
+    inst, doc = _r150_install_md()
+    sec = doc.split("### Grok Build CLI")[-1][:9000] if doc else ""
+    check("docs.x.ai/build/settings/reference" in sec and "grok inspect --json" in sec
+          and "plugins" in sec and "~/.grok/rules" in sec,
+          "R150 И-3 (i) INSTALL.md's Grok section cites xAI's settings reference, the per-run "
+          "inspect check and what still loads (plugins, ~/.grok/rules)", inst)
 
 
 def suite_r149_i2_muse_code():
