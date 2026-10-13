@@ -9,6 +9,7 @@ The Muse Code channel (`mcwonder10cont`) after its first review panel and a look
 - **A run is OK only when it says so.** A crash after part of the answer had streamed (no final record, exit 1) used to be graded OK. Now the run must end with a completed record and exit 0; anything else is a warning, and the partial text is still saved.
 - When `muse export` gives no token counts for a session, the report says so instead of leaving the columns silently empty. A toolset that names a tool the machine lacks (Muse Code then refuses the whole run) has its own diagnosis.
 
+## 1.111.0 — 2026-10-13
 
 Muse Wonder through the Muse Code CLI, on your Muse Code subscription.
 
