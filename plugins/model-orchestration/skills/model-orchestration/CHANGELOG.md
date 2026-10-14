@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.111.4 — 2026-10-13
+
+Grok Build, after Grok's own review of 1.111.3 (each item below was checked in the code or with a
+live Grok run before it was changed):
+
+- **A grok that would load your Claude Code setup is not started.** When `grok inspect` shows
+  imported items active despite the switches (a newer grok that renamed one), the brief is not sent
+  and the error names the surfaces and how to turn them off; 1.111.3 only noted it and ran. A switch
+  that is on with nothing behind it stays a 🔴 note, and an inspect answer whose switch cells have
+  no true/false value is «not verified», never «verified off».
+- **Each run names its Grok session** (`--session-id`, a fresh UUID), and the note after a timeout
+  reads that session by name. 1.111.3 said a timeout never quotes another run's session; two runs
+  sharing one `--task` folder at the same time still could. A session folder without Grok's
+  `events.jsonl` is now named as such, and a tool call a deny rule refused is counted as refused -
+  it used to read as «started and never finished», the sign of a stalled run (found on a live run of
+  this release).
+- **With bypass on, the reviewer cannot read Grok's own session records** (they keep each MCP
+  server's command line and headers; on the author's machine 297 of them carry a key or token), Grok's
+  MCP OAuth store (`mcp_credentials.json`), or the older kimi-cli config. Measured on Windows: the
+  deny rules match backslash and forward-slash paths, and they also stop `cat <path>` in Grok's shell
+  (1.111.3's comment said the shell could still read the file).
+
 ## 1.111.3 — 2026-10-13
 
 Grok Build, after a review panel on 1.111.2 (six reviewers; each item below was checked in the code

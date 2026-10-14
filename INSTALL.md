@@ -753,14 +753,17 @@ from `~/.claude.json` hung every run until the 40-minute timeout. The harness st
 (`GROK_<CLAUDE|CURSOR|CODEX>_<SKILLS|RULES|AGENTS|MCPS|HOOKS|SESSIONS>_ENABLED=0`). Ten of them are in
 xAI's [settings reference](https://docs.x.ai/build/settings/reference); the `SESSIONS` and `CODEX`
 ones exist only in the binary (measured on grok 1.0.52). Since 1.111.3 every run first asks
-`grok inspect --json` (no model call, about 0.2 s) whether this grok honoured them, and the run log
-says «imports verified off»; if a newer grok ignores a switch, the run carries a 🔴 note instead of
-failing silently. Still loaded, because Grok has no switch for them: Claude Code **plugins** (with any
+`grok inspect --json` (no model call, under half a second) whether this grok honoured them, and the
+run log says «imports verified off». Since 1.111.4, if a newer grok ignores a switch and would load
+an imported item, Grok is not started and the brief is not sent: the error names the surfaces, and
+`[compat.claude]` / `[compat.cursor]` in `~/.grok/config.toml` turn them off. A switch that is on with
+nothing behind it is a 🔴 note on the run. Still loaded, because Grok has no switch for them: Claude Code **plugins** (with any
 skills, hooks or MCP servers they bring) and the files in `~/.grok/rules/` (the preflight lists them).
 A reviewer keeps Grok's own config: the MCP servers in `~/.grok/config.toml`, your shell logins,
 Grok's own skills. In `--task` mode Grok works in the task folder and reads that project's
 `AGENTS.md`, as it would for you. If a run still times out, the error quotes Grok's own session
-record: the tool that started and never finished, and the MCP servers that failed at start. Your own
+record (found by the `--session-id` the harness gives each run): the tool that started and never
+finished, and the MCP servers that failed at start. Your own
 `grok` sessions are unaffected; to keep them from importing too, set `GROK_CLAUDE_MCPS_ENABLED=0` (and
 any of the others) in your user environment, or `mcps = false` under `[compat.claude]` in
 `~/.grok/config.toml`.

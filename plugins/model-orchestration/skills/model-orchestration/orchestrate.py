@@ -1651,6 +1651,15 @@ KNOWN_FAILURES = [
      "reply, and a re-run is the remedy. Only attempts that each ran about as long as a full "
      "budget takes point to the budget - the cap is the vendor's ceiling and effort stays at "
      "max by policy, so then a narrower brief is the lever."),
+    (r"NOT RUN, the brief was not sent - 🔴 GROK IMPORTS STILL ON",
+     "This grok ignored some of the 18 GROK_*_ENABLED=0 switches (renamed in a newer grok?), and "
+     "`grok inspect` showed it would load imported Claude Code / Cursor / Codex items on this run - "
+     "the setup that hung every run on 13.10 and that this harness never sends. Grok was not "
+     "started; nothing reached xAI.",
+     "Run `grok inspect --json` in any folder: the `externalCompat.cells` still `true` name the "
+     "surfaces. Turn them off in ~/.grok/config.toml (`[compat.claude]` / `[compat.cursor]`, e.g. "
+     "`mcps = false` - docs.x.ai/build/settings/reference) or update the kit; `--skip grokbuild` "
+     "until then. A re-run changes nothing."),
     (r"Grok's own session [^\n]*(never finished|failed at start|transport decode errors)",
      "Grok Build stalled inside its own runtime: a tool it started never returned, or an MCP "
      "server died at start-up - its own session record, quoted in the error, names which. The "
@@ -1662,9 +1671,9 @@ KNOWN_FAILURES = [
      "under `[mcp_servers.<name>]` for the server the note names, or `--skip grokbuild` until "
      "then. Re-running blind repeats the 40-minute wait."),
     (r"Grok's own session record: none found",
-     "Grok left no session record for this run where the harness looks (<GROK_HOME>/sessions/"
-     "<the run's folder>): it stopped before it opened a session, or it filed the session under "
-     "a name the harness does not recognise.",
+     "Grok left no session record for this run where the harness looks (<GROK_HOME>/sessions/, "
+     "under the session id it gave grok, then the run's folder): it stopped before it opened a "
+     "session, or this grok files sessions elsewhere.",
      "A longer timeout will not help. Run `grok inspect --json` and a one-line `grok -p \"say "
      "ok\"` by hand: a hang there is the cause. If both answer, `--skip grokbuild` and report the "
      "grok version and the folder names under ~/.grok/sessions."),
@@ -3434,14 +3443,22 @@ GROK_BYPASS_REMOVED_TOOLS = ("ask_user_question", "enter_plan_mode", "exit_plan_
 # R150 И-3 (panel: Kimi, Spark): the list missed the other CLIs' credential stores - Claude Code's MCP
 # config (`~/.claude.json`, server tokens in env blocks) and login (`.credentials.json`), every
 # `auth.json` (grok, codex, opencode, mimo), Gemini/Qwen `oauth_creds.json`, Claude Desktop's and
-# Cursor's MCP configs, Kimi's config (its key sits in it). read_file only: the bypass shell can still
-# `cat` a file, and a deny hit under bypass is not fatal to the turn (R137 И-2).
+# Cursor's MCP configs, Kimi's config (its key sits in it).
+# R150 И-4 (Grok's live review; runs/r150-grok-timeout/probe_i4c.py): the rules hold on Windows and
+# reach the shell - read_file with a backslash or a forward-slash path AND `cat "<path>"` in
+# run_terminal_command all got «Denied by permission policy: deny rule on read matching
+# "**/auth.json"» (a control file was served 3 of 3); a script that opens the file itself is not
+# matched. Added: Grok's own session records (`mcp_server_starting` / `mcp_server_failed` keep each
+# MCP server's command line and headers - 297 secret-shaped on this machine, probe_i4d.py), its MCP
+# OAuth store, the older kimi-cli home. A deny hit under bypass is not fatal to the turn (R137 И-2).
 GROK_BYPASS_DENY_RULES = ("MCPTool(firecrawl__*)", "Read(**/.env*)", "Read(**/.ssh/**)",
                           "Read(**/.gnupg/**)", "Read(**/.grok/config.toml)",
                           "Read(**/.codex/config.toml)", "Read(**/.claude.json)",
                           "Read(**/.credentials.json)", "Read(**/auth.json)",
                           "Read(**/oauth_creds.json)", "Read(**/claude_desktop_config.json)",
-                          "Read(**/.cursor/mcp.json)", "Read(**/.kimi-code/config.toml)")
+                          "Read(**/.cursor/mcp.json)", "Read(**/.kimi-code/config.toml)",
+                          "Read(**/.kimi/config.*)", "Read(**/mcp_credentials.json)",
+                          "Read(**/.grok/sessions/**)")
 # 🔴🔴 R150 (13.10.2026): GROK BUILD IMPORTS THE SETUP OF THREE OTHER VENDORS' CLIs, AND ONE IMPORTED
 # MCP SERVER HUNG EVERY RUN. By design (~/.grok/README.md §Claude Code Compatibility) it loads
 # Claude Code's MCP servers (~/.claude.json), skills, rules (~/.claude/CLAUDE.md + rules/*.md),
@@ -3548,7 +3565,7 @@ def _grok_session_files(cwd):
     return found
 
 
-def _grok_session_note(cwd, t0, before=None):
+def _grok_session_note(cwd, t0, before=None, sid=None):
     """R150 И-2: after a TIMEOUT or an empty answer, the stuck step and the dead MCP servers, read
     from Grok's OWN record (where it lives: _grok_session_files).
 
@@ -3560,6 +3577,10 @@ def _grok_session_note(cwd, t0, before=None):
     that was there and did not change (a retry in the same process, another grok in a --task
     workdir) is never quoted as this run's - a newer mtime alone used to win; when two changed,
     the note says it cannot tell them apart.
+    R150 И-4 (Grok's live review): `sid` = the `--session-id` call_grokcli gave grok; the session is
+    found by that name in ANY group, so neither a concurrent run in a shared --task workdir nor an
+    unexpected group name (slug + hash, a symlinked TEMP) can stand in for it. The folder snapshot
+    stays as the fallback, and says so.
     """
     import collections
 
@@ -3575,13 +3596,36 @@ def _grok_session_note(cwd, t0, before=None):
     where = ("~" + base[len(home):]
              if os.path.normcase(base).startswith(os.path.normcase(home) + os.sep) else base)
     before = before or {}
-    cands = sorted((mt, ev) for ev, mt in _grok_session_files(cwd).items()
-                   if before.get(ev) != mt and mt >= t0 - 2)     # 2 s = mtime grain (FAT)
+    own, via = [], ""
+    if sid:
+        try:
+            own = [os.path.join(base, g, sid) for g in os.listdir(base)
+                   if os.path.isdir(os.path.join(base, g, sid))]
+        except OSError:
+            own = []
+    if own:
+        ev = os.path.join(own[0], "events.jsonl")
+        if not os.path.isfile(ev):
+            try:
+                logs = sorted(n for n in os.listdir(own[0]) if n.endswith(".jsonl"))
+            except OSError:
+                logs = []
+            return ("Grok's own session %s (%s/.../%s): no events.jsonl - this grok keeps another "
+                    "log (%s), which the harness does not read" % (sid[:13], where, sid,
+                                                                    ", ".join(logs[:4]) or "none"))
+        cands = [(0.0, ev)]
+    else:
+        cands = sorted((mt, ev) for ev, mt in _grok_session_files(cwd).items()
+                       if before.get(ev) != mt and mt >= t0 - 2)     # 2 s = mtime grain (FAT)
+        if sid and cands:
+            via = " - found by folder, not under the --session-id it was given"
     if not cands:
-        return "Grok's own session record: none found for this run under %s" % where
+        return "Grok's own session record: none found for this run under %s%s" % (
+            where, " (session id %s)" % sid[:13] if sid else "")
     _mt, ev = cands[-1]
     sid = os.path.basename(os.path.dirname(ev))
     starts, failed, decode, last, turn = collections.defaultdict(list), [], [], None, None
+    refused = 0
     try:
         with open(ev, encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -3602,6 +3646,14 @@ def _grok_session_note(cwd, t0, before=None):
                     lst = starts.get(safe(e.get("tool_name")) or "?")
                     if lst:
                         lst.pop(0)
+                elif t == "permission_resolved" and e.get("decision") == "deny":
+                    # R150 И-4 (probe_i4f.py, grok 1.0.52): a call a deny rule refuses has
+                    # tool_started and permission_resolved{decision: deny} but NO tool_completed -
+                    # refused, not stuck; the start just resolved is the newest of that name
+                    refused += 1
+                    lst = starts.get(safe(e.get("tool_name")) or "?")
+                    if lst:
+                        lst.pop()
                 elif t == "mcp_server_failed":
                     failed.append("%s (%s)" % (safe(e.get("server_name")) or "?",
                                                safe(e.get("error_type")) or "?"))
@@ -3624,6 +3676,8 @@ def _grok_session_note(cwd, t0, before=None):
         parts.append("tool `%s` started %s and never finished%s" % (
             pend[0][1], hms(pend[0][0]),
             " (%d more pending)" % (len(pend) - 1) if len(pend) > 1 else ""))
+    if refused:
+        parts.append("%d tool call(s) refused by a deny rule" % refused)
     if any(failed):
         parts.append("MCP servers that failed at start: " + ", ".join(sorted(set(filter(None, failed)))))
     if any(decode):
@@ -3634,14 +3688,28 @@ def _grok_session_note(cwd, t0, before=None):
         parts.append("last event %s at %s, no turn end" % (safe(last[0]) or "?", hms(last[1])))
     amb = (" - 1 of %d sessions that changed in this folder during the run (another grok shares "
            "it), the newest" % len(cands)) if len(cands) > 1 else ""
-    return "Grok's own session %s (%s/.../%s)%s: %s" % (sid[:13], where, sid, amb,
-                                                       "; ".join(parts) or "empty record")
+    return "Grok's own session %s (%s/.../%s)%s%s: %s" % (sid[:13], where, sid, amb, via,
+                                                         "; ".join(parts) or "empty record")
+
+
+def _grok_imports_active(j):
+    """The imported items `grok inspect --json` says this grok WILL load: `compatibilityStatus:
+    enabled` (an import's own field - grok 1.0.52 tags imports `vendor: claude` and marks them
+    `disabled` when switched off; its own items carry neither). Counts by kind, e.g.
+    ["8 projectInstructions"]; [] for anything that is not such an object."""
+    import collections
+    if not isinstance(j, dict):
+        return []
+    act = collections.Counter(k for k in ("skills", "mcpServers", "projectInstructions", "agents",
+                                          "hooks")
+                              for it in (j.get(k) or [])
+                              if isinstance(it, dict) and it.get("compatibilityStatus") == "enabled")
+    return ["%d %s" % (n, k) for k, n in sorted(act.items())]
 
 
 def _grok_imports_summary(j):
     """(log text, note or None) from a `grok inspect --json` object - counts and kinds only (the
     same JSON carries each MCP server's target, which can hold headers)."""
-    import collections
     if not isinstance(j, dict):
         return "", "Grok's import switches NOT verified: `grok inspect --json` printed no object"
     cells = [c for c in ((j.get("externalCompat") or {}).get("cells") or []) if isinstance(c, dict)]
@@ -3649,45 +3717,53 @@ def _grok_imports_summary(j):
         return "", ("Grok's import switches NOT verified: `grok inspect --json` lists no "
                     "externalCompat cells - this grok reports its imports differently")
     on = sorted("%s/%s" % (safe_c.get("vendor"), safe_c.get("surface"))
-                for safe_c in cells if safe_c.get("enabled"))
-    act = collections.Counter(k for k in ("skills", "mcpServers", "projectInstructions", "agents",
-                                          "hooks")
-                              for it in (j.get(k) or [])
-                              if isinstance(it, dict) and it.get("compatibilityStatus") == "enabled")
+                for safe_c in cells if safe_c.get("enabled") is True)
+    act = _grok_imports_active(j)
     plug = sum(1 for it in (j.get("plugins") or []) if isinstance(it, dict) and it.get("enabled"))
     if on or act:
-        what = on[:6] + ["%d %s" % (n, k) for k, n in sorted(act.items())]
-        return "", ("🔴 GROK IMPORTS STILL ON despite %d GROK_*_ENABLED=0: %s - this grok ignores "
-                    "some switches (renamed?), so this run carries your Claude Code / Cursor setup "
-                    "to xAI and can hang on an imported MCP server"
-                    % (len(GROK_COMPAT_OFF), ", ".join(re.sub(r"[^A-Za-z0-9/ ._-]", "", w)[:40]
-                                                       for w in what)))
+        what = ", ".join(re.sub(r"[^A-Za-z0-9/ ._-]", "", w)[:40] for w in on[:6] + act)
+        return "", ((
+            "🔴 GROK IMPORTS STILL ON despite %d GROK_*_ENABLED=0: %s - this grok ignores some "
+            "switches (renamed?), so this run would carry your Claude Code / Cursor setup to xAI "
+            "and can hang on an imported MCP server") if act else (
+            "🔴 GROK IMPORTS STILL ON despite %d GROK_*_ENABLED=0: %s - this grok ignores some "
+            "switches (renamed?); nothing is imported through them today (0 items), so the run "
+            "goes ahead")) % (len(GROK_COMPAT_OFF), what)
+    # R150 И-4 (Grok's live review): a cell whose `enabled` is not true/false is unknown, not «off»
+    odd = sum(1 for c in cells if not isinstance(c.get("enabled"), bool))
+    if odd:
+        return "", ("Grok's import switches NOT verified: %d of %d externalCompat cells carry no "
+                    "true/false `enabled` - this grok reports them differently" % (odd, len(cells)))
     return ("imports verified off by `grok inspect` (%d cells off, 0 imported items active; %d "
             "plugin(s) still load - no switch)" % (len(cells), plug)), None
 
 
 def _grok_imports_check(binary, cwd, env):
-    """R150 И-3 (the panel, 6 of 6): ask `grok inspect --json` - no model call, 0.2 s measured -
-    whether THIS grok honoured the switches under `env`. Eight of the eighteen are undocumented
-    and Grok ignores a name it does not know, so a rename would bring the imports (and the 13.10
-    stall) back with no sign; this makes it a note on the run. Skipped under the selftest's fake
-    CLI, where _grok_imports_summary is tested directly."""
+    """R150 И-3 (the panel, 6 of 6): ask `grok inspect --json` - no model call, 0.3 s measured, a
+    static listing (its MCP items carry config fields only and no connection state, R150 И-4) -
+    whether THIS grok honoured the switches under `env`. Eight of the eighteen are undocumented and
+    Grok ignores a name it does not know, so a rename would bring the imports (and the 13.10 stall)
+    back with no sign. Returns (log, note, active). R150 И-4 (Grok's live review): `active` - the
+    imported items it would load - stops the run before the brief is sent; switches that are on
+    with nothing behind them, or an answer it cannot read, stay a note. Skipped under the selftest's
+    fake CLI, where _grok_imports_summary / _grok_imports_active are tested directly."""
     if subprocess.run is not _STDLIB_SUBPROCESS_RUN:
-        return "", None
+        return "", None, []
     try:
         r = subprocess.run([binary, "inspect", "--json"], cwd=cwd, env=env, capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=60)
     except FileNotFoundError:
-        return "", None                     # the run itself names the missing binary
+        return "", None, []                 # the run itself names the missing binary
     except (OSError, subprocess.SubprocessError) as exc:
         return "", ("Grok's import switches NOT verified: `grok inspect --json` failed (%s)"
-                    % type(exc).__name__)
+                    % type(exc).__name__), []
     try:
         j = json.loads(r.stdout or "")
     except ValueError:
         return "", ("Grok's import switches NOT verified: `grok inspect --json` exit %s, no JSON - "
-                    "this grok may predate the switches" % r.returncode)
-    return _grok_imports_summary(j)
+                    "this grok may predate the switches" % r.returncode), []
+    return _grok_imports_summary(j) + (_grok_imports_active(j),)
+
 
 def _grok_tools_note(bypass, file_refs):
     """The log line's account of the toolset - written from the same branch that builds argv."""
@@ -3927,9 +4003,21 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
         % (name, effort or "vendor default", len(text_in), len(GROK_COMPAT_OFF),
            _grok_tools_note(bypass, file_refs)))
     genv = _grok_child_env()
-    imp_log, imp_note = _grok_imports_check(binary, gcwd, genv)
+    imp_log, imp_note, imp_active = _grok_imports_check(binary, gcwd, genv)
     if imp_log or imp_note:
         log("  [%s] %s" % (name, imp_log or imp_note))
+    if imp_active:
+        # R150 И-4 (Grok's live review): positive evidence that THIS run would load the operator's
+        # Claude Code / Cursor / Codex setup - the 13.10 stall, and text outside the preset + brief
+        # this harness promises. 1.111.3 only noted it and sent the brief anyway.
+        return {"channel": name, "ok": False, "model": model,
+                "error": "NOT RUN, the brief was not sent - " + (imp_note or ", ".join(imp_active))}
+    import uuid
+    # R150 И-4 (Grok's live review): we name the session (`-s, --session-id`: «a specific session
+    # UUID for a new conversation», grok 1.0.52 --help; honoured headless, probe_i4c.py), so a note
+    # after a timeout reads THIS run's record by name; the folder snapshot below is the fallback.
+    sid = str(uuid.uuid4())
+    cmd += ["--session-id", sid]
     before = _grok_session_files(gcwd)     # R150 И-3: what was in the folder is not this run's
     t0 = time.time()
     try:
@@ -3956,7 +4044,7 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
         # bug even when every fact in it is true.
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
     except subprocess.TimeoutExpired:
-        sn = _grok_session_note(gcwd, t0, before)
+        sn = _grok_session_note(gcwd, t0, before, sid)
         return {"channel": name, "ok": False, "text": "", "seconds": round(time.time() - t0, 1),
                 "error": "TIMEOUT after %s - %s" % (timeout or "40m", sn), "model": model,
                 "warnings": ["TIMEOUT"], "notes": [imp_note] if imp_note else []}
@@ -3985,7 +4073,7 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     if imp_note:
         note.append(imp_note)
     if not text.strip():
-        note.append(_grok_session_note(gcwd, t0, before))
+        note.append(_grok_session_note(gcwd, t0, before, sid))
     record_refusal(refusal_check(text, marker), warn, note)
     u = data.get("usage") or {}
     stop = data.get("stopReason")

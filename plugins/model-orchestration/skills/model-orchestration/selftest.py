@@ -7918,6 +7918,7 @@ def main():
                   suite_r149_i3_muse_hotfix,
                   suite_r150_i2_grok_compat,
                   suite_r150_i3_grok_panel_fixes,
+                  suite_r150_i4_grok_live_answer,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -11692,8 +11693,8 @@ R138_GOLDEN_BEFORE = {
     "attach_refs.tools_full=True": "946c283132ad9b82",
     "grok.argv.bypass=False.refs=False": "eca273eaed4488ef",
     "grok.argv.bypass=False.refs=True": "ed9164f29f8f689c",
-    "grok.argv.bypass=True.refs=False": "49c8a45815f99664",   # R150 И-3: +7 credential-store --deny rules
-    "grok.argv.bypass=True.refs=True": "8e4ba1ce9d4ae45e",   # R150 И-3: +7 credential-store --deny rules
+    "grok.argv.bypass=True.refs=False": "e365a9ab004004da",   # R150 И-4: +3 --deny (sessions, MCP OAuth, kimi-cli)
+    "grok.argv.bypass=True.refs=True": "f3ad07f02a817e4a",   # R150 И-4: +3 --deny (sessions, MCP OAuth, kimi-cli)
     "grok.prompt.bypass=False.refs=False": "7fd767f70586b77a",
     "grok.prompt.bypass=False.refs=True": "57fe754bf739fcf1",
     "grok.prompt.bypass=True.refs=False": "e313a10a15bf330e",
@@ -11768,7 +11769,12 @@ def _r138_golden(o, tmp):
     def norm(cmd):
         # R150 И-2 (2026-10-13): grok's --cwd became a per-process folder inside the neutral cwd
         # (Grok files its sessions by cwd); mapped back to <TMP> so every other byte of the argv is
-        # still held to the v1.100.2 values.
+        # still held to the v1.100.2 values. R150 И-4: grok's `--session-id <fresh uuid4>` pair is
+        # dropped for the same reason (suite_r150_i4_grok_live_answer holds it).
+        cmd = list(cmd)
+        if "--session-id" in cmd:
+            i = cmd.index("--session-id")
+            del cmd[i:i + 2]
         return json.dumps([re.sub(r"^<TMP>/grok-p\d+$", "<TMP>",
                                   str(x).replace(tmp, "<TMP>").replace("\\", "/")) for x in cmd[1:]])
 
@@ -15191,6 +15197,182 @@ def suite_r150_i2_grok_compat():
           and "plugins" in doc.split("### Grok Build CLI")[-1][:6000],
           "R150 И-2 (g) INSTALL.md's Grok section names the import switches and what they leave on "
           "(R150 И-3: a tree without the doc fails - it used to pass vacuously)", inst)
+
+
+def suite_r150_i4_grok_live_answer():
+    """R150 И-4 (2026-10-13): Grok's own live review of kit 1.111.3 (one voice; it refuted the planted
+    claim). What it found AND a probe or the code confirmed (runs/r150-grok-timeout/triage-i4.md);
+    each check fails on 1.111.3:
+    (a) bypass argv denies Grok's own session records, its MCP OAuth store and the older kimi-cli
+        home (probe_i4d: 297 secret-shaped MCP server targets in ~/.grok/sessions);
+    (b) every grok run carries `--session-id <uuid4>`, a fresh one per call, bypass or not;
+    (c) the note reads the session named by that id even when a NEWER session changed in the same
+        folder (a second run in a shared --task workdir) - no «1 of N»;
+    (d) the id is found under a group whose name matches no form of the cwd (no .cwd either);
+    (e) a session dir without events.jsonl is named as such, with the log it does have;
+    (f) imported items active -> grok is not started and the brief is not sent;
+    (g) switches ignored with nothing imported -> a note, and the run goes ahead;
+    (h) a cell without a true/false `enabled` is NOT verified, never «verified off»;
+    (i) diagnose(): the not-run error has its own cause, not «took longer» / re-run advice;
+    (j) found by the live probe (probe_i4f): a call refused by a deny rule (tool_started +
+        permission_resolved deny, no tool_completed) is not «started and never finished» - the
+        tool that really hung is named, and the refusals are counted.
+    """
+    import json as _j
+    import shutil as _sh
+    import tempfile
+    import time
+    import urllib.parse as _up
+    import uuid as _uu
+    import orchestrate as o
+    section("R150 И-4 Grok Build: the session id, active imports stop the run, three more denies")
+    td = tempfile.mkdtemp(prefix="r150i4-")
+    seen, during = [], []
+
+    def _ev(path, events, mtime=None):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            for e in events:
+                f.write(_j.dumps(e) + "\n")
+        if mtime:
+            os.utime(path, (mtime, mtime))
+
+    def _tool(name, sec):
+        return {"type": "tool_started", "tool_name": name, "ts": "2026-10-13T23:00:%02d.000Z" % sec}
+
+    def _sid(cmd):
+        return cmd[cmd.index("--session-id") + 1] if "--session-id" in cmd else ""
+
+    class _Done:
+        returncode, stderr = 0, ""
+        stdout = _j.dumps({"text": "ok\nMARK", "stopReason": "end_turn"})
+
+    def _done(cmd, **kw):
+        seen.append(list(cmd))
+        return _Done()
+
+    def _timeout(cmd, **kw):
+        seen.append(list(cmd))
+        while during:
+            during.pop(0)(list(cmd))
+        raise o.subprocess.TimeoutExpired(cmd, 7)
+
+    def _call(**kw):
+        try:
+            return o.call_grokcli("B", "MARK", os.path.join(td, "w"), os.path.join(td, "G.md"),
+                                  timeout=7, **kw)
+        except Exception as exc:        # noqa: BLE001 - 1.111.3 raises on (f)/(g); the check fails
+            return {"error": "raised %r" % (exc,)}
+
+    def _uuid(s):
+        try:
+            return str(_uu.UUID(s)) == s
+        except (ValueError, TypeError, AttributeError):
+            return False
+
+    saved = (o.subprocess.run, o.grok_bin, o.neutral_cwd, o._grok_imports_check,
+             os.environ.get("GROK_HOME"))
+    try:
+        o.neutral_cwd = lambda: os.path.join(td, "neutral")
+        o.grok_bin = lambda: "grok.exe"
+        os.environ["GROK_HOME"] = os.path.join(td, "grokhome")
+        gc = os.path.join(td, "neutral", "grok-p%d" % os.getpid())
+        grp = os.path.join(td, "grokhome", "sessions", _up.quote(gc, safe=""))
+        # (a) + (b)
+        o.subprocess.run = _done
+        _call(bypass=True)
+        _call()
+        c1, c2 = (seen + [[], []])[:2]
+        denies = [c1[i + 1] for i, x in enumerate(c1[:-1]) if x == "--deny"]
+        new = ("Read(**/.grok/sessions/**)", "Read(**/mcp_credentials.json)", "Read(**/.kimi/config.*)")
+        check(all(r in denies and r in o.GROK_BYPASS_DENY_RULES for r in new),
+              "R150 И-4 (a) bypass argv denies Grok's own session records, its MCP OAuth store and "
+              "the older kimi-cli home", repr([r for r in new if r not in denies]))
+        check(_uuid(_sid(c1)) and _uuid(_sid(c2)) and _sid(c1) != _sid(c2),
+              "R150 И-4 (b) each grok run (bypass or not) carries --session-id with a fresh uuid4",
+              repr((_sid(c1), _sid(c2))))
+        # (c) this run's session is OLDER than another one that changed during the run
+        o.subprocess.run = _timeout
+        now = time.time()
+        during.append(lambda cmd: (
+            _ev(os.path.join(grp, _sid(cmd) or "no-id", "events.jsonl"), [_tool("web_fetch", 1)], now),
+            _ev(os.path.join(grp, str(_uu.uuid4()), "events.jsonl"), [_tool("read_file", 2)], now + 30)))
+        err = _call().get("error") or ""
+        mine = _sid(seen[-1])
+        check(_uuid(mine) and mine[:13] in err and "web_fetch" in err and "read_file" not in err
+              and "1 of " not in err and "found by folder" not in err,
+              "R150 И-4 (c) the note quotes the session named by --session-id, not the newest one "
+              "in the folder", err[:300])
+        # (d) the id under a group whose name matches no form of the cwd, no .cwd file
+        during.append(lambda cmd: _ev(os.path.join(td, "grokhome", "sessions", "0123slug-9f8e7d",
+                                                   _sid(cmd) or "no-id", "events.jsonl"),
+                                      [_tool("grep", 3)], now))
+        err = _call().get("error") or ""
+        check("grep" in err and _sid(seen[-1])[:13] in err and "none found" not in err,
+              "R150 И-4 (d) the session id is found in any group, whatever the group's name", err[:300])
+        # (e) the session dir holds another log and no events.jsonl
+        during.append(lambda cmd: _ev(os.path.join(grp, _sid(cmd) or "no-id", "updates.jsonl"),
+                                      [{"type": "x"}], now))
+        err = _call().get("error") or ""
+        check("no events.jsonl" in err and "updates.jsonl" in err,
+              "R150 И-4 (e) a session without events.jsonl is named as such, with the log it has",
+              err[:300])
+        # (f) imported items active: grok is not started
+        red = ("🔴 GROK IMPORTS STILL ON despite 18 GROK_*_ENABLED=0: claude/mcps, 1 mcpServers - "
+               "this grok ignores some switches (renamed?)")
+        o._grok_imports_check = lambda b, c, e: ("", red, ["1 mcpServers"])
+        o.subprocess.run = _done
+        n0 = len(seen)
+        r_f = _call()
+        act = getattr(o, "_grok_imports_active", lambda j: None)
+        check(r_f.get("ok") is False and "NOT RUN, the brief was not sent" in (r_f.get("error") or "")
+              and len(seen) == n0
+              and act({"mcpServers": [{"compatibilityStatus": "enabled"}],
+                       "skills": [{"compatibilityStatus": "disabled"}, {"name": "own"}]})
+              == ["1 mcpServers"],
+              "R150 И-4 (f) imported items active -> grok is not started, the brief is not sent",
+              repr((r_f.get("error"), len(seen) - n0)))
+        # (g) switches ignored, nothing imported: a note, the run goes ahead
+        amber = red.replace("1 mcpServers", "x").split(" - ")[0] + " - nothing is imported"
+        o._grok_imports_check = lambda b, c, e: ("", amber, [])
+        n0 = len(seen)
+        r_g = _call()
+        check(r_g.get("ok") is True and len(seen) == n0 + 1 and amber in (r_g.get("notes") or []),
+              "R150 И-4 (g) switches on with nothing imported -> a note, the run goes ahead",
+              repr((r_g.get("ok"), r_g.get("error"), len(seen) - n0)))
+        # (j) a refused read_file early, a web_fetch that really hangs later
+        o._grok_imports_check = saved[3]
+        o.subprocess.run = _timeout
+        during.append(lambda cmd: _ev(os.path.join(grp, _sid(cmd) or "no-id", "events.jsonl"), [
+            _tool("read_file", 1),
+            {"type": "permission_requested", "tool_name": "read_file", "ts": "2026-10-13T23:00:01Z"},
+            {"type": "permission_resolved", "tool_name": "read_file", "decision": "deny",
+             "wait_ms": 0, "ts": "2026-10-13T23:00:01Z"},
+            _tool("web_fetch", 9)], now))
+        err = _call().get("error") or ""
+        check("`web_fetch` started" in err and "`read_file` started" not in err
+              and "1 tool call(s) refused" in err,
+              "R150 И-4 (j) a call a deny rule refused is not «started and never finished»; the tool "
+              "that hung is named and the refusal counted", err[:300])
+    finally:
+        o.subprocess.run, o.grok_bin, o.neutral_cwd, o._grok_imports_check = saved[:4]
+        if saved[4] is None:
+            os.environ.pop("GROK_HOME", None)
+        else:
+            os.environ["GROK_HOME"] = saved[4]
+        _sh.rmtree(td, ignore_errors=True)
+    # (h) a cell with no true/false `enabled`
+    summ = getattr(o, "_grok_imports_summary", lambda j: ("", None))
+    t_h, n_h = summ({"externalCompat": {"cells": [{"vendor": "claude", "surface": "mcps",
+                                                    "source": "env"}]}})
+    check(not t_h and "NOT verified" in (n_h or ""),
+          "R150 И-4 (h) a cell without a true/false `enabled` is NOT verified, never «verified off»",
+          repr((t_h, n_h)))
+    # (i) diagnose() of the not-run error
+    cause = o.diagnose("NOT RUN, the brief was not sent - " + red)[0] or ""
+    check(cause.startswith("This grok ignored some of the 18"),
+          "R150 И-4 (i) diagnose(): the not-run error has its own cause (no «took longer», no "
+          "re-run advice)", cause[:120])
 
 
 def suite_r150_i3_grok_panel_fixes():
