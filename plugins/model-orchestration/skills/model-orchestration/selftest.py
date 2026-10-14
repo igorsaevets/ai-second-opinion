@@ -7919,6 +7919,7 @@ def main():
                   suite_r150_i2_grok_compat,
                   suite_r150_i3_grok_panel_fixes,
                   suite_r150_i4_grok_live_answer,
+                  suite_r151_i2_mimo_prompt,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -15197,6 +15198,70 @@ def suite_r150_i2_grok_compat():
           and "plugins" in doc.split("### Grok Build CLI")[-1][:6000],
           "R150 И-2 (g) INSTALL.md's Grok section names the import switches and what they leave on "
           "(R150 И-3: a tree without the doc fails - it used to pass vacuously)", inst)
+
+
+def suite_r151_i2_mimo_prompt():
+    """R151 И-2 (2026-10-14): MiMo Code put `~/.claude/CLAUDE.md` and `~/AGENTS.md` into EVERY reviewer prompt
+    (its own prompt record, `session_prefix_snapshot`: 132 of 132 harness runs; runs/r151-playwright-ext/i2).
+    (a) a review run's child env carries the import switch AND both instruction switches;
+    (b) a --task run drops Claude Code's file but leaves the instruction switch as the parent has it (the
+        worker acts in the project, whose own files it may need);
+    (c) nothing else in the review env differs from the parent env (key NAMES only in the detail - R150 И-2);
+    (d) tools and MCP servers are not touched (Igor 03.10, R137 И-2): the harness sets neither
+        MIMOCODE_DISABLE_CLAUDE_CODE nor MIMOCODE_DISABLE_CLAUDE_CODE_MCP.
+    (a) and (b) fail on 1.111.4; (c) and (d) are pins.
+    """
+    import json as _j
+    import shutil as _sh
+    import tempfile
+    import orchestrate as o
+    section("R151 И-2 MiMo Code: no Claude Code CLAUDE.md, no home AGENTS.md in a reviewer prompt")
+    K_IMP, K_PROMPT, K_INSTR = ("MIMOCODE_DISABLE_CLAUDE_IMPORT", "MIMOCODE_DISABLE_CLAUDE_CODE_PROMPT",
+                                "MIMOCODE_DISABLE_INSTRUCTIONS")
+    K_TOOLS = ("MIMOCODE_DISABLE_CLAUDE_CODE", "MIMOCODE_DISABLE_CLAUDE_CODE_MCP")
+    seen = []
+
+    class _Done:
+        returncode = 0
+        stderr = ""
+        stdout = "\n".join([_j.dumps({"type": "text", "part": {"text": "ok\nMARK"}}),
+                            _j.dumps({"type": "step_finish", "part": {"tokens": {}, "cost": 0}})])
+
+    def _run(cmd, **kw):
+        seen.append(dict(kw))
+        return _Done()
+
+    td = tempfile.mkdtemp(prefix="r151i2-")
+    saved = (o.subprocess.run, o.mimo_bin, getattr(o._TASK, "ctx", None))
+    review = task = None
+    try:
+        o.subprocess.run, o.mimo_bin = _run, (lambda: "mimo")
+        o._TASK.ctx = None
+        o.call_mimocli("B", "MARK", os.path.join(td, "M.md"), system="S")
+        review = seen[-1].get("env") if seen else None
+        o._TASK.ctx = {"remote": False}
+        o.call_mimocli("B", "MARK", os.path.join(td, "M2.md"), system="S")
+        task = seen[-1].get("env") if len(seen) > 1 else None
+    finally:
+        o.subprocess.run, o.mimo_bin = saved[0], saved[1]
+        o._TASK.ctx = saved[2]
+        _sh.rmtree(td, ignore_errors=True)
+    review = review if isinstance(review, dict) else {}
+    task = task if isinstance(task, dict) else {}
+    check(review.get(K_IMP) == "1" and review.get(K_PROMPT) == "1" and review.get(K_INSTR) == "1",
+          "R151 И-2 (a): a review run's mimo env carries %s, %s and %s = 1" % (K_IMP, K_PROMPT, K_INSTR),
+          repr({k: review.get(k) for k in (K_IMP, K_PROMPT, K_INSTR)}))
+    check(task.get(K_PROMPT) == "1" and task.get(K_INSTR) == os.environ.get(K_INSTR),
+          "R151 И-2 (b): a --task run drops Claude Code's CLAUDE.md, the instruction switch stays the parent's",
+          repr({k: task.get(k) for k in (K_PROMPT, K_INSTR)}))
+    diff = sorted(k for k in set(review) | set(os.environ)
+                  if review.get(k) != os.environ.get(k) and k not in (K_IMP, K_PROMPT, K_INSTR))
+    check(bool(review) and not diff,
+          "R151 И-2 (c): the review env differs from the parent only by the three MIMOCODE_ switches",
+          repr(diff[:12]))
+    check(bool(review) and all(review.get(k) == os.environ.get(k) for k in K_TOOLS),
+          "R151 И-2 (d): tools stay untouched - neither %s is set by the harness (Igor 03.10)" % " nor ".join(K_TOOLS),
+          repr([k for k in K_TOOLS if review.get(k) != os.environ.get(k)]))
 
 
 def suite_r150_i4_grok_live_answer():

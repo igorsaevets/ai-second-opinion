@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.111.5 — 2026-10-14
+
+MiMo Code (`mimov26pro`):
+
+- **Your Claude Code instructions no longer ride every MiMo review.** MiMo Code's Claude Code
+  compatibility put `~/.claude/CLAUDE.md` into each reviewer prompt, and on Windows the folder the
+  harness runs it from (inside the system temp folder, under your home) let it also pick up an
+  `AGENTS.md` from your home folder. MiMo's own record of the prompt held both files in every
+  harness run checked (132 of 132). The harness now starts MiMo with
+  `MIMOCODE_DISABLE_CLAUDE_CODE_PROMPT=1` and, for reviews, `MIMOCODE_DISABLE_INSTRUCTIONS=1`; a
+  `--task` run keeps the project's own instruction files and still drops the Claude Code one.
+  Measured on that record: the system prompt went from 76 690 to 39 553 characters, and the tools
+  offered did not change. The run log names what was kept out.
+- MiMo's tools and MCP servers are unchanged in this release.
+
 ## 1.111.4 — 2026-10-13
 
 Grok Build, after Grok's own review of 1.111.3 (each item below was checked in the code or with a

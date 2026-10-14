@@ -4533,6 +4533,21 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
 # --- MiMo Code CLI channel (kind mimocli) --------------------------------------------------------
 
 
+# R151 И-2 (2026-10-14): which instruction files MiMo Code puts into a reviewer's prompt, read from MiMo's OWN
+# record of that prompt (`session_prefix_snapshot.system` in its mimocode.db): 132 of 132 snapshots of harness
+# runs carried `~/.claude/CLAUDE.md` (Claude Code's personal instructions) and `~/AGENTS.md` (found by walking up
+# from neutral_cwd(), which on Windows sits under the home folder) - 37 137 of 76 690 system chars, sent to the
+# vendor on every call and read by a reviewer meant to be independent of them. Switch names come from the 0.1.15
+# binary; their effect was measured on the same record with the provider pointed at a closed local port
+# (runs/r151-playwright-ext/i2/mimo_arms.py): DISABLE_CLAUDE_CODE_PROMPT drops the Claude Code file only (76 690
+# -> 56 405), DISABLE_INSTRUCTIONS drops every instruction file (-> 39 553); neither changes the tools (189).
+# A --task run keeps the project's own instruction files (the worker acts in that project), never Claude Code's.
+# Tools and MCP servers are deliberately NOT touched here (Igor 03.10, R137 И-2: «все типы инструментов ...
+# включая любые MCP»); MIMOCODE_DISABLE_CLAUDE_CODE / _CLAUDE_CODE_MCP would also remove 4 imported servers.
+MIMO_PROMPT_OFF = ("MIMOCODE_DISABLE_CLAUDE_CODE_PROMPT",)
+MIMO_REVIEW_PROMPT_OFF = ("MIMOCODE_DISABLE_INSTRUCTIONS",)
+
+
 def call_mimocli(brief, marker, outfile, model=None, effort=None, system=None,
                  timeout=2400, name="mimov26pro"):
     """MiMo Code CLI (Xiaomi) — direct Xiaomi API, metered.
@@ -4548,7 +4563,9 @@ def call_mimocli(brief, marker, outfile, model=None, effort=None, system=None,
       * 107K input tokens on a trivial prompt — agent framework overhead.
       * Second call on same machine: 123K cached, cost $0.0005 (cache kicks in).
 
-    Neutral cwd via Python cwd= to prevent loading any project's CLAUDE.md.
+    Neutral cwd via Python cwd= to prevent loading any project's CLAUDE.md. SUPERSEDED in part (R151 И-2):
+    the neutral cwd kept projects out but not `~/AGENTS.md` (walk-up from TEMP under home) nor
+    `~/.claude/CLAUDE.md` (MiMo's Claude Code compatibility) - MIMO_PROMPT_OFF / MIMO_REVIEW_PROMPT_OFF do.
     """
     binary = mimo_bin()
     # R126 (2026-09-28): bypass is ALWAYS on for this channel (--dangerously-skip-permissions
@@ -4571,9 +4588,16 @@ def call_mimocli(brief, marker, outfile, model=None, effort=None, system=None,
     if child_env is None:
         child_env = dict(os.environ)
     child_env["MIMOCODE_DISABLE_CLAUDE_IMPORT"] = "1"
+    child_env.update(dict.fromkeys(MIMO_PROMPT_OFF, "1"))
+    review = getattr(_TASK, "ctx", None) is None
+    if review:
+        child_env.update(dict.fromkeys(MIMO_REVIEW_PROMPT_OFF, "1"))
     log("  [%s] mimo CLI v0.1.14, metered Xiaomi API; brief via stdin (%d chars), model=%s%s"
         % (name, len(text_in), base_model,
            (", variant=%s" % effort) if effort else ""))
+    log("  [%s] instruction files kept out of the prompt: ~/.claude/CLAUDE.md%s"
+        % (name, " and every AGENTS.md / CLAUDE.md (review)" if review
+           else " (--task: the project's own instruction files stay)"))
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
