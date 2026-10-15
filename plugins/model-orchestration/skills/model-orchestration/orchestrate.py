@@ -1381,6 +1381,30 @@ KNOWN_FAILURES = [
      "it repeats (NVIDIA's free moonshotai/kimi-k3 since 2026-10-06 - every run with text, 4 of 4; "
      "another NIM client reported the same stream). Leave it out with --skip <channel> until the "
      "vendor fixes it; the other reviewers' answers stand."),
+    # R153 И-2 (2026-10-15): a model the vendor RETIRED. NVIDIA ended moonshotai/kimi-k3 at
+    # 2026-10-15T08:00Z - a direct request answers `410 Gone` «has reached its end of life», Kimi Code
+    # CLI records only «410 status code (no body)» - and two panels that night printed «stopped before
+    # finishing» (runs/r153-t107-kimi-mimo/FINDINGS.md). High in the list: the generic status-code,
+    # timeout and END MARKER rows below would answer it with «re-run».
+    (r"\bHTTP 410\b|\b410 Gone\b|\b410 status code\b|reached its end of life|end-of-life",
+     "The vendor has RETIRED this model: its endpoint answers HTTP 410 Gone (end of life) and will "
+     "not serve it again. Nothing in the brief, the key or the harness causes it - NVIDIA retired "
+     "moonshotai/kimi-k3 this way on 2026-10-15.",
+     "Do not re-run or wait. Leave the channel out (--skip <channel>) or reach the same model by "
+     "another route in the registry (Kimi K3: kimik3 on OpenRouter, paid, standard panel). Kit "
+     "1.112.0 ships nvkimik3 switched off for this reason; named on purpose it fails in under a "
+     "second and spends nothing."),
+    # R153 И-2: opencode's own record says the step stopped at the model's OUTPUT LIMIT (store
+    # `finish: length`). T107: MiMo Flash Free reasoned 32 002 tokens into its 32 000 and wrote nothing;
+    # opencode exited 0, the round printed «stopped before finishing». 8 of 88 such sessions since 10-01.
+    (r"OPENCODE OUTPUT LIMIT REACHED",
+     "The model used the whole output allowance opencode gave its step - reasoning and answer "
+     "share it - so the step ended with finish=length. When the reasoning took all of it no answer "
+     "was written; nothing was refused, and a free model billed nothing.",
+     "The warning prints the split and the limit. Effort stays at the vendor's ceiling by policy, so "
+     "the levers are the limit - the channel's `opencode_limit` in channels.json, applied through "
+     "`run --standalone` - and the brief: a narrower question needs less reasoning. A re-run of the "
+     "same brief often stops the same way."),
     # R144 И-4: FIRST - Qwen Code's own budget stop. Its text also says «wall-clock» and «exceeded»,
     # which generic timeout entries below would claim with advice that makes the round slower.
     # R144 И-7 (H9): exit 53 - the session-turn cap, FatalTurnLimitedError in cli 0.25.0 - is the
@@ -4436,6 +4460,152 @@ def _opencode_store_merge(raw, tokens, cost, note):
     return out, cost2, "opencode store"
 
 
+_OC_STANDALONE = {}
+
+
+def _opencode_supports_standalone(binary):
+    """True when this opencode has `run --standalone` (a private server per run, started with the run's
+    own environment). R153 И-2: read from the binary's strings - the flag and its help sentence - with no
+    subprocess, cached per (path, size, mtime). The npm shim (`opencode.cmd`) is followed to the package's
+    binary. False on any doubt: the run then keeps the shared background service, as before."""
+    cands = [os.path.realpath(binary or "")]
+    d = os.path.dirname(cands[0])
+    cands += [os.path.join(d, "node_modules", "@opencode", "cli", "bin", n) for n in ("opencode.exe", "opencode")]
+    for c in cands:
+        try:
+            st = os.stat(c)
+        except OSError:
+            continue
+        if st.st_size < 1000000:
+            continue
+        key = (c, st.st_size, st.st_mtime)
+        if key not in _OC_STANDALONE:
+            ok = False
+            try:
+                import mmap
+                with open(c, "rb") as f:
+                    mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+                    try:
+                        ok = (mm.find(b"--standalone") != -1
+                              and mm.find(b"private server instead of the background service") != -1)
+                    finally:
+                        mm.close()
+            except (OSError, ValueError):
+                ok = False
+            _OC_STANDALONE[key] = ok
+        return _OC_STANDALONE[key]
+    return False
+
+
+def _opencode_limit(cname, reg=None):
+    """The channel's `opencode_limit` ({"context": N, "output": M}) AS WRITTEN, or None (R153 И-2).
+    Read from the registry like _kimi_env_model: routing's plan does not carry it."""
+    try:
+        if reg is None:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import routing
+            reg = routing.load_registry()
+        lim = ((reg.get("channels") or {}).get(cname) or {}).get("opencode_limit")
+    except Exception:                                    # noqa: BLE001 - a run never dies on this
+        return None
+    if isinstance(lim, dict) and all(isinstance(lim.get(k), int) and not isinstance(lim.get(k), bool)
+                                     and lim.get(k) > 0 for k in ("context", "output")):
+        return {"context": lim["context"], "output": lim["output"]}
+    return None
+
+
+def _opencode_child_env(name, base_model, binary, cwd):
+    """(env, info) for one opencode run (R153 И-2, each line measured with opencode 2.0.29):
+
+    - PWD = the run's cwd. opencode takes its working directory from an inherited PWD over the real
+      cwd - a harness started from Git Bash ran its opencode reviewer in the SHELL's folder (the
+      user's project: its AGENTS.md, its files), shared service and --standalone alike, while the
+      same run with PWD removed or set to the cwd worked in neutral_cwd() (runs/r153-t107-kimi-mimo/
+      i2/pwd_probe*.log).
+    - OPENCODE_DISABLE_AUTOUPDATE=1: the binary skips its update check on it; on 15.10 an update took
+      4 minutes during which no `opencode` command existed (panels E-359: killed at 5 min = broken).
+    - the channel's `opencode_limit` -> OPENCODE_CONFIG_CONTENT `provider.<p>.models.<m>.limit`,
+      merged over any value the user set, and only with `--standalone` (info["standalone"]): a
+      private server is started with THIS environment; measured on a local stand-in, it then asks
+      for max_completion_tokens = limit.output (32000 by default, 131072 / 20000 as configured).
+    """
+    env = dict(os.environ)
+    env["PWD"] = cwd
+    env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+    info = {"standalone": False, "limit": None, "note": None}
+    lim = _opencode_limit(name)
+    if not lim:
+        return env, info
+    if not _opencode_supports_standalone(binary):
+        info["note"] = ("opencode_limit (output %d) not applied: this opencode has no `run --standalone`, "
+                        "so the run's own config cannot reach the server - catalogue limit used"
+                        % lim["output"])
+        return env, info
+    prov, _, mid = base_model.split("#")[0].partition("/")
+    try:
+        cfg = json.loads(env.get("OPENCODE_CONFIG_CONTENT") or "{}")
+    except ValueError:
+        cfg = None
+    if not isinstance(cfg, dict) or not prov or not mid:
+        info["note"] = "opencode_limit not applied: OPENCODE_CONFIG_CONTENT in this environment is not a JSON object"
+        return env, info
+    try:
+        m = cfg.setdefault("provider", {}).setdefault(prov, {}).setdefault("models", {}).setdefault(mid, {})
+        m["limit"] = dict(m.get("limit") or {}, context=lim["context"], output=lim["output"])
+    except (AttributeError, TypeError):
+        info["note"] = "opencode_limit not applied: OPENCODE_CONFIG_CONTENT has another shape there"
+        return env, info
+    env["OPENCODE_CONFIG_CONTENT"] = json.dumps(cfg)
+    info.update(standalone=True, limit=lim)
+    return env, info
+
+
+def _opencode_catalogue_output(base_model):
+    """limit.output of `provider/model` in opencode's cached model catalogue (`<cache>/opencode/models.json`),
+    or None. Only read on a failed step, to print the number the step ran into."""
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    prov, _, mid = (base_model or "").split("#")[0].partition("/")
+    try:
+        with open(os.path.join(base, "opencode", "models.json"), encoding="utf-8") as f:
+            v = ((((json.load(f).get(prov) or {}).get("models") or {}).get(mid) or {}).get("limit") or {}).get("output")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def _opencode_length_stop(raw, base_model, info, has_text):
+    """R153 И-2: the OPENCODE OUTPUT LIMIT REACHED warning when opencode's store says the run's last
+    assistant step ended `finish: length`, else None. Read-only, by the stream's sessionID, the main
+    session only, numbers only (finish + token counts) - never message text."""
+    m = _OC_SESSION_RE.search(raw or "")
+    path = _opencode_store_path()
+    if not m or not os.path.isfile(path):
+        return None
+    try:
+        import sqlite3
+        import urllib.parse
+        uri = "file:%s?mode=ro" % urllib.parse.quote(path.replace("\\", "/"), safe="/:")
+        con = sqlite3.connect(uri, uri=True, timeout=2)
+        try:
+            row = con.execute("SELECT data FROM session_message WHERE session_id = ? AND type = 'assistant' "
+                              "ORDER BY seq DESC LIMIT 1", (m.group(1),)).fetchone()
+        finally:
+            con.close()
+        d = json.loads(row[0]) if row else None
+    except Exception:                                     # noqa: BLE001 - never costs the round
+        return None
+    if not isinstance(d, dict) or d.get("finish") != "length":
+        return None
+    tok = d.get("tokens") if isinstance(d.get("tokens"), dict) else {}
+    lim = (info or {}).get("limit")
+    cap = lim["output"] if lim else _opencode_catalogue_output(base_model)
+    return ("OPENCODE OUTPUT LIMIT REACHED - the run's last step ended with finish=length after %s reasoning "
+            "+ %s answer tokens (output limit %s, %s)%s"
+            % (tok.get("reasoning"), tok.get("output"), cap if cap else "unknown",
+               "the channel's opencode_limit" if lim else "opencode's model catalogue",
+               "; the answer stops mid-way" if has_text else "; no answer was written"))
+
+
 def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
                   timeout=2400, name="ocspark13free"):
     """opencode CLI (opencode.ai) — Spark 1.3 Contributor: FREE (`opencode/...-free`, no API key) or
@@ -4476,6 +4646,15 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
            "-m", base_model,
            "--format", "json",
            "--auto"]
+    # R153 И-2: PWD, no self-update, the channel's output limit (see _opencode_child_env).
+    ncwd = neutral_cwd()
+    env, oc_info = _opencode_child_env(name, base_model, binary, ncwd)
+    if oc_info["standalone"]:
+        cmd.insert(2, "--standalone")
+        log("  [%s] opencode_limit context %d / output %d -> a private server (--standalone)"
+            % (name, oc_info["limit"]["context"], oc_info["limit"]["output"]))
+    elif oc_info["note"]:
+        log("  [%s] %s" % (name, oc_info["note"]))
 
     # R146 И-3: the opencode-go/ provider is Igor's OpenCode Go plan, not the free tier.
     how = ("OpenCode Go plan (opencode's own login), counted against the plan's limits"
@@ -4485,7 +4664,7 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           input=text_in, cwd=neutral_cwd(), env=_task_child_env(),
+                           input=text_in, cwd=ncwd, env=_task_child_env(env),
                            timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
@@ -4517,6 +4696,12 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     if not text.strip() and not warn:
         warn.append("EMPTY OUTPUT despite exit 0")
     record_refusal(refusal_check(text, marker), warn, note)
+    # R153 И-2: opencode's own record of why the step ended - first, so the round names it.
+    stop = _opencode_length_stop(raw, base_model, oc_info, bool(text.strip()))
+    if stop:
+        warn.insert(0, stop)
+    if oc_info["note"]:
+        note.append(oc_info["note"])
 
     cache = tokens.get("cache") or {}
     return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
@@ -5753,6 +5938,7 @@ def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
         return None
     reqs = r429 = think = streak = 0
     other, ev, ended, last_req = {}, [], None, None
+    end_status, end_msg = None, ""
     req_t, think_t = {}, {}
     usage, models = dict.fromkeys(_KIMI_USAGE_KEYS, 0), set()
     try:
@@ -5808,6 +5994,13 @@ def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
                     er = rec.get("error")
                     ended = "%s%s" % (rec.get("reason"), (" (%s)" % er.get("name"))
                                       if isinstance(er, dict) and er.get("name") else "")
+                    # R153 И-2: the HTTP status that ended the turn (`error.details.statusCode`;
+                    # T107: 410 = the vendor retired the model) + the CLI's own short message.
+                    det = er.get("details") if isinstance(er, dict) else None
+                    sc = det.get("statusCode") if isinstance(det, dict) else None
+                    if isinstance(sc, int) and not isinstance(sc, bool):
+                        end_status = sc
+                        end_msg = scrub(str(er.get("message") or ""))[:120]
     cur = peak = spawned = 0
     for _t, d in sorted(ev):
         cur += d
@@ -5834,6 +6027,15 @@ def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
             cause += ", each ended at most %.0f s after its request" % max(think_secs)
     if cause and spawned:
         cause += "; it ran %d sub-agent(s), up to %d at once" % (spawned, peak)
+    # R153 И-2: a turn that ENDED on an HTTP error says which - T107's 410 «model retired» (4th
+    # request, 0.2 s) read as «stopped before finishing» because only 429s and thinking-only
+    # replies had a cause here.
+    if end_status == 410:
+        cause = ("the endpoint answered HTTP 410 Gone (%s): the vendor has retired this model and "
+                 "will not serve it again%s" % (end_msg or "no body",
+                                                 "; earlier, " + cause if cause else ""))
+    elif end_status and not cause:
+        cause = "the turn failed on HTTP %d (%s)" % (end_status, end_msg or "no message")
     # R142 И-6 (Б-52): other Kimi sessions on this machine active while this one ran. Since the
     # one-reviewer setup they rarely break a run (05.10: 9 of 12 overlapping sessions finished),
     # but they share a free key's rate limit - 62 of 417 requests (15%) got a 429 against 4 of 70
@@ -5872,7 +6074,7 @@ def _kimi_wire_postmortem(t0, prompt, child_env=None, stopped_at=None):
     return {"cause": cause, "line": line, "requests": reqs, "r429": r429, "thinking": think,
             "subagents": spawned, "peak": peak, "ended": ended, "session": found[0],
             "think_max_s": max(think_secs) if think_secs else None, "streak": streak,
-            "usage": usage, "models": sorted(models), "overlap": overlap}
+            "usage": usage, "models": sorted(models), "overlap": overlap, "status": end_status}
 
 
 _STDLIB_SUBPROCESS_RUN = subprocess.run

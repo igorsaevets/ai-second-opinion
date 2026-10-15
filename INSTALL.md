@@ -408,7 +408,7 @@ disagreement this tool exists to produce. Everything else is optional.
 | what it needs | what that unlocks | cost |
 |---|---|---|
 | the opencode CLI (`npm install -g opencode-ai`) | `ocspark13free` — the **free** Spark 1.3 voice, and the default `--ask` channel; `ocmimo26flashfree` — the **free** MiMo v2.6 Flash | **free** |
-| the Kimi Code CLI + `NVIDIA_NIM_API_KEY` ([below](#kimi-code-cli-free-kimi-k3-through-nvidia)) | `nvkimik3` — a **free** Kimi K3 voice in the cheap panel; the standard panel runs it instead of the paid `kimik3` | **free** (NVIDIA's trial service) |
+| ~~the Kimi Code CLI + `NVIDIA_NIM_API_KEY`~~ — **not needed since 1.112.0** ([why](#kimi-code-cli-retired-free-kimi-k3-through-nvidia)) | `nvkimik3` ships switched off: NVIDIA retired its free Kimi K3 on 2026-10-15. Kimi K3 answers in the standard panel through `OPENROUTER_API_KEY` (`kimik3`) | — |
 | `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, a Muse Spark voice and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
 | `MODEL_API_KEY` | the Muse Spark voices reached directly from Meta | metered API |
 | the Codex CLI, signed in | `codex` | your existing subscription |
@@ -613,44 +613,18 @@ If the CLI is absent, the others work the same as before — you only lose the f
 `doctor.py` reports whether the CLI is found and where. If yours is installed in an unusual
 location, set `OPENCODE_BIN` to the full path.
 
-### Kimi Code CLI (free Kimi K3 through NVIDIA)
+### Kimi Code CLI (retired: free Kimi K3 through NVIDIA)
 
-Since 1.106.0 the cheap panel has a free Kimi K3 voice, `nvkimik3`: the Kimi Code CLI
-([github.com/MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code)) talking to NVIDIA's
-free endpoint. It needs two things, both free:
+**Not needed since 1.112.0.** From 1.106.0 to 1.111.5 the cheap panel had a free Kimi K3 voice,
+`nvkimik3`: the Kimi Code CLI ([github.com/MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code))
+talking to NVIDIA's free endpoint with an `NVIDIA_NIM_API_KEY`. NVIDIA retired that model on
+2026-10-15 at 08:00 UTC: the endpoint answers HTTP 410 «end of life», on every key.
 
-1. **The CLI.** The vendor's script installs one binary and needs no Node.js:
-
-   ```
-   # Windows (PowerShell)
-   irm https://code.kimi.com/kimi-code/install.ps1 | iex
-   # macOS / Linux
-   curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
-   ```
-
-   Then open a new terminal and run `kimi --version`. `npm install -g @moonshot-ai/kimi-code` works
-   too (Node.js 22.19 or newer). On Windows the vendor asks for Git for Windows first: the CLI uses
-   its Git Bash. You need no `kimi login` and no config file: for the one process it starts, the
-   harness routes the CLI to NVIDIA with environment variables, and your Kimi config is not edited.
-2. **An NVIDIA key.** Sign up at [build.nvidia.com](https://build.nvidia.com), create an API key and
-   put it in `NVIDIA_NIM_API_KEY`, the same way as `OPENROUTER_API_KEY` above. NVIDIA calls this a
-   trial service, limited to about 40 requests a minute per key: two panels started at the same
-   time share that limit, and Kimi may not finish in one of them.
-
-Measured on 2026-10-05 with Kimi Code CLI 2.1.1: the script's binary, an empty Kimi home folder and
-this one key answered a review in 59 s.
-
-**Without the CLI or the key** the cheap panel answers with five voices: the plan says what is
-missing before anything starts, and `nvkimik3` ends at once with a pointer, sending nothing. In the
-standard panel the paid `kimik3` (OpenRouter, about $1.38 a run) answers instead. To stop `nvkimik3`
-from starting at all, put this in `~/.claude/model-orchestration.local.json`:
-
-```json
-{ "channels": { "nvkimik3": { "enabled": false } } }
-```
-
-If the CLI lives somewhere unusual, set `KIMI_BIN` to its full path. `doctor.py` reports whether it
-is found and where.
+Since 1.112.0 `nvkimik3` ships switched off and the cheap panel has no Kimi voice. Kimi K3 answers in
+the standard panel through OpenRouter (`kimik3`, about $1.38 a run), and «only kimi» / `--only kimi`
+starts that channel alone. If you installed the CLI and the key for the free route, nothing uses
+them any more; you may remove both. If you start `nvkimik3` by name anyway, the run ends with the
+410 and names the cause: the vendor has retired the model.
 
 ### Muse Code CLI (Muse Wonder on a Muse Code subscription)
 

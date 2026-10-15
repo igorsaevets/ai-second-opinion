@@ -1837,7 +1837,14 @@ def family_absent_from_panel(plan, reg, route=None, only=None):
     out = set()
     for gname in sorted(said):
         members = [c for c in groups[gname].get("channels") or [] if c in plan]
-        if not members or any(c in room for c in members):
+        # 🔴 R153 И-3 (2026-10-15): «in the room» = a member this panel would START, not one merely
+        # DECLARED on it. `panel_members` admits by the `panel` field alone, so members that ship OFF
+        # (nvkimik3 after NVIDIA retired Kimi K3; kimik3free, `distribution: local`, in the kit) still
+        # «held» the family, and the kit's `--only kimi` became «running 0 channel(s): NONE» (exit 2)
+        # while the paid kimik3 stood by. A default-off or explicit_only member speaks only when named.
+        present = [c for c in members if c in room and plan[c].get("default_enabled", True)
+                   and not (reg["channels"].get(c) or {}).get("explicit_only")]
+        if not members or present:
             continue
         for c in members:
             p, ch = plan[c], reg["channels"].get(c) or {}

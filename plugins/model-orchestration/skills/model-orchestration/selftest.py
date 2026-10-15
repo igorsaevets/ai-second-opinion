@@ -401,7 +401,14 @@ def suite_routing():
         # R142 И-6 (Б-53): `kimi` is the Kimi FAMILY group now - as an alias of the paid channel it
         # bought the OpenRouter voice while the free NVIDIA one was ready. The promise above holds:
         # the command still runs Kimi; the cascade keeps one transport.
-        (["--only", "kimi"], cascaded(group_of("kimi")), "--only kimi (GROUP -> every Kimi transport)"),
+        # R153 И-3 (2026-10-15): the promise holds in BOTH trees. Where the default panel runs a Kimi
+        # (here kimik3free) the word keeps to it; where it runs none (the kit: NVIDIA retired Kimi K3 and
+        # kimik3free is local) the family word names the Kimi that ships on (R149). The И-2 expectation
+        # accepted the empty round instead («running 0 channel(s): NONE», exit 2) - the R60 nested run's red.
+        (["--only", "kimi"], cascaded(group_of("kimi") or {c for c in group_members_all("kimi")
+                                                           if c in ENABLED_ANY_PANEL and not
+                                                           (_RAW["channels"].get(c) or {}).get("explicit_only")}),
+         "--only kimi (GROUP -> every Kimi transport)"),
         (["--only", "kimik3"], {"kimik3"}, "--only kimik3 (the channel's own name stays exact)"),
         (["--only", "qwen38max"], {"qwen38max"}, "--only qwen38max"),
         (["--only", "agy36flash"], {"agy36flash"}, "--only agy36flash"),
@@ -7920,6 +7927,8 @@ def main():
                   suite_r150_i3_grok_panel_fixes,
                   suite_r150_i4_grok_live_answer,
                   suite_r151_i2_mimo_prompt,
+                  suite_r153_i2_kimi_eol_oc_limit,
+                  suite_r153_i3_family_room,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -12112,7 +12121,13 @@ def suite_r138_i2_hotfix():
     ge_diff = sorted(set(ge) ^ set(ge_want)) if isinstance(ge, dict) else ["not a dict"]
     ge_diff += sorted(k for k in (set(ge) & set(ge_want) if isinstance(ge, dict) else ())
                       if ge[k] != ge_want[k])
-    check(ge == ge_want and getattr(o, "GROK_COMPAT_OFF", None) and oe is None
+    # R153 И-2 (2026-10-15): opencode's review env is no longer None - the parent's plus exactly PWD (opencode
+    # takes its folder from an inherited PWD over the real cwd, measured) and OPENCODE_DISABLE_AUTOUPDATE=1.
+    oe_extra = (sorted(k for k in set(oe) | set(os.environ) if oe.get(k) != os.environ.get(k))
+                if isinstance(oe, dict) else ["not a dict"])
+    oe_ok = (isinstance(oe, dict) and set(oe_extra) <= {"OPENCODE_DISABLE_AUTOUPDATE", "PWD"}
+             and oe.get("OPENCODE_DISABLE_AUTOUPDATE") == "1")
+    check(ge == ge_want and getattr(o, "GROK_COMPAT_OFF", None) and oe_ok
           and isinstance(me, dict) and me.get("MIMOCODE_DISABLE_CLAUDE_IMPORT") == "1"
           and o.neutral_cwd() == os.path.join(tempfile.gettempdir(), "orchestrate-neutral-cwd")
           and inline == {"inline.atts": "05ce32bc661b313b", "inline.dir_skipped": "ff08c8a5417f218a",
@@ -13478,9 +13493,13 @@ def suite_r143_i3_free_voices():
                 ch["enabled"] = False
             elif d == "kit":
                 ch["enabled"] = True
-    check(kit["channels"][nv].get("enabled", True) and kit["channels"][paid].get("enabled", True),
-          "R143 И-3: the kit ships %s ON (distribution not local) and keeps %s as its fallback"
-          % (nv, paid), repr((chans[nv].get("distribution"), chans[paid].get("distribution"))))
+    # R153 И-2 (2026-10-15): NVIDIA retired moonshotai/kimi-k3, so the env-routed Kimi ships OFF. This pin
+    # says so; the (c) checks below still test the cascade MECHANISM (env-routed Kimi first, the paid one
+    # only when it is not ready), so the fixture switches the env-routed member back on after it.
+    check(kit["channels"][nv].get("enabled") is False and kit["channels"][paid].get("enabled", True),
+          "R143 И-3 -> R153 И-2: the kit ships %s OFF (vendor end of life) and keeps %s"
+          % (nv, paid), repr((kit["channels"][nv].get("enabled"), chans[paid].get("distribution"))))
+    kit["channels"][nv]["enabled"] = True
     not_nv = lambda c: "%s is not set" % chans[nv]["env_model"]["key_env"] if c == nv else True  # noqa: E731
     for label, rdy, want in (("ready", yes, [nv]), ("its key missing", not_nv, [paid])):
         p = routing.resolve(copy.deepcopy(kit), panel="standard", ready=rdy)
@@ -13719,6 +13738,9 @@ def suite_r142_i6_kimi():
         for ch in kit["channels"].values():
             if isinstance(ch, dict) and ch.get("distribution") == "local":
                 ch["enabled"] = False
+        # R153 И-2 (2026-10-15): the env-routed Kimi ships OFF (NVIDIA end of life); these checks test the
+        # cascade MECHANISM, so the fixture switches it back on.
+        kit["channels"][nv]["enabled"] = True
 
         def run(rdy, **kw):
             p = routing.resolve(copy.deepcopy(kit), ready=rdy, **kw)
@@ -15198,6 +15220,256 @@ def suite_r150_i2_grok_compat():
           and "plugins" in doc.split("### Grok Build CLI")[-1][:6000],
           "R150 И-2 (g) INSTALL.md's Grok section names the import switches and what they leave on "
           "(R150 И-3: a tree without the doc fails - it used to pass vacuously)", inst)
+
+
+def suite_r153_i3_family_room():
+    """R153 И-3 (2026-10-15): in the shipped kit `--only kimi` and «только кими» ended «running 0 channel(s):
+    NONE» (exit 2). R149's rule - a group word names its family when the chosen panel holds no voice of it -
+    asked `panel_members`, which admits by the `panel` field alone: nvkimik3 (retired, off) and kimik3free
+    (local, off in the kit) are DECLARED cheap, so the family looked present while none of it could start.
+    «In the room» now means a member the panel would START.
+    (a) kit-shaped registry, cheap default: `--only kimi` and «только кими» run the paid Kimi alone, and the
+        plan says why (the R149 reason);
+    (b) CONTROL: a cheap Kimi that runs (kimik3free on) keeps the word to the room - kimik3 is not added;
+    (c) an explicit_only cheap member does not hold the family either (it speaks only when named), and
+        naming it still starts it;
+    (d) every group word, kit-shaped and as shipped from this tree, cheap default: an empty round only
+        when the family has no member that ships on outside explicit_only.
+    (a), (c), (d) fail on И-2's routing; (b) passes on both.
+    """
+    import copy as _cp
+    import routing as _r
+    section("R153 И-3: a family is «in the room» only through a member the panel would start")
+
+    def yes(_n):
+        return True
+
+    base = _r.load_registry(overlay=False)
+    kit = _cp.deepcopy(base)
+    for ch in kit["channels"].values():
+        if ch.get("distribution") == "local":
+            ch["enabled"] = False                         # what package.py does to a local channel
+
+    def runs(reg, **kw):
+        try:
+            p = _r.resolve(_cp.deepcopy(reg), ready=yes, **kw)
+        except _r.RouteError as e:
+            return [], {"_error": str(e)[:160]}
+        return sorted(c for c, s in p.items() if s.get("enabled")), p
+
+    def family(reg, word):
+        for g, v in (reg.get("groups") or {}).items():
+            if not g.startswith("_") and isinstance(v, dict) and (word == g or word in (v.get("aliases") or [])):
+                return [c for c in v.get("channels") or [] if c in reg["channels"]]
+        return []
+
+    fam = family(kit, "kimi")
+    if "kimik3" not in fam or "kimik3free" not in fam:
+        for n in "abcd":
+            check(False, "R153 И-3 (%s) the kimi family holds kimik3 and kimik3free" % n, repr(fam))
+        return
+    ships_on = [c for c in fam if kit["channels"][c].get("enabled", True)
+                and not kit["channels"][c].get("explicit_only")]
+    ko, kp = runs(kit, only=["kimi"])
+    kr, _ = runs(kit, route="только кими")
+    why = " ".join((kp.get(ko[0]) or {}).get("why") or []) if ko else repr(kp.get("_error"))
+    check(ships_on == ["kimik3"] and ko == ["kimik3"] and kr == ["kimik3"] and "R149" in why,
+          "R153 И-3 (a) kit, cheap default: `--only kimi` and «только кими» run kimik3 (the Kimi that ships on), "
+          "and the plan names the R149 reason - not an empty round",
+          "ships_on=%r only=%r route=%r why=%r" % (ships_on, ko, kr, why[-120:]))
+    liv = _cp.deepcopy(kit)
+    liv["channels"]["kimik3free"]["enabled"] = True       # the mechanism, not this tree's product
+    lo, _ = runs(liv, only=["kimi"])
+    lr, _ = runs(liv, route="только кими")
+    check(lo == ["kimik3free"] and lr == ["kimik3free"],
+          "R153 И-3 (b) CONTROL: a cheap Kimi that runs keeps the word to the room (kimik3free alone, no kimik3)",
+          "only=%r route=%r" % (lo, lr))
+    ex = _cp.deepcopy(liv)
+    ex["channels"]["kimik3free"]["explicit_only"] = True
+    eo, _ = runs(ex, only=["kimi"])
+    en, _ = runs(ex, only=["kimik3free"])
+    check(eo == ["kimik3"] and en == ["kimik3free"],
+          "R153 И-3 (c) an explicit_only cheap member does not hold the family (`--only kimi` -> kimik3); "
+          "naming it still starts it",
+          "only kimi=%r only kimik3free=%r" % (eo, en))
+    bad, seen = [], 0
+    for tag, reg in (("kit", kit), ("tree", base)):
+        for g, v in sorted((reg.get("groups") or {}).items()):
+            if g.startswith("_") or not isinstance(v, dict):
+                continue
+            can = [c for c in v.get("channels") or [] if c in reg["channels"]
+                   and reg["channels"][c].get("enabled", True) and not reg["channels"][c].get("explicit_only")]
+            got, _ = runs(reg, only=[g])
+            seen += 1
+            if bool(got) != bool(can):
+                bad.append("%s:%s got=%s ships_on=%s" % (tag, g, got, can))
+    check(seen >= 10 and not bad,
+          "R153 И-3 (d) every group word, cheap default, kit-shaped and as shipped: an empty round only when the "
+          "family has no member that ships on (explicit_only aside)",
+          "words=%d bad=%s" % (seen, "; ".join(bad)[:400]))
+
+
+def suite_r153_i2_kimi_eol_oc_limit():
+    """R153 И-2 (2026-10-15): Page2AI panel T107 lost two voices to causes the round could not name
+    (runs/r153-t107-kimi-mimo/FINDINGS.md): NVIDIA retired moonshotai/kimi-k3 (HTTP 410), and MiMo Flash
+    Free spent opencode's 32 000-token output limit on reasoning (store `finish: length`).
+    (a) Kimi's session log: a turn ended by HTTP 410 is named a retired model and diagnose() says so; a
+        400 names the old empty-body row; a clean run stays quiet;
+    (b) the vendor's own end-of-life sentence maps to the same cause;
+    (c) opencode's store `finish: length` -> OPENCODE OUTPUT LIMIT REACHED with the split and the
+        catalogue limit, diagnosed as such (not as END MARKER); quiet on `stop`;
+    (d) opencode's child env: PWD = the run's cwd, OPENCODE_DISABLE_AUTOUPDATE=1, nothing else differs;
+    (e) a channel's opencode_limit -> OPENCODE_CONFIG_CONTENT merged over the user's value + `--standalone`
+        in the argv; an opencode without --standalone gets neither and the run says so;
+    (f) registry: nvkimik3 off (vendor end of life), kimik3free local; no plan of the cheap panel runs
+        nvkimik3. (a)-(e) fail on 1.111.5, (f) on its registry.
+    """
+    import json as _j
+    import shutil as _sh
+    import sqlite3 as _sq
+    import tempfile
+    import time as _t
+    import orchestrate as o
+    import routing as _r
+    section("R153 И-2: a retired model (HTTP 410) and opencode's output limit are named; opencode's env")
+    td = tempfile.mkdtemp(prefix="r153i2-")
+    miss = lambda *a, **k: None  # noqa: E731 - a function the old code lacks fails its check
+    pm = getattr(o, "_kimi_wire_postmortem")
+    prompt = "P" * 300 + "R153-MIDDLE-OF-THE-BRIEF-" + "Q" * 300
+
+    def kimi_home(tag, status, msg):
+        home = os.path.join(td, "kimi-" + tag)
+        d = os.path.join(home, "sessions", "wd_r153", "session_" + tag + "0000", "agents", "main")
+        os.makedirs(d)
+        recs = [{"type": "turn.prompt", "input": [{"text": prompt}], "time": 1}]
+        recs += [{"type": "llm.request", "model": "m", "time": 2} for _ in range(4)]
+        end = {"type": "turn.ended", "agentId": "main", "reason": "failed" if status else "completed"}
+        if status:
+            end["error"] = {"code": "provider.api_error", "message": msg, "name": "APIStatusError",
+                            "details": {"statusCode": status}, "retryable": False}
+        recs.append(end)
+        with open(os.path.join(d, "wire.jsonl"), "w", encoding="utf-8") as f:
+            f.write("\n".join(_j.dumps(r) for r in recs) + "\n")
+        return {"KIMI_CODE_HOME": home}
+
+    saved_env = {k: os.environ.get(k) for k in ("XDG_DATA_HOME", "XDG_CACHE_HOME", "OPENCODE_CONFIG_CONTENT")}
+    saved = (o.subprocess.run, o.opencode_bin, o.neutral_cwd, getattr(o, "_opencode_limit", miss),
+             getattr(o, "_opencode_supports_standalone", miss))
+    try:
+        t0 = _t.time() - 1
+        g = pm(t0, prompt, kimi_home("a410", 410, "410 status code (no body)"))
+        b = pm(t0, prompt, kimi_home("a400", 400, "400 status code (no body)"))
+        c = pm(t0, prompt, kimi_home("aok", None, ""))
+        gc = (g or {}).get("cause") or ""
+        cause410, _f = o.diagnose("Kimi session log: " + gc)
+        cause400, _f = o.diagnose("Kimi session log: " + ((b or {}).get("cause") or ""))
+        endm, _f = o.diagnose("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
+        check("HTTP 410 Gone" in gc and (g or {}).get("status") == 410 and "RETIRED" in (cause410 or "")
+              and "empty-bodied 400" in (cause400 or "") and (c or {}).get("cause") is None
+              and "stopped before finishing" in (endm or ""),
+              "R153 И-2 (a): Kimi's log names the HTTP 410 that ended the turn -> «retired»; a 400 keeps its "
+              "own row; a clean run stays quiet; END MARKER keeps its cause",
+              repr((gc[:90], (b or {}).get("cause"), (c or {}).get("cause"), (cause410 or "")[:30]))[:240])
+        vend, _f = o.diagnose("410 Gone: The model 'moonshotai/kimi-k3' has reached its end of life on "
+                              "2026-10-15T08:00:00Z and is no longer available.")
+        check("RETIRED" in (vend or ""), "R153 И-2 (b): the vendor's own end-of-life sentence is a retired model",
+              repr((vend or "")[:80]))
+
+        # (c) opencode store + catalogue fixtures
+        xdg, cache = os.path.join(td, "xdg"), os.path.join(td, "cache")
+        os.makedirs(os.path.join(xdg, "opencode"))
+        os.makedirs(os.path.join(cache, "opencode"))
+        con = _sq.connect(os.path.join(xdg, "opencode", "opencode.db"))
+        con.execute("CREATE TABLE session_message (session_id TEXT, type TEXT, seq INTEGER, data TEXT)")
+        for sid, fin, rs, out in (("ses_R153len", "length", 32002, 0), ("ses_R153ok", "stop", 900, 400)):
+            con.execute("INSERT INTO session_message VALUES (?, 'assistant', 1, ?)",
+                        (sid, _j.dumps({"finish": "tool-calls", "tokens": {"reasoning": 5, "output": 5}})))
+            con.execute("INSERT INTO session_message VALUES (?, 'assistant', 2, ?)",
+                        (sid, _j.dumps({"finish": fin, "tokens": {"reasoning": rs, "output": out}})))
+        con.commit()
+        con.close()
+        with open(os.path.join(cache, "opencode", "models.json"), "w", encoding="utf-8") as f:
+            _j.dump({"opencode": {"models": {"mimo-v2.6-flash-free": {"limit": {"context": 200000,
+                                                                                  "output": 32000}}}}}, f)
+        os.environ["XDG_DATA_HOME"], os.environ["XDG_CACHE_HOME"] = xdg, cache
+        ls = getattr(o, "_opencode_length_stop", miss)
+        w = ls('{"sessionID":"ses_R153len"}', "opencode/mimo-v2.6-flash-free", {"limit": None}, False) or ""
+        q = ls('{"sessionID":"ses_R153ok"}', "opencode/mimo-v2.6-flash-free", {"limit": None}, True)
+        wc, _f = o.diagnose(w)
+        check("OPENCODE OUTPUT LIMIT REACHED" in w and "32002 reasoning" in w and "output limit 32000" in w
+              and "no answer was written" in w and q is None and "finish=length" in (wc or "")
+              and "stopped before finishing" not in (wc or ""),
+              "R153 И-2 (c): opencode's `finish: length` is named with the split and the catalogue limit; "
+              "quiet on `stop`", repr((w[:140], q, (wc or "")[:40]))[:240])
+
+        # (d) the child env
+        ce = getattr(o, "_opencode_child_env", None)
+        o._opencode_limit = lambda name, reg=None: None
+        env, info = ce("ocspark13free", "opencode/x", "opencode", td) if ce else ({}, {})
+        diff = sorted(k for k in set(env) | set(os.environ) if env.get(k) != os.environ.get(k)
+                      and k not in ("PWD", "OPENCODE_DISABLE_AUTOUPDATE"))
+        check(env.get("PWD") == td and env.get("OPENCODE_DISABLE_AUTOUPDATE") == "1" and not diff
+              and info.get("standalone") is False,
+              "R153 И-2 (d): opencode's env = the parent's + PWD (its cwd) + OPENCODE_DISABLE_AUTOUPDATE=1",
+              repr(diff[:12]))
+
+        # (e) opencode_limit -> config + --standalone; refused without standalone support
+        seen = []
+
+        class _Done:
+            returncode = 0
+            stderr = ""
+            stdout = "\n".join([_j.dumps({"type": "text", "part": {"text": "ok\nMARK"}}),
+                                _j.dumps({"type": "step_finish", "part": {"tokens": {}, "cost": 0}})])
+
+        def _run(cmd, **kw):
+            seen.append((list(cmd), dict(kw)))
+            return _Done()
+        os.environ["OPENCODE_CONFIG_CONTENT"] = _j.dumps({"keep": 1, "provider": {"opencode": {"options": {"k": 2}}}})
+        o.subprocess.run, o.opencode_bin, o.neutral_cwd = _run, (lambda: "opencode"), (lambda: td)
+        o._opencode_limit = lambda name, reg=None: {"context": 200000, "output": 131072}
+        o._opencode_supports_standalone = lambda b: True
+        o.call_opencode("B", "MARK", os.path.join(td, "O1.md"), model="opencode/mimo-v2.6-flash-free",
+                        system="S", name="ocmimo26flashfree")
+        a1, k1 = seen[-1] if seen else ([], {})
+        cfg = _j.loads((k1.get("env") or {}).get("OPENCODE_CONFIG_CONTENT") or "{}")
+        mo = ((((cfg.get("provider") or {}).get("opencode") or {}).get("models") or {})
+              .get("mimo-v2.6-flash-free") or {})
+        o._opencode_supports_standalone = lambda b: False
+        r2 = o.call_opencode("B", "MARK", os.path.join(td, "O2.md"), model="opencode/mimo-v2.6-flash-free",
+                             system="S", name="ocmimo26flashfree")
+        a2, k2 = seen[-1] if len(seen) > 1 else ([], {})
+        check(a1[1:3] == ["run", "--standalone"] and k1.get("cwd") == td and (k1.get("env") or {}).get("PWD") == td
+              and mo.get("limit") == {"context": 200000, "output": 131072} and cfg.get("keep") == 1
+              and ((cfg.get("provider") or {}).get("opencode") or {}).get("options") == {"k": 2}
+              and "--standalone" not in a2 and "OPENCODE_CONFIG_CONTENT" in (k2.get("env") or {})
+              and _j.loads(k2["env"]["OPENCODE_CONFIG_CONTENT"]).get("provider", {}).get("opencode", {})
+              .get("models") is None
+              and any("not applied" in n for n in (r2 or {}).get("notes") or []),
+              "R153 И-2 (e): opencode_limit -> the run's OPENCODE_CONFIG_CONTENT (user's keys kept) + "
+              "`run --standalone`; without --standalone support neither, and the run says so",
+              repr((a1[:4], mo, a2[:4]))[:240])
+    finally:
+        o.subprocess.run, o.opencode_bin, o.neutral_cwd = saved[0], saved[1], saved[2]
+        o._opencode_limit, o._opencode_supports_standalone = saved[3], saved[4]
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        _sh.rmtree(td, ignore_errors=True)
+
+    # (f) the registry of the tree this selftest runs in (source or the shipped kit)
+    reg = _r.load_registry()
+    ch = reg.get("channels") or {}
+    nv, kf = ch.get("nvkimik3") or {}, ch.get("kimik3free") or {}
+    raw = _j.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "channels.json"),
+                       encoding="utf-8"))["channels"]
+    plan = _r.resolve(reg, panel="cheap")
+    check(nv.get("enabled") is False and "_disabled_r153" in raw.get("nvkimik3", {})
+          and kf.get("distribution") == "local" and not (plan.get("nvkimik3") or {}).get("enabled"),
+          "R153 И-2 (f): nvkimik3 is off (NVIDIA end of life), kimik3free stays local, the cheap plan has no nvkimik3",
+          repr((nv.get("enabled"), kf.get("distribution"), (plan.get("nvkimik3") or {}).get("enabled"))))
 
 
 def suite_r151_i2_mimo_prompt():

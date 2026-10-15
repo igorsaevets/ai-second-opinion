@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.112.0 — 2026-10-15
+
+Kimi and opencode, after a panel on 2026-10-15 lost two of six voices and printed «the model stopped
+before finishing» for both:
+
+- **`nvkimik3` is off.** NVIDIA retired `moonshotai/kimi-k3` on 2026-10-15 at 08:00 UTC: every
+  request now answers HTTP 410 «has reached its end of life». The cheap panel runs without a Kimi
+  voice (5 models) until another free route exists; `kimik3` (OpenRouter, paid) answers in the
+  standard panel. Naming `nvkimik3` on purpose still starts it, and the run ends on the 410, named.
+- **«only kimi» runs a Kimi again.** The rule «a family word names its family when the chosen panel
+  holds no voice of it» (1.110.0) counted a member as present when it was merely DECLARED on the
+  panel. With `nvkimik3` off and `kimik3free` local-only, the kit's `--only kimi` and «только кими»
+  ended «running 0 channel(s): NONE» (exit 2). A member now counts only if the panel would start
+  it, so the word names `kimik3` (OpenRouter, paid) and the plan says why. Checked over all 11 group
+  words, as a flag and as a phrase, in the shipped and in the source registry: this is the only plan
+  that changes.
+- **A retired model is named.** When Kimi Code CLI's session log shows the turn ended on an HTTP
+  status, the round says which; a 410 reads «the vendor has retired this model» with what to do,
+  and the vendor's own end-of-life sentence maps to the same cause on any channel.
+- **opencode's output limit is named.** When opencode's own store says the run's last step ended
+  with `finish: length`, the round prints OPENCODE OUTPUT LIMIT REACHED with the reasoning / answer
+  split and the limit, instead of a missing end marker.
+- **MiMo Flash Free (`ocmimo26flashfree`) gets a larger output allowance.** opencode's catalogue gives
+  the free model 32 000 output tokens, and reasoning counts against them: on 2026-10-15 it reasoned
+  32 002 tokens into a review and wrote nothing (8 of 88 such runs since 10-01). The channel now
+  carries `opencode_limit` (context 200 000, output 65 536), which the harness passes as the run's
+  `OPENCODE_CONFIG_CONTENT` with `opencode run --standalone` - a private opencode server started
+  with that run's settings. Measured: opencode then asks for the configured limit instead of
+  32 000, and the free gateway wrote 86 562 tokens in one step when allowed 131 072. 65 536 leaves
+  most of the 200 000-token window for the brief. An opencode without `--standalone` keeps the
+  catalogue limit and the run says so.
+- **opencode reviewers work in the harness's neutral folder.** opencode takes its working folder
+  from an inherited `PWD` over the folder it is started in, so a harness launched from Git Bash ran
+  its opencode reviewer inside the folder the shell was in - usually your project, with its
+  `AGENTS.md` and files (measured in both the shared-service and the standalone mode). The child now
+  gets `PWD` = its own folder.
+- **opencode does not update itself during a run.** Harness runs set `OPENCODE_DISABLE_AUTOUPDATE=1`;
+  an opencode update replaces the installed package through npm, and for those minutes there is no
+  `opencode` command at all. An opencode window you open yourself can still update; setting the
+  same variable for your user account stops that too.
+- **README and INSTALL** stop describing the NVIDIA route: step «2b» is gone, the cheap panel is 5
+  models («CLI only» 4), the standard one 12 with Kimi K3 through OpenRouter, its cost about $2.5 a
+  run; the channel off-switch example now uses `ocmimo26flashfree`.
+
 ## 1.111.5 — 2026-10-14
 
 MiMo Code (`mimov26pro`):
