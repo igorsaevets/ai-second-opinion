@@ -7954,6 +7954,7 @@ def main():
                   suite_r153_i3_family_room,
                   suite_r153_i5_hotfix,
                   suite_r153_i6_hotfix,
+                  suite_r153_i7_hotfix,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -15247,6 +15248,105 @@ def suite_r150_i2_grok_compat():
           and "plugins" in doc.split("### Grok Build CLI")[-1][:6000],
           "R150 И-2 (g) INSTALL.md's Grok section names the import switches and what they leave on "
           "(R150 И-3: a tree without the doc fails - it used to pass vacuously)", inst)
+
+
+def suite_r153_i7_hotfix():
+    """R153 И-7 (2026-10-16), kit 1.112.3 - the route grammar the r153i6 panel probed, measured on the real code:
+    (a) G6 (Grok), measured worse: «kimik3free вместо kimik3» (the «X вместо Y» apply_route's own refusal recommends)
+        ran the PAID kimik3 and switched the free kimik3free OFF - the R86 hoist read the target first;
+    (b) the same inversion between two CLIs: «codex вместо grokbuild» ran grokbuild, not codex;
+    (c) G1 (5 of 5 voices): «только grokbuild, добавь agy38flash» (either order) ran grokbuild alone;
+    (d) F3/S1D/G6: «codex, не используй grokbuild» dropped codex with grokbuild; names on both sides of a «не» are
+        refused now; CONTROL: «grokbuild не используй» / «grokbuild и agy38flash не используй» still exclude;
+    (e) G3/F2/A1.4: «вместо grokbuild возьми qwen38maxcli, codex» - the third entity is a replacement (was a dangling
+        target: codex never started although _selection_tokens counted it);
+    (f) a GROUP as the «вместо» target replaces the whole family («вместо кими возьми grokbuild»: the expanded
+        members used to pair up among themselves - kimik3free became a replacement);
+    (g) G8 (Grok): `--only wonder mcwonder10cont --skip mcwonder10cont` - named AND skipped - held the family (empty
+        round); now the stop says «you excluded it in this run»;
+    (h) the two readers agree: every channel _selection_tokens counts as chosen and the run did not exclude starts;
+    (i) ONE normaliser: apply_route and _selection_tokens both call _route_stream (no second copy of the hoist).
+    """
+    import copy as _cp
+    import inspect
+    import routing as _r
+    section("R153 И-7: «X вместо Y», «только X, добавь Y», names before a «не», one route normaliser")
+
+    base = _r.load_registry(overlay=False)
+
+    def runs(route=None, panel="standard", reg=None, **kw):
+        try:
+            p = _r.resolve(_cp.deepcopy(reg or base), route=route, panel=panel, ready=lambda _n: True, **kw)
+        except _r.RouteError as e:
+            return None, str(e)
+        return sorted(c for c, s in p.items() if s.get("enabled")), p
+
+    a, pa = runs("kimik3free вместо kimik3")
+    check(a is not None and "kimik3free" in a and "kimik3" not in a,
+          "R153 И-7 (a) «kimik3free вместо kimik3» runs the free kimik3free and NOT the paid kimik3 (1.112.2: inverted)",
+          "%r" % (a if a is not None else str(pa)[:160]))
+    b, pb = runs("codex вместо grokbuild", panel="cheap")
+    check(b is not None and "codex" in b and "grokbuild" not in b,
+          "R153 И-7 (b) «codex вместо grokbuild» runs codex and not grokbuild",
+          "%r" % (b if b is not None else str(pb)[:160]))
+    c1, _ = runs("только grokbuild, добавь agy38flash", panel="cheap")
+    c2, _ = runs("добавь agy38flash, только grokbuild", panel="cheap")
+    check(c1 == ["agy38flash", "grokbuild"] and c2 == ["agy38flash", "grokbuild"],
+          "R153 И-7 (c) «только grokbuild, добавь agy38flash» (both orders) runs both, not grokbuild alone",
+          "%r / %r" % (c1, c2))
+    d1, e1 = runs("codex, не используй grokbuild", panel="cheap")
+    d2, _ = runs("grokbuild не используй", panel="cheap")
+    d3, _ = runs("grokbuild и agy38flash не используй", panel="cheap")
+    check(d1 is None and "BEFORE its exclusion" in str(e1) and d2 is not None and "grokbuild" not in d2
+          and d3 is not None and not {"grokbuild", "agy38flash"} & set(d3),
+          "R153 И-7 (d) names on both sides of a «не» are refused, not dropped together; CONTROL: a trailing «не "
+          "используй» still excludes the names before it",
+          "%r / %r / %r" % (d1 if d1 is not None else str(e1)[:90], d2, d3))
+    e, pe = runs("вместо grokbuild возьми qwen38maxcli, codex", panel="cheap")
+    check(e is not None and {"qwen38maxcli", "codex"} <= set(e) and "grokbuild" not in e,
+          "R153 И-7 (e) «вместо grokbuild возьми qwen38maxcli, codex»: the third entity is a second replacement",
+          "%r" % (e if e is not None else str(pe)[:160]))
+    kimi = set(_r.group_members(base, "kimi") or [])
+    f, pf = runs("вместо кими возьми grokbuild")
+    check(f is not None and "grokbuild" in f and not kimi & set(f) and len(kimi) >= 2,
+          "R153 И-7 (f) a group as the «вместо» target replaces every member («вместо кими возьми grokbuild»)",
+          "%r (kimi = %r)" % (f if f is not None else str(pf)[:160], sorted(kimi)))
+    kit = _cp.deepcopy(base)
+    for ch in kit["channels"].values():
+        if ch.get("distribution") == "local":
+            ch["enabled"] = False                         # what package.py does to a local channel
+    g, eg = runs(panel="cheap", reg=kit, only=["wonder", "mcwonder10cont"], skip=["mcwonder10cont"])
+    check(g is None and "you excluded it in this run" in eg and "mcwonder10cont" in eg,
+          "R153 И-7 (g) a member named AND skipped does not hold its family: the stop names the exclusion",
+          "%r" % (g if g is not None else str(eg)[:200]))
+    corpus = ["только grokbuild, добавь codex", "только grokbuild, вместо codex agy38flash",
+              "вместо codex grokbuild agy38flash", "вместо grokbuild возьми qwen38maxcli, kimik3free",
+              "не используй kimik3 вместо kimik3free", "не используй grokbuild, вместо него возьми qwen38maxcli",
+              "codex вместо grokbuild", "kimik3free вместо kimik3", "только kimik3free вместо kimik3",
+              "не используй codex, добавь codex", "не используй cli, добавь codex", "включая qwen38maxcli вместо codex",
+              "не используй codex, только codex", "добавь codex, не используй cli"]
+    bad = []
+    for s in corpus:
+        named = _r.explicitly_named(_cp.deepcopy(base), route=s)
+        on, p = runs(s)
+        if on is None:
+            bad.append("%s: refused" % s)
+            continue
+        # «excluded» = the sentence dropped it BY NAME or replaced it; «not in the 'only' list» marks _user_off too,
+        # and that is exactly the 1.112.2 disagreement this check is for (NC: inert on the old code without this).
+        miss = sorted(c for c in named if not p[c].get("enabled") and not any(
+            str(w).startswith(("route: excluded by name", "route: replaced by")) for w in p[c].get("why") or []))
+        if miss:
+            bad.append("%s: named, not excluded, off: %s" % (s, ",".join(miss)))
+    check(not bad, "R153 И-7 (h) _selection_tokens and apply_route agree on %d sentences: a name counted as chosen "
+          "and not excluded starts" % len(corpus), "; ".join(bad)[:300])
+    rs = getattr(_r, "_route_stream", None)
+    src_sel = inspect.getsource(_r._selection_tokens)
+    src_route = inspect.getsource(_r.apply_route)
+    check(callable(rs) and "_route_stream(" in src_sel and "_route_stream(" in src_route
+          and "stream[first]] + stream[:first]" not in src_sel and "stream[:first_marker_i]" not in src_route,
+          "R153 И-7 (i) ONE normaliser: apply_route and _selection_tokens both order the route through _route_stream",
+          "route_stream=%s" % callable(rs))
 
 
 def suite_r153_i6_hotfix():

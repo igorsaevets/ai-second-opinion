@@ -1395,6 +1395,49 @@ def _detect_silent_drop(text, stream, alias_idx, reg):
                cname, cname, ", ".join(known) or "(none)"))
 
 
+_ROUTE_MARKERS = ("neg", "subst", "only", "add")
+
+
+def _route_stream(stream, text=None, strict=False):
+    """
+    R153 И-7: put a route's tokens in the order BOTH readers walk them - apply_route (strict) and _selection_tokens
+    (lenient, never raises). One copy, because two copies of this grammar drifted (r153i6: 5 of 5 reviewers).
+
+    Entities before the first marker: «в codex используй 5.6 sol» / «grokbuild не используй» -> the marker moves to
+    the front (R86). «kimik3free вместо kimik3» -> an implicit «add» goes in front instead: the entity before
+    «вместо» is the replacement, the one after it the target (the hoist read it backwards). «codex, не используй
+    grokbuild» -> names on BOTH sides of a «не»: strict refuses (is codex kept or dropped?), lenient hoists.
+    """
+    stream = list(stream)
+    first = next((i for i, t in enumerate(stream) if t[1] in _ROUTE_MARKERS), None)
+    if not first:
+        return stream
+    lead, marker, rest = stream[:first], stream[first], stream[first + 1:]
+    if marker[1] == "subst":
+        return [(lead[0][0], "add", "")] + stream
+    if marker[1] == "neg" and rest and rest[0][1] == "entity" and strict:
+        names = ", ".join(dict.fromkeys(t[2][1] for t in lead if t[1] == "entity"))
+        raise RouteError(
+            "%r names %s BEFORE its exclusion («не ...») and more channels after it, so it cannot say whether %s "
+            "is kept or dropped (until 1.112.3 it was dropped with the rest). Say «только %s, не используй ...» "
+            "(that and nothing else), «включая %s, не используй ...» (the usual set and that), or put every name "
+            "you exclude after the «не»." % (text, names, names, names, names))
+    return [marker] + lead + rest
+
+
+def _logical_tokens(stream):
+    """R153 И-7: (kind, value) for a marker, ("entity", [vals]) for one written word - a group's members together."""
+    out = []
+    for tok in stream:
+        if tok[1] != "entity":
+            out.append([tok[1], tok[2], None])
+        elif out and out[-1][0] == "entity" and out[-1][2] == tok[0]:
+            out[-1][1].append(tok[2])
+        else:
+            out.append(["entity", [tok[2]], tok[0]])
+    return [(k, v) for k, v, _pos in out]
+
+
 def apply_route(plan, reg, text):
     """Interpret free text into plan mutations. Raises RouteError rather than guessing."""
     idx = alias_index(reg)
@@ -1406,107 +1449,146 @@ def apply_route(plan, reg, text):
     # See _detect_silent_drop for the full rationale and #44 criterion 1 in BACKLOG.md.
     _detect_silent_drop(text, stream, idx, reg)
 
-    # 🔴 R86 2026-09-14: HOIST the first marker to the front when entities precede it.
-    # Russian natural word order puts the marker after the object: «в codex используй 5.6 sol»
-    # scans as [entity(codex), marker(ADD), entity(5.6 sol)]; without this rearrangement the
-    # first entity hits mode=None and raises «bare name is not an instruction» - the very error
-    # message that already NAMED this exact use case («используй терра») as one the router
-    # SHOULD support. Semantics for a stream that already begins with a marker are unchanged
-    # (first_marker_i==0, no rearrangement). A stream with entities but NO marker still fails
-    # with the same error below (unchanged), preserving refuse-rather-than-guess.
-    first_marker_i = next((i for i, t in enumerate(stream)
-                           if t[1] in ("neg", "subst", "only", "add")), None)
-    if first_marker_i is not None and first_marker_i > 0:
-        marker = stream[first_marker_i]
-        stream = [marker] + stream[:first_marker_i] + stream[first_marker_i+1:]
+    # 🔴 R86 2026-09-14 / R153 И-7 2026-10-16: ENTITIES BEFORE THE FIRST MARKER. Russian puts the object first
+    # («в codex используй 5.6 sol»), so R86 hoisted that marker to the front - right for «используй» and for a
+    # trailing «не используй», BACKWARDS for «вместо»: «kimik3free вместо kimik3» became «вместо kimik3free kimik3»,
+    # and the router switched OFF the free channel the human asked for and ON the paid one it was told to replace
+    # (`runs/r153-t107-kimi-mimo/i7/route_probe2_i7.py`, H2) - the very «X вместо Y» the refusal below recommends.
+    # _route_stream is the ONE place that orders the tokens, for this loop and for _selection_tokens alike.
+    stream = _route_stream(stream, text, strict=True)
 
     mode = None
-    pending_neg = None      # the entity a following "вместо" replaces
-    subst_target = None
+    pending_neg = None      # the entities a following "вместо" replaces («не X, вместо него Y»)
+    subst_target = None     # the entities a leading «вместо» replaces («вместо X возьми Y»)
+    repl_open = False       # after a completed «вместо X Y», further entities are further replacements
+    infix_from = None       # «Y вместо X»: the entities Y, already selected, that replace X
+    resume_mode = None      # ... and the mode the sentence returns to after X
+    prev_sel = None         # what the previous word selected (only/add): the Y of «Y вместо X»
+    last_targets = []
     only_list = []
+    selected = []           # what «добавь»/«плюс» or a replacement switched on - part of an «only» sentence too
 
-    for _, kind, val in stream:
+    # A group word expands into one token per member at ONE position; _logical_tokens hands the loop the members of
+    # one written word together, so «вместо кими возьми X» replaces the whole family, not just its first member.
+    for kind, vals in _logical_tokens(stream):
         if kind in ("neg", "subst", "only", "add"):
-            mode = kind
             if kind == "subst":
-                subst_target = pending_neg      # "не 5.6 sol, вместо нее 5.5" -> anaphora
+                repl_open, infix_from = False, None
+                if pending_neg is not None:
+                    subst_target = pending_neg      # "не 5.6 sol, вместо нее 5.5" -> anaphora
+                elif prev_sel is not None:
+                    infix_from, resume_mode, subst_target = prev_sel, mode, None
+                else:
+                    subst_target = None
+            mode = kind
+            prev_sel = None
             continue
-        etype = val[0]
-        cname = val[1]
-        mname = val[2]
 
-        if mode == "only":
-            only_list.append(cname)
-            if etype == "model":
-                plan[cname]["model"] = mname
-                plan[cname]["why"].append("only: model pinned to %s" % mname)
+        if mode == "subst" and infix_from is not None:
+            # «Y вместо X»: X is the target. A model of Y's own channel is a swap Y already made («5.5 вместо 6.1 sol»).
+            keep = {v[1] for v in infix_from}
+            for _t_type, t_chan, _t_model in vals:
+                if t_chan in keep:
+                    continue
+                plan[t_chan]["enabled"] = False
+                plan[t_chan]["_route_off"] = True
+                plan[t_chan]["why"].append("route: replaced by %s" % ", ".join(sorted(keep)))
+                only_list[:] = [c for c in only_list if c != t_chan]
+            mode, infix_from = resume_mode, None
+            continue
 
-        elif mode == "add":
-            # ADDITIVE: keep whatever the default set already is and switch this one ON. The
-            # point of the mode is opt-in channels - anything already enabled is unaffected, so
-            # "добавь kimi" on a default run is a no-op that still prints why, rather than an
-            # error. Note this does NOT set _route_off anywhere: adding a channel excludes
-            # nothing, which is exactly how it differs from `only`.
-            plan[cname]["enabled"] = True
-            plan[cname].pop("_route_off", None)
-            if etype == "model":
-                plan[cname]["model"] = mname
-                plan[cname]["why"].append("route: added, model pinned to %s" % mname)
-            else:
-                plan[cname]["why"].append("route: added to the default set by name")
+        if mode == "subst":
+            if subst_target is None and not repl_open:
+                # "вместо 5.6 sol возьми 5.5": first entity after the marker is the target,
+                # the next one is the replacement.
+                subst_target = vals
+                continue
+            # R153 И-7: «вместо codex возьми grokbuild, agy38flash» - a THIRD entity used to become a new target that
+            # nothing replaced (left as it was), while _selection_tokens counted it as chosen. It is a replacement.
+            targets = [] if repl_open else subst_target
+            for etype, cname, mname in vals:
+                same = [t for t in targets if etype == "model" and t[0] == "model" and t[1] == cname]
+                if same:
+                    plan[cname]["model"] = mname
+                    plan[cname]["enabled"] = True
+                    plan[cname].pop("_needs_replacement", None)
+                    plan[cname]["why"].append("route: %s -> %s" % (same[0][2], mname))
+                else:
+                    plan[cname]["enabled"] = True
+                    plan[cname].pop("_route_off", None)   # the route itself re-enabled it
+                    if mname:
+                        plan[cname]["model"] = mname
+                    plan[cname]["why"].append("route: replaces %s" % ", ".join(
+                        t[1] for t in (targets or last_targets)))
+                selected.append(cname)
+            for _t_type, t_chan, _t_model in targets:
+                if any(v[1] == t_chan for v in vals):
+                    continue
+                plan[t_chan]["enabled"] = False
+                plan[t_chan]["_route_off"] = True
+                plan[t_chan]["why"].append("route: replaced by %s" % ", ".join(v[1] for v in vals))
+            if not repl_open:
+                last_targets = targets
+            subst_target, pending_neg, repl_open = None, None, True
+            continue
 
-        elif mode == "neg":
-            if etype == "channel":
-                plan[cname]["enabled"] = False
-                plan[cname]["_route_off"] = True   # a later flag may not quietly undo this
-                plan[cname]["why"].append("route: excluded by name")
-                pending_neg = val
-            else:
-                pending_neg = val
-                if plan[cname]["model"] == mname:
+        for etype, cname, mname in vals:
+            if mode == "only":
+                only_list.append(cname)
+                if etype == "model":
+                    plan[cname]["model"] = mname
+                    plan[cname]["why"].append("only: model pinned to %s" % mname)
+
+            elif mode == "add":
+                # ADDITIVE: keep whatever the default set already is and switch this one ON. The
+                # point of the mode is opt-in channels - anything already enabled is unaffected, so
+                # "добавь kimi" on a default run is a no-op that still prints why, rather than an
+                # error. Note this does NOT set _route_off anywhere: adding a channel excludes
+                # nothing, which is exactly how it differs from `only`.
+                plan[cname]["enabled"] = True
+                plan[cname].pop("_route_off", None)
+                selected.append(cname)
+                if etype == "model":
+                    plan[cname]["model"] = mname
+                    plan[cname]["why"].append("route: added, model pinned to %s" % mname)
+                else:
+                    plan[cname]["why"].append("route: added to the default set by name")
+
+            elif mode == "neg":
+                if etype == "channel":
+                    plan[cname]["enabled"] = False
+                    plan[cname]["_route_off"] = True   # a later flag may not quietly undo this
+                    plan[cname]["why"].append("route: excluded by name")
+                elif plan[cname]["model"] == mname:
                     plan[cname]["_needs_replacement"] = mname
                     plan[cname]["why"].append("route: %s refused, replacement pending" % mname)
                 else:
                     plan[cname]["why"].append("route: %s refused (was not selected anyway)"
                                               % mname)
 
-        elif mode == "subst":
-            if subst_target is None:
-                # "вместо 5.6 sol возьми 5.5": first entity after the marker is the target,
-                # the next one is the replacement.
-                subst_target = val
-                continue
-            t_type, t_chan, t_model = subst_target
-            if etype == "model" and t_type == "model" and cname == t_chan:
-                plan[cname]["model"] = mname
-                plan[cname]["enabled"] = True
-                plan[cname].pop("_needs_replacement", None)
-                plan[cname]["why"].append("route: %s -> %s" % (t_model, mname))
             else:
-                plan[t_chan]["enabled"] = False
-                plan[t_chan]["_route_off"] = True
-                plan[t_chan]["why"].append("route: replaced by %s" % cname)
-                plan[cname]["enabled"] = True
-                plan[cname].pop("_route_off", None)   # the route itself re-enabled it
-                if mname:
-                    plan[cname]["model"] = mname
-                plan[cname]["why"].append("route: replaces %s" % t_chan)
-            subst_target = None
-            pending_neg = None
+                raise RouteError(
+                    # 🔴 THE MESSAGE LISTED THREE OF THE FOUR MODES AND OMITTED THE ONE THE READER
+                    # MOST OFTEN WANTS. ADD has existed since R38 and this sentence never mentioned
+                    # it, so «используй терра» - a natural way to ask for an opt-in channel - was
+                    # refused with a list of alternatives that did not contain the right answer.
+                    # A refusal is only as good as the instruction it gives.
+                    "%r mentions %s but no instruction word. Say what to do with it: «только %s» "
+                    "(that one and nothing else), «включая %s» / «плюс %s» (the usual set AND that "
+                    "one), «не используй %s» (drop it), or «X вместо %s» (swap). A bare name is not "
+                    "an instruction, and guessing between «only» and «also» is exactly the guess "
+                    "that would spend money on the wrong set."
+                    % (text, cname, cname, cname, cname, cname, cname))
+        if mode in ("only", "add"):
+            prev_sel, pending_neg = vals, None    # a chosen word ends the «не X, вместо него» anaphora
+        elif mode == "neg":
+            pending_neg = vals
 
-        else:
-            raise RouteError(
-                # 🔴 THE MESSAGE LISTED THREE OF THE FOUR MODES AND OMITTED THE ONE THE READER
-                # MOST OFTEN WANTS. ADD has existed since R38 and this sentence never mentioned
-                # it, so «используй терра» - a natural way to ask for an opt-in channel - was
-                # refused with a list of alternatives that did not contain the right answer.
-                # A refusal is only as good as the instruction it gives.
-                "%r mentions %s but no instruction word. Say what to do with it: «только %s» "
-                "(that one and nothing else), «включая %s» / «плюс %s» (the usual set AND that "
-                "one), «не используй %s» (drop it), or «X вместо %s» (swap). A bare name is not "
-                "an instruction, and guessing between «only» and «also» is exactly the guess "
-                "that would spend money on the wrong set."
-                % (text, cname, cname, cname, cname, cname, cname))
+    # 🔴 R153 И-7: «только grokbuild, добавь agy38flash» ran grokbuild ALONE (5 of 5 r153i6 reviewers): the add switched
+    # agy38flash on, the «only» pass below switched it off as «not in the 'only' list», and _selection_tokens counted
+    # it as chosen. What an «add» or a replacement names in an «only» sentence is part of that «only».
+    if only_list:
+        only_list += [c for c in selected if c not in only_list]
 
     if only_list:
         for c in plan:
@@ -1724,14 +1806,12 @@ def _group_alias_words(reg):
 def _selection_tokens(route, reg):
     """
     R153 И-6: the entity tokens of a route that SELECT - not the ones inside «не/без/кроме», and not the channel a
-    «вместо» replaces. Unexpanded (a group token stays a group token). Mirrors apply_route: the first marker is
-    hoisted to the front, each marker sets the mode, and a «вместо» target is the anaphoric «не X» before it or
-    else the first entity after the marker.
+    «вместо» replaces. Unexpanded (a group token stays a group token). R153 И-7: walks the stream apply_route walks
+    (_route_stream - the same function, not a copy); each marker sets the mode, and a «вместо» target is the
+    anaphoric «не X» right before it, or else the first entity after the marker - in «Y вместо X» too, where Y was
+    chosen first. Every entity after the target selects: a further replacement, or the sentence's mode resumed.
     """
-    stream = list(_scan(route, alias_index(reg)))
-    first = next((i for i, t in enumerate(stream) if t[1] in ("neg", "subst", "only", "add")), None)
-    if first:
-        stream = [stream[first]] + stream[:first] + stream[first + 1:]
+    stream = _route_stream(_scan(route, alias_index(reg)))
     mode, pending_neg, target_open = None, None, False
     for tok in stream:
         if tok[1] in ("neg", "subst", "only", "add"):
@@ -1746,8 +1826,7 @@ def _selection_tokens(route, reg):
         if mode == "subst" and target_open:
             target_open = False
             continue
-        if mode == "subst":
-            pending_neg = None
+        pending_neg = None      # a chosen word ends the «не X, вместо него» anaphora (apply_route: the same)
         yield tok
 
 
@@ -1885,9 +1964,10 @@ def family_absent_from_panel(plan, reg, route=None, only=None, named=None, ready
         # (`_user_off`: --skip, «не используй»). Kit 1.112.1: `--only kimi kimik3free` stopped «kimik3free will
         # not start» right after naming it; live `--only kimi --skip kimik3free` ran NOTHING (the skipped
         # member still «held» the family - the R149 empty round again).
-        present = [c for c in members if c in (named or ()) or (
-                   c in room and plan[c].get("default_enabled", True) and not plan[c].get("_user_off")
-                   and not (reg["channels"].get(c) or {}).get("explicit_only"))]
+        # R153 И-7: `--only wonder mcwonder10cont --skip mcwonder10cont` - named AND skipped - still held it (empty round).
+        present = [c for c in members if not plan[c].get("_user_off") and (c in (named or ()) or (
+                   c in room and plan[c].get("default_enabled", True)
+                   and not (reg["channels"].get(c) or {}).get("explicit_only")))]
         if not members or present:
             continue
         chans = reg["channels"]

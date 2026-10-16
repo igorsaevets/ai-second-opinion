@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.112.3 — 2026-10-16
+
+Route grammar fixes from the review panel on 1.112.2, each reproduced on the code before it was changed.
+
+- **«X вместо Y» swaps the right way.** «kimik3free вместо kimik3» («kimik3free instead of kimik3») ran the PAID kimik3 and switched the free kimik3free off; «codex вместо grokbuild» ran grokbuild. When words came before «вместо», the router moved the marker to the front and read the first name as the one to replace (since 2026-09-14). Now the name before «вместо» is the replacement and the name after it is the one replaced - also inside «только ...» / «включая ...». «вместо X возьми Y» and «не X, вместо него Y» are unchanged.
+- **«только X, добавь Y» runs Y too.** The «add» switched Y on and the «only» rule switched it off again («not in the 'only' list»), in either word order. A name that «добавь/плюс/включая» or a replacement gives in an «only» sentence now belongs to that «only».
+- **Names on both sides of a «не» are refused, not dropped together.** «codex, не используй grokbuild» and «kimi не используй kimik3» excluded every name in the sentence; now the run stops and says how to write it («только codex, не используй grokbuild», «включая ...»). A trailing «grokbuild не используй» still excludes.
+- **«вместо» with more than two names.** «вместо grokbuild возьми qwen38maxcli, codex»: codex is a second replacement (it was left off as a new «target»). A group after «вместо» is replaced as a whole («вместо кими возьми grokbuild» turns every Kimi channel off; one Kimi member used to become the replacement).
+- **A member you name and also `--skip` does not hold its family.** `--only wonder mcwonder10cont --skip mcwonder10cont` ran an empty round; it now stops with «you excluded it in this run».
+- The two readers of a route - the one that switches channels and the one that decides what you «named» - now order the words through one shared function, so they cannot drift apart again.
+
 ## 1.112.2 — 2026-10-16
 
 Fixes from the review panel on 1.112.1, and one found while checking them.
