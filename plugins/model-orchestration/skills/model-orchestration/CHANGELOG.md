@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.112.2 — 2026-10-16
+
+Fixes from the review panel on 1.112.1, and one found while checking them.
+
+- **An exclusion inside «только <group>» is kept.** «только cli без codex» ran codex, and in the kit «только кими, не используй kimik3» ran ONLY the paid kimik3: when a sentence both named a group and excluded one of its members, the group's «only» list switched the excluded member back on (since 2026-08-14), and 1.112.1's free-to-paid stop read the excluded name as «the human named the paid channel». Now the exclusion holds, a name inside «не/без/кроме» or the channel being replaced («вместо») does not count as naming it, and when a run excludes every voice of the family it named, it stops and lists each one with the reason.
+- **The free-to-paid stop knows what can run on this machine.** In the kit, «только вондер» on a machine without Muse Code passed the stop (the subscription member counted) and then ran the paid `wonder10`, which has no per-run ceiling. A member that is not ready here (its CLI or key is missing) now counts as one that will not start, so the run stops before spending and says «not ready here».
+- **A member you name starts; one you exclude does not hold the family.** `--only kimi kimik3free` stopped «kimik3free will not start» right after naming it; `--only kimi --skip kimik3free` (free Kimi on) ran nothing at all. Both fixed; the stop now says «you excluded it in this run».
+- **opencode:** `opencode --version` is read from «opencode vX.Y.Z» (or the last bare version line), so a wrapper's banner printed first cannot pass for the version; on v1 a channel never gets `--standalone`; the v1 error names the binary it found. Checked on opencode 2.0.31 (the npm release since 1.112.1): `--standalone` is still found and the review switches are still in the binary.
+- Scope of 1.112.1, stated plainly: the review switches act on opencode's private server (MiMo Flash); the Spark channels run on the shared background service and still send the home folder's `AGENTS.md` - open. The free-to-paid stop concerns a family word on a panel that holds none of that family; the standard panel includes the paid Kimi by design.
+- New known failure: AIHubMix's 429 «limit of the free model quota» (the key's free allowance is used up; a re-run fails the same way). A stale registry note that still said `npm install -g opencode-ai` is marked superseded.
+
 ## 1.112.1 — 2026-10-16
 
 Fixes from the review panel on 1.112.0.

@@ -7948,6 +7948,7 @@ def main():
                   suite_r153_i2_kimi_eol_oc_limit,
                   suite_r153_i3_family_room,
                   suite_r153_i5_hotfix,
+                  suite_r153_i6_hotfix,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -15241,6 +15242,150 @@ def suite_r150_i2_grok_compat():
           and "plugins" in doc.split("### Grok Build CLI")[-1][:6000],
           "R150 И-2 (g) INSTALL.md's Grok section names the import switches and what they leave on "
           "(R150 И-3: a tree without the doc fails - it used to pass vacuously)", inst)
+
+
+def suite_r153_i6_hotfix():
+    """R153 И-6 (2026-10-16), kit 1.112.2 - the accepted findings of the r153i5 panel, and one found verifying them:
+    (a) G1 (5 of 5 voices): kit, cheap: «только вондер» / `--only wonder` where the subscription member is NOT READY
+        stop before the cascade can start the paid wonder10 (no per-run ceiling); CONTROL: all ready -> it runs;
+    (b) A3/G3: a member the human NAMED starts - `--only kimi kimik3free` (kit) runs kimik3free, `--only wonder
+        wonder10` with the subscription off runs wonder10 (both stopped in 1.112.1);
+    (c) M2/G5: a member the human EXCLUDED does not hold the family - `--only kimi --skip kimik3free` and «только
+        кими, не используй kimik3free» stop and say «you excluded it» (1.112.1: an empty round / ran kimik3free);
+    (d) found in И-6: an exclusion inside «только <group>» holds (1.112.1 re-enabled it: «только cli без codex» ran
+        codex) and an excluded name is not «named» (kit «только кими, не используй kimik3» ran the PAID kimik3;
+        now it stops and says why);
+    (e) G6 (5 of 5): `opencode --version` reads «opencode vX.Y.Z», else the LAST bare-version line - a wrapper's
+        banner printed first no longer decides the major version;
+    (f) S-U1: on v1 a non-variant opencode channel never gets `--standalone`;
+    (g) AIHubMix 429 «limit of the free model quota» names an allowance of the key, ahead of the generic 429 row;
+    (h) G7: no registry note teaches `npm install -g opencode-ai` without a SUPERSEDED mark.
+    """
+    import copy as _cp
+    import tempfile
+    import orchestrate as o
+    import routing as _r
+    section("R153 И-6: readiness in the free-to-paid stop, named / excluded members, route exclusions, opencode")
+
+    base = _r.load_registry(overlay=False)
+    kit = _cp.deepcopy(base)
+    for ch in kit["channels"].values():
+        if ch.get("distribution") == "local":
+            ch["enabled"] = False                         # what package.py does to a local channel
+
+    def runs(reg, ready=None, **kw):
+        try:
+            p = _r.resolve(_cp.deepcopy(reg), ready=ready or (lambda _n: True), **kw)
+        except _r.RouteError as e:
+            return None, str(e)
+        return sorted(c for c, s in p.items() if s.get("enabled")), p
+
+    def no_muse(n):
+        return "stub: the muse CLI is missing" if n == "mcwonder10cont" else True
+
+    a1, e1 = runs(kit, ready=no_muse, route="только вондер")
+    a2, e2 = runs(kit, ready=no_muse, only=["wonder"])
+    a3, _ = runs(kit, only=["wonder"])
+    check(a1 is None and a2 is None and all("not ready here" in str(e) and "wonder10 is PAID per call" in str(e)
+                                            for e in (e1, e2)) and a3 is not None and "mcwonder10cont" in a3,
+          "R153 И-6 (a) Wonder: the subscription member NOT READY here -> «только вондер» / `--only wonder` stop "
+          "before the paid wonder10; CONTROL: all ready -> the subscription member runs",
+          "%r / %r / control %r" % (a1 if a1 is not None else str(e1)[:90], a2 if a2 is not None else str(e2)[:60],
+                                    a3))
+    b1, _ = runs(kit, only=["kimi", "kimik3free"])
+    mw = _cp.deepcopy(kit)
+    mw["channels"]["mcwonder10cont"]["enabled"] = False
+    b2, _ = runs(mw, only=["wonder", "wonder10"])
+    check(b1 == ["kimik3free"] and b2 == ["wonder10"],
+          "R153 И-6 (b) a member the human NAMED starts: `--only kimi kimik3free` (kit) -> kimik3free; `--only "
+          "wonder wonder10` (subscription off) -> wonder10",
+          "%r / %r" % (b1, b2))
+    tree = _cp.deepcopy(kit)
+    tree["channels"]["kimik3free"]["enabled"] = True       # the mechanism, not this tree's product
+    c1, e3 = runs(tree, only=["kimi"], skip=["kimik3free"])
+    c2, e4 = runs(tree, route="только кими, не используй kimik3free")
+    check(c1 is None and c2 is None and all("you excluded it in this run" in str(e) and "kimik3 is PAID" in str(e)
+                                            for e in (e3, e4)),
+          "R153 И-6 (c) a member the human EXCLUDED does not hold the family: `--only kimi --skip kimik3free` and "
+          "«только кими, не используй kimik3free» stop and say so (1.112.1: an empty round / ran kimik3free)",
+          "%r / %r" % (c1 if c1 is not None else str(e3)[:100], c2 if c2 is not None else str(e4)[:100]))
+    cli_ch = ((kit.get("groups") or {}).get("cli") or {}).get("channels") or []
+    g_on, _ = runs(kit, only=["cli"])
+    victim = next((c for c in (g_on or []) if c in cli_ch), None)
+    d1, _ = runs(kit, route="только cli без %s" % victim) if victim else (None, "")
+    named = _r.explicitly_named(kit, route="только кими, не используй kimik3")
+    named_ctl = _r.explicitly_named(kit, route="только kimik3")
+    d3, e5 = runs(kit, route="только кими, не используй kimik3")
+    check(bool(victim) and bool(d1) and victim not in d1 and "kimik3" not in named and "kimik3" in named_ctl
+          and d3 is None and "excludes or leaves off every voice" in str(e5) and "kimik3 (" in str(e5),
+          "R153 И-6 (d) an exclusion inside «только <group>» holds («только cli без <a member>» drops it) and an "
+          "excluded name is not «named»: kit «только кими, не используй kimik3» stops instead of running kimik3",
+          "victim=%r ran=%r named=%r ctl=%r kimi=%r" % (victim, d1, sorted(named), sorted(named_ctl),
+                                                       d3 if d3 is not None else str(e5)[:90]))
+
+    class _P:
+        def __init__(self, out, rc=0):
+            self.stdout, self.stderr, self.returncode = out, "", rc
+
+    real_run = o.subprocess.run
+    cases = {"node v22.10.0\nopencode v2.0.29\n": (2, 0, 29), "proxy-shim 1.4.0: opencode v2.0.31\n": (2, 0, 31),
+             "10.9.0\n1.19.2\n": (1, 19, 2), "opencode v2.0.29\n": (2, 0, 29), "1.19.2\n": (1, 19, 2),
+             "nonsense\n": None, "built with go1.22.5\n": None}
+    got = {}
+    try:
+        for out in cases:
+            getattr(o, "_OC_VERSION", {}).clear()
+            o.subprocess.run = (lambda txt: (lambda *a, **k: _P(txt)))(out)
+            got[out] = o._opencode_version("X:/oc.cmd")
+    finally:
+        o.subprocess.run = real_run
+        getattr(o, "_OC_VERSION", {}).clear()
+    wrong = {k.strip()[:28]: got.get(k) for k, v in cases.items() if got.get(k) != v}
+    check(not wrong, "R153 И-6 (e) `opencode --version`: «opencode vX.Y.Z» first, else the last bare-version line; "
+          "a banner printed before it does not decide", repr(wrong))
+    calls = []
+
+    def fake_run(cmd, *a, **k):
+        calls.append(list(cmd))
+        return _P('{"type":"text","part":{"text":"ok\\nMARK-R153I6"}}\n')
+
+    saved = (o.opencode_bin, o._opencode_version, o._opencode_child_env)
+    tmp = tempfile.mkdtemp(prefix="r153i6-")
+    try:
+        o.opencode_bin = lambda: "X:/oc.cmd"
+        o._opencode_version = lambda b: (1, 19, 2)
+        o._opencode_child_env = lambda *a, **k: (dict(os.environ), {"standalone": True, "note": None,
+                                                                    "limit": {"context": 200000, "output": 65536}})
+        o.subprocess.run = fake_run
+        o.call_opencode("brief", "MARK-R153I6", os.path.join(tmp, "f.md"), model="opencode/mimo-v2.6-flash-free",
+                        effort=None, name="ocmimo26flashfree")
+    finally:
+        o.subprocess.run = real_run
+        o.opencode_bin, o._opencode_version, o._opencode_child_env = saved
+    runs_f = [c for c in calls if "run" in c]
+    check(bool(runs_f) and not any("--standalone" in c for c in runs_f),
+          "R153 И-6 (f) opencode v1: a non-variant channel runs WITHOUT `--standalone` (v1 has no such flag)",
+          repr([c[:4] for c in runs_f]))
+    cq, fq = o.diagnose("error: failed to run prompt: provider.rate_limit: 429 Sorry, you have reached the limit of "
+                        "the free model quota. Please switch to a paid model to enjoy unlimited concurrency.")
+    cg, _ = o.diagnose("HTTP 429 rate limited")
+    check(bool(cq) and "free allowance" in cq and "fails the same way" in (fq or "") and bool(cg)
+          and "free allowance" not in cg,
+          "R153 И-6 (g) AIHubMix 429 «limit of the free model quota» = an allowance of the key, own row; a plain 429 "
+          "keeps the generic row", repr(((cq or "")[:70], (cg or "")[:40])))
+
+    def strings(x):
+        if isinstance(x, dict):
+            for v in x.values():
+                yield from strings(v)
+        elif isinstance(x, list):
+            for v in x:
+                yield from strings(v)
+        elif isinstance(x, str):
+            yield x
+    bad = [s[:70] for s in strings(base) if "install -g opencode-ai" in s and "SUPERSEDED" not in s]
+    check(not bad, "R153 И-6 (h) no registry note teaches `npm install -g opencode-ai` (opencode v1) unmarked",
+          repr(bad))
 
 
 def suite_r153_i5_hotfix():

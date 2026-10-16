@@ -1461,6 +1461,15 @@ KNOWN_FAILURES = [
      "brief or the harness's own round causes it.",
      "Re-run this channel alone once the other run on that key has finished (`--only <channel>`); do "
      "not loop. Two panels that both use the key should run one after the other."),
+    # R153 И-6 (2026-10-16): r153i5 kimik3free died in 158 s - AIHubMix 429 «Sorry, you have reached the limit of
+    # the free model quota» on 9 of 11 requests. An allowance of the KEY, not a burst: the generic 429 advice
+    # below («re-run alone») fails the same way. Placed above that row because the first match wins.
+    (r"limit of the free model quota",
+     "The gateway's free allowance for this API key is used up (AIHubMix: 429 «reached the limit of the "
+     "free model quota»). It counts every free-model request made with that key - other panels and "
+     "sessions included - and the CLI's own retries met the same refusal.",
+     "Read the other channels. A re-run now fails the same way: the free channel answers again when the "
+     "gateway resets the allowance (it does not say when). Nothing in the brief or the harness causes it."),
     # R149 И-2: Muse Code with no reachable login. The harness keeps META_API_KEY / MODEL_API_KEY out
     # of this channel's environment on purpose (a key outranks the login and bills per token), so a
     # machine whose Muse Code only ever ran on a key lands here. The CLI's exact text, measured with
@@ -4526,8 +4535,15 @@ def _opencode_version(binary):
         try:
             p = subprocess.run([binary, "--version"], capture_output=True, text=True, encoding="utf-8",
                                errors="replace", timeout=30, stdin=subprocess.DEVNULL)
-            m = re.search(r"(\d+)\.(\d+)\.(\d+)", p.stdout or "")
-            v = tuple(int(x) for x in m.groups()) if m and p.returncode == 0 else None
+            # R153 И-6 (5 of 5 reviewers): the FIRST x.y.z anywhere read a wrapper's banner («node v22.10.0»,
+            # «proxy-shim 1.4.0: opencode v2.0.29») as opencode's version. Now: «opencode vX.Y.Z», else the LAST
+            # line that is a bare version (v1 prints «1.19.2»); anything else is unknown, i.e. not treated as v1.
+            out = p.stdout or ""
+            m = re.search(r"\bopencode\s+v?(\d+)\.(\d+)\.(\d+)", out, re.I)
+            if not m:
+                bare = list(re.finditer(r"(?m)^\s*v?(\d+)\.(\d+)\.(\d+)\S*\s*$", out))
+                m = bare[-1] if bare else None
+            v = tuple(int(x) for x in m.groups()[:3]) if m and p.returncode == 0 else None
         except (OSError, subprocess.SubprocessError):
             v = None
         _OC_VERSION[binary] = v
@@ -4539,7 +4555,7 @@ def _opencode_version(binary):
 # oc_v1_probe.py): the harness's `-m <provider/model>#<variant>` call exits 1 in 1.5 s («UnknownError»), the
 # same model without `#` answers, and `run --standalone` does not exist.
 OC_V1_FIX = ("this harness speaks opencode v2: run `npm uninstall -g opencode-ai`, then "
-             "`npm install -g @opencode/cli`")
+             "`npm install -g @opencode/cli` (v1 installed another way: remove it that way)")
 
 
 def _opencode_limit(cname, reg=None):
@@ -4720,7 +4736,7 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
         base_model += "#" + effort
     ver, v1_note = _opencode_version(binary), None
     if ver and ver[0] < 2:                               # R153 И-5 (H4): the kit used to install v1
-        v1_note = "opencode %s is the v1 line - %s" % (".".join(map(str, ver)), OC_V1_FIX)
+        v1_note = "opencode %s is the v1 line (%s) - %s" % (".".join(map(str, ver)), binary, OC_V1_FIX)
         if "#" in base_model:
             log("  [%s] %s" % (name, v1_note))
             return {"channel": name, "ok": False,
@@ -4733,6 +4749,9 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     # R153 И-2: PWD, no self-update, the channel's output limit (see _opencode_child_env).
     ncwd = neutral_cwd()
     env, oc_info = _opencode_child_env(name, base_model, binary, ncwd)
+    if oc_info["standalone"] and v1_note:                # R153 И-6: v1 has no `run --standalone` (a v1 shim
+        oc_info["standalone"] = False                    # beside a v2 package passes the byte check)
+        log("  [%s] opencode_limit not applied: the v1 binary has no `run --standalone`" % name)
     if oc_info["standalone"]:
         cmd.insert(2, "--standalone")
         log("  [%s] opencode_limit context %d / output %d -> a private server (--standalone)"

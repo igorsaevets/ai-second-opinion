@@ -1514,7 +1514,12 @@ def apply_route(plan, reg, text):
                 plan[c]["enabled"] = False
                 plan[c]["_route_off"] = True
                 plan[c]["why"].append("route: not in the 'only' list")
-            elif c in only_list and not plan[c]["enabled"]:
+            elif c in only_list and not plan[c]["enabled"] and not plan[c].get("_route_off"):
+                # 🔴 R153 И-6 (2026-10-16): `_route_off` here can only come from THIS route's «не/без/кроме»
+                # or «вместо» - and the branch used to undo it: «только cli без codex» ran codex, «только
+                # кими, не используй kimik3» ran the paid kimik3 (since 2026-08-14, when the branch below
+                # was added). A member the same sentence excluded stays out of its group's «only».
+                #
                 # 🔴 NAMING A CHANNEL SELECTS IT, ON BOTH SELECTION PATHS. Until 2026-08-14 this
                 # branch only turned channels OFF, so a route that named a default-OFF channel
                 # produced "running 0 channel(s): NONE" - it removed everything else and then
@@ -1716,6 +1721,36 @@ def _group_alias_words(reg):
     return out
 
 
+def _selection_tokens(route, reg):
+    """
+    R153 И-6: the entity tokens of a route that SELECT - not the ones inside «не/без/кроме», and not the channel a
+    «вместо» replaces. Unexpanded (a group token stays a group token). Mirrors apply_route: the first marker is
+    hoisted to the front, each marker sets the mode, and a «вместо» target is the anaphoric «не X» before it or
+    else the first entity after the marker.
+    """
+    stream = list(_scan(route, alias_index(reg)))
+    first = next((i for i, t in enumerate(stream) if t[1] in ("neg", "subst", "only", "add")), None)
+    if first:
+        stream = [stream[first]] + stream[:first] + stream[first + 1:]
+    mode, pending_neg, target_open = None, None, False
+    for tok in stream:
+        if tok[1] in ("neg", "subst", "only", "add"):
+            mode = tok[1]
+            target_open = mode == "subst" and pending_neg is None
+            continue
+        if tok[1] != "entity":
+            continue
+        if mode == "neg":
+            pending_neg = tok[2]
+            continue
+        if mode == "subst" and target_open:
+            target_open = False
+            continue
+        if mode == "subst":
+            pending_neg = None
+        yield tok
+
+
 def explicitly_named(reg, route=None, only=None, sets=None):
     """
     The channels the human named BY THEIR OWN NAME - never through a group.
@@ -1738,9 +1773,11 @@ def explicitly_named(reg, route=None, only=None, sets=None):
             named.update(canon_channel_safe(reg, nm))
     if route:
         # Scanned WITHOUT _expand_groups: a group token stays a group token and is not counted.
-        for tok in _scan(route, alias_index(reg)):
-            if tok[1] != "entity":
-                continue
+        # 🔴 R153 И-6 (2026-10-16): A NAME INSIDE AN EXCLUSION IS NOT A SELECTION. Every entity used to count,
+        # so «только кими, не используй kimik3» put kimik3 here: R153 И-5's free-to-paid stop read that as
+        # «the human named the paid channel» and let it through, apply_explicit_only kept a default-off
+        # member alive the same way (kit 1.112.1: that sentence ran ONLY the paid kimik3).
+        for tok in _selection_tokens(route, reg):
             # 🔴 BOTH ENTITY KINDS CARRY THE CHANNEL IN SLOT 1; the model id is in slot 2.
             # ('model', 'orgpt56terrapro', 'openai/gpt-5.6-terra-pro'). The first draft here read
             # slot 1 as the model id for kind=='model' and searched the registry for it, which
@@ -1804,7 +1841,7 @@ def apply_explicit_only(plan, reg, named):
     return plan
 
 
-def family_absent_from_panel(plan, reg, route=None, only=None, named=None):
+def family_absent_from_panel(plan, reg, route=None, only=None, named=None, ready=None):
     """
     The channels of a GROUP the human named when the chosen panel holds NONE of that group.
 
@@ -1831,8 +1868,10 @@ def family_absent_from_panel(plan, reg, route=None, only=None, named=None):
                                            for a in g.get("aliases") or []}:
                 said.add(gname)
     if route:
-        for tok in _scan(route, alias_index(reg)):
-            if tok[1] == "entity" and tok[2][0] == "group":
+        # R153 И-6: a group named inside «не/без/кроме» was «said» too - harmless while its excluded members could
+        # not be picked, a false «excludes every voice» stop once exclusions hold (selftest: «не используй gemini»).
+        for tok in _selection_tokens(route, reg):
+            if tok[2][0] == "group":
                 said.add(tok[2][1])
     out = set()
     for gname in sorted(said):
@@ -1842,14 +1881,30 @@ def family_absent_from_panel(plan, reg, route=None, only=None, named=None):
         # (nvkimik3 after NVIDIA retired Kimi K3; kimik3free, `distribution: local`, in the kit) still
         # «held» the family, and the kit's `--only kimi` became «running 0 channel(s): NONE» (exit 2)
         # while the paid kimik3 stood by. A default-off or explicit_only member speaks only when named.
-        present = [c for c in members if c in room and plan[c].get("default_enabled", True)
-                   and not (reg["channels"].get(c) or {}).get("explicit_only")]
+        # 🔴 R153 И-6 (2026-10-16): and a member the human NAMED starts, while one the human EXCLUDED does not
+        # (`_user_off`: --skip, «не используй»). Kit 1.112.1: `--only kimi kimik3free` stopped «kimik3free will
+        # not start» right after naming it; live `--only kimi --skip kimik3free` ran NOTHING (the skipped
+        # member still «held» the family - the R149 empty round again).
+        present = [c for c in members if c in (named or ()) or (
+                   c in room and plan[c].get("default_enabled", True) and not plan[c].get("_user_off")
+                   and not (reg["channels"].get(c) or {}).get("explicit_only"))]
         if not members or present:
             continue
         chans = reg["channels"]
         picked = [c for c in members
                   if plan[c].get("enabled") and plan[c].get("_panel_excluded")
                   and not (chans.get(c) or {}).get("explicit_only") and plan[c].get("default_enabled", True)]
+        # 🔴 R153 И-6: «will not start» includes «cannot start HERE». The cascade keeps the first READY member,
+        # so on a machine without Muse Code «только вондер» passed this stop (its subscription member was
+        # picked) and then ran the paid wonder10, which has no per-run ceiling. `ready` is the cascade's own
+        # predicate (orchestrate._cascade_ready); a predicate that raises counts as ready, as it does there.
+        verdict = {}
+        for c in picked:
+            try:
+                verdict[c] = True if ready is None else ready(c)
+            except Exception:                            # noqa: BLE001 - the cascade's rule
+                verdict[c] = True
+        can = [c for c in picked if verdict[c] is True]
         # 🔴 R153 И-5 (2026-10-16): A FAMILY WORD MAY NOT TURN A FREE HABIT INTO A PAID CALL IN SILENCE.
         # Kit 1.112.0: «только кими», «только кими бесплатно» and `--only kimi` started the PAID OpenRouter
         # kimik3 (≈$1.38 a run) because both free Kimi routes ship off (nvkimik3: NVIDIA retired the model;
@@ -1859,15 +1914,28 @@ def family_absent_from_panel(plan, reg, route=None, only=None, named=None):
         # subscription member that will not start, stop and name both - unless the human named the paid
         # channel itself. A family with no non-paid route keeps R149 (Wonder: its subscription member is
         # picked too, so the round goes on and the paid members say PAID in their plan line).
-        paid = [c for c in picked if (chans.get(c) or {}).get("cost") not in _NON_PAID_COSTS]
-        idle = [c for c in members if c not in picked and (chans.get(c) or {}).get("cost") in _NON_PAID_COSTS]
-        if picked and len(paid) == len(picked) and idle and not set(paid) <= set(named or ()):
-            def _idle_why(c):
-                p, ch = plan[c], chans.get(c) or {}
-                return "%s (%s, %s)" % (c, ch.get("cost"), "starts only by its own name" if ch.get("explicit_only")
-                                        else "off in this install" if not p.get("enabled")
-                                        else "off by default" if not p.get("default_enabled", True)
-                                        else "not on the %r panel" % chosen)
+        def _idle_why(c):
+            p, ch = plan[c], chans.get(c) or {}
+            return "%s (%s, %s)" % (c, ch.get("cost"),
+                                    "you excluded it in this run: %s" % p["_user_off"] if p.get("_user_off")
+                                    else "starts only by its own name" if ch.get("explicit_only")
+                                    else "not ready here: %s" % (verdict[c] if isinstance(verdict[c], str)
+                                                                 and verdict[c] else "its key or CLI is missing")
+                                    if c in verdict and verdict[c] is not True
+                                    else "off in this install" if not p.get("enabled")
+                                    else "off by default" if not p.get("default_enabled", True)
+                                    else "not on the %r panel" % chosen)
+        # 🔴 R153 И-6: once an exclusion inside «только <family>» holds, the human can exclude every voice of the
+        # family that could start; that used to be an unexplained «running 0 channel(s)». Say which and why.
+        if not picked and any(plan[c].get("_user_off") for c in members):
+            raise RouteError(
+                "%r names a family, and this run excludes or leaves off every voice of it that could start in "
+                "the %r round: %s. Nothing of %r would run - drop the word, or name a member that can run here."
+                % (gname, chosen, "; ".join(_idle_why(c) for c in members), gname))
+        paid_all = [c for c in picked if (chans.get(c) or {}).get("cost") not in _NON_PAID_COSTS]
+        paid = [c for c in can if c in paid_all]
+        idle = [c for c in members if c not in can and (chans.get(c) or {}).get("cost") in _NON_PAID_COSTS]
+        if can and len(paid) == len(can) and idle and not set(paid) <= set(named or ()):
             raise RouteError(
                 "%r names a family whose free/subscription voices will not start here: %s. The only %s voice "
                 "this %r round would start is PAID per call: %s. A family word never switches you from free to "
@@ -1878,7 +1946,7 @@ def family_absent_from_panel(plan, reg, route=None, only=None, named=None):
             out.add(c)
             plan[c]["why"].append("the %r panel holds no %r voice, so naming the family named this channel "
                                   "(R149)%s" % (chosen, gname, (" - " + _paid_label(c, plan, chans))
-                                                if c in paid else ""))
+                                                if c in paid_all else ""))
     return out
 
 
@@ -2118,7 +2186,7 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
     # than inside apply_flags/apply_route so that adding a THIRD selection path later cannot
     # reopen the hole - the gate does not care which path enabled the channel.
     named_directly = named_directly | family_absent_from_panel(plan, reg, route=route, only=only,
-                                                               named=named_directly)
+                                                               named=named_directly, ready=ready)
     plan = apply_explicit_only(plan, reg, named_directly)
     plan = _apply_cascade(plan, reg, ready)          # R140 И-3: `ready` from orchestrate.py
     plan = apply_fallback(plan, reg, ready)          # R142: after the cascade picked the voices
