@@ -401,7 +401,12 @@ def suite_routing():
         idle = {c for c in group_members_all("kimi") if c not in fb
                 and (_RAW["channels"].get(c) or {}).get("cost") in nonpaid}
         if fb and idle and all((_RAW["channels"].get(c) or {}).get("cost") not in nonpaid for c in fb):
-            return "REFUSED"
+            # R153 И-6: the stop takes readiness - with no paid member ready HERE (CI has no keys) nothing can
+            # spend, and the run goes on to that member's own preflight (CI 1943/1944 on 1654e45).
+            import orchestrate as _o
+            rdy = _o._cascade_ready(_RAW)
+            if any(rdy(c) is True for c in fb):
+                return "REFUSED"
         return cascaded(fb)
 
     cases = [
