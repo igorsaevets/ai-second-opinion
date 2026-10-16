@@ -1804,7 +1804,7 @@ def apply_explicit_only(plan, reg, named):
     return plan
 
 
-def family_absent_from_panel(plan, reg, route=None, only=None):
+def family_absent_from_panel(plan, reg, route=None, only=None, named=None):
     """
     The channels of a GROUP the human named when the chosen panel holds NONE of that group.
 
@@ -1846,14 +1846,51 @@ def family_absent_from_panel(plan, reg, route=None, only=None):
                    and not (reg["channels"].get(c) or {}).get("explicit_only")]
         if not members or present:
             continue
-        for c in members:
-            p, ch = plan[c], reg["channels"].get(c) or {}
-            if (p.get("enabled") and p.get("_panel_excluded") and not ch.get("explicit_only")
-                    and p.get("default_enabled", True)):
-                out.add(c)
-                p["why"].append("the %r panel holds no %r voice, so naming the family named "
-                                "this channel (R149)" % (chosen, gname))
+        chans = reg["channels"]
+        picked = [c for c in members
+                  if plan[c].get("enabled") and plan[c].get("_panel_excluded")
+                  and not (chans.get(c) or {}).get("explicit_only") and plan[c].get("default_enabled", True)]
+        # 🔴 R153 И-5 (2026-10-16): A FAMILY WORD MAY NOT TURN A FREE HABIT INTO A PAID CALL IN SILENCE.
+        # Kit 1.112.0: «только кими», «только кими бесплатно» and `--only kimi` started the PAID OpenRouter
+        # kimik3 (≈$1.38 a run) because both free Kimi routes ship off (nvkimik3: NVIDIA retired the model;
+        # kimik3free: local only). A week earlier the same words started a free Kimi; the router has no price
+        # words, and the plan never said «paid». 5 of 5 reviewers who judged it (r153i3/r153i4) would stop.
+        # So: when every member this rule would start is paid per call AND the family declares a free or
+        # subscription member that will not start, stop and name both - unless the human named the paid
+        # channel itself. A family with no non-paid route keeps R149 (Wonder: its subscription member is
+        # picked too, so the round goes on and the paid members say PAID in their plan line).
+        paid = [c for c in picked if (chans.get(c) or {}).get("cost") not in _NON_PAID_COSTS]
+        idle = [c for c in members if c not in picked and (chans.get(c) or {}).get("cost") in _NON_PAID_COSTS]
+        if picked and len(paid) == len(picked) and idle and not set(paid) <= set(named or ()):
+            def _idle_why(c):
+                p, ch = plan[c], chans.get(c) or {}
+                return "%s (%s, %s)" % (c, ch.get("cost"), "starts only by its own name" if ch.get("explicit_only")
+                                        else "off in this install" if not p.get("enabled")
+                                        else "off by default" if not p.get("default_enabled", True)
+                                        else "not on the %r panel" % chosen)
+            raise RouteError(
+                "%r names a family whose free/subscription voices will not start here: %s. The only %s voice "
+                "this %r round would start is PAID per call: %s. A family word never switches you from free to "
+                "paid in silence - to pay for it, name the channel (--only %s); to stay free, switch a free "
+                "member on." % (gname, "; ".join(_idle_why(c) for c in idle), gname, chosen,
+                                ", ".join(_paid_label(c, plan, chans) for c in paid), ",".join(paid)))
+        for c in picked:
+            out.add(c)
+            plan[c]["why"].append("the %r panel holds no %r voice, so naming the family named this channel "
+                                  "(R149)%s" % (chosen, gname, (" - " + _paid_label(c, plan, chans))
+                                                if c in paid else ""))
     return out
+
+
+# R153 И-5: costs that never bill a key per call. Everything else (cheap, mid, metered, expensive) does.
+_NON_PAID_COSTS = frozenset(("free", "subscription"))
+
+
+def _paid_label(c, plan, chans):
+    """«kimik3 is PAID per call (metered, stops at $3 a run)» - the spend guard's ceiling when it has one."""
+    sg = (plan[c].get("spend_guard") or {}).get("max_usd_per_review")
+    return "%s is PAID per call (%s, %s)" % (c, (chans.get(c) or {}).get("cost"),
+                                             "stops at $%s a run" % sg if sg else "no per-run spend ceiling")
 
 
 def apply_panel(plan, reg, panel):
@@ -2080,7 +2117,8 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
     # channel that may only be started by name is either named or it is off. Placed here rather
     # than inside apply_flags/apply_route so that adding a THIRD selection path later cannot
     # reopen the hole - the gate does not care which path enabled the channel.
-    named_directly = named_directly | family_absent_from_panel(plan, reg, route=route, only=only)
+    named_directly = named_directly | family_absent_from_panel(plan, reg, route=route, only=only,
+                                                               named=named_directly)
     plan = apply_explicit_only(plan, reg, named_directly)
     plan = _apply_cascade(plan, reg, ready)          # R140 И-3: `ready` from orchestrate.py
     plan = apply_fallback(plan, reg, ready)          # R142: after the cascade picked the voices

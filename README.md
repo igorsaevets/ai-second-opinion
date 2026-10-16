@@ -37,7 +37,7 @@ To start you need **one OpenRouter key and a couple of free programs**. Everythi
 | Step | What to do | What it gives you | What it costs (as of 2026-10-05) |
 |---|---|---|---|
 | **1. OpenRouter** — the main one | Sign up at [openrouter.ai](https://openrouter.ai), add credit and create a key (*Keys → Create Key*). Put it in the `OPENROUTER_API_KEY` variable in your own terminal, not in a chat with an AI ([how — INSTALL.md](INSTALL.md#openrouter--openrouter_api_key)) | The paid voices: MiMo in the cheap panel; Kimi K3, Qwen, DeepSeek, GLM and Nemotron in the standard one; a fallback route to Gemini and Muse Spark | Pay per token on the key; prices are in the tables below. OpenRouter takes a 5.5% fee when you buy credits. Free models: 50 requests a day, or 1000 a day once you have bought at least $10 of credits |
-| **2. opencode CLI** | `npm install -g opencode-ai` | The free Muse Spark 1.3 voice (Meta). The free MiMo v2.6 Flash (Xiaomi) runs through it too | Free, no key and no account: that is how it works for us. OpenCode warns that its free models are available "for a limited time" |
+| **2. opencode CLI** | `npm install -g @opencode/cli` (v2; had the old `opencode-ai`? `npm uninstall -g opencode-ai` first) | The free Muse Spark 1.3 voice (Meta). The free MiMo v2.6 Flash (Xiaomi) runs through it too | Free, no key and no account: that is how it works for us. OpenCode warns that its free models are available "for a limited time" |
 | **3. Antigravity CLI (`agy`)** | Install it, sign in with a Google account and run `patch_agy_permissions.py` **once**. Without that step the answers come back empty ([INSTALL.md](INSTALL.md#antigravity-cli-gemini)) | Gemini 3.8 Flash, and Gemini 3.1 Pro by name | Free on a personal Google account, with weekly limits. Google AI Pro ($19.99/month) and Ultra ($99.99 or $199.99/month) raise them |
 | **4. Grok Build CLI** | Install it and run `grok login` ([INSTALL.md](INSTALL.md#grok-build-cli)) | Grok 4.7 with live web search | An xAI account. xAI says Grok Build is now available to everyone; SuperGrok ($30/month) and SuperGrok Plus ($100/month) raise the limits. Whether the CLI works on a free account we have not checked |
 | **5. Codex CLI** — for the standard panel | Install it and sign in with a ChatGPT account ([INSTALL.md](INSTALL.md#codex-cli)) | GPT-6.1 Sol | A ChatGPT plan: Plus $20/month, Pro $200/month. OpenAI says Codex is also in Free and Go ($8/month); whether GPT-6.1 Sol is available there we have not checked. Limits are counted in 5-hour and weekly windows |
@@ -129,7 +129,7 @@ On the plan, Spark costs $0.10 / $0.20 per 1M tokens out of the plan's limits (o
 
 ℹ️ **Qwen 3.8 Max:** until v1.108.0 this line said that 0 of our 8 runs had answered. That was our counting error: the 8 included copies of the same run, and the harness graded real answers as failures because OpenRouter serves the name `qwen/qwen3.8-max` as its dated snapshot `qwen/qwen3.8-max-0902`. Counted once per run, all 3 of our runs since 1 September ended with a full answer (22–63 KB). Since v1.108.0 such a snapshot is a note in the report, not a failure.
 
-**In total:** about $2.5 a run on your OpenRouter key plus subscriptions; Kimi K3 through OpenRouter (≈ $1.38) is the largest part. How long Kimi takes on OpenRouter we have not measured (3 runs). Of the other models added here, GLM 5.3 and Qwen 3.8 Max take longest, medians 16 and 15 minutes (GLM's longest run: 44 minutes). Every paid channel has a spending ceiling per run ($2–5); when it reaches it, the channel stops.
+**In total:** about $2.5 a run on your OpenRouter key plus subscriptions; Kimi K3 through OpenRouter (≈ $1.38) is the largest part. How long Kimi takes on OpenRouter we have not measured (3 runs). Of the other models added here, GLM 5.3 and Qwen 3.8 Max take longest, medians 16 and 15 minutes (GLM's longest run: 44 minutes). Most paid channels have a spending ceiling per run ($2–5); a channel that reaches it stops. `wonder10` has none: Meta runs its whole search loop inside one request.
 
 ### By name only
 
@@ -512,7 +512,7 @@ MiMo, Grok, GLM, DeepSeek, Muse Spark and NVIDIA Nemotron. Start with that and a
 vendor access later for the models that benefit from it.
 
 **Is this expensive?**<br>
-No. The cheap panel costs about $0.06 a run on your OpenRouter key, plus subscriptions you most likely already have. Say "CLI only" and there is not one paid request on the key. The standard panel costs about $3.2 a run: since 1.112.0 Kimi K3 always answers there through OpenRouter. These are the medians of our runs in September–October 2026; the tool prints the exact amount of your run at its end. See [what it costs](#what-it-costs-honestly).
+No. The cheap panel costs about $0.06 a run on your OpenRouter key, plus subscriptions you most likely already have. Say "CLI only" and there is not one paid request on the key. The standard panel costs about $2.5 a run: since 1.112.0 Kimi K3 always answers there through OpenRouter. These are the medians of our runs in September–October 2026; the tool prints the exact amount of your run at its end. See [what it costs](#what-it-costs-honestly).
 
 ## Found a bug? Want a feature? Want to work together?
 

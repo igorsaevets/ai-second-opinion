@@ -647,7 +647,7 @@
       "label": "OC MiMo 2.6 Flash Free",
       "cost": "free",
       "fetch_fallback_hint_ref": "mcp_fallback",
-      "_added_r133": "R133 И-2 (2026-10-02), the operator: «добавим mimo. Добавишь его в cli cheap панель.» MiMo v2.6 Flash Free via opencode CLI (opencode.ai). No API key needed — opencode/ prefix models are free. Flash is the lightweight member of the MiMo family (~128K context, no vision/audio). Data policy: opencode's free relay infrastructure terms plus Xiaomi's MiMo terms. Live tested 2026-10-02: 'Say OK' answered in 5.8s, cost=$0.",
+      "_added_r133": "R133 И-2 (2026-10-02), the operator: «добавим mimo. Добавишь его в cli cheap панель.» MiMo v2.6 Flash Free via opencode CLI (opencode.ai). No API key needed — opencode/ prefix models are free. Flash is the lightweight member of the MiMo family (no vision/audio; 🔴 SUPERSEDED R153 И-5: the «~128K context» this note said is wrong - opencode's own catalogue gives limit.context 200000, the value opencode_limit carries). Data policy: opencode's free relay infrastructure terms plus Xiaomi's MiMo terms. Live tested 2026-10-02: 'Say OK' answered in 5.8s, cost=$0.",
       "model": "opencode/mimo-v2.6-flash-free",
       "effort": null,
       "opencode_limit": {
@@ -1088,7 +1088,7 @@
       "label": "KimiK3",
       "_renamed": "2026-08-07 (round 25) from `kimi`, the operator: «аналогично для qwen и kimi, что бы было понятно: KimiK3, Qwen38Max». Same rule as spark11/spark12cont/agy31pro/agy36flash - the channel name must identify the MODEL, and here it can, because one channel runs one model and the registry refuses any other. The bare vendor name stopped being an identity the moment a second OpenRouter model joined. The old name survives as an ALIAS below, so every `--only kimi` in an existing script keeps working: renaming a channel must not break the commands people already have.",
       "cost": "metered",
-      "_pricing": "RE-VERIFIED 2026-08-06 against the public models API: $3/M prompt, $15/M completion, ctx 1,048,576 - identical to the 2026-08-03 reading, no drift in three days. A typical review round (~6K in / ~16K out) is ~$0.26, billed on the SAME OpenRouter account the Hermes path was already spending from.",
+      "_pricing": "🔴 SUPERSEDED 2026-10-16 (R153 И-5): OpenRouter's live endpoints list for moonshotai/kimi-k3 shows 25 providers at $0.29-$4.50/M prompt (Moonshot's own: $3 / $15); what a review costs is the measured ≈ $1.38 a run in the README, not this per-token line. The old reading: RE-VERIFIED 2026-08-06 against the public models API: $3/M prompt, $15/M completion, ctx 1,048,576 - identical to the 2026-08-03 reading, no drift in three days. A typical review round (~6K in / ~16K out) is ~$0.26, billed on the SAME OpenRouter account the Hermes path was already spending from.",
       "model": "moonshotai/kimi-k3",
       "role": "code",
       "spend_guard": {

@@ -1451,6 +1451,16 @@ KNOWN_FAILURES = [
      "Read the other channels. Re-running in a few minutes will not help: the channel answers "
      "again only when the gateway restores the route (`--only <channel>` checks it). Nothing in "
      "the brief or the harness causes it."),
+    # R153 И-5 (2026-10-16): AIHubMix answers 403 «You've reached your concurrent request limit» when the
+    # SAME key already has requests in flight - r153i4 kimik3free died in 41.5 s while another session's
+    # panel on this machine ran Kimi on that key; the round printed no cause. Not a ban, not the brief.
+    (r"concurrent request limit",
+     "The gateway refused this call because the same API key already had as many requests in flight "
+     "as it allows (AIHubMix: 403 «concurrent request limit») - another run using that key at the same "
+     "moment (a second panel, another session, a sub-agent swarm) is the usual cause. Nothing in the "
+     "brief or the harness's own round causes it.",
+     "Re-run this channel alone once the other run on that key has finished (`--only <channel>`); do "
+     "not loop. Two panels that both use the key should run one after the other."),
     # R149 И-2: Muse Code with no reachable login. The harness keeps META_API_KEY / MODEL_API_KEY out
     # of this channel's environment on purpose (a key outranks the login and bills per token), so a
     # machine whose Muse Code only ever ran on a key lands here. The CLI's exact text, measured with
@@ -4470,7 +4480,14 @@ def _opencode_supports_standalone(binary):
     binary. False on any doubt: the run then keeps the shared background service, as before."""
     cands = [os.path.realpath(binary or "")]
     d = os.path.dirname(cands[0])
-    cands += [os.path.join(d, "node_modules", "@opencode", "cli", "bin", n) for n in ("opencode.exe", "opencode")]
+    # R153 И-5 (A3/F8): the package's own binary, then the platform packages npm installs beside it
+    # (`@opencode/cli-windows-x64`, `-baseline`, ...); a big file WITHOUT the flag is not the last word.
+    oc = os.path.join(d, "node_modules", "@opencode")
+    try:
+        pkgs = ["cli"] + sorted(n for n in os.listdir(oc) if n.startswith("cli-"))
+    except OSError:
+        pkgs = ["cli"]
+    cands += [os.path.join(oc, pkg, "bin", n) for pkg in pkgs for n in ("opencode.exe", "opencode")]
     for c in cands:
         try:
             st = os.stat(c)
@@ -4493,8 +4510,36 @@ def _opencode_supports_standalone(binary):
             except (OSError, ValueError):
                 ok = False
             _OC_STANDALONE[key] = ok
-        return _OC_STANDALONE[key]
+        if _OC_STANDALONE[key]:
+            return True
     return False
+
+
+_OC_VERSION = {}
+
+
+def _opencode_version(binary):
+    """(major, minor, patch) printed by `opencode --version`, or None (R153 И-5). 0.09 s on 2.0.29, which
+    prints «opencode v2.0.29»; the v1 line prints «1.19.2». Cached per binary for the life of the process."""
+    if binary not in _OC_VERSION:
+        v = None
+        try:
+            p = subprocess.run([binary, "--version"], capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=30, stdin=subprocess.DEVNULL)
+            m = re.search(r"(\d+)\.(\d+)\.(\d+)", p.stdout or "")
+            v = tuple(int(x) for x in m.groups()) if m and p.returncode == 0 else None
+        except (OSError, subprocess.SubprocessError):
+            v = None
+        _OC_VERSION[binary] = v
+    return _OC_VERSION[binary]
+
+
+# R153 И-5 (H4): kit README/INSTALL said `npm install -g opencode-ai`; on 2026-10-16 that package is opencode
+# 1.19.2 - the v1 line. v2 is `@opencode/cli`. Measured on v1 in a sandbox (runs/r153-t107-kimi-mimo/i4/
+# oc_v1_probe.py): the harness's `-m <provider/model>#<variant>` call exits 1 in 1.5 s («UnknownError»), the
+# same model without `#` answers, and `run --standalone` does not exist.
+OC_V1_FIX = ("this harness speaks opencode v2: run `npm uninstall -g opencode-ai`, then "
+             "`npm install -g @opencode/cli`")
 
 
 def _opencode_limit(cname, reg=None):
@@ -4506,12 +4551,28 @@ def _opencode_limit(cname, reg=None):
             import routing
             reg = routing.load_registry()
         lim = ((reg.get("channels") or {}).get(cname) or {}).get("opencode_limit")
-    except Exception:                                    # noqa: BLE001 - a run never dies on this
+    except Exception as exc:                             # noqa: BLE001 - a run never dies on this
+        # R153 И-5 (F7): the only drop path that said nothing - name it, the catalogue limit applies
+        log("  [%s] opencode_limit not read (%s) - opencode's catalogue limit applies"
+            % (cname, exc.__class__.__name__))
         return None
     if isinstance(lim, dict) and all(isinstance(lim.get(k), int) and not isinstance(lim.get(k), bool)
                                      and lim.get(k) > 0 for k in ("context", "output")):
         return {"context": lim["context"], "output": lim["output"]}
     return None
+
+
+# R153 И-5 (G10, measured on a local stand-in provider, $0 - runs/r153-t107-kimi-mimo/i5/oc_prompt_probe.py and
+# oc_prompt_arms.py): opencode 2.0.29 put the HOME folder's `~/AGENTS.md` - found by walking up from neutral_cwd(),
+# which on Windows sits under home - into every reviewer's prompt: 57 101 chars with it, 40 536 without.
+# `~/.claude/CLAUDE.md` was NOT in it (its top canary absent), and `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT`, named by a
+# reviewer, is not in the 2.0.29 binary and changed nothing. Each of these two names drops the walk-up file (an
+# empty AGENTS.md in the cwd or a `git init` there did not). opencode's own global rules (~/.config/opencode/
+# AGENTS.md) stay: no switch drops them without dropping the user's whole opencode config (MCP servers included).
+# 🔴 Measured with `run --standalone` (a private server gets THIS environment). A run on the shared background
+# service gets the service's environment; there the switch helps only if the service was started with it.
+# Reviews only: a --task run works in the user's project and keeps that project's instruction files.
+OC_REVIEW_PROMPT_OFF = ("OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_CONFIG_PROJECT_DISABLE")
 
 
 def _opencode_child_env(name, base_model, binary, cwd):
@@ -4532,6 +4593,8 @@ def _opencode_child_env(name, base_model, binary, cwd):
     env = dict(os.environ)
     env["PWD"] = cwd
     env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+    if getattr(_TASK, "ctx", None) is None:              # R153 И-5 G10: a review gets no walk-up AGENTS.md
+        env.update(dict.fromkeys(OC_REVIEW_PROMPT_OFF, "1"))
     info = {"standalone": False, "limit": None, "note": None}
     lim = _opencode_limit(name)
     if not lim:
@@ -4542,21 +4605,34 @@ def _opencode_child_env(name, base_model, binary, cwd):
                         % lim["output"])
         return env, info
     prov, _, mid = base_model.split("#")[0].partition("/")
+    if not prov or not mid:                              # R153 И-5 (G2): its own note, not «not a JSON object»
+        info["note"] = "opencode_limit not applied: the model id %r has no provider/ prefix" % base_model
+        return env, info
     try:
         cfg = json.loads(env.get("OPENCODE_CONFIG_CONTENT") or "{}")
     except ValueError:
         cfg = None
-    if not isinstance(cfg, dict) or not prov or not mid:
-        info["note"] = "opencode_limit not applied: OPENCODE_CONFIG_CONTENT in this environment is not a JSON object"
+    if not isinstance(cfg, dict):
+        info["note"] = ("opencode_limit not applied: OPENCODE_CONFIG_CONTENT in this environment is not a "
+                        "JSON object this harness can read (comments are not parsed here)")
         return env, info
     try:
         m = cfg.setdefault("provider", {}).setdefault(prov, {}).setdefault("models", {}).setdefault(mid, {})
-        m["limit"] = dict(m.get("limit") or {}, context=lim["context"], output=lim["output"])
-    except (AttributeError, TypeError):
-        info["note"] = "opencode_limit not applied: OPENCODE_CONFIG_CONTENT has another shape there"
+        old = m.get("limit")
+        if old is not None and not isinstance(old, dict):   # G2: a string limit raised ValueError in dict()
+            raise TypeError("limit")
+        m["limit"] = dict(old or {}, context=lim["context"], output=lim["output"])
+    except (AttributeError, TypeError, ValueError):
+        info["note"] = ("opencode_limit not applied: OPENCODE_CONFIG_CONTENT has another shape at "
+                        "provider.%s.models.%s" % (prov, mid))
         return env, info
     env["OPENCODE_CONFIG_CONTENT"] = json.dumps(cfg)
     info.update(standalone=True, limit=lim)
+    mine = {k: old[k] for k in ("context", "output") if isinstance(old, dict) and k in old}
+    if any(mine[k] != lim[k] for k in mine):             # R153 И-5 (S2): say what was replaced
+        info["note"] = ("opencode_limit replaced the limit this environment's OPENCODE_CONFIG_CONTENT set for "
+                        "%s (%s) with context %d / output %d" % (base_model.split("#")[0], json.dumps(mine),
+                                                                 lim["context"], lim["output"]))
     return env, info
 
 
@@ -4642,6 +4718,14 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     base_model = model or "opencode/muse-spark-1.3-contributor-free"
     if effort:
         base_model += "#" + effort
+    ver, v1_note = _opencode_version(binary), None
+    if ver and ver[0] < 2:                               # R153 И-5 (H4): the kit used to install v1
+        v1_note = "opencode %s is the v1 line - %s" % (".".join(map(str, ver)), OC_V1_FIX)
+        if "#" in base_model:
+            log("  [%s] %s" % (name, v1_note))
+            return {"channel": name, "ok": False,
+                    "error": v1_note + " (on v1 this channel's model#variant call fails at once)"}
+        log("  [%s] %s; this run goes on without a variant" % (name, v1_note))
     cmd = [binary, "run",
            "-m", base_model,
            "--format", "json",
@@ -4702,6 +4786,8 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
         warn.insert(0, stop)
     if oc_info["note"]:
         note.append(oc_info["note"])
+    if v1_note:
+        note.append(v1_note)
 
     cache = tokens.get("cache") or {}
     return {"channel": name, "ok": not warn, "text": text, "seconds": round(secs, 1),
@@ -8942,7 +9028,7 @@ def agy_bin():
 
 
 def opencode_bin():
-    """opencode CLI (opencode.ai) — npm install -g opencode-ai.
+    """opencode CLI (opencode.ai) v2 — npm install -g @opencode/cli (the `opencode-ai` package is v1, R153 И-5).
 
     Free Spark 1.3 Contributor needs no API key (the opencode/ model prefix is free).
     Installed via npm globally; on Windows the binary is opencode.cmd in the npm dir.
@@ -11493,6 +11579,12 @@ def _task_tripwire(before):
 
 
 def main():
+    # 🔴 R153 И-5 (Q3, the class fix): NO CHILD INHERITS THE SHELL'S PWD. opencode took its working folder
+    # from an inherited PWD over its real cwd (measured 2026-10-15), so a harness started from Git Bash ran
+    # the reviewer in the user's project. Every channel's child env starts from os.environ; without PWD a
+    # CLI falls back to the cwd it was given, and a shell child sets its own. opencode still gets PWD = its
+    # cwd explicitly (_opencode_child_env). Which other CLIs read PWD is not measured - this makes it moot.
+    os.environ.pop("PWD", None)
     ap = argparse.ArgumentParser(description="Run one brief past several reviewer models at once.")
     ap.add_argument("--brief", help="path to the brief sent to every channel (or use --ask)")
     # 🔴 THE CHEAP PATH. Igor, 2026-08-07: «Можно наверное у нее всегда спрашивать сейчас, даже

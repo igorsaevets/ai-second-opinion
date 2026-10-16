@@ -401,13 +401,13 @@ assistant makes for you.
 it skipped and why. A missing key or a missing CLI is a normal, non-fatal condition, not an error.
 
 **No key at all gets you `--ask`.** The opencode CLI runs a **free** Spark 1.3 voice with no API
-key and no account — `npm install -g opencode-ai` and you are done. For a full review panel,
+key and no account — `npm install -g @opencode/cli` and you are done. For a full review panel,
 `OPENROUTER_API_KEY` alone reaches most of the model families here, which is enough for the
 disagreement this tool exists to produce. Everything else is optional.
 
 | what it needs | what that unlocks | cost |
 |---|---|---|
-| the opencode CLI (`npm install -g opencode-ai`) | `ocspark13free` — the **free** Spark 1.3 voice, and the default `--ask` channel; `ocmimo26flashfree` — the **free** MiMo v2.6 Flash | **free** |
+| the opencode CLI v2 (`npm install -g @opencode/cli`) | `ocspark13free` — the **free** Spark 1.3 voice, and the default `--ask` channel; `ocmimo26flashfree` — the **free** MiMo v2.6 Flash | **free** |
 | ~~the Kimi Code CLI + `NVIDIA_NIM_API_KEY`~~ — **not needed since 1.112.0** ([why](#kimi-code-cli-retired-free-kimi-k3-through-nvidia)) | `nvkimik3` ships switched off: NVIDIA retired its free Kimi K3 on 2026-10-15. Kimi K3 answers in the standard panel through `OPENROUTER_API_KEY` (`kimik3`) | — |
 | `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, a Muse Spark voice and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
 | `MODEL_API_KEY` | the Muse Spark voices reached directly from Meta | metered API |
@@ -594,9 +594,12 @@ certain a key is really gone after rotating it, that length is what changes.
 node`; on Linux use your package manager.
 
 ```
-npm install -g opencode-ai
-opencode --version
+npm uninstall -g opencode-ai    # only if you have the old package: it is opencode v1
+npm install -g @opencode/cli
+opencode --version              # must print 2.x
 ```
+
+The package `opencode-ai` is the v1 line (1.19.2 on 2026-10-16). The harness speaks v2 (`model#variant`, `run --standalone`); on v1 the free Spark voice fails at once and the harness says so.
 
 No key, no account, no sign-in — the `opencode/` prefix models are free. This installs the
 opencode CLI from [opencode.ai](https://opencode.ai/), which hosts free access to Meta's Muse

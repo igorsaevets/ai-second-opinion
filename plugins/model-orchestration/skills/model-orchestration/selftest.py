@@ -390,6 +390,20 @@ def suite_routing():
           "group=%s by_kind=%s diff=%s" % (sorted(_cli_group), sorted(_cli_by_kind),
                                            sorted(_cli_group ^ _cli_by_kind)))
 
+    def _kimi_expect():
+        """R153 И-5: what `--only kimi` starts in THIS tree, or "REFUSED" for the free-to-paid stop."""
+        on = group_of("kimi")
+        if on:
+            return cascaded(on)
+        fb = {c for c in group_members_all("kimi") if c in ENABLED_ANY_PANEL
+              and not (_RAW["channels"].get(c) or {}).get("explicit_only")}
+        nonpaid = ("free", "subscription")
+        idle = {c for c in group_members_all("kimi") if c not in fb
+                and (_RAW["channels"].get(c) or {}).get("cost") in nonpaid}
+        if fb and idle and all((_RAW["channels"].get(c) or {}).get("cost") not in nonpaid for c in fb):
+            return "REFUSED"
+        return cascaded(fb)
+
     cases = [
         (["--only", "spark11"], {"spark11"}, "--only spark11"),
         (["--only", "http11"], {"spark11"}, "--only http11 (channel alias)"),
@@ -405,10 +419,10 @@ def suite_routing():
         # (here kimik3free) the word keeps to it; where it runs none (the kit: NVIDIA retired Kimi K3 and
         # kimik3free is local) the family word names the Kimi that ships on (R149). The И-2 expectation
         # accepted the empty round instead («running 0 channel(s): NONE», exit 2) - the R60 nested run's red.
-        (["--only", "kimi"], cascaded(group_of("kimi") or {c for c in group_members_all("kimi")
-                                                           if c in ENABLED_ANY_PANEL and not
-                                                           (_RAW["channels"].get(c) or {}).get("explicit_only")}),
-         "--only kimi (GROUP -> every Kimi transport)"),
+        # R153 И-5 (2026-10-16): where the panel runs no Kimi and the only Kimi that would start is PAID while a
+        # free one is declared (the kit: nvkimik3 retired, kimik3free local), the word STOPS and names both - a
+        # family word never turns a free habit into a paid call in silence (_kimi_expect derives it).
+        (["--only", "kimi"], _kimi_expect(), "--only kimi (GROUP -> every Kimi transport)"),
         (["--only", "kimik3"], {"kimik3"}, "--only kimik3 (the channel's own name stays exact)"),
         (["--only", "qwen38max"], {"qwen38max"}, "--only qwen38max"),
         (["--only", "agy36flash"], {"agy36flash"}, "--only agy36flash"),
@@ -461,6 +475,10 @@ def suite_routing():
         ]
     for args, expect, label in cases:
         p = run_cli(args + ["--dry-run"], timeout=90)
+        if expect == "REFUSED":                          # R153 И-5: the free-to-paid stop, never an empty round
+            check(p.returncode == 2 and "PAID per call" in blob_of(p) and "will not start" in blob_of(p),
+                  f"{label:<28}", f"exit={p.returncode} (expected the free-to-paid stop)")
+            continue
         ran = {ln.strip().split("]", 1)[1].strip().split()[0]
                for ln in (p.stdout or "").splitlines() if ln.strip().startswith("[RUN ]")}
         check(ran == expect and p.returncode == 0, f"{label:<28}",
@@ -7929,6 +7947,7 @@ def main():
                   suite_r151_i2_mimo_prompt,
                   suite_r153_i2_kimi_eol_oc_limit,
                   suite_r153_i3_family_room,
+                  suite_r153_i5_hotfix,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -12125,7 +12144,9 @@ def suite_r138_i2_hotfix():
     # takes its folder from an inherited PWD over the real cwd, measured) and OPENCODE_DISABLE_AUTOUPDATE=1.
     oe_extra = (sorted(k for k in set(oe) | set(os.environ) if oe.get(k) != os.environ.get(k))
                 if isinstance(oe, dict) else ["not a dict"])
-    oe_ok = (isinstance(oe, dict) and set(oe_extra) <= {"OPENCODE_DISABLE_AUTOUPDATE", "PWD"}
+    # R153 И-5: + the review switches that keep the home folder's walk-up AGENTS.md out (OC_REVIEW_PROMPT_OFF).
+    oe_ok = (isinstance(oe, dict) and set(oe_extra) <= ({"OPENCODE_DISABLE_AUTOUPDATE", "PWD"}
+                                                        | set(getattr(o, "OC_REVIEW_PROMPT_OFF", ())))
              and oe.get("OPENCODE_DISABLE_AUTOUPDATE") == "1")
     check(ge == ge_want and getattr(o, "GROK_COMPAT_OFF", None) and oe_ok
           and isinstance(me, dict) and me.get("MIMOCODE_DISABLE_CLAUDE_IMPORT") == "1"
@@ -15222,6 +15243,201 @@ def suite_r150_i2_grok_compat():
           "(R150 И-3: a tree without the doc fails - it used to pass vacuously)", inst)
 
 
+def suite_r153_i5_hotfix():
+    """R153 И-5 (2026-10-16), kit 1.112.1 - the accepted findings of the r153i3/r153i4 panel:
+    (a) kit-shaped registry, cheap default: `--only kimi`, «только кими», «только кими бесплатно» STOP - the only
+        Kimi that would start is the PAID kimik3 while free ones are declared - and name kimik3 as PAID and the
+        free members; `--only kimik3` and `--only kimi,kimik3` run kimik3 (the human named it);
+    (b) CONTROL: a cheap Kimi that starts (kimik3free on) keeps the word to it - no stop;
+    (c) Wonder has no free member: «только вондер» still starts (R149) and its paid members' plan lines say PAID;
+    (d) M9/U3: over every group word, kit-shaped and as shipped, the stop fires only where the free Kimi is off;
+        «только CLI» never adds kimik3;
+    (e) H4: `opencode --version` is parsed (v2 «opencode v2.0.29», v1 «1.19.2»); on v1 a model#variant call
+        returns a named error with the v2 install line and starts nothing; without a variant it runs, noted;
+    (f) G10: a review's opencode env carries OC_REVIEW_PROMPT_OFF = "1" and PWD = cwd; a --task run does not;
+    (g) S2/G2: a string limit in OPENCODE_CONFIG_CONTENT is a named note, not an exception; a replaced user
+        limit is named; a model id without provider/ has its own note;
+    (h) A3/F8: the strings check goes on past a big candidate without the flag to the platform package;
+    (i) AIHubMix's 403 «concurrent request limit» has its own KNOWN_FAILURES cause;
+    (j) Q3: main() removes an inherited PWD before any child can start.
+    """
+    import contextlib
+    import copy as _cp
+    import io
+    import json as _json
+    import tempfile
+    import orchestrate as o
+    import routing as _r
+    section("R153 И-5: free-to-paid stop, opencode v1, opencode review env, small fixes")
+
+    def yes(_n):
+        return True
+
+    base = _r.load_registry(overlay=False)
+    kit = _cp.deepcopy(base)
+    for ch in kit["channels"].values():
+        if ch.get("distribution") == "local":
+            ch["enabled"] = False                         # what package.py does to a local channel
+
+    def runs(reg, **kw):
+        try:
+            p = _r.resolve(_cp.deepcopy(reg), ready=yes, **kw)
+        except _r.RouteError as e:
+            return None, str(e)
+        return sorted(c for c, s in p.items() if s.get("enabled")), p
+
+    outs = {k: runs(kit, **kw) for k, kw in (("only", {"only": ["kimi"]}), ("route", {"route": "только кими"}),
+                                             ("free", {"route": "только кими бесплатно"}))}
+    stopped = all(v[0] is None and "kimik3 is PAID per call" in v[1] and "kimik3free" in v[1] for v in outs.values())
+    n1, _ = runs(kit, only=["kimik3"])
+    n2, _ = runs(kit, only=["kimi", "kimik3"])
+    check(stopped and n1 == ["kimik3"] and n2 == ["kimik3"],
+          "R153 И-5 (a) kit, cheap: `--only kimi` / «только кими» / «только кими бесплатно» stop and name the PAID "
+          "kimik3 and the free members; naming kimik3 runs it",
+          "%r named=%r / %r" % ({k: v[0] if v[0] is not None else str(v[1])[:80] for k, v in outs.items()}, n1, n2))
+    liv = _cp.deepcopy(kit)
+    liv["channels"]["kimik3free"]["enabled"] = True       # the mechanism, not this tree's product
+    lo, _ = runs(liv, only=["kimi"])
+    check(lo == ["kimik3free"], "R153 И-5 (b) CONTROL: a cheap Kimi that starts keeps the word to it - no stop",
+          repr(lo))
+    wo, wp = runs(kit, route="только вондер")
+    wl = {c: " ".join((wp.get(c) or {}).get("why") or []) for c in ("wonder10", "orwonder")
+          if c in kit["channels"]} if wo else {}
+    check(bool(wo) and "mcwonder10cont" in wo and bool(wl) and all("PAID per call" in w for w in wl.values()),
+          "R153 И-5 (c) Wonder has no free member: «только вондер» still starts (R149); its paid members say PAID",
+          "started=%r why=%r" % (wo if wo is not None else str(wp)[:120], {c: w[-70:] for c, w in wl.items()}))
+    stops, other = [], []
+    for tag, reg in (("kit", kit), ("tree", base)):
+        for g, v in sorted((reg.get("groups") or {}).items()):
+            if g.startswith("_") or not isinstance(v, dict):
+                continue
+            got, info = runs(reg, only=[g])
+            if got is None:
+                (stops if "will not start" in info else other).append("%s:%s" % (tag, g))
+    want = ["%s:kimi" % t for t, reg in (("kit", kit), ("tree", base))
+            if not reg["channels"]["kimik3free"].get("enabled", True)]
+    cli, _ = runs(kit, route="только CLI")
+    check(stops == want and not other and cli is not None and "kimik3" not in cli,
+          "R153 И-5 (d) every group word, cheap default: the free-to-paid stop fires only where the free Kimi is "
+          "off; «только CLI» adds no kimik3",
+          "stops=%r want=%r other=%r cli=%r" % (stops, want, other, cli))
+
+    class _P:
+        def __init__(self, out, rc=0):
+            self.stdout, self.stderr, self.returncode = out, "", rc
+
+    real_run = o.subprocess.run
+    vers = {}
+    try:
+        for out in ("opencode v2.0.29\n", "1.19.2\n", "nonsense\n"):
+            getattr(o, "_OC_VERSION", {}).clear()
+            o.subprocess.run = (lambda txt: (lambda *a, **k: _P(txt)))(out)
+            vers[out.strip()] = getattr(o, "_opencode_version", lambda b: "missing")("X:/oc.cmd")
+    finally:
+        o.subprocess.run = real_run
+    calls = []
+
+    def fake_run(cmd, *a, **k):
+        calls.append(list(cmd))
+        return _P('{"type":"text","part":{"text":"ok\\nMARK-R153I5"}}\n')
+
+    saved = (o.opencode_bin, getattr(o, "_opencode_version", None))
+    tmp = tempfile.mkdtemp(prefix="r153i5-")
+    try:
+        o.opencode_bin = lambda: "X:/oc.cmd"
+        o._opencode_version = lambda b: (1, 19, 2)
+        o.subprocess.run = fake_run
+        r1 = o.call_opencode("brief", "MARK-R153I5", os.path.join(tmp, "a.md"),
+                             model="opencode/muse-spark-1.3-contributor-free", effort="xhigh", name="ocspark13free")
+        runs_v = [c for c in calls if "run" in c]
+        r2 = o.call_opencode("brief", "MARK-R153I5", os.path.join(tmp, "b.md"),
+                             model="opencode/mimo-v2.6-flash-free", effort=None, name="ocmimo26flashfree")
+    finally:
+        o.subprocess.run = real_run
+        o.opencode_bin = saved[0]
+        if saved[1] is not None:
+            o._opencode_version = saved[1]
+    e1 = str(r1.get("error") or "")
+    check(vers.get("opencode v2.0.29") == (2, 0, 29) and vers.get("1.19.2") == (1, 19, 2) and vers.get("nonsense") is None
+          and not r1.get("ok") and "v1 line" in e1 and "@opencode/cli" in e1 and not runs_v
+          and any("v1 line" in n for n in r2.get("notes") or []),
+          "R153 И-5 (e) opencode v1: version parsed; a model#variant call names v1 + the v2 install line and starts "
+          "nothing; without a variant the run goes on and is noted",
+          "vers=%r err=%r started=%d notes2=%r" % (vers, e1[:90], len(runs_v), (r2.get("notes") or [])[-1:]))
+    off = getattr(o, "OC_REVIEW_PROMPT_OFF", ("<missing>",))
+    env, _ = o._opencode_child_env("ocspark13free", "opencode/x#xhigh", "X:/oc.cmd", "C:/n")
+    rev = all(env.get(k) == "1" for k in off) and env.get("PWD") == "C:/n"
+    prev = getattr(o._TASK, "ctx", None)
+    o._TASK.ctx = {"remote": True}
+    try:
+        tenv, _ = o._opencode_child_env("ocspark13free", "opencode/x#xhigh", "X:/oc.cmd", "C:/n")
+    finally:
+        o._TASK.ctx = prev
+    check(rev and not any(k in tenv for k in off),
+          "R153 И-5 (f) an opencode review gets OPENCODE_DISABLE_PROJECT_CONFIG (+ twin) and PWD = cwd; a --task "
+          "run keeps the project's files", "review=%r task=%r" % (rev, [k for k in off if k in tenv]))
+    keep = (o._opencode_limit, o._opencode_supports_standalone, os.environ.get("OPENCODE_CONFIG_CONTENT"))
+    try:
+        o._opencode_limit = lambda n, reg=None: {"context": 200000, "output": 65536}
+        o._opencode_supports_standalone = lambda b: True
+        os.environ["OPENCODE_CONFIG_CONTENT"] = _json.dumps({"provider": {"opencode": {"models": {"m": {"limit": "x"}}}}})
+        try:
+            _, i1 = o._opencode_child_env("c", "opencode/m", "X", "C:/n")
+        except Exception as exc:                          # noqa: BLE001 - the old code raised here
+            i1 = {"standalone": True, "note": "RAISED " + type(exc).__name__}
+        os.environ["OPENCODE_CONFIG_CONTENT"] = _json.dumps({"provider": {"opencode": {"models": {"m": {"limit": {"output": 1000}}}}}})
+        e2, i2 = o._opencode_child_env("c", "opencode/m", "X", "C:/n")
+        lim2 = _json.loads(e2.get("OPENCODE_CONFIG_CONTENT") or "{}")["provider"]["opencode"]["models"]["m"]["limit"]
+        os.environ.pop("OPENCODE_CONFIG_CONTENT", None)
+        _, i3 = o._opencode_child_env("c", "noslash", "X", "C:/n")
+    finally:
+        o._opencode_limit, o._opencode_supports_standalone = keep[0], keep[1]
+        if keep[2] is None:
+            os.environ.pop("OPENCODE_CONFIG_CONTENT", None)
+        else:
+            os.environ["OPENCODE_CONFIG_CONTENT"] = keep[2]
+    check(not i1["standalone"] and "another shape" in (i1["note"] or "") and i2["standalone"]
+          and lim2.get("output") == 65536 and "replaced" in (i2["note"] or "") and '"output": 1000' in (i2["note"] or "")
+          and "no provider/ prefix" in (i3["note"] or ""),
+          "R153 И-5 (g) a string limit is a named note, a replaced user limit is named, a model id without "
+          "provider/ has its own note", "%r | %r | %r" % (i1["note"], i2["note"], i3["note"]))
+    with tempfile.TemporaryDirectory() as td:
+        shim = os.path.join(td, "opencode.cmd")
+        with open(shim, "w") as f:
+            f.write("@echo off\n")
+        for pkg, tail in (("cli", b""), ("cli-windows-x64",
+                                         b" --standalone  Run with a private server instead of the background service")):
+            d = os.path.join(td, "node_modules", "@opencode", pkg, "bin")
+            os.makedirs(d)
+            with open(os.path.join(d, "opencode.exe"), "wb") as f:
+                f.write(b"\0" * 1100000 + tail)
+        getattr(o, "_OC_STANDALONE", {}).clear()
+        found = o._opencode_supports_standalone(shim)
+        getattr(o, "_OC_STANDALONE", {}).clear()
+    check(found is True, "R153 И-5 (h) the strings check goes on past a big binary without the flag to the "
+          "platform package (@opencode/cli-windows-x64)", repr(found))
+    cause, fix = o.diagnose("Error: 403 You've reached your concurrent request limit, please try again later")
+    check(bool(cause) and "in flight" in cause and "one after the other" in (fix or ""),
+          "R153 И-5 (i) AIHubMix 403 «concurrent request limit» names its cause (the same key busy elsewhere)",
+          repr((cause or "")[:90]))
+    had, argv = os.environ.get("PWD"), sys.argv
+    os.environ["PWD"] = "/c/Users/someone/project"
+    sys.argv = ["orchestrate.py", "--help"]
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            o.main()
+    except SystemExit:
+        pass
+    finally:
+        sys.argv = argv
+    gone = "PWD" not in os.environ
+    if had is None:
+        os.environ.pop("PWD", None)
+    else:
+        os.environ["PWD"] = had
+    check(gone, "R153 И-5 (j) main() drops an inherited PWD before any channel's child can start", repr(gone))
+
+
 def suite_r153_i3_family_room():
     """R153 И-3 (2026-10-15): in the shipped kit `--only kimi` and «только кими» ended «running 0 channel(s):
     NONE» (exit 2). R149's rule - a group word names its family when the chosen panel holds no voice of it -
@@ -15273,10 +15489,13 @@ def suite_r153_i3_family_room():
     ko, kp = runs(kit, only=["kimi"])
     kr, _ = runs(kit, route="только кими")
     why = " ".join((kp.get(ko[0]) or {}).get("why") or []) if ko else repr(kp.get("_error"))
-    check(ships_on == ["kimik3"] and ko == ["kimik3"] and kr == ["kimik3"] and "R149" in why,
-          "R153 И-3 (a) kit, cheap default: `--only kimi` and «только кими» run kimik3 (the Kimi that ships on), "
-          "and the plan names the R149 reason - not an empty round",
-          "ships_on=%r only=%r route=%r why=%r" % (ships_on, ko, kr, why[-120:]))
+    # R153 И-5 SUPERSEDES the «run kimik3» half: that Kimi is PAID and two free ones are declared, so the word
+    # now stops and names them (suite_r153_i5_hotfix). Still pinned here: never an empty round.
+    kn, _ = runs(kit, only=["kimik3"])
+    check(ships_on == ["kimik3"] and ko == [] and kr == [] and "will not start" in why and kn == ["kimik3"],
+          "R153 И-3 (a) kit, cheap default: `--only kimi` and «только кими» are never an empty round - they stop "
+          "and name the paid kimik3 (R153 И-5); `--only kimik3` runs it",
+          "ships_on=%r only=%r route=%r why=%r named=%r" % (ships_on, ko, kr, why[-120:], kn))
     liv = _cp.deepcopy(kit)
     liv["channels"]["kimik3free"]["enabled"] = True       # the mechanism, not this tree's product
     lo, _ = runs(liv, only=["kimi"])
@@ -15286,12 +15505,12 @@ def suite_r153_i3_family_room():
           "only=%r route=%r" % (lo, lr))
     ex = _cp.deepcopy(liv)
     ex["channels"]["kimik3free"]["explicit_only"] = True
-    eo, _ = runs(ex, only=["kimi"])
+    eo, ep = runs(ex, only=["kimi"])
     en, _ = runs(ex, only=["kimik3free"])
-    check(eo == ["kimik3"] and en == ["kimik3free"],
-          "R153 И-3 (c) an explicit_only cheap member does not hold the family (`--only kimi` -> kimik3); "
-          "naming it still starts it",
-          "only kimi=%r only kimik3free=%r" % (eo, en))
+    check(eo == [] and "will not start" in str(ep.get("_error")) and en == ["kimik3free"],
+          "R153 И-3 (c) an explicit_only cheap member does not hold the family - `--only kimi` stops and names it "
+          "(R153 И-5: the other Kimi is paid); naming it still starts it",
+          "only kimi=%r err=%r only kimik3free=%r" % (eo, str(ep.get("_error"))[:120], en))
     bad, seen = [], 0
     for tag, reg in (("kit", kit), ("tree", base)):
         for g, v in sorted((reg.get("groups") or {}).items()):
@@ -15299,9 +15518,10 @@ def suite_r153_i3_family_room():
                 continue
             can = [c for c in v.get("channels") or [] if c in reg["channels"]
                    and reg["channels"][c].get("enabled", True) and not reg["channels"][c].get("explicit_only")]
-            got, _ = runs(reg, only=[g])
+            got, gp = runs(reg, only=[g])
             seen += 1
-            if bool(got) != bool(can):
+            stop = "will not start" in str(gp.get("_error") or "")    # R153 И-5: the deliberate free-to-paid stop
+            if bool(got) != bool(can) and not (stop and can):
                 bad.append("%s:%s got=%s ships_on=%s" % (tag, g, got, can))
     check(seen >= 10 and not bad,
           "R153 И-3 (d) every group word, cheap default, kit-shaped and as shipped: an empty round only when the "
@@ -15407,7 +15627,8 @@ def suite_r153_i2_kimi_eol_oc_limit():
         o._opencode_limit = lambda name, reg=None: None
         env, info = ce("ocspark13free", "opencode/x", "opencode", td) if ce else ({}, {})
         diff = sorted(k for k in set(env) | set(os.environ) if env.get(k) != os.environ.get(k)
-                      and k not in ("PWD", "OPENCODE_DISABLE_AUTOUPDATE"))
+                      and k not in ("PWD", "OPENCODE_DISABLE_AUTOUPDATE")
+                      and k not in getattr(o, "OC_REVIEW_PROMPT_OFF", ()))   # R153 И-5: + review switches
         check(env.get("PWD") == td and env.get("OPENCODE_DISABLE_AUTOUPDATE") == "1" and not diff
               and info.get("standalone") is False,
               "R153 И-2 (d): opencode's env = the parent's + PWD (its cwd) + OPENCODE_DISABLE_AUTOUPDATE=1",

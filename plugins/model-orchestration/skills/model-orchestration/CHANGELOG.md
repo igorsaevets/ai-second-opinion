@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.112.1 — 2026-10-16
+
+Fixes from the review panel on 1.112.0.
+
+- **The install line installed the wrong opencode.** README, README.ru and INSTALL said `npm install -g opencode-ai`; that package is opencode **v1** (1.19.2 on 2026-10-16). The harness speaks **v2**: `npm install -g @opencode/cli`. On v1 the free Spark voice (the cheap panel's Spark seat and the default `--ask` channel) failed in 1.5 s and MiMo Flash ran without its output limit. The docs name the v2 package now (with `npm uninstall -g opencode-ai` for anyone who followed the old line). The harness asks `opencode --version` once per run; on v1 it stops a `model#variant` channel with that fix in the error instead of «UnknownError», and notes it on the others.
+- **A family word no longer turns a free habit into a paid call in silence.** In the kit, «только кими», `--only kimi` and «только кими бесплатно» started the paid OpenRouter Kimi (about $1.38 a run): both free Kimi routes ship off, and the plan never said «paid». Now, when every member a family word would start is paid per call and the family declares a free or subscription member that will not start, the run stops before spending and names both; `--only kimik3` runs the paid one on purpose. A family with no free route keeps the 1.110.0 rule (Wonder), and every paid member such a word starts says «PAID per call» in its plan line.
+- **opencode reviewers no longer get your home folder's `AGENTS.md`.** Measured on a local stand-in provider: opencode 2.0.29 walked up from the reviewer's working folder (under your home on Windows) and put `~/AGENTS.md` into every review prompt. Reviews now set `OPENCODE_DISABLE_PROJECT_CONFIG` (and its twin name); a `--task` run keeps the project's files. This acts on the private server (`--standalone`, MiMo Flash); a run on opencode's shared background service gets that service's environment. `~/.claude/CLAUDE.md` was not in opencode's prompt.
+- **No reviewer inherits your shell's `PWD`.** opencode took its working folder from it (1.112.0 fixed opencode alone); the harness now drops `PWD` before any channel starts, for every CLI.
+- New known failure: AIHubMix's 403 «concurrent request limit» (the same key busy in another run) is named, with what to do.
+- Smaller: the opencode limit merge names a limit it replaced and no longer raises on a non-object `limit`; a model id without `provider/` gets its own note; the `--standalone` check looks past a big file without the flag (npm's platform packages); a failed registry read for `opencode_limit` is logged; README FAQ: the standard panel is about $2.5 a run, not $3.2; «every paid channel has a ceiling» now says most do and `wonder10` does not; two stale registry notes are marked superseded.
+
 ## 1.112.0 — 2026-10-15
 
 Kimi and opencode, after a panel on 2026-10-15 lost two of six voices and printed «the model stopped
