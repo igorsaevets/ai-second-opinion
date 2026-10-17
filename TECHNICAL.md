@@ -191,9 +191,15 @@ resurrecting on a group word means calling a vendor whose key the user may not h
 channel still works and is now the only way in**: `--only <name>`, or «включая <name>» in prose.
 
 🔴 **A channel may declare `explicit_only`.** Then even naming its group is not enough — it runs
-only when something names *it*. One channel ships that way (the most expensive one), because
-`enabled: false` alone was not a lock: `--only` overrides it by design, and `--only <group>`
-reached it through two different vendor words.
+only when something names *it*, because `enabled: false` alone was not a lock: `--only`
+overrides it by design, and `--only <group>` reached it through two different vendor words. Four
+channels ship that way: `agy31pro`, and since 1.113.0 the three Muse Wonder transports
+(`mcwonder10cont`, `wonder10`, `orwonder`). One narrow exception keeps a model reachable by its own
+name: a group whose channels are exactly one cascade (one voice, several transports — today
+`wonder`) names that model, so «вондер» / "only wonder" starts ONE of its `explicit_only` members,
+the first that is ready here, and stops the run instead of paying when only a paid member could
+start. A broader group — a vendor, `cli`, `openrouter`, a panel, «все» — still starts none of them,
+and a member that is also `enabled: false` still needs its own name.
 
 🔴 **What the cheap panel really costs is vendor diversity, not depth.** The plan prints the
 vendor tally of whatever resolves and warns when one vendor holds half the seats, because six

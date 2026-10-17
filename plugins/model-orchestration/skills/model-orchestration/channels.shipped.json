@@ -47,8 +47,11 @@
         "вандер",
         "уондер",
         "muse wonder",
-        "муза вондер"
-      ]
+        "муза вондер",
+        "wonder 1.0",
+        "вондер 1.0"
+      ],
+      "_r155": "R155 И-3 (2026-10-17): «wonder 1.0» / «вондер 1.0» moved here from wonder10's MODEL aliases. There they named the paid Meta API transport, so «только wonder 1.0» ran wonder10 ($4 / $20 per 1M) on every machine, also where the Muse Code subscription was ready, while «только вондер» ran Muse Code. They are the model's name, so they are this group's words; «muse-wonder-1.0» (the API's own model id) stays on wonder10. Since R155 every Wonder channel is explicit_only and this group's word is the way to start the model (routing.one_voice_groups: the group equals one cascade)."
     },
     "muse": {
       "label": "every Meta Muse voice: Spark and Wonder, all transports",
@@ -63,6 +66,7 @@
         "mcwonder10cont"
       ],
       "_added_r149": "R149: the brand word. «только муза» = one Spark (its cascade) + one Wonder (its cascade); «не используй muse» drops both lines. Same shape as `gemini` (the family) over `agy` (a transport).",
+      "_superseded_r155": "SUPERSEDED R155 И-3 (2026-10-17) for the Wonder half: every Wonder channel is explicit_only now (the operator: «Wonder ... только если явно назовут модель»), so «только муза» / «muse» = ONE Spark; Wonder starts only by its own word («вондер», the `wonder` group) or a channel name. «не используй muse» still drops both lines.",
       "aliases": [
         "muse",
         "муза",
@@ -500,6 +504,8 @@
       "panel": "standard",
       "vendor": "meta",
       "enabled": true,
+      "explicit_only": true,
+      "_explicit_only_r155": "R155 И-3 (2026-10-17), the operator: «Wonder в standart надо сделать по дефолту отключенным, только если явно назовут модель». No panel, default or broader group («muse», «openrouter», «cli», «все») starts it; the model's word («вондер», «wonder», «muse wonder», «wonder 1.0» - the `wonder` group, which is exactly one cascade: routing.one_voice_groups) or this channel's own name does, and the cascade starts ONE Wonder - Muse Code first. Where Muse Code is not ready the model's word stops before a paid Wonder and names it (R153 И-5 stop).",
       "label": "Wonder 1.0",
       "cost": "expensive",
       "_cost": "Meta Model API pay-as-you-go, Standard mode only: $4.00 in / $20.00 out / $0.20 cached input per 1M tokens, web search $2.50 per 1,000 queries; 3,000 RPM / 4,000,000 TPM per team (dev.meta.ai/docs/pricing-rate-limits.md, read 2026-10-13) - 40x the input and 100x the output price of Spark 1.3 Contributor. This kind has NO per-review dollar ceiling (spend_guard is enforced on openrouter/oai only): the vendor runs the search loop inside one request, so a big brief with many searches is billed in full. Hence `panel: standard`, never cheap.",
@@ -519,9 +525,7 @@
             "minimal"
           ],
           "aliases": [
-            "muse-wonder-1.0",
-            "wonder 1.0",
-            "вондер 1.0"
+            "muse-wonder-1.0"
           ]
         }
       },
@@ -532,7 +536,7 @@
         "вондер апи"
       ],
       "_added": "R149 (2026-10-13), the operator: «добавим к нам и в kit новые модели spark Muse Wonder». Catalogue: GET /v1/models with this machine's MODEL_API_KEY lists muse-wonder-1.0 (and no muse-wonder-1.0-contributor); the docs say Wonder Full is Muse Code subscription-only and effort max does not select it. Its own cascade with orwonder; NOT in the Spark cascade - a different model is a different voice.",
-      "notes": "Meta's most capable model (preview) on the same Messages endpoint and key as spark13cont. Standard mode only, $4/$20 per 1M - an expensive standard-panel voice; the cheap panel never runs it. Effort max."
+      "notes": "Meta's most capable model (preview) on the same Messages endpoint and key as spark13cont. Standard mode only, $4/$20 per 1M - an expensive voice that starts only when named (R155: «вондер» or «only wonder10»; no panel, default or broader group runs it). Effort max."
     },
     "orwonder": {
       "read_order": 1,
@@ -541,6 +545,8 @@
       "vendor": "meta",
       "provider": "openrouter",
       "enabled": true,
+      "explicit_only": true,
+      "_explicit_only_r155": "R155 И-3 (2026-10-17), the operator: «Wonder в standart надо сделать по дефолту отключенным, только если явно назовут модель». No panel, default or broader group («muse», «openrouter», «cli», «все») starts it; the model's word («вондер», «wonder», «muse wonder», «wonder 1.0» - the `wonder` group, which is exactly one cascade: routing.one_voice_groups) or this channel's own name does, and the cascade starts ONE Wonder - Muse Code first. Where Muse Code is not ready the model's word stops before a paid Wonder and names it (R153 И-5 stop).",
       "distribution": "kit",
       "_distribution": "KIT route, the orspark13cont pattern (R69): an employee who holds only an OPENROUTER_API_KEY gets a Wonder voice. Locally it sits after wonder10 in the Wonder cascade, so with MODEL_API_KEY present it never runs.",
       "label": "OR Wonder",
@@ -596,6 +602,8 @@
       "panel": "standard",
       "vendor": "meta",
       "enabled": true,
+      "explicit_only": true,
+      "_explicit_only_r155": "R155 И-3 (2026-10-17), the operator: «Wonder в standart надо сделать по дефолту отключенным, только если явно назовут модель». No panel, default or broader group («muse», «openrouter», «cli», «все») starts it; the model's word («вондер», «wonder», «muse wonder», «wonder 1.0» - the `wonder` group, which is exactly one cascade: routing.one_voice_groups) or this channel's own name does, and the cascade starts ONE Wonder - Muse Code first. Where Muse Code is not ready the model's word stops before a paid Wonder and names it (R153 И-5 stop).",
       "distribution": "both",
       "label": "Muse Code Wonder 1.0 Contributor",
       "cost": "subscription",

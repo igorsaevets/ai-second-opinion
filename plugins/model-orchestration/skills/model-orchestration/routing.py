@@ -2349,6 +2349,7 @@ def apply_explicit_only(plan, reg, named):
     that a word which used to include this channel now does not, and a human who typed that word
     is entitled to see the difference. Hence a line in `why` AND a warning collected for the plan.
     """
+    one_voice = one_voice_groups(reg)
     for cname, p in plan.items():
         ch = reg["channels"].get(cname) or {}
         hard = bool(ch.get("explicit_only"))
@@ -2370,17 +2371,48 @@ def apply_explicit_only(plan, reg, named):
         if not p.get("enabled") or not (hard or off_by_default or panel_excluded):
             continue
         if cname in named:
-            p["why"].append("named directly, which is the only way to start a channel that is "
-                            "off by default or excluded by the panel")
+            if not p.get("_family_named"):           # R155 И-3: the family rule already said which word named it
+                p["why"].append("named directly, which is the only way to start a channel that is "
+                                "off by default or excluded by the panel")
             continue
         p["enabled"] = False
-        p["why"].append(("explicit_only: " if hard else "")
-                        + "NOT named directly - a group cannot override "
-                        + ("the panel exclusion" if panel_excluded and not off_by_default
-                           else "a default-off channel"))
+        fam = [g for g, m in one_voice.items() if cname in m] if hard else []
+        if fam:
+            # R155 И-3: «a group cannot override» was false for these - the model's own word starts them.
+            al = [str(a) for a in ((reg.get("groups") or {}).get(fam[0]) or {}).get("aliases") or []]
+            p["why"].append("explicit_only: not named in this run - it starts only by the model's word (%s) or its "
+                            "own name" % " / ".join([fam[0]] + [a for a in al if a != fam[0]][:1]))
+        else:
+            p["why"].append(("explicit_only: " if hard else "")
+                            + "NOT named directly - a group cannot override "
+                            + ("the panel exclusion" if panel_excluded and not off_by_default
+                               else "a default-off channel"))
         reg.setdefault("_explicit_only_blocked" if hard else "_default_off_blocked",
                        []).append(cname)
     return plan
+
+
+def one_voice_groups(reg):
+    """
+    🔴 R155 И-3 (2026-10-17): the groups whose word names ONE MODEL - {group: its cascade, in order}.
+
+    A group whose member set equals one `_cascade_groups` entry is that model's name: the cascade already IS the
+    registry's statement «one voice, several transports» (`_apply_cascade` starts one of them). Today `wonder`
+    (Muse Code / Meta API / OpenRouter) and `kimi`. Derived, not declared: a flag could be set on a vendor group by
+    mistake and reopen R43 (one word, several paid channels), while a cascade can only ever start one.
+    """
+    chans = reg.get("channels") or {}
+    out = {}
+    for gname, g in (reg.get("groups") or {}).items():
+        if gname.startswith("_") or not isinstance(g, dict):
+            continue
+        members = frozenset(c for c in g.get("channels") or [] if c in chans)
+        for group in reg.get("_cascade_groups") or []:
+            if (isinstance(group, list) and len(group) >= 2 and members
+                    and members == frozenset(c for c in group if c in chans)):
+                out[gname] = [c for c in group if c in chans]
+                break
+    return out
 
 
 def family_absent_from_panel(plan, reg, route=None, only=None, named=None, ready=None):
@@ -2395,10 +2427,20 @@ def family_absent_from_panel(plan, reg, route=None, only=None, named=None, ready
     can only mean «that model», so its members count as named. Not touched: `explicit_only` and
     default-off members (they still need their own name), and any group with a member in the room
     («муза» in a cheap round = Spark alone). Members a route excluded are off, so not counted.
+
+    🔴 R155 И-3 (2026-10-17): «WONDER ONLY WHEN NAMED». Igor: «Wonder в standart надо сделать по дефолту
+    отключенным, только если явно назовут модель». The three Wonder channels became `explicit_only`, so no panel,
+    default or broader group («муза», «openrouter», «cli», «все») starts them - and «только вондер» became R149's empty
+    round again, one gate further down. For a group that names ONE model (`one_voice_groups`: its members are exactly
+    one cascade) the `explicit_only` members count as named too - the model's own word IS naming it. The cascade still
+    starts one, and the free-to-paid stop below still holds: where Muse Code is not ready, «вондер» stops and names the
+    paid channels instead of running wonder10. `enabled: false` members still need their own name (nvkimik3 is off
+    because NVIDIA retired the model - a family word must not wake a dead channel).
     """
     chosen = reg.get("_panel_chosen")
     if not chosen:
         return set()
+    one_voice = one_voice_groups(reg)
     room = panel_members(reg, chosen)
     groups = {g: v for g, v in (reg.get("groups") or {}).items()
               if not g.startswith("_") and isinstance(v, dict)}
@@ -2417,6 +2459,7 @@ def family_absent_from_panel(plan, reg, route=None, only=None, named=None, ready
                 said.add(tok[2][1])
     out = set()
     for gname in sorted(said):
+        one = gname in one_voice                     # R155 И-3: the word names one model
         members = [c for c in groups[gname].get("channels") or [] if c in plan]
         # 🔴 R153 И-3 (2026-10-15): «in the room» = a member this panel would START, not one merely
         # DECLARED on it. `panel_members` admits by the `panel` field alone, so members that ship OFF
@@ -2434,9 +2477,13 @@ def family_absent_from_panel(plan, reg, route=None, only=None, named=None, ready
         if not members or present:
             continue
         chans = reg["channels"]
+
+        def _gated(c):
+            return bool((chans.get(c) or {}).get("explicit_only"))
+        # R155 И-3: a one-voice group's `explicit_only` members are picked wherever they sit (in this room or out of it).
         picked = [c for c in members
-                  if plan[c].get("enabled") and plan[c].get("_panel_excluded")
-                  and not (chans.get(c) or {}).get("explicit_only") and plan[c].get("default_enabled", True)]
+                  if plan[c].get("enabled") and plan[c].get("default_enabled", True)
+                  and ((plan[c].get("_panel_excluded") and not _gated(c)) or (one and _gated(c)))]
         # 🔴 R153 И-6: «will not start» includes «cannot start HERE». The cascade keeps the first READY member,
         # so on a machine without Muse Code «только вондер» passed this stop (its subscription member was
         # picked) and then ran the paid wonder10, which has no per-run ceiling. `ready` is the cascade's own
@@ -2461,7 +2508,7 @@ def family_absent_from_panel(plan, reg, route=None, only=None, named=None, ready
             p, ch = plan[c], chans.get(c) or {}
             return "%s (%s, %s)" % (c, ch.get("cost"),
                                     "you excluded it in this run: %s" % p["_user_off"] if p.get("_user_off")
-                                    else "starts only by its own name" if ch.get("explicit_only")
+                                    else "starts only by its own name" if ch.get("explicit_only") and not one
                                     else "not ready here: %s" % (verdict[c] if isinstance(verdict[c], str)
                                                                  and verdict[c] else "its key or CLI is missing")
                                     if c in verdict and verdict[c] is not True
@@ -2487,9 +2534,14 @@ def family_absent_from_panel(plan, reg, route=None, only=None, named=None, ready
                                 ", ".join(_paid_label(c, plan, chans) for c in paid), ",".join(paid)))
         for c in picked:
             out.add(c)
-            plan[c]["why"].append("the %r panel holds no %r voice, so naming the family named this channel "
-                                  "(R149)%s" % (chosen, gname, (" - " + _paid_label(c, plan, chans))
-                                                if c in paid_all else ""))
+            plan[c]["_family_named"] = gname
+            if one and _gated(c):
+                said_why = ("%r names one model, whose channels start only when named, so the model's word named this "
+                            "channel (R155)" % gname)
+            else:
+                said_why = "the %r panel holds no %r voice, so naming the family named this channel (R149)" % (
+                    chosen, gname)
+            plan[c]["why"].append(said_why + ((" - " + _paid_label(c, plan, chans)) if c in paid_all else ""))
     return out
 
 
@@ -3366,7 +3418,28 @@ def format_plan(plan, reg):
     # shrinks is indistinguishable from a set that did not.
     blocked = reg.get("_explicit_only_blocked") or []
     if blocked:
+        # 🔴 R155 И-3: a model reachable over several transports gets ONE line, and it must not say «never through a
+        # group» - its own word (`one_voice_groups`) does start it. Three «wonder10 ... never through a group» lines
+        # on every standard run told the reader the opposite of the rule.
+        shown = set()
+        for gname, members in sorted(one_voice_groups(reg).items()):
+            hit = [c for c in members if c in blocked]
+            if not hit:
+                continue
+            shown.update(hit)
+            al = [str(a) for a in ((reg.get("groups") or {}).get(gname) or {}).get("aliases") or []]
+            words = [gname] + [a for a in al if a != gname][:1] + [a for a in al if " " in a][:1]
+            lines.append("  🔴 %s was NOT started (%s): it starts only when named - by the model's word (%s) or"
+                         % (gname, ", ".join(hit), " / ".join(words)))
+            lines.append("     by a channel's own name; never through another group, a panel or a default. The "
+                         "model's word starts ONE")
+            free = [c for c in members if (reg["channels"].get(c) or {}).get("cost") in _NON_PAID_COSTS]
+            lines.append("     of them: the first that is ready here%s." % (
+                "; if %s cannot run here, the run stops instead of paying for another" % " / ".join(free)
+                if free else " (each is PAID per call)"))
         for cname in blocked:
+            if cname in shown:
+                continue
             lines.append("  🔴 %s was NOT started: it runs only when named directly (%s), never "
                          "through a group," % (cname, "/".join(
                              (reg["channels"][cname].get("aliases") or [cname])[:3])))

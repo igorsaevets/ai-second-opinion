@@ -1484,9 +1484,10 @@ KNOWN_FAILURES = [
      "The harness never hands this channel an API key: META_API_KEY and MODEL_API_KEY are kept out "
      "of its environment, because a key would bill per token instead of the subscription.",
      "Run `muse login` once in a terminal (browser sign-in with the account that holds the Muse "
-     "Code subscription), then re-run. No subscription? Leave the channel out with --skip <channel>: "
-     "the Wonder cascade then runs wonder10 on MODEL_API_KEY (pay-as-you-go) or orwonder on "
-     "OpenRouter."),
+     "Code subscription), then re-run. No subscription? Name a paid Wonder instead: --only wonder10 "
+     "(MODEL_API_KEY, pay-as-you-go) or --only orwonder (OpenRouter, stops at $5 a run); since "
+     "1.113.0 the model's word («вондер», \"only wonder\") never switches to a paid one by itself, "
+     "and --skip <channel> leaves no Wonder at all."),
     ("MODEL_API_KEY not set",
      "The Spark channel has no API key.",
      "Set MODEL_API_KEY, or run with --skip spark to use the other channels only. The harness "

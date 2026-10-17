@@ -631,26 +631,33 @@ them any more; you may remove both. If you start `nvkimik3` by name anyway, the 
 
 ### Muse Code CLI (Muse Wonder on a Muse Code subscription)
 
-Optional, since 1.111.0. With it, the standard panel's Wonder seat (`mcwonder10cont`) runs on your
-Muse Code subscription instead of a per-token key.
+Optional, since 1.111.0. With it, Muse Wonder (`mcwonder10cont`) runs on your Muse Code
+subscription instead of a per-token key. Since 1.113.0 Wonder is in no panel: it starts only when
+you name it ("only wonder", "add wonder", «вондер», or a channel's own name).
 
 1. **The CLI and a sign-in.** Install Muse Code from Meta's documentation
    ([dev.meta.ai/docs/muse-code](https://dev.meta.ai/docs/muse-code)) and sign in once with the
    account that holds the subscription: `muse login`. The plan must include Muse Wonder.
-2. **Check it.** `muse model-profile show muse-wonder-1.0-contributor --effort xhigh` prints the
-   model. On Windows, `muse sandbox windows check` should print `status=ready` (the CLI's shell
-   sandbox); if not, `muse sandbox windows setup`.
+2. **Check it with one real call** (it uses a little of your plan):
+   `python ~/.claude/skills/model-orchestration/orchestrate.py --ask "Reply with the word OK" --only mcwonder10cont`
+   (a plugin install has the same file in its plugin folder). It prints the answer, `OK`; if Muse
+   Code is not signed in, the run says so and how to fix it. A command that only resolves the model
+   name proves nothing: `muse model-profile show` prints a profile for any id, an invented one too.
+   On Windows, `muse sandbox windows check` should print `status=ready` (the CLI's shell sandbox);
+   if not, `muse sandbox windows setup`.
 
 The harness finds the binary through `MUSE_BIN`, then (Windows) the `muse-bin-<version>.exe` named in
 `%LOCALAPPDATA%\Programs\muse\.muse-version`, then `muse` on PATH. It never passes an API key to
 this CLI: with `META_API_KEY` set, Muse Code bills that key instead of the plan, so the harness keeps
 it out of the CLI's environment. The run has no file writes, no shell and no approval prompts (`--disable-approval --disable-write --disable-shell`); it is offered only the built-in `web_search` and `web_fetch` (`-c run.toolset`): the MCP servers in
 your Muse Code settings still start, but the reviewer cannot call them.
-Without Muse Code nothing changes: the Wonder seat runs `wonder10` (`MODEL_API_KEY`) or `orwonder`
-(OpenRouter). To leave it out:
+Without Muse Code, "only wonder" / «вондер» stops before paying and names the paid Wonders:
+`wonder10` (`MODEL_API_KEY`, pay-as-you-go) and `orwonder` (OpenRouter, stops at $5 a run); name one
+to run it. To seat Wonder in the standard panel again on your subscription, as before 1.113.0, put
+this in `~/.claude/model-orchestration.local.json`:
 
 ```
-{ "channels": { "mcwonder10cont": { "enabled": false } } }
+{ "channels": { "mcwonder10cont": { "explicit_only": false } } }
 ```
 
 ### Codex CLI

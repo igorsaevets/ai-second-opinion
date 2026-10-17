@@ -200,7 +200,7 @@ at the ceiling its own vendor accepts, in every mode: **only the number of model
 | `--panel` | who runs |
 |---|---|
 | **`cheap`** (default since 2026-08-16) | free, subscription and low-rate channels — all **except** spark11, codex, kimik3 and qwen38max. *«запусти дешевые»* |
-| **`standard`** | every enabled channel. *«запусти все»*, *«стандартная панель»* |
+| **`standard`** | every enabled channel except `explicit_only` ones (agy31pro, Wonder). *«запусти все»*, *«стандартная панель»* |
 
 **Premium (true-batch + Flex) is a separate script, not a panel**: `premium/premium_panel.py`;
 `--panel premium` prints it; lane→key table: kit README.

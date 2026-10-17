@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.113.0 — 2026-10-17
+
+Muse Wonder starts only when you name it. Measured on 1.112.6: a standard panel without the Muse Code CLI ran the paid `wonder10` (Meta key, no per-run ceiling) or `orwonder` in every round; «only muse», «only openrouter» and «CLI only» pulled Wonder in; «only wonder 1.0» ran the paid `wonder10` even where the Muse Code subscription was ready.
+
+- **No panel, default, «все» or broader group runs Muse Wonder.** `mcwonder10cont`, `wonder10` and `orwonder` are `explicit_only`; the standard panel has 11 models.
+- **The model's word starts ONE Wonder, subscription first.** «вондер», «only wonder», «muse wonder», «wonder 1.0», «add wonder» start `mcwonder10cont` where the Muse Code CLI is installed. Where it is not, the run stops before paying and names the paid ones; «only wonder10» or «only orwonder» runs that one. A group whose channels are exactly one cascade (`wonder`) names that model; a broader group (a vendor, `cli`, `openrouter`, a panel) starts none of them, and a member that is also `enabled: false` still needs its own name.
+- **«wonder 1.0» / «вондер 1.0» name the model, not the paid API channel.** They were model aliases of `wonder10`; «muse-wonder-1.0», the API's own id, still names `wonder10`.
+- **The plan prints one 🔴 line per Wonder family left out**, with the words that start it.
+- **INSTALL's Muse Code check is a real call**: `orchestrate.py --ask "Reply with the word OK" --only mcwonder10cont`. The old check, `muse model-profile show`, printed a profile for any id, an invented one too.
+- **The «Muse Code is not signed in» hint names `--only wonder10` / `--only orwonder`.** It sent you to `--skip`, which since this version starts no other Wonder.
+- **The way back:** `{"channels": {"mcwonder10cont": {"explicit_only": false}}}` in `~/.claude/model-orchestration.local.json` seats Wonder in the standard panel again, on the subscription.
+
 ## 1.112.6 — 2026-10-17
 
 Route fixes from the review panel on 1.112.5. Each sentence below was run on 1.112.5 with a paid channel in the slot it turns off, and started a channel the speaker had excluded or never named.

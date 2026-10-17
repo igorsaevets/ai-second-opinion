@@ -54,13 +54,14 @@ To check what was found: `python doctor.py`. It prints which keys and programs i
 
 In Claude Code with the plugin (and in any agent you gave the line from the top of this page) just say it in plain words:
 
-| You say | What runs (version 1.112.6) |
+| You say | What runs (version 1.113.0) |
 |---|---|
 | **"second opinion"** (for example, "give me a second opinion on this file") | **The cheap panel**, the default: 5 models |
 | **"second opinion, CLI only"** | Only the CLI agents of the cheap panel: 4 models — Muse Spark, MiMo v2.6 Flash, Gemini 3.8 Flash and Grok 4.7. Not one paid request on your OpenRouter key |
-| "standard panel" or "all models" | 12 models: the cheap panel plus GPT-6.1 Sol, Kimi K3 (through OpenRouter, paid), Qwen 3.8 Max, DeepSeek V4 Pro, GLM 5.3, Nemotron and Muse Wonder |
-| "CLI only, standard panel" | 5 models: the four CLI agents plus Codex (GPT-6.1 Sol); 6 with the Muse Code CLI (Muse Wonder) |
+| "standard panel" or "all models" | 11 models: the cheap panel plus GPT-6.1 Sol, Kimi K3 (through OpenRouter, paid), Qwen 3.8 Max, DeepSeek V4 Pro, GLM 5.3 and Nemotron. No Muse Wonder: since 1.113.0 it starts only when named |
+| "CLI only, standard panel" | 5 models: the four CLI agents plus Codex (GPT-6.1 Sol) |
 | "ask only codex", "only grok" | The one named channel |
+| "only wonder", "muse wonder", «вондер»; "add wonder" | One Muse Wonder, on your Muse Code subscription where the Muse Code CLI is installed. Without it the run stops before paying and names the paid ones: "only wonder10" (Meta key) or "only orwonder" (OpenRouter) runs that one |
 | "only kimi" | The run stops and says why: since 1.112.0 the cheap panel has no free Kimi, and the only Kimi it could start is `kimik3` (OpenRouter, paid). "only kimik3" runs it; on the standard panel "only kimi" runs it too |
 | "only agy31pro" or "only agypro" | Gemini 3.1 Pro: it starts only when named |
 | "don't use openrouter" | Everything except the OpenRouter channels |
@@ -113,7 +114,7 @@ On the plan, Spark costs $0.10 / $0.20 per 1M tokens out of the plan's limits (o
 **If an answer is «word salad».** A model sometimes returns its own control tokens mixed with fragments of words in several languages instead of text: NVIDIA's free Kimi K3 did so from 6 October until it was retired, and users of other programs reported the same. The run marks such an answer **CORRUPTED OUTPUT**: `REPORT.md` says «🔴 CORRUPTED», `HANDOFF.md` tells you not to open it, and it does not count as an answer.
 
 
-### The standard panel — 12 models: the cheap one + 7
+### The standard panel — 11 models: the cheap one + 6
 
 | Model | Channel | Transport | Effort | Payment | Price per 1M (in / out) | Per run |
 |---|---|---|---|---|---|---|
@@ -123,20 +124,22 @@ On the plan, Spark costs $0.10 / $0.20 per 1M tokens out of the plan's limits (o
 | DeepSeek V4 Pro | `ordeepseekv4pro` | OpenRouter | xhigh (the ceiling) | per key | $0.209 / $0.418 | ≈ $0.18 (n=3) |
 | GLM 5.3 (Z.ai) | `orglm53` | OpenRouter | max | per key | $0.05 / $7.00 | ≈ $0.19 (n=3) |
 | Nemotron 3 Ultra (NVIDIA) | `ornemotron3ultra` | OpenRouter | high (the ceiling) | free model | $0 / $0 | ≈ $0.07 (n=6): only the web searches are paid here |
-| Muse Wonder 1.0 (Meta) — new in 1.110.0, Muse Code in 1.111.0 | `mcwonder10cont` where the Muse Code CLI is installed; else `wonder10` with a Meta key (`MODEL_API_KEY`), otherwise `orwonder` | Muse Code subscription / Meta Model API / OpenRouter | xhigh on the subscription (its ceiling), max on the API | your plan / per key | plan / $4.00 / $20.00 | no reviews counted yet; a two-line check cost $0.016 |
 
-**Muse Wonder** is Meta's most capable model (preview) and the most expensive voice here per token: 40× the input and 100× the output price of Spark Contributor. One Wonder runs per round — through the Meta API when `MODEL_API_KEY` is set, else through OpenRouter. On the API it exists only in Standard mode: what you send is not used for training. `orwonder` stops at $5 per run; `wonder10` has no such ceiling, because Meta runs the whole search loop inside one request. The cheap panel never runs Wonder; `--only wonder` starts it alone. Since 1.111.0, where the Muse Code CLI is installed and signed in, the round runs Wonder through it instead: `mcwonder10cont`, the Contributor variant only Muse Code subscriptions offer (Meta may use that content for training), at `xhigh` (the plan's measured ceiling), counted against your plan and never against a key. Setup: INSTALL.md, «Muse Code CLI».
+Muse Wonder left this panel in 1.113.0: it starts only when named (below, «By name only»).
 
 ℹ️ **Qwen 3.8 Max:** until v1.108.0 this line said that 0 of our 8 runs had answered. That was our counting error: the 8 included copies of the same run, and the harness graded real answers as failures because OpenRouter serves the name `qwen/qwen3.8-max` as its dated snapshot `qwen/qwen3.8-max-0902`. Counted once per run, all 3 of our runs since 1 September ended with a full answer (22–63 KB). Since v1.108.0 such a snapshot is a note in the report, not a failure.
 
-**In total:** about $2.5 a run on your OpenRouter key plus subscriptions; Kimi K3 through OpenRouter (≈ $1.38) is the largest part. How long Kimi takes on OpenRouter we have not measured (3 runs). Of the other models added here, GLM 5.3 and Qwen 3.8 Max take longest, medians 16 and 15 minutes (GLM's longest run: 44 minutes). Most paid channels have a spending ceiling per run ($2–5); a channel that reaches it stops. `wonder10` has none: Meta runs its whole search loop inside one request.
+**In total:** about $2.5 a run on your OpenRouter key plus subscriptions; Kimi K3 through OpenRouter (≈ $1.38) is the largest part. How long Kimi takes on OpenRouter we have not measured (3 runs). Of the other models added here, GLM 5.3 and Qwen 3.8 Max take longest, medians 16 and 15 minutes (GLM's longest run: 44 minutes). Most paid channels have a spending ceiling per run ($2–5); a channel that reaches it stops.
 
 ### By name only
 
 | Model | Channel | Transport | Effort | Payment |
 |---|---|---|---|---|
+| Muse Wonder 1.0 (Meta) — new in 1.110.0, Muse Code in 1.111.0, by name only since 1.113.0 | `mcwonder10cont` where the Muse Code CLI is installed; `wonder10` and `orwonder` only by their own names | Muse Code subscription / Meta Model API (`MODEL_API_KEY`) / OpenRouter | xhigh on the subscription (its ceiling), max on the API | your plan; per key $4.00 / $20.00 per 1M (in / out) |
 | Gemini 3.1 Pro (Google) | `agy31pro` | agy CLI agent | not set | as for agy above. Starts only when named: "only agy31pro" |
 | Claude Opus 4.6 [1M] (Anthropic) | `cclopus46` | Claude Code CLI agent | max | a Claude plan (Pro $20/month). Off by default; when on, it runs with permission prompts bypassed ([SECURITY.md](SECURITY.md)) |
+
+**Muse Wonder** is Meta's most capable model (preview) and the most expensive voice here per token: 40× the input and 100× the output price of Spark Contributor. **Since 1.113.0 no panel runs it: it starts only when you name it** — "only wonder", "add wonder", "muse wonder", "wonder 1.0", «вондер», or a channel's own name. A broader word never does: not "standard panel", "all models", "only muse", "only openrouter", "CLI only". The model's word starts ONE Wonder, `mcwonder10cont`: the Contributor variant only Muse Code subscriptions offer (Meta may use that content for training), at `xhigh` (the plan's measured ceiling), counted against your plan and never against a key (setup: INSTALL.md, «Muse Code CLI»). Where the Muse Code CLI is not installed, the run stops before paying anything and names the paid Wonders it could start; name one to pay for it: `wonder10`, the Meta Model API on `MODEL_API_KEY` (Standard mode only: what you send is not used for training), with no per-run ceiling, because Meta runs the whole search loop inside one request (a two-line check cost $0.016; no reviews counted yet), or `orwonder` on OpenRouter, which stops at $5 a run. Until 1.112.6 the standard panel ran Wonder in every round: on the subscription where Muse Code was installed, otherwise the paid `wonder10` or `orwonder`. To seat it there again, on your subscription only, put `{"channels": {"mcwonder10cont": {"explicit_only": false}}}` in `~/.claude/model-orchestration.local.json`.
 
 ### Web search
 

@@ -2893,16 +2893,26 @@ def suite_max_depth_and_explicit_only():
     for pname in [p for p in (reg.get("panels") or {}) if not p.startswith("_")]:
         check(not (set(expl) & enabled(panel=pname)),
               "--panel %s does not start an explicit_only channel" % pname)
+    # 🔴 R155 И-3 (2026-10-17): ONE EXCEPTION, AND IT IS THE INSTRUCTION. Igor: «Wonder в standart надо сделать по
+    # дефолту отключенным, только если явно назовут модель». A group that IS one model (routing.one_voice_groups: its
+    # members are exactly one cascade) is that model's name, so its word starts exactly ONE of its own members and
+    # nothing gated outside it. Every other group word still starts no explicit_only channel.
+    one_voice = getattr(routing, "one_voice_groups", lambda _r: {})(reg)
     for gname, g in (reg.get("groups") or {}).items():
         if gname.startswith("_") or not isinstance(g, dict):
             continue
         if not (set(g.get("channels") or []) & set(expl)):
             continue
+        fam = set(one_voice.get(gname) or ())
         for word in [gname] + list(g.get("aliases") or []):
-            check(not (set(expl) & enabled(only=[word])),
-                  "--only %r does not start an explicit_only channel" % word)
-            check(not (set(expl) & enabled(route="только %s" % word)),
-                  "route 'только %s' does not start an explicit_only channel" % word)
+            for how, got in (("--only %r" % word, enabled(only=[word])),
+                             ("route 'только %s'" % word, enabled(route="только %s" % word))):
+                if fam:
+                    check(len(set(expl) & got) == 1 and set(expl) & got <= fam,
+                          "%s starts exactly ONE channel of its one-voice family %r and nothing else gated (R155)"
+                          % (how, gname), repr(sorted(set(expl) & got)))
+                else:
+                    check(not (set(expl) & got), "%s does not start an explicit_only channel" % how)
 
     # THE LOCK MUST OPEN FOR ITS OWN KEY. A safeguard that cannot be lifted is an outage, and
     # this half is what the whole change is FOR - Igor authorises the channel by naming it.
@@ -3983,7 +3993,16 @@ def suite_r47_causes():
         # protection is the panel-default-off behaviour itself (apply_explicit_only in
         # routing.py), which this suite's structural checks already enforce via
         # suite_max_depth_and_explicit_only.
-        rationed_expensive = {c for c in rationed if _chans54[c].get("cost") == "expensive"}
+        # 🔴 R155 И-3 (2026-10-17): Wonder's two paid transports (wonder10, orwonder) became explicit_only ON PURPOSE
+        # and must STAY in the kit - Igor ordered «только если явно назовут модель», not absence. They are transports
+        # of ONE voice (routing.one_voice_groups) whose subscription member comes first: the model's word stops
+        # before paying for them (R153 И-5), and their own name is the opt-in the owner chose. A LONE expensive
+        # explicit_only channel is still the R47 Terra shape and must be deleted from the published registry.
+        import routing as _rt54
+        _ov54 = getattr(_rt54, "one_voice_groups", lambda _r: {})(_reg54)
+        _soft54 = {c for fam in _ov54.values() for c in fam
+                   if any((_chans54.get(m) or {}).get("cost") in ("free", "subscription") for m in fam)}
+        rationed_expensive = {c for c in rationed if _chans54[c].get("cost") == "expensive" and c not in _soft54}
         check(rationed_expensive <= shipped_excl,
               "every EXPENSIVE explicit_only channel is DELETED from the shipped registry "
               "(R47 Terra class: employees walked every lock rung on purpose for a metered "
@@ -7960,6 +7979,7 @@ def main():
                   suite_r153_i11_hotfix,
                   suite_r153_i12_hotfix,
                   suite_r153_i13_g10,
+                  suite_r155_i3_wonder_by_name,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -16298,17 +16318,22 @@ def suite_r153_i3_family_room():
     ex["channels"]["kimik3free"]["explicit_only"] = True
     eo, ep = runs(ex, only=["kimi"])
     en, _ = runs(ex, only=["kimik3free"])
-    check(eo == [] and "will not start" in str(ep.get("_error")) and en == ["kimik3free"],
-          "R153 И-3 (c) an explicit_only cheap member does not hold the family - `--only kimi` stops and names it "
-          "(R153 И-5: the other Kimi is paid); naming it still starts it",
+    # 🔴 R155 И-3 (2026-10-17): `kimi` names ONE model (routing.one_voice_groups: the group is exactly the Kimi
+    # cascade), so its word now names an explicit_only member too - Igor: «только если явно назовут модель». The
+    # free member runs instead of a stop; the stop before the PAID one stays (suite_r155_i3_wonder_by_name (h)).
+    check(eo == ["kimik3free"] and en == ["kimik3free"],
+          "R153 И-3 (c) an explicit_only member of a one-voice family starts by the model's word (R155: `--only "
+          "kimi` runs the free kimik3free, no stop); naming it still starts it",
           "only kimi=%r err=%r only kimik3free=%r" % (eo, str(ep.get("_error"))[:120], en))
     bad, seen = [], 0
     for tag, reg in (("kit", kit), ("tree", base)):
+        ovg = getattr(_r, "one_voice_groups", lambda _x: {})(reg)    # R155 И-3: the model's word names its gated members
         for g, v in sorted((reg.get("groups") or {}).items()):
             if g.startswith("_") or not isinstance(v, dict):
                 continue
             can = [c for c in v.get("channels") or [] if c in reg["channels"]
-                   and reg["channels"][c].get("enabled", True) and not reg["channels"][c].get("explicit_only")]
+                   and reg["channels"][c].get("enabled", True)
+                   and (not reg["channels"][c].get("explicit_only") or g in ovg)]
             got, gp = runs(reg, only=[g])
             seen += 1
             stop = "will not start" in str(gp.get("_error") or "")    # R153 И-5: the deliberate free-to-paid stop
@@ -17090,13 +17115,15 @@ def suite_r149_i2_muse_code():
     pmc = pm.get("mcwonder10cont") or {}
     sysm = o._system_for("BASE", pmc)
     hint = (reg.get("hints") or {}).get("mcp_fallback") or "\0"
-    check((not on or ([x for x in std if x in wonders] == ["mcwonder10cont"] and rw == ["mcwonder10cont"]
+    # R155 И-3 (2026-10-17): the standard panel seats NO Wonder until it is named (explicit_only); «только вондер»
+    # still seats Muse Code alone.
+    check((not on or ([x for x in std if x in wonders] == [] and rw == ["mcwonder10cont"]
                       and "mcwonder10cont" not in nob and pmc.get("effort") == "xhigh"))
           and "mcwonder10cont" not in cheap
           and hint.strip()[:60] in sysm
           and ("STANDING NOTE" in sysm) == bool((m.get("prompt_suffix") or {}).get("enabled")),
-          "R149 И-2 (h) standard and «только вондер» seat Muse Code alone; cheap never; without the "
-          "binary the cascade moves on; tier max stays xhigh; the MCP hint and the training-tier note "
+          "R149 И-2 (h) «только вондер» seats Muse Code alone; the standard panel none (R155: only when named); "
+          "cheap never; without the binary still none; tier max stays xhigh; the MCP hint and the training-tier note "
           "reach the system prompt", repr((std, cheap, rw, [x for x in nob if x in wonders],
                                            pmc.get("effort"))))
     _sh.rmtree(tmp, ignore_errors=True)
@@ -17153,9 +17180,11 @@ def suite_r149_muse_wonder():
     cheap, _ = runs(panel="cheap")
     std, _ = runs(panel="standard")
     on_w = [c for c in WONDERS if chs[c].get("enabled", True)]
-    check(not set(WONDERS) & set(cheap) and [c for c in std if c in WONDERS]
-          == on_w[:1],
-          "R149 (c) the cheap panel runs no Wonder; the standard panel runs exactly one (the cascade)",
+    # R155 И-3 (2026-10-17): every Wonder channel is explicit_only (Igor: «только если явно назовут модель») - the
+    # standard panel runs NONE by default; (d) below is how the model's word still starts exactly one.
+    check(not set(WONDERS) & set(cheap) and not set(WONDERS) & set(std),
+          "R149 (c) the cheap panel runs no Wonder; since R155 the standard panel runs none either (Wonder starts "
+          "only when named)",
           "cheap=%r std-wonder=%r" % (cheap, [c for c in std if "wonder" in c]))
     ow_, _ = runs(only=["wonder"])
     rw_, _ = runs(route="только вондер")
@@ -17326,6 +17355,182 @@ def suite_r154_refs_kinds():
           "; ".join(hits) or repr([d.name for d in found]))
     _sh.rmtree(td, ignore_errors=True)
 
+
+def suite_r155_i3_wonder_by_name():
+    """R155 И-3 (2026-10-17): Muse Wonder off by default, started by its model's name. Igor: «Wonder в standart надо
+    сделать по дефолту отключенным, только если явно назовут модель. И надо не забыть в репозитории обновить
+    описание.» The three Wonder channels are explicit_only; a group that is ONE model (routing.one_voice_groups: its
+    members are exactly one cascade) is that model's name, so «вондер» / "wonder" / «muse wonder» / «wonder 1.0» start
+    ONE Wonder (Muse Code first) while panels, «все» and broader groups («muse», «openrouter», «cli») never do; where
+    Muse Code is not ready the model's word stops before a paid Wonder and names it (the R153 И-5 stop).
+    (a) registry: the three explicit_only; one-voice groups = wonder + kimi; «wonder 1.0» is the group's word, no longer
+        wonder10's model alias (1.112.6: «только wonder 1.0» ran the PAID wonder10 also where Muse Code was ready);
+    (b) no Wonder in a default, «запусти все» or «стандартная панель» run - source and kit;
+    (c) broader words start no Wonder: «только muse / муза / meta / openrouter / cli», `--only muse|openrouter|cli`;
+    (d) all ready: the model's words start exactly mcwonder10cont on both panels; «добавь вондер» adds exactly it;
+    (e) kit without Muse Code: the model's word STOPS and names wonder10 / orwonder as PAID; «только wonder10» runs it;
+    (f) money grid: no READY paid Wonder starts unless named by its own name;
+    (g) the plan prints ONE 🔴 line for the family with the model's words, not «never through a group» per channel;
+    (h) a family word never wakes `enabled: false` members (nvkimik3 retired; Igor's Kimi off), while explicit_only Kimi
+        members would start by «кими» free-first and stop before the paid one (an option for R153 И-15 D8);
+    (i) INSTALL's way back: an overlay `mcwonder10cont.explicit_only: false` seats Muse Code Wonder in standard again.
+    (j) R155 И-3b: the Muse Code «not signed in» hint names --only wonder10 / --only orwonder, not --skip (since
+        1.113.0 --skip mcwonder10cont starts no other Wonder).
+    (a)-(h) and (j) fail on 1.112.6; (i) passes there too (Wonder WAS the default) - it pins the documented way back.
+    """
+    import copy as _cp
+    import routing as _r
+    section("R155 И-3: Muse Wonder only when named (explicit_only + the model's word)")
+    W = ("mcwonder10cont", "wonder10", "orwonder")
+    base = _r.load_registry(overlay=False)
+    kit = _cp.deepcopy(base)
+    for ch in kit["channels"].values():
+        if ch.get("distribution") == "local":
+            ch["enabled"] = False                         # what package.py does to a local channel
+    chs = base["channels"]
+    ovg = getattr(_r, "one_voice_groups", lambda _x: {})
+
+    def yes(_n):
+        return True
+
+    def no_muse(n):
+        return "stub: the muse CLI is missing" if n == "mcwonder10cont" else True
+
+    def runs(reg, ready=yes, **kw):
+        try:
+            p = _r.resolve(_cp.deepcopy(reg), ready=ready, **kw)
+        except _r.RouteError as e:
+            return None, str(e)
+        return sorted(c for c, s in p.items() if s.get("enabled")), p
+
+    def wonders(reg, ready=yes, **kw):
+        on, _p = runs(reg, ready, **kw)
+        return None if on is None else [c for c in on if c in W]
+
+    ali = [str(a) for a in ((base.get("groups") or {}).get("wonder") or {}).get("aliases") or []]
+    mal = [str(a) for m in ((chs.get("wonder10") or {}).get("models") or {}).values() for a in m.get("aliases") or []]
+    ov = ovg(base)
+    # the set of one-voice words is a PRODUCT pin on purpose: a new member means a new word that starts gated channels
+    check(all((chs.get(c) or {}).get("explicit_only") is True for c in W)
+          and ov.get("wonder") == list(W) and "kimi" in ov and set(ov) <= {"wonder", "kimi"}
+          and "wonder 1.0" in ali and "вондер 1.0" in ali and "wonder 1.0" not in mal and "muse-wonder-1.0" in mal,
+          "R155 И-3 (a) the three Wonder channels are explicit_only; one-voice groups = wonder + kimi; «wonder 1.0» "
+          "is the model's word (the group), not wonder10's model alias",
+          repr((sorted(ov), [c for c in W if not (chs.get(c) or {}).get("explicit_only")], mal)))
+
+    bad = []
+    for reg, tag in ((base, "src"), (kit, "kit")):
+        for panel in ("standard", "cheap"):
+            w = wonders(reg, panel=panel)
+            if w:
+                bad.append((tag, panel, None, w))
+        for rt_ in ("запусти все", "стандартная панель", "полная панель", "standard panel", "все модели"):
+            w = wonders(reg, route=rt_)
+            if w:
+                bad.append((tag, None, rt_, w))
+    check(not bad, "R155 И-3 (b) no Wonder in a default / «запусти все» / «стандартная панель» run (source and kit)",
+          repr(bad[:4]))
+
+    bad = []
+    for reg, tag in ((base, "src"), (kit, "kit")):
+        for kw in ({"route": "только muse"}, {"route": "только муза"}, {"route": "только meta"},
+                   {"route": "только openrouter"}, {"route": "только cli"}, {"only": ["muse"]},
+                   {"only": ["openrouter"]}, {"only": ["cli"]}):
+            for panel in ("standard", "cheap"):
+                w = wonders(reg, panel=panel, **kw)
+                if w:
+                    bad.append((tag, panel, kw, w))
+    check(not bad, "R155 И-3 (c) «только muse / муза / meta / openrouter / cli» and the flags start no Wonder",
+          repr(bad[:4]))
+
+    bad = []
+    for reg, tag in ((base, "src"), (kit, "kit")):
+        for panel in ("standard", "cheap"):
+            for kw in ({"route": "только вондер"}, {"route": "only wonder"}, {"route": "только muse wonder"},
+                       {"route": "только wonder 1.0"}, {"route": "только вондер 1.0"}, {"only": ["wonder"]}):
+                w = wonders(reg, panel=panel, **kw)
+                if w != ["mcwonder10cont"]:
+                    bad.append((tag, panel, kw, w))
+        on, _p = runs(reg, panel="standard", route="добавь вондер")
+        on0, _p = runs(reg, panel="standard")
+        if on is None or on0 is None or sorted(set(on) - set(on0)) != ["mcwonder10cont"]:
+            bad.append((tag, "standard", "добавь вондер", on))
+    check(not bad, "R155 И-3 (d) all ready: «только вондер», «only wonder», «только muse wonder», «только wonder "
+                   "1.0», `--only wonder` start exactly Muse Code; «добавь вондер» adds exactly it", repr(bad[:4]))
+
+    e1 = [runs(kit, no_muse, panel="standard", **kw) for kw in (
+        {"route": "только вондер"}, {"only": ["wonder"]}, {"route": "добавь вондер"}, {"route": "только wonder 1.0"})]
+    e2, _p = runs(kit, no_muse, panel="standard", route="только wonder10")
+    check(all(a is None and "PAID per call" in str(b) and "wonder10" in str(b) and "mcwonder10cont" in str(b)
+              for a, b in e1) and e2 == ["wonder10"],
+          "R155 И-3 (e) kit, standard, Muse Code not ready: the model's word STOPS and names the paid Wonder; "
+          "«только wonder10» (its own name) runs it", repr([(a, str(b)[:80]) for a, b in e1] + [e2]))
+
+    routes = [None, "запусти все", "только вондер", "only wonder", "добавь вондер", "только muse", "только openrouter",
+              "только cli", "вондер вместо codex", "только вондер, без mcwonder10cont", "только wonder 1.0",
+              "только вондер 1.0", "только muse wonder 1.0"]
+    worlds = {"no_muse": (no_muse, {"wonder10", "orwonder"}),
+              "only_or": (lambda n: "stub: not ready" if n in ("mcwonder10cont", "wonder10") else True, {"orwonder"})}
+    bad, n = [], 0
+    for reg, tag in ((base, "src"), (kit, "kit")):
+        for panel in ("standard", "cheap"):
+            for wname, (rd, ready_paid) in worlds.items():
+                for rt_ in routes:
+                    n += 1
+                    on, _p = runs(reg, rd, panel=panel, route=rt_)
+                    hit = [c for c in (on or []) if c in ready_paid]
+                    if hit:
+                        bad.append((tag, panel, wname, rt_, hit))
+    check(not bad, "R155 И-3 (f) money: no READY paid Wonder starts unless named by its own name (%d cases)" % n,
+          repr(bad[:4]))
+
+    r2 = _cp.deepcopy(base)
+    p2 = _r.resolve(r2, panel="standard", ready=yes)
+    txt = _r.format_plan(p2, r2)
+    fam_line = [ln for ln in txt.splitlines() if "🔴 wonder was NOT started" in ln]
+    per_ch = [ln for ln in txt.splitlines() if any("🔴 %s was NOT started" % c in ln for c in W)]
+    why = " ".join(str(w) for w in (p2.get("wonder10") or {}).get("why") or [])
+    check(len(fam_line) == 1 and "вондер" in fam_line[0] and not per_ch and "model's word" in why
+          and "a group cannot override" not in why,
+          "R155 И-3 (g) the plan prints ONE 🔴 line for Wonder with the model's words; wonder10's why says the "
+          "model's word starts it", repr((fam_line, per_ch, why[:160])))
+
+    kof = _cp.deepcopy(base)
+    for c in ("kimik3free", "kimik3"):
+        kof["channels"][c]["enabled"] = False             # Igor's overlay since 2026-10-17 (Kimi off by default)
+    h1 = runs(kof, panel="standard", route="только кими")[0]
+    kxo = _cp.deepcopy(base)
+    for c in ("kimik3free", "kimik3"):
+        kxo["channels"][c]["enabled"] = True            # the MECHANISM: the kit ships kimik3free off (R153 И-2 #5)
+        kxo["channels"][c]["explicit_only"] = True
+    h2 = runs(kxo, panel="standard", route="только кими")[0]
+    h3, e3 = runs(kxo, lambda n: "stub: no free quota" if n == "kimik3free" else True, panel="standard",
+                  route="только кими")
+    h4 = runs(kxo, panel="standard")[0]
+    check(not [c for c in (h1 or []) if "kimi" in c] and h2 == ["kimik3free"] and h3 is None
+          and "PAID per call" in str(e3) and h4 is not None and not [c for c in h4 if "kimi" in c],
+          "R155 И-3 (h) a family word never wakes `enabled: false` Kimi; explicit_only Kimi: «только кими» runs the "
+          "free kimik3free, stops before the paid kimik3, and the default runs no Kimi",
+          repr((h1, h2, h3, str(e3)[:80], [c for c in (h4 or []) if "kimi" in c])))
+
+    back = _cp.deepcopy(base)
+    try:
+        _r.apply_overlay(back, path="selftest-r155-overlay.json", trust=getattr(_r, "OVERLAY_TRUST_HOME", None),
+                         data={"channels": {"mcwonder10cont": {"explicit_only": False}}})
+        i1 = wonders(back, panel="standard")
+    except Exception as exc:                              # noqa: BLE001 - a raise is the finding
+        i1 = "raised %s: %s" % (type(exc).__name__, str(exc)[:120])
+    check(i1 == ["mcwonder10cont"], "R155 И-3 (i) INSTALL's way back: overlay `mcwonder10cont.explicit_only: false` "
+                                    "seats Muse Code Wonder in the standard panel again", repr(i1))
+
+    import orchestrate as _o
+    try:
+        hint = str(_o.diagnose("missing meta credentials: run `muse login`"))
+    except Exception as exc:                              # noqa: BLE001 - a raise is the finding
+        hint = "raised %s: %s" % (type(exc).__name__, str(exc)[:120])
+    check("--only wonder10" in hint and "--only orwonder" in hint and "the Wonder cascade then runs" not in hint,
+          "R155 И-3b (j) the Muse Code «not signed in» hint names --only wonder10 / --only orwonder, never «--skip: "
+          "the Wonder cascade then runs wonder10»", hint[-200:])
 
 if __name__ == "__main__":
     sys.exit(main())
