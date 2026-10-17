@@ -51,7 +51,10 @@ SHIPPED_REGISTRY_NAME = "channels.shipped.json"
 NEG = ["не использовать", "не используй", "не использовать для", "не задействуй", "не надо",
        "не нужно", "исключи", "исключить", "убери", "убрать", "выключи", "выключить",
        "отключи", "отключить", "без ", "кроме ", "минус ",
-       "do not use", "don't use", "dont use", "skip", "without", "except", "exclude", "no "]
+       "do not use", "don't use", "dont use", "skip", "without", "except", "exclude", "no ",
+       # R153 И-12: «добавь grokbuild, за исключением codex» and «codex не нужен, возьми grokbuild» RAN codex (r153i11
+       # Spark S4b; «за исключением» mine) - the grammar knew neither, so the name took the sentence's add.
+       "за исключением", "исключая", "excluding", "пропусти", "пропустить", "не нужен", "не нужна", "не нужны"]
 # R153 И-11 (r153i9 Grok G1): «вместо того чтобы» is «instead of doing», not the pronoun «вместо того» (И-8):
 # «grokbuild вместо того чтобы использовать codex» ran codex and dropped grokbuild. The longest marker wins in _scan.
 SUBST = ["вместо", "взамен", "заменить на", "замени на", "instead of", "replace with", "->", "→",
@@ -65,7 +68,9 @@ SUBST_ANAPHOR = ["вместо него", "вместо нее", "вместо �
                  "instead of it", "instead of them", "instead of that", "instead of this"]
 _ADVERBIAL_SUBST = "вместо этого"      # «вместо возьми Y»: «instead» with no object of its own
 _SUBST_ANAPHOR_SET = frozenset(SUBST_ANAPHOR)
-ONLY = ["только", "лишь", "исключительно", "only", "just use", "nothing but"]
+ONLY = ["только", "лишь", "исключительно", "only", "just use", "nothing but",
+        # R153 И-12 (r153i11 Grok G3): «no one but codex» ran the panel WITHOUT codex («no » won), «nobody but» refused
+        "no one but", "nobody but", "none but", "no one except"]
 # 🔴 ADD is the "default set PLUS this one" mode, and it exists because opt-in channels do.
 # Added 2026-08-14 (round 38) with orgpt56terrapro, the first channel that is off unless asked
 # for by name. Igor: «если скажут используй все модели, ее не использовать, а если скажут и 5.6
@@ -112,7 +117,13 @@ _ADDITIVE = frozenset(("и еще", "а также", "плюс ", "добавь"
                        "включительно", "в том числе", "and also", "plus ", "add ", "including"))
 # The English negators both flips missed: «don't pick codex», «never use codex», «doesn't use codex» ADDED the
 # expensive codex (agy A1, Grok G2, Spark S1, MiMo Flash F2); «don’t» (U+2019) is folded to «'» in _scan.
-_NEGATOR = r"(?:не|нe|not|never|cannot|(?:do|does|did|wo|ca|could|would|should|must|need)n'?\s?t)"
+# R153 И-12 (r153i11 Spark S3, agy A5): «shan't / hasn't / ain't / mightn't / isn't use codex» still ADDED codex -
+# every n't auxiliary is one list, shared with the second reader's _GUARD_NE_RE.
+_NT_AUX = "do|does|did|wo|ca|could|would|should|must|need|sha|is|are|was|were|has|have|had|ai|might|may|ought|dare"
+_NEGATOR = r"(?:не|нe|not|never|cannot|(?:%s)n'?\s?t)" % _NT_AUX
+# «why not skip codex» is a suggestion to skip it: the H7 double-negation flip (1.112.5) ADDED codex (agy A5; 1.112.4
+# excluded it). After «why / почему (бы)» a «not / не» is not a negator.
+_WHY_NOT = re.compile(r"(?:why|почему(?:\s+бы)?)\s+(?:not|не)\s*$")
 _APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'", "\x60": "'"})
 # Connectives that hold a NEG word: «кроме того, добавь codex» is «moreover», not «except» (Grok G6). Dropped only
 # before a comma, a colon, a dash or the end, so «кроме того дорогого codex» still excludes.
@@ -1084,11 +1095,19 @@ def group_members(reg, name):
     return list(g["channels"]) if g else None
 
 
+_FUNCTION_WORDS = frozenset(("or", "and", "a", "an", "the", "to", "of", "in", "on", "at", "by", "no", "not", "и",
+                             "а", "но", "или", "в", "на", "с", "к", "у", "о"))
+
+
 def alias_index(reg):
     """alias -> ("channel"|"model"|"group", ...). Longest aliases first."""
     idx = []
     for gname, g in (reg.get("groups") or {}).items():
         for al in [gname] + list(g.get("aliases", [])):
+            # 🔴 R153 И-12 (r153i11 Grok G5): the openrouter group's alias «or» made the English conjunction a channel
+            # word - «только codex or grokbuild» started three PAID OpenRouter channels. A function word never names.
+            if al.lower() in _FUNCTION_WORDS:
+                continue
             idx.append((al.lower(), ("group", gname, None)))
     for cname, ch in reg["channels"].items():
         for al in ch.get("aliases", []):
@@ -1275,23 +1294,27 @@ def _scan(text, idx):
                         # codex» / «don't just use codex» too (they ran codex alone).
                         marks.append((m.start(), "add", w))
                         continue
-                    if re.search(r"(?:^|\s)(?:without|кроме|без|%s)\s*$" % _NEGATOR, before):
+                    if re.search(r"(?:^|\s)(?:without|кроме|без|%s)\s*$" % _NEGATOR, before) \
+                            and not _WHY_NOT.search(before):
                         marks.append((m.start(), "neg", w))
                         continue
-                    if kind == "only" and re.match(r"[\s,;:\u2013\u2014-]+(?:не|нe|not)\s", t[m.end():]):
+                    if kind == "only" and re.match(r"[\s,;:\u2013\u2014(\[«\"'-]+(?:не|нe|not)"
+                                                   r"(?=[\s,;:\u2013\u2014.!?)\]»\"'-])", t[m.end():]):
                         # 🔴 R153 И-11: «только не codex» and «всё что угодно, только не codex» - the commonest Russian
                         # «anything but codex» - ran codex ALONE through every release: a bare «не» is no marker, so
                         # «только» kept its meaning (r153i9 MiMo Flash F1). «только не используй codex» reads the same.
                         marks.append((m.start(), "neg", w))
                         continue
                 elif kind == "neg":
-                    if re.search(r"(?:^|\s)%s\s*$" % _NEGATOR, before):
+                    # «without excluding X» keeps X (Grok G4: it dropped the free ocspark13free for spark13cont)
+                    if re.search(r"(?:^|\s)(?:without|%s)\s*$" % _NEGATOR, before) and not _WHY_NOT.search(before):
                         # R153 И-11: a negated exclusion includes - «не без ocspark13free» / «don't exclude
                         # ocspark13free» turned the free Spark OFF and the paid spark13cont ON (r153i9 Grok G7, G11).
                         marks.append((m.start(), "add", w))
                         continue
-                    if w in ("кроме ", "except") and re.search(r"(?:^|\s)(?:ничего|никого|nothing|nobody)[\s,]*$",
-                                                                before):
+                    if w in ("кроме ", "except", "за исключением", "исключая", "excluding") and re.search(
+                            r"(?:^|\s)(?:ничего|никого|никто|ничто|nothing|nobody)(?:\s+\w+)?[\s,\u2013\u2014-]*$",
+                            t[max(0, m.start() - 30):m.start()]):
                         marks.append((m.start(), "only", w))       # R153 И-11: «ничего кроме X» = только X
                         continue
                 marks.append((m.start(), kind, w))
@@ -1527,10 +1550,11 @@ def _swap_reversed(stream, text, strict):
     return out
 
 
-def _join_subst_targets(stream):
+def _join_subst_targets(stream, text=None):
     """R153 И-11: «вместо kimik3 и codex возьми grokbuild» replaced kimik3 only and STARTED codex (r153i9 Grok G3; old):
     the names between a «вместо» and the add word that introduces the replacement are ONE target (one position)."""
     out = list(stream)
+    t = None if text is None else " " + text.lower().replace("ё", "е").translate(_APOSTROPHES) + " "
     for k, tok in enumerate(out):
         if tok[1] != "subst" or tok[2] in _SUBST_ANAPHOR_SET:
             continue
@@ -1540,6 +1564,21 @@ def _join_subst_targets(stream):
         if j < len(out) and out[j][1] == "add" and len({t[0] for t in out[k + 1:j]}) >= 2:
             p0 = out[k + 1][0]
             out[k + 1:j] = [(p0, "entity", t[2]) for t in out[k + 1:j]]
+            continue
+        # R153 И-12 (r153i11 agy A1): an INFIX «вместо» (a name right before it, no comma between) takes the names after
+        # it that are JOINED to the first by «и» / «,» / "and" - «grokbuild вместо kimik3 и codex» replaced kimik3 and
+        # STARTED codex (old too). «только grokbuild, вместо codex agy38flash» stays a prefix (И-11 controls).
+        if t is None or k == 0 or out[k - 1][1] != "entity" or j - k < 3:
+            continue
+        if re.search(r"[,;!?\u2013\u2014]", t[out[k - 1][0]:out[k][0]]):
+            continue
+        e = k + 2
+        while e < j and (out[e][0] == out[e - 1][0]
+                         or re.search(r"(?:,|(?<!\w)(?:и|and)(?!\w))", t[out[e - 1][0]:out[e][0]])):
+            e += 1
+        if len({tk[0] for tk in out[k + 1:e]}) >= 2:
+            p0 = out[k + 1][0]
+            out[k + 1:e] = [(p0, "entity", tk[2]) for tk in out[k + 1:e]]
     return out
 
 
@@ -1555,7 +1594,7 @@ def _route_stream(stream, text=None, strict=False):
     R153 И-11: first the reversed markers turn round («A -> B» = «B вместо A», _swap_reversed) and «вместо A и B
     возьми C» gets one target (_join_subst_targets).
     """
-    stream = _join_subst_targets(_swap_reversed(list(stream), text, strict))
+    stream = _join_subst_targets(_swap_reversed(list(stream), text, strict), text)
     first = next((i for i, t in enumerate(stream) if t[1] in _ROUTE_MARKERS), None)
     if not first:
         return stream
@@ -1666,49 +1705,136 @@ def _subst_refusal(text, role, lt, i, pending_neg, prev_sel):
 
 
 # R153 И-11: the second reader's own word lists - deliberately NOT _scan's markers (see _negation_guard).
-_GUARD_NEG = frozenset(("не", "нe", "ни", "not", "no", "never", "cannot", "without", "except", "excluding", "exclude",
-                        "skip", "без", "кроме", "минус", "исключи", "исключить", "исключая", "убери", "убрать",
-                        "выключи", "выключить", "отключи", "отключить"))
-_GUARD_NEG_RE = re.compile(r"(?:do|does|did|wo|ca|could|would|should|must|need)n'?t$")
-_GUARD_CANCEL = frozenset(("только", "лишь", "only", "just"))
-_GUARD_NOTHING = frozenset(("ничего", "никого", "nothing", "nobody"))    # «ничего кроме X» = только X
+# 🔴 R153 И-12 (2026-10-17, panel r153i11): THE SECOND READER LOOKED AT TWO WORDS BEFORE A NAME, FROM ONE LIST.
+# Spark, agy and the И-12 extensions found 30+ sentences that ran codex while saying not to: a negation 3+ words out
+# («добавь grokbuild, не запускай сегодня codex»), AFTER the name («codex не нужен, возьми grokbuild», «а codex
+# пропусти», «codex в сторону»), or a word no list had («запрети», «никакого», «за исключением», "ban", "shan't"); and
+# it stopped «не исключительно codex, но и grokbuild» and «добавь grokbuild и не забудь codex», which 1.112.4 ran.
+_GUARD_NE = frozenset(("не", "нe", "нет", "нельзя", "not", "no", "never", "cannot", "dont", "doesnt", "didnt", "wont",
+                       "cant", "isnt", "arent", "hasnt", "havent", "shouldnt"))
+_GUARD_NE_RE = re.compile(r"(?:%s)n't$" % _NT_AUX)
+_GUARD_NI = frozenset(("ни", "neither", "nor"))
+_GUARD_OTHER = frozenset(("без", "кроме", "минус", "убери", "убрать", "уберите", "without", "except", "excluding",
+                          "exclude", "skip", "ban", "avoid", "drop", "forbid", "omit", "minus"))
+_GUARD_STEMS = ("исключ", "выключ", "отключ", "пропуст", "запрет", "запрещ", "отмен", "невозмож", "отстав", "exclud")
+_GUARD_PAIRS = frozenset((("в", "сторону"), ("забудь", "про"), ("забудьте", "про"), ("забудь", "о"),
+                          ("leave", "out"), ("leaving", "out"), ("other", "than"), ("apart", "from")))
+_GUARD_FORWARD = frozenset(("без", "кроме", "минус", "without", "except", "excluding", "minus", "исключая",
+                            "исключением", "other", "apart", "ни", "neither", "nor", "no"))   # determiners: the NEXT name
+_GUARD_CANCEL = frozenset(("только", "лишь", "исключительно", "просто", "only", "just", "merely", "simply"))
+_GUARD_POSITIVE = frozenset(("забудь", "забывай", "забудьте", "стесняйся", "стесняйтесь", "бойся", "бойтесь",
+                             "сомневайся", "forget", "hesitate"))
+_GUARD_NOTHING = frozenset(("ничего", "никого", "никто", "ничто", "nothing", "nobody", "none"))
+_GUARD_BUT = frozenset(("кроме", "except", "but", "excluding", "исключая", "исключением"))
+_GUARD_STOP = frozenset((",", ";", ".", "!", "?", "но", "а", "однако", "зато", "если", "когда", "пока", "but",
+                         "however", "if", "when", "unless", "while", "because"))
+_GUARD_AND = frozenset(("и", "and"))
+_GUARD_GO = frozenset(("добавь", "добавить", "добавьте", "используй", "используйте", "использовать", "возьми",
+                       "возьмите", "бери", "выбери", "поставь", "запусти", "запустите", "включи", "add", "use", "pick",
+                       "choose", "run", "include", "take"))
 
 
-def _negation_guard(text, stream, plan, chosen):
+def _guard_kind(w, nxt):
+    """'ne' | 'ni' | 'other' | None: is one word a negation, for the second reader (its own lists, no markers)."""
+    if w in _GUARD_CANCEL or w in _GUARD_NOTHING:
+        return None
+    if (w, nxt) in _GUARD_PAIRS:
+        return "other"
+    if w in _GUARD_NE or _GUARD_NE_RE.match(w):
+        return "ne"
+    if w in _GUARD_NI or w.startswith("никак"):
+        return "ni"
+    if w in _GUARD_OTHER or w.startswith(_GUARD_STEMS):
+        return "other"
+    return None
+
+
+def _negation_guard(text, stream, plan, chosen, reg=None):
     """
     🔴 R153 И-11 (2026-10-17): A SECOND READER THAT IS NOT A MIRROR. Three rounds in a row (r153i6, r153i7, r153i9)
     found sentences that ran a channel the speaker had excluded, and each passed the suite's agreement check: apply_route
     and _selection_tokens share _scan and _route_stream, so a defect both readers share is invisible to a test that
-    compares them («только не codex» ran codex ALONE through every release). This reader knows no markers. When an odd
-    number of negation words stands in the two words right before a channel's name and the route RUNS that channel by
-    name, the run stops and asks («только codex и не kimik3», «добавь codex, но не kimik3» ran the paid kimik3). It
-    never changes a plan; it only refuses. «не только X», «не без X», «don't exclude X» are even or cancelled. Only a
-    channel's LAST mention is read: «не используй cli, добавь codex» excludes the group and then adds codex (И-7 (h)).
+    compares them («только не codex» ran codex ALONE through every release). This reader knows no markers and never
+    changes a plan; it only refuses.
+
+    R153 И-12: it reads the CLAUSE (up to , ; . ! ? and «но / а / если», "but / if") of every channel's LAST mention.
+    A negation word goes to the NEXT name in its clause, or - when no name follows and it is not a preposition («без»,
+    «кроме», "without") - to the name right before it («codex не нужен»). Cancels: «не только / лишь / исключительно /
+    просто X», «не забудь / не стесняйся», «ничего / никто (другого) кроме X», «why not / почему бы не»; «и» + a
+    positive verb closes a negation («не меняй панель и добавь codex»); «ни ... не» is one negation, any other pair a
+    double negation (even). A channel the route would RUN with an odd count stops the run. `chosen` is kept for the
+    callers; every mentioned channel that runs is read («используй всё, за исключением codex» ran it from the panel).
     """
     t = " " + text.lower().replace("ё", "е").translate(_APOSTROPHES) + " "
-    last = {}
+    toks = [(m.start(), m.group()) for m in re.finditer(r"[\w']+|[^\w\s']", t)]
+    words = [w for _, w in toks]
+    n = len(words)
+    names, last = {}, {}
     for pos, kind, ent in stream:
-        if kind == "entity":
-            last[ent[1]] = max(pos, last.get(ent[1], -1))
-    for chan, pos in last.items():
-        if chan not in chosen or not plan[chan]["enabled"]:
+        if kind != "entity":
             continue
-        ent = (None, chan)
-        window = []
-        head = re.sub(r"(ничего|никого|nothing|nobody)\s*,", r"\1 ", t[:pos])
-        for w in reversed(re.findall(r"[\w']+|[^\w\s'-]", head)):
-            if not (w[0].isalnum() or w[0] == "_") or len(window) == 2:
+        i = next((k for k, (st, w) in enumerate(toks) if st <= pos < st + len(w)), None)
+        if i is None:
+            continue
+        chans = list(group_members(reg, ent[1]) or []) if ent[0] == "group" and reg else [ent[1]]
+        names.setdefault(i, []).extend(chans)
+        for c in chans:
+            last[c] = max(i, last.get(c, -1))
+    kinds = [None if k in names else _guard_kind(w, words[k + 1] if k + 1 < n else "") for k, w in enumerate(words)]
+    stop = [w in _GUARD_STOP for w in words]
+    for k in range(n):
+        nxt = words[k + 1] if k + 1 < n else ""
+        if kinds[k] == "ne" and (nxt in _GUARD_CANCEL or nxt in _GUARD_POSITIVE):
+            kinds[k] = None                                      # «не только X», «не забудь X»
+            if nxt in _GUARD_POSITIVE:
+                kinds[k + 1] = None                              # «не забудь про X»
+        if kinds[k] == "ne" and k and (words[k - 1] in ("why", "почему")
+                                       or (words[k - 1] == "бы" and k > 1 and words[k - 2] == "почему")):
+            kinds[k] = None                                      # «why not skip X» skips X
+        if words[k] in _GUARD_NOTHING or (words[k] == "no" and nxt == "one"):
+            if words[k] == "no":
+                kinds[k] = None                                  # «no one but X» = only X
+            for m in range(k + 1, min(n, k + 5)):
+                if words[m] in _GUARD_BUT:
+                    kinds[m], stop[m] = None, False              # «ничего (другого) кроме X» = только X
+                    break
+    count, said = {}, {}
+    for k in range(n):
+        if not kinds[k]:
+            continue
+        hi = next((m for m in range(k + 1, n) if stop[m]), n)
+        lo = next((m for m in range(k - 1, -1, -1) if stop[m]), -1)
+        target, closed, seen_and = None, False, False
+        for j in range(k + 1, hi):
+            if j in names:
+                target = j
                 break
-            window.insert(0, w)
-        neg = [w for k, w in enumerate(window) if (w in _GUARD_NEG or _GUARD_NEG_RE.match(w))
-               and not (k + 1 < len(window) and window[k + 1] in _GUARD_CANCEL)
-               and not (k > 0 and window[k - 1] in _GUARD_NOTHING)]
-        if len(neg) % 2:
+            if words[j] in _GUARD_AND:
+                seen_and = True
+            elif seen_and and words[j] in _GUARD_GO:
+                closed = True                                    # «не меняй панель и добавь codex»
+                break
+        if target is None and not closed and words[k] not in _GUARD_FORWARD and not words[k].startswith("никак"):
+            for j in range(k - 1, lo, -1):
+                if words[j] in _GUARD_AND:
+                    break
+                if j in names:
+                    target = j                                   # «codex не нужен», «codex в сторону»
+                    break
+        if target is not None:
+            count.setdefault(target, [0, 0, 0])[("ne", "ni", "other").index(kinds[k])] += 1
+            said.setdefault(target, words[k])
+    for chan, i in last.items():
+        if chan not in plan or not plan[chan]["enabled"] or i not in count:
+            continue
+        ne, ni, other = count[i]
+        if (ne + other if ne + other else ni) % 2:
+            w = said[i]
             raise RouteError(
-                "%r puts «%s» right before %s, and this route would RUN %s: the router's grammar and a plain reading "
-                "of the words disagree, and that gap is money. Say «не используй %s» to drop it, or name it without "
-                "the «%s» («добавь %s», «только %s») to run it."
-                % (text, neg[-1], ent[1], ent[1], ent[1], neg[-1], ent[1], ent[1]))
+                "%r has «%s» on %s (in the same clause as its name), and this route would RUN %s: the router's grammar "
+                "and a plain reading of the words disagree, and that gap is money. Say «не используй %s» to drop it, "
+                "or name it without the «%s» («добавь %s», «только %s») to run it."
+                % (text, w, chan, chan, chan, w, chan, chan))
 
 
 def apply_route(plan, reg, text):
@@ -1930,7 +2056,7 @@ def apply_route(plan, reg, text):
                 plan[c]["why"].append("route: named explicitly (overrides default-off)")
 
     # R153 И-11: the independent check, after every mode has run and before anything else reads the plan.
-    _negation_guard(text, scanned, plan, set(only_list) | set(selected))
+    _negation_guard(text, scanned, plan, set(only_list) | set(selected), reg)
 
     # A refused model with no stated replacement: fall back to the next model in registry order
     # and SAY SO in the plan. Registry order is curated, so this is deterministic - but it is
@@ -2427,8 +2553,11 @@ def _twins_of_excluded(plan, reg, named):
         gone = [c for c in members if _excluded_by_name(plan[c])]
         if not gone:
             continue
-        for c in members[members.index(gone[0]) + 1:]:
-            if not plan[c]["enabled"] or c in (named or ()) or plan[c].get("_user_off"):
+        # 🔴 R153 И-12 (r153i11 agy AC): a REPLACED member takes EVERY paid twin, earlier ones too - «grokbuild вместо
+        # orspark13cont» with the Go / free Spark not ready ran the paid spark13cont, which sits BEFORE orspark13cont.
+        repl_all = [g for g in gone if any(str(w).startswith("route: replaced by") for w in plan[g].get("why") or [])]
+        for c in members:
+            if c in gone or not plan[c]["enabled"] or c in (named or ()) or plan[c].get("_user_off"):
                 continue
             if (chans.get(c) or {}).get("cost") in _NON_PAID_COSTS:
                 continue
@@ -2436,19 +2565,19 @@ def _twins_of_excluded(plan, reg, named):
             # `--skip mcwonder10cont` ran the paid orwonder (gone[0] was only skipped); the same for kimik3 and
             # orspark13cont (r153i9 Grok G10, MiMo Flash F3, agy A-Q2-1).
             before = [g for g in gone if members.index(g) < members.index(c)]
-            repl = [g for g in before if any(str(w).startswith("route: replaced by") for w in plan[g].get("why") or [])]
+            repl = repl_all
             if repl:
                 plan[c]["enabled"] = False
                 plan[c]["why"].append(
                     "cascade: %s is replaced in this run, so its twin does not take its place - %s; name %s to "
                     "start it" % (repl[0], _paid_label(c, plan, chans), c))
-            else:
+            elif before:
                 plan[c]["why"].append("cascade: %s is excluded in this run, so its twin %s carries this voice - %s"
                                       % (", ".join(before), c, _paid_label(c, plan, chans)))
     return plan
 
 
-def _apply_cascade(plan, reg, ready=None):
+def _apply_cascade(plan, reg, ready=None, named=None):
     """
     For each cascade group, keep one enabled member; disable the rest.
 
@@ -2484,7 +2613,15 @@ def _apply_cascade(plan, reg, ready=None):
         chans = reg.get("channels") or {}
         if unready and (chans.get(winner) or {}).get("cost") not in _NON_PAID_COSTS:
             # R153 И-11: «добавь kimik3free» where it is not ready ran the paid kimik3 and no line said PAID (r153i9
-            # MiMo Pro P4; old).
+            # MiMo Pro P4; old). 🔴 R153 И-12 (r153i11 agy AB): a line is not a choice - the family word already
+            # STOPS here (R153 И-5); a member the human named by its own name stops too, unless the winner is named.
+            asked = [c for c in unready if c in (named or ())]
+            if asked and winner not in (named or ()):
+                raise RouteError(
+                    "%s is named in this route but not ready here (%s), and its voice would go to %s, which is PAID "
+                    "per call (%s). Name %s to pay for it, or leave %s out." % (
+                        ", ".join(asked), verdict[asked[0]] if isinstance(verdict[asked[0]], str) else "not ready",
+                        winner, (chans.get(winner) or {}).get("cost"), winner, ", ".join(asked)))
             plan[winner]["why"].append("cascade: %s not ready here, so %s carries this voice - %s"
                                        % (", ".join(unready), winner, _paid_label(winner, plan, chans)))
         for c in members:
@@ -2520,6 +2657,27 @@ def same_voice(reg, name):
 SUBSTANTIAL_BYTES = 2000
 
 
+def _replaced_twin(plan, reg, fb):
+    """R153 И-13 (G10): (the member of fb's cascade group that THIS route replaced, its why) or (None, "").
+
+    Since И-12 a replaced member takes every PAID twin with it (_twins_of_excluded), but that rule
+    marks only channels that were ON: mimov26flash is off in the registry (it exists as mimov26pro's
+    run-time fallback), so «X вместо ocmimo26flashfree» never touched it and apply_fallback armed it.
+    A plain exclusion keeps the cascade (the plan prints the fallback with its cost) - only «вместо».
+    """
+    for group in reg.get("_cascade_groups") or []:
+        if not isinstance(group, list) or fb not in group:
+            continue
+        for m in group:
+            s = plan.get(m) or {}
+            if m == fb or not s.get("_user_off"):
+                continue
+            rep = [str(w) for w in (s.get("why") or []) if "replaced by" in str(w)]
+            if rep:
+                return m, "; ".join(rep)
+    return None, ""
+
+
 def apply_fallback(plan, reg, ready=None):
     """
     R142: arm each RUNNING channel's run-time `fallback` (channels.json), or record why it is off.
@@ -2533,7 +2691,9 @@ def apply_fallback(plan, reg, ready=None):
     was excluded by the human in this run (--skip, a route; `--only` does not exclude it, because
     `--only mimov26pro` still wants a MiMo answer), or cannot run here (`ready`, the cascade's
     predicate). Whether its VOICE already answered is a run-time question: orchestrate.py asks it
-    of same_voice() after the round.
+    of same_voice() after the round. Also off when this route REPLACED a member of the fallback's
+    cascade group (R153 И-13, G10: «grokbuild вместо ocmimo26flashfree» left the METERED mimov26flash
+    armed for mimov26pro - the voice the sentence replaced would have come back, paid).
     """
     chans = reg.get("channels") or {}
     for cname, p in plan.items():
@@ -2542,6 +2702,7 @@ def apply_fallback(plan, reg, ready=None):
         if not fb or not p.get("enabled"):
             continue
         off = None
+        rmember, rwhy = _replaced_twin(plan, reg, fb)
         if fb not in chans or fb not in plan:
             off = "%s is not in this registry" % fb
         elif fb == cname:
@@ -2550,6 +2711,8 @@ def apply_fallback(plan, reg, ready=None):
             off = "%s already runs in this round as its own voice" % fb
         elif plan[fb].get("_user_off"):
             off = "%s is excluded in this run (%s)" % (fb, plan[fb]["_user_off"])
+        elif rmember:
+            off = "%s is the same model as %s, which this route replaced (%s)" % (fb, rmember, rwhy)
         elif ((chans.get(fb) or {}).get("spend_guard") or {}).get("requires_ack"):
             off = "%s needs --accept-spend (its spend_guard), which a fallback never asks for" % fb
         elif ready is not None:
@@ -2665,7 +2828,7 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
     if was_on and not any(p["enabled"] for p in plan.values()):
         raise RouteError("everything left to run is a PAID twin of a channel this route replaces (%s). Name the one "
                          "you want, or say what runs instead." % ", ".join(was_on))
-    plan = _apply_cascade(plan, reg, ready)          # R140 И-3: `ready` from orchestrate.py
+    plan = _apply_cascade(plan, reg, ready, named_directly)   # R140 И-3: `ready` from orchestrate.py
     plan = apply_fallback(plan, reg, ready)          # R142: after the cascade picked the voices
 
     # 🔴 DECORATE BEFORE APPLYING THE TIER, not after. The tier now SCALES per-channel values

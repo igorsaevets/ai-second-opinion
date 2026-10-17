@@ -7958,6 +7958,8 @@ def main():
                   suite_r153_i8_hotfix,
                   suite_r154_refs_kinds,
                   suite_r153_i11_hotfix,
+                  suite_r153_i12_hotfix,
+                  suite_r153_i13_g10,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -15253,6 +15255,224 @@ def suite_r150_i2_grok_compat():
           "(R150 И-3: a tree without the doc fails - it used to pass vacuously)", inst)
 
 
+def suite_r153_i13_g10():
+    """
+    R153 И-13 (2026-10-17), G10 from the И-12 BACKLOG: a run-time `fallback` (channels.json) is ANOTHER channel that
+    orchestrate.py runs once after the round when its carrier failed. mimov26pro's fallback is mimov26flash
+    (METERED; off in the registry, it exists as that fallback). «grokbuild вместо ocmimo26flashfree» replaces the
+    MiMo Flash voice; since И-12 a replaced member takes every paid twin, but mimov26flash was never ON, so no rule
+    marked it and apply_fallback ARMED it (i13/g10_probe.py: 4 routes) - after a mimov26pro failure the voice the
+    sentence replaced would have come back, paid.
+    (a) a route that REPLACES a member of the fallback's cascade group turns the fallback off, with the reason;
+    (b) the dispatcher does not run it (run_fallbacks, a failed carrier, a stub submit);
+    (c) CONTROLS: on the plain panel the same stub DOES run it; «только mimov26pro» and a plain exclusion
+        («без ocmimo26flashfree», G9: the cascade keeps the voice, the plan prints the cost) keep it armed.
+    """
+    import concurrent.futures as _cf
+    import copy as _cp
+    import orchestrate as o
+    import routing as _r
+    section("R153 И-13: G10 - a fallback whose voice the route replaced stays off")
+
+    reg = _cp.deepcopy(_r.load_registry(overlay=False))
+    chans = reg.get("channels") or {}
+    need = ("mimov26pro", "mimov26flash", "ocmimo26flashfree")
+    check(all(n in chans for n in need), "R153 И-13 the registry has %s" % ", ".join(need))
+    if not all(n in chans for n in need):
+        return
+    # the mechanism, not the product: the kit tree (R60) ships the local mimov26pro off - on in this fixture
+    chans["mimov26pro"]["enabled"] = True
+    chans["mimov26pro"]["fallback"] = "mimov26flash"
+    chans["ocmimo26flashfree"]["enabled"] = True
+
+    def plan(route):
+        return _r.resolve(_cp.deepcopy(reg), route=route, panel="cheap", ready=lambda _n: True)
+
+    def armed(p):
+        fb = (p.get("mimov26pro") or {}).get("fallback") or {}
+        return (p.get("mimov26pro") or {}).get("enabled") and fb.get("channel") == "mimov26flash", fb.get("off")
+
+    bad = []
+    for route in ("grokbuild вместо ocmimo26flashfree", "codex вместо ocmimo26flashfree",
+                  "grokbuild instead of ocmimo26flashfree", "ocmimo26flashfree -> grokbuild"):
+        try:
+            on, why = armed(plan(route))
+        except _r.RouteError as exc:
+            bad.append("%s: refused (%s)" % (route, str(exc)[:60]))
+            continue
+        if not (on and why and "replaced" in why and "ocmimo26flashfree" in why):
+            bad.append("%s: fallback off=%r" % (route, why))
+    check(not bad, "R153 И-13 (a) «X вместо ocmimo26flashfree»: mimov26pro's fallback mimov26flash is OFF, "
+          "the reason names the replaced member", "; ".join(bad))
+
+    calls = []
+
+    def fake_submit(_ex, name):
+        calls.append(name)
+        f = _cf.Future()
+        f.set_result({"ok": True, "text": "flash answer", "bytes": 12})
+        return f
+
+    dead = {"ok": False, "text": "", "error": "TIMEOUT after 40m", "warnings": ["TIMEOUT"]}
+
+    def after_failure(p):
+        del calls[:]
+        res = {"mimov26pro": dict(dead)}
+        o.run_fallbacks(res, p, reg, ["mimov26pro"], submit=fake_submit, same_voice=_r.same_voice)
+        return list(calls), res["mimov26pro"].get("notes") or []
+
+    got, notes = after_failure(plan("grokbuild вместо ocmimo26flashfree"))
+    check(got == [] and any("OFF in this run" in n and "replaced" in n for n in notes),
+          "R153 И-13 (b) mimov26pro fails after «grokbuild вместо ocmimo26flashfree»: mimov26flash is NOT run",
+          "submitted %r, notes %r" % (got, [n[:90] for n in notes]))
+
+    got_plain, _n = after_failure(plan(None))
+    ctrl = [] if got_plain == ["mimov26flash"] else ["plain panel: the stub saw %r" % got_plain]
+    for route in ("только mimov26pro", "без ocmimo26flashfree"):
+        try:
+            on, why = armed(plan(route))
+        except _r.RouteError as exc:
+            ctrl.append("%s: refused (%s)" % (route, str(exc)[:60]))
+            continue
+        if not on or why:
+            ctrl.append("%s: off=%r" % (route, why))
+    check(not ctrl, "R153 И-13 (c) CONTROLS: plain panel runs the fallback after a failure; «только mimov26pro» and "
+          "«без ocmimo26flashfree» keep it armed", "; ".join(ctrl))
+
+
+def suite_r153_i12_hotfix():
+    """
+    R153 И-12 (2026-10-17): what the r153i11 panel on kit 1.112.5 reproduced (i12/route_check_i12.py, every input
+    with a paid channel in the slot the sentence turns off):
+    (a) an INFIX «вместо» with two targets: «grokbuild вместо kimik3 и codex» STARTED codex (agy A1; old too);
+    (b) a replaced member takes its EARLIER paid twin too: «grokbuild вместо orspark13cont» with the Go / free Spark
+        not ready ran the paid spark13cont (agy AC; old too);
+    (c) «why not skip codex» ADDED codex - 1.112.5's double-negation flip (agy A5; 1.112.4 excluded it);
+    (d) «только не: codex» / «only not: codex» ran codex ALONE, «только (не codex)» (Spark S1/S2);
+    (e) every n't auxiliary: «shan't / hasn't / mightn't / ain't use codex» ADDED codex (Spark S3);
+    (f) «за исключением», «excluding», «codex не нужен» are exclusions (Spark S4b, mine X1);
+    (g) the second reader reads the clause, after the name too: «добавь grokbuild, не запускай сегодня codex»,
+        «добавь grokbuild, codex не трогай», «добавь grokbuild, запрети codex», «никакого codex, добавь grokbuild»,
+        «don't you dare use codex», «add grokbuild, ban codex» ran codex (Spark S4, agy Q3b, mine);
+    (h) and it no longer stops «не исключительно codex, но и grokbuild» / «добавь grokbuild и не забудь codex»
+        (1.112.5 false stops; 1.112.4 ran them) or «не меняй панель и добавь codex»;
+    (i) a named free member that is not ready STOPS instead of handing its voice to the paid twin (agy AB);
+    (j) «ничего другого, кроме codex», «никто кроме codex» = only codex (agy A7);
+    (k) CONTROLS that worked on 1.112.5 and must keep working.
+    """
+    import copy as _cp
+    import routing as _r
+    section("R153 И-12: infix «вместо A и B», earlier paid twins, «why not», n't, clause-wide second reader, named stop")
+
+    base = _r.load_registry(overlay=False)
+    kit = _cp.deepcopy(base)
+    for ch in kit["channels"].values():
+        if ch.get("distribution") == "local":
+            ch["enabled"] = False                         # what package.py does to a local channel
+
+    def runs(route, panel="cheap", reg=None, ready=None, skip=None):
+        try:
+            p = _r.resolve(_cp.deepcopy(reg or base), route=route, panel=panel, skip=skip,
+                           ready=ready or (lambda _n: True))
+        except _r.RouteError as e:
+            return None, str(e)
+        return sorted(c for c, s in p.items() if s.get("enabled")), p
+
+    def off(route, chans, **kw):                          # none of chans runs (a refusal is safe)
+        on = runs(route, **kw)[0]
+        return on is None or not any(c in on for c in chans)
+
+    def goes(route, chans, **kw):                         # it RUNS, with every chan in it
+        on = runs(route, **kw)[0]
+        return on is not None and all(c in on for c in chans)
+
+    a = [s for s, chans, kw in (("grokbuild вместо kimik3 и codex", ["kimik3", "codex"], {}),
+                                ("grokbuild вместо kimik3 и codex", ["kimik3", "codex"], {"reg": kit,
+                                                                                          "panel": "standard"}),
+                                ("grokbuild вместо codex и kimik3", ["kimik3", "codex"], {"reg": kit,
+                                                                                          "panel": "standard"}),
+                                ("grokbuild вместо kimik3, codex", ["kimik3", "codex"], {}))
+         if not off(s, chans, **kw)]
+    check(not a and goes("grokbuild вместо kimik3 и codex", ["grokbuild"]),
+          "R153 И-12 (a) an infix «вместо» takes every name joined after it: «grokbuild вместо kimik3 и codex»",
+          "ran an excluded one: %r" % a)
+    unready = lambda n: "not ready" if n in ("ocspark13go", "ocspark13free") else True  # noqa: E731
+    b = [nm for reg, nm in ((base, "src"), (kit, "kit"))
+         if not off("grokbuild вместо orspark13cont", ["spark13cont", "orspark13cont"], panel="standard", reg=reg,
+                    ready=unready)]
+    check(not b, "R153 И-12 (b) a replaced member takes its EARLIER paid twin too (spark13cont before orspark13cont)",
+          "paid twin ran in %r" % b)
+    c_on = runs("why not add codex")[0]
+    check(off("why not skip codex", ["codex"]) and off("почему бы не исключить codex", ["codex"])
+          and c_on is not None and "codex" in c_on,
+          "R153 И-12 (c) «why not skip X» skips X, «why not add X» adds X", "%r" % c_on)
+    d = [s for s in ("только не: codex", "only not: codex", "лишь не — codex", "только (не codex)",
+                     "только «не codex»") if not off(s, ["codex"])]
+    check(not d and goes("только не: codex", ["grokbuild"]),
+          "R153 И-12 (d) «только не: codex» / «только (не codex)» exclude codex and run the rest", "%r" % d)
+    e = [s for s in ("shan't use codex", "hasn't use codex", "mightn't use codex", "ain't use codex",
+                     "isn’t to use codex") if not off(s, ["codex"])]
+    check(not e, "R153 И-12 (e) every n't auxiliary negates («shan't use codex»)", "added: %r" % e)
+    f = [s for s, kw in (("добавь grokbuild, за исключением codex", {}), ("используй всё, за исключением codex",
+                                                                         {"panel": None}),
+                         ("add grokbuild, excluding codex", {}), ("codex не нужен, возьми grokbuild", {}),
+                         ("добавь grokbuild, исключая codex", {}))
+         if not off(s, ["codex"], **kw)]
+    check(not f and goes("добавь grokbuild, за исключением codex", ["grokbuild"]),
+          "R153 И-12 (f) «за исключением», «excluding», «codex не нужен» exclude", "ran codex: %r" % f)
+    g = [s for s in ("добавь grokbuild, не запускай сегодня codex", "добавь grokbuild, codex не трогай",
+                     "добавь grokbuild, запрети codex", "никакого codex, добавь grokbuild", "don't you dare use codex",
+                     "add grokbuild, ban codex", "добавь grokbuild, а codex пропусти", "добавь grokbuild, codex в сторону",
+                     "добавь grokbuild, ни в коем случае не запускай codex") if not off(s, ["codex"])]
+    check(not g, "R153 И-12 (g) the second reader reads the clause, before and after the name", "ran codex: %r" % g)
+    h = [s for s, chans in (("запусти не исключительно codex, но и grokbuild", ["codex", "grokbuild"]),
+                            ("добавь grokbuild и не забудь codex", ["codex", "grokbuild"]),
+                            ("не меняй ничего и добавь codex", ["codex"]),
+                            ("не думай долго и добавь codex", ["codex"]))
+         if not goes(s, chans)]
+    check(not h, "R153 И-12 (h) no false stop on «не исключительно», «не забудь», «не ... и добавь»", "%r" % h)
+    i_on, i_msg = runs("добавь kimik3free", panel="standard", reg=kit,
+                       ready=lambda n: "no key" if n == "kimik3free" else True)
+    i2 = runs("добавь kimik3free и kimik3", panel="standard", reg=kit,
+              ready=lambda n: "no key" if n == "kimik3free" else True)[0]
+    check(i_on is None and "not ready here (no key)" in str(i_msg) and "PAID" in str(i_msg)
+          and i2 is not None and "kimik3" in i2,
+          "R153 И-12 (i) a named free member that is not ready stops; naming the paid twin too runs it",
+          "%r %r | %r" % (i_on, str(i_msg)[:120], i2))
+    j = [s for s in ("ничего другого, кроме codex", "никто кроме codex", "nothing else except codex")
+         if runs(s)[0] != ["codex"]]
+    check(not j, "R153 И-12 (j) «ничего другого, кроме X», «никто кроме X» = only X", "%r" % j)
+    ctrl = []
+    for s, ok in (("только не codex", lambda: off("только не codex", ["codex"]) and goes("только не codex",
+                                                                                         ["grokbuild"])),
+                  ("не только codex, но и grokbuild", lambda: goes("запусти не только codex, но и grokbuild",
+                                                                   ["codex", "grokbuild"])),
+                  ("ничего кроме kimik3free", lambda: runs("ничего кроме kimik3free", panel="standard")[0]
+                   == ["kimik3free"]),
+                  ("не используй cli, добавь codex", lambda: goes("не используй cli, добавь codex", ["codex"])),
+                  ("только grokbuild, вместо codex agy38flash",
+                   lambda: goes("только grokbuild, вместо codex agy38flash", ["grokbuild", "agy38flash"])
+                   and off("только grokbuild, вместо codex agy38flash", ["codex"])),
+                  ("не используй grokbuild, вместо codex agy38flash",
+                   lambda: off("не используй grokbuild, вместо codex agy38flash", ["codex", "grokbuild"])),
+                  ("kimik3 -> kimik3free", lambda: goes("kimik3 -> kimik3free", ["kimik3free"], panel="standard")
+                   and off("kimik3 -> kimik3free", ["kimik3"], panel="standard")),
+                  ("только grokbuild и не codex", lambda: off("только grokbuild и не codex", ["codex"])),
+                  ("добавь codex, но не kimik3", lambda: off("добавь codex, но не kimik3", ["kimik3"], reg=kit,
+                                                             panel="standard")),
+                  ("не без ocspark13free", lambda: goes("не без ocspark13free", [], panel="standard")
+                   and off("не без ocspark13free", ["spark13cont", "orspark13cont"], panel="standard")),
+                  ("kimik3free вместо kimik3", lambda: goes("kimik3free вместо kimik3", ["kimik3free"],
+                                                            panel="standard")
+                   and off("kimik3free вместо kimik3", ["kimik3"], panel="standard"))):
+        try:
+            if not ok():
+                ctrl.append(s)
+        except Exception as exc:                          # noqa: BLE001
+            ctrl.append("%s (%s)" % (s, type(exc).__name__))
+    check(not ctrl, "R153 И-12 (k) CONTROLS that worked on 1.112.5 keep working", "broken: %r" % ctrl)
+
+
 def suite_r153_i11_hotfix():
     """R153 И-11 (2026-10-17), kit 1.112.5 - what panel r153i9 found in the 1.112.4 route grammar, every input re-run on
     1.112.4 first (`runs/r153-t107-kimi-mimo/i10/design-i10.md`, `i11/h_check.py`). A paid / expensive channel stands in
@@ -15362,10 +15582,10 @@ def suite_r153_i11_hotfix():
     check(not h, "R153 И-11 (h) «только добавь X» adds X to the round; a hyphen blocks a marker", "wrong: %r" % h)
     on, p = runs("добавь kimik3free", panel="standard", reg=kit,
                  ready=lambda n: "no key" if n == "kimik3free" else True)
-    why = " | ".join(p["kimik3"]["why"]) if on is not None and "kimik3" in on else ""
-    check(on is not None and ("kimik3" not in on or "PAID per call" in why),
-          "R153 И-11 (i) a named free member that is not ready: its paid twin's plan line says PAID",
-          "%r why=%r" % (on, why[-160:]))
+    # R153 И-12 (r153i11 agy AB): the PAID line became a STOP - the paid twin may not start for a named free member.
+    check(on is None and "not ready here" in str(p) and "PAID" in str(p),
+          "R153 И-11 (i) a named free member that is not ready: the run stops and names the PAID twin (И-12)",
+          "%r %r" % (on, str(p)[-160:]))
     j_on, j_msg = runs("не используй grokbuild, kimik3free вместо kimik3 codex", panel="standard")
     check(j_on is None, "R153 И-11 (j) «не используй A, B вместо C D» reads two ways and refuses", "%r" % j_on)
     k = [s for s in ("только grokbuild и не codex", "добавь grokbuild, но не codex", "use grokbuild but not codex")

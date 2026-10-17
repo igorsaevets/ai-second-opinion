@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.112.6 — 2026-10-17
+
+Route fixes from the review panel on 1.112.5. Each sentence below was run on 1.112.5 with a paid channel in the slot it turns off, and started a channel the speaker had excluded or never named.
+
+- **«X вместо A и B» replaces both.** «grokbuild вместо kimik3 и codex» started codex; on the standard panel «grokbuild вместо codex и kimik3» ran the paid kimik3. An infix «вместо» joins only the names linked to it by «и» / «and» / a comma; after a comma, «вместо» starts a new clause.
+- **The English word «or» no longer selects a channel group.** «only codex or grokbuild» started three paid OpenRouter channels: «or» was an alias of the `openrouter` group. A function word (or, and, the, no, not, и, а, но, или, в, на, с, …) never names a channel or a group.
+- **Negations after the name, far from it, or in words the grammar did not list are caught.** «codex не нужен, возьми grokbuild», «добавь grokbuild, codex не трогай», «а codex пропусти», «codex в сторону», «запрети codex», «никакого codex», «за исключением codex», «don't ever use codex», «don't you dare use codex», «codex запрещён», «use neither codex nor grokbuild» and «не‐используй codex» (a Unicode hyphen) all started codex. «за исключением», «исключая», «excluding», «пропусти», «не нужен» are exclusions now; for the other shapes the second check reads the whole clause, also the words after the name, and stops the run with the way to write it. That check still never changes a plan.
+- **A replaced channel takes every paid twin of its group with it, also the ones before it.** «grokbuild вместо orspark13cont» with the free Spark not ready ran the paid spark13cont; «grokbuild вместо orwonder, не используй mcwonder10cont» ran wonder10. Twins whose cost is `mid`, `cheap`, `metered` or `expensive` count as paid, so «codex вместо orgemini38flash» also leaves agy38flash off.
+- **A free channel you name that is not ready here STOPS the run** instead of handing its voice to its paid twin with a PAID line («добавь kimik3free» without its key ran the paid kimik3). Name the paid channel to pay for it, or leave the free one out.
+- **«why not skip codex» excludes codex.** 1.112.5 added it: the double-negation rule read «not skip» as «use». «почему бы не» the same.
+- **«только не: codex», «only not: codex», «только не? codex» exclude codex.** Punctuation after «не» made 1.112.5 run codex ALONE.
+- **Every n't form excludes:** «shan't use codex», «hasn't», «mightn't», «ain't», «isn't to use codex» added codex.
+- **«no one but X», «nobody but X» and «ничего — кроме X» (with a dash) mean only X.** They ran the panel without X (the paid kimik3 then carried the Kimi voice). «without excluding X» keeps X (it dropped the free Spark and ran the paid spark13cont).
+- **No more false stops on** «не исключительно codex, но и grokbuild», «добавь grokbuild и не забудь codex», «don't exclude the codex»: 1.112.5 refused them, they run as written.
+- **A run-time fallback whose model the route replaced stays off.** «grokbuild вместо ocmimo26flashfree» left the metered mimov26flash armed as mimov26pro's fallback, so a mimov26pro failure would have brought the replaced model back, paid. The plan prints why it is off.
+
 ## 1.112.5 — 2026-10-17
 
 Route grammar fixes from the review panel on 1.112.4, each reproduced on the code before it was changed (a paid channel in the slot the sentence turns off), and attachments by path for three more CLI kinds.
