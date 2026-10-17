@@ -44,7 +44,7 @@ To start you need **one OpenRouter key and a couple of free programs**. Everythi
 | optional | Claude Code with a subscription ([INSTALL.md](INSTALL.md#claude-code-cli-claude-opus--off-by-default)) | Claude Opus 4.6. Off by default | Claude Pro $20/month, Max from $100/month. Claude Code is in every paid plan |
 | optional | A Meta key, `MODEL_API_KEY` ([INSTALL.md](INSTALL.md#spark--model_api_key)) | A second route to Muse Spark if opencode is not installed | Per key: $0.10 / $0.20 per 1M tokens (Contributor tier) |
 
-**There is no free Kimi any more.** NVIDIA retired its free Kimi K3 on 2026-10-15: the endpoint answers HTTP 410 «end of life». Versions 1.106–1.111 asked for a step «2b» (the Kimi Code CLI and an `NVIDIA_NIM_API_KEY`); since 1.112.0 nothing uses them, the `nvkimik3` channel ships switched off, and the cheap panel has no Kimi voice. Kimi K3 answers in the standard panel through OpenRouter (`kimik3`, paid), and «only kimi» starts that channel alone.
+**There is no free Kimi any more.** NVIDIA retired its free Kimi K3 on 2026-10-15: the endpoint answers HTTP 410 «end of life». Versions 1.106–1.111 asked for a step «2b» (the Kimi Code CLI and an `NVIDIA_NIM_API_KEY`); since 1.112.0 nothing uses them, the `nvkimik3` channel ships switched off, and the cheap panel has no Kimi voice. Kimi K3 answers in the standard panel through OpenRouter (`kimik3`, paid). «only kimik3» starts that channel alone; «only kimi» does too on the standard panel, while on the default cheap panel it stops and asks you to name `kimik3`: a family word never moves you from free to paid in silence.
 
 To check what was found: `python doctor.py`. It prints which keys and programs it found, and never prints a key itself: only present / absent and the length.
 
@@ -54,14 +54,14 @@ To check what was found: `python doctor.py`. It prints which keys and programs i
 
 In Claude Code with the plugin (and in any agent you gave the line from the top of this page) just say it in plain words:
 
-| You say | What runs (version 1.112.0) |
+| You say | What runs (version 1.112.4) |
 |---|---|
 | **"second opinion"** (for example, "give me a second opinion on this file") | **The cheap panel**, the default: 5 models |
 | **"second opinion, CLI only"** | Only the CLI agents of the cheap panel: 4 models — Muse Spark, MiMo v2.6 Flash, Gemini 3.8 Flash and Grok 4.7. Not one paid request on your OpenRouter key |
 | "standard panel" or "all models" | 12 models: the cheap panel plus GPT-6.1 Sol, Kimi K3 (through OpenRouter, paid), Qwen 3.8 Max, DeepSeek V4 Pro, GLM 5.3, Nemotron and Muse Wonder |
 | "CLI only, standard panel" | 5 models: the four CLI agents plus Codex (GPT-6.1 Sol); 6 with the Muse Code CLI (Muse Wonder) |
 | "ask only codex", "only grok" | The one named channel |
-| "only kimi" | Kimi K3 through OpenRouter (`kimik3`, paid): the cheap panel has no Kimi since 1.112.0, so the word names the paid channel, and the plan says so |
+| "only kimi" | The run stops and says why: since 1.112.0 the cheap panel has no free Kimi, and the only Kimi it could start is `kimik3` (OpenRouter, paid). "only kimik3" runs it; on the standard panel "only kimi" runs it too |
 | "only agy31pro" or "only agypro" | Gemini 3.1 Pro: it starts only when named |
 | "don't use openrouter" | Everything except the OpenRouter channels |
 
@@ -88,7 +88,7 @@ How to read the tables:
 If you lack the main transport, a fallback route to the same model takes over:
 - **Muse Spark.** No opencode → `spark13cont` (Meta key) → `orspark13cont` (OpenRouter, $0.10 / $0.20, effort xhigh).
 - **Gemini 3.8 Flash.** No `agy` → `orgemini38flash` (OpenRouter, $0.75 / $3.75, effort high — this model's ceiling).
-- **Kimi K3.** Not in the cheap panel since 1.112.0: NVIDIA retired its free Kimi K3 on 2026-10-15 (HTTP 410, «end of life»), so `nvkimik3` ships switched off. Kimi answers in the standard panel through OpenRouter (`kimik3`); «only kimi» starts it alone.
+- **Kimi K3.** Not in the cheap panel since 1.112.0: NVIDIA retired its free Kimi K3 on 2026-10-15 (HTTP 410, «end of life»), so `nvkimik3` ships switched off. Kimi answers in the standard panel through OpenRouter (`kimik3`); «only kimik3» starts it alone (on the cheap panel «only kimi» stops and asks for that name).
 
 **In total:** about $0.06 a run on your OpenRouter key plus your subscriptions. Expect about 15 minutes: MiMo v2.6 Pro thinks longest, its median is 14 minutes.
 

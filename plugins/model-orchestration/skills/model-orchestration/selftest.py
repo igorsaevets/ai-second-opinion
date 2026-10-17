@@ -7955,6 +7955,7 @@ def main():
                   suite_r153_i5_hotfix,
                   suite_r153_i6_hotfix,
                   suite_r153_i7_hotfix,
+                  suite_r153_i8_hotfix,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -15248,6 +15249,145 @@ def suite_r150_i2_grok_compat():
           and "plugins" in doc.split("### Grok Build CLI")[-1][:6000],
           "R150 И-2 (g) INSTALL.md's Grok section names the import switches and what they leave on "
           "(R150 И-3: a tree without the doc fails - it used to pass vacuously)", inst)
+
+
+def suite_r153_i8_hotfix():
+    """R153 И-8 (2026-10-17), kit 1.112.4 - the route grammar the r153i7 panel probed, every input re-run on 1.112.3
+    first (`runs/r153-t107-kimi-mimo/i8/route_probe_i8.py`):
+    (a) mine, following the panel's marker-collapse finding: «don't use codex» / «dont use codex» ADDED the expensive
+        codex (the ADD «use » inside the NEG won the collapse, since R86); «just use codex» ran the whole panel;
+    (b) Grok G3b / MiMo Flash F1: «codex не используй, а используй grokbuild» and «codex не используй вместо kimik3
+        kimik3free» lost the «не» to the next marker and ran codex;
+    (c) G3/S3/F3/A3/G8 + «только используй codex»: «только» lost to an adjacent «используй»/«вместо», or emptied by
+        an infix swap -> the whole panel ran;
+    (d) Grok G4: «вместо agy38flash используй grokbuild» / «вместо codex поставь grokbuild» left the target ON;
+    (e) agy A4: «кими вместо kimik3» / «вместо kimik3 возьми кими» kept the PAID kimik3 (a member of the replacing
+        family); now it is replaced (and the kit's family stop says the free voices will not start);
+    (f) refusals instead of guesses: a «не» with no name after it after another instruction (G2, S6: «kimik3 вместо
+        kimik3free не используй» ran the PAID kimik3), a «вместо» target nothing replaces (S2, G5/S1), «не используй
+        A, B вместо C» (G1: two readings, opposite money); CONTROLS still run: «grokbuild не используй», «не используй
+        kimik3free вместо kimik3», «только grokbuild, вместо codex agy38flash»;
+    (g) MiMo Pro P1 + MiMo Flash F2: «kimik3, вместо него kimik3free» ran the PAID kimik3 (no pronoun in the grammar);
+        «не используй grokbuild, вместо codex agy38flash» read codex as a replacement;
+    (h) mine, from Spark's S5 input: «codex вместо agy38flash» ALSO ran the paid orgemini38flash (the replaced voice
+        came back on its OpenRouter twin); a plain «не используй agy38flash» keeps the cascade but says PAID;
+    (i) MiMo Pro P2/P5: «не только codex, но и grokbuild» excluded both; «refuse codex» added codex;
+    (j) both readers, both directions, on every accepted sentence: a name counted as chosen and not excluded starts,
+        and nothing the sentence excluded or replaced starts (a guard - it also holds on 1.112.3);
+    (k) ONE «вместо» decision: apply_route and _selection_tokens both ask _subst_kind.
+    """
+    import copy as _cp
+    import inspect
+    import routing as _r
+    section("R153 И-8: longest marker, collapse keeps «не»/«только», one «вместо» decision, refusals, paid twins")
+
+    base = _r.load_registry(overlay=False)
+
+    kit = _cp.deepcopy(base)
+    for ch in kit["channels"].values():
+        if ch.get("distribution") == "local":
+            ch["enabled"] = False                         # what package.py does to a local channel
+
+    def runs(route=None, panel="cheap", reg=None, **kw):
+        try:
+            p = _r.resolve(_cp.deepcopy(reg or base), route=route, panel=panel, ready=lambda _n: True, **kw)
+        except _r.RouteError as e:
+            return None, str(e)
+        return sorted(c for c, s in p.items() if s.get("enabled")), p
+
+    def show(x, p):
+        return "%r" % (x if x is not None else str(p)[:140])
+
+    a1, pa1 = runs("don't use codex")
+    a2, pa2 = runs("dont use codex")
+    a3, pa3 = runs("just use codex")
+    check(a1 is not None and a2 is not None and "codex" not in a1 and "codex" not in a2 and a3 == ["codex"],
+          "R153 И-8 (a) «don't use codex» / «dont use codex» exclude codex; «just use codex» = codex alone",
+          "%s / %s / %s" % (show(a1, pa1), show(a2, pa2), show(a3, pa3)))
+    b1, pb1 = runs("codex не используй, а используй grokbuild")
+    b2, pb2 = runs("codex не используй вместо kimik3 kimik3free")
+    check(b1 is not None and "grokbuild" in b1 and "codex" not in b1
+          and b2 is not None and "codex" not in b2 and "kimik3" not in b2,
+          "R153 И-8 (b) a «не» keeps its meaning next to another marker: codex does not run",
+          "%s / %s" % (show(b1, pb1), show(b2, pb2)))
+    c1, pc1 = runs("только используй codex")
+    c2, pc2 = runs("только вместо grokbuild возьми codex")
+    c3, pc3 = runs("только kimik3free, добавь grokbuild вместо kimik3free")
+    check(c1 == ["codex"] and c2 == ["codex"] and c3 == ["grokbuild"],
+          "R153 И-8 (c) «только» survives an adjacent «используй»/«вместо» and an infix swap of its own name",
+          "%s / %s / %s" % (show(c1, pc1), show(c2, pc2), show(c3, pc3)))
+    d1, pd1 = runs("вместо agy38flash используй grokbuild")
+    d2, pd2 = runs("вместо codex поставь grokbuild", panel="standard")
+    check(d1 is not None and "agy38flash" not in d1 and "grokbuild" in d1
+          and d2 is not None and "codex" not in d2 and "grokbuild" in d2,
+          "R153 И-8 (d) «вместо X используй/поставь Y» switches the target X off",
+          "%s / %s" % (show(d1, pd1), show(d2, pd2)))
+    e1, pe1 = runs("кими вместо kimik3", panel="standard", reg=kit)
+    e2, pe2 = runs("вместо kimik3 возьми кими", panel="standard", reg=kit)
+    check((e1 is None or "kimik3" not in e1) and (e2 is None or "kimik3" not in e2)
+          and (e1 is not None or "kimi" in pe1),
+          "R153 И-8 (e) a member named as the target of its own family is replaced: the paid kimik3 does not run",
+          "%s / %s" % (show(e1, pe1), show(e2, pe2)))
+    refused = ["добавь codex, kimik3 не используй", "kimik3 вместо kimik3free не используй", "вместо grokbuild",
+               "kimik3free вместо grokbuild вместо agy38flash", "не используй grokbuild, kimik3free вместо kimik3"]
+    ran = [s for s in refused if runs(s)[0] is not None]
+    f1, _ = runs("grokbuild не используй")
+    f2, _ = runs("не используй kimik3free вместо kimik3")
+    f3, _ = runs("только grokbuild, вместо codex agy38flash")
+    check(not ran and f1 is not None and "grokbuild" not in f1 and f2 is not None and "kimik3free" not in f2
+          and f3 is not None and "codex" not in f3 and {"agy38flash", "grokbuild"} <= set(f3),
+          "R153 И-8 (f) %d unclear sentences stop instead of guessing; CONTROL: three clear ones still run" % len(refused),
+          "ran: %r / controls %r %r %r" % (ran, f1, f2, f3))
+    g1, pg1 = runs("kimik3, вместо него kimik3free")
+    g2, pg2 = runs("codex, вместо него grokbuild")
+    g3, pg3 = runs("не используй grokbuild, вместо codex agy38flash", panel="standard")
+    check(g1 is not None and "kimik3free" in g1 and "kimik3" not in g1
+          and g2 is not None and "grokbuild" in g2 and "codex" not in g2
+          and g3 is not None and "codex" not in g3 and "agy38flash" in g3,
+          "R153 И-8 (g) «вместо него» replaces what came before it; after a «не», «вместо A B» makes A the target",
+          "%s / %s / %s" % (show(g1, pg1), show(g2, pg2), show(g3, pg3)))
+    h1, ph1 = runs("codex вместо agy38flash")
+    h2, ph2 = runs("не используй agy38flash")
+    h3, ph3 = runs("только orgemini38flash")
+    why2 = " | ".join(ph2["orgemini38flash"]["why"]) if h2 is not None else ""
+    check(h1 is not None and "codex" in h1 and "orgemini38flash" not in h1
+          and h2 is not None and "orgemini38flash" in h2 and "PAID per call" in why2 and h3 == ["orgemini38flash"],
+          "R153 И-8 (h) a replaced transport does not come back on its paid twin; an excluded one says PAID; "
+          "CONTROL: the twin named alone runs",
+          "%s / %s why=%r / %s" % (show(h1, ph1), show(h2, ph2), why2[:120], show(h3, ph3)))
+    i1, pi1 = runs("запусти не только codex, но и grokbuild")
+    i2, _ = runs("refuse codex")
+    check(i1 is not None and {"codex", "grokbuild"} <= set(i1) and (i2 is None or "codex" not in i2),
+          "R153 И-8 (i) «не только X, но и Y» adds both; a marker inside a word («refuse») is not a marker",
+          "%s / %r" % (show(i1, pi1), i2))
+    corpus = ["kimik3, вместо него kimik3free", "только используй codex", "codex не используй, а используй grokbuild",
+              "вместо agy38flash используй grokbuild", "только вместо grokbuild возьми codex",
+              "не используй grokbuild, вместо codex agy38flash", "добавь codex, вместо grokbuild возьми agy38flash",
+              "только codex, вместо codex возьми grokbuild", "запусти не только codex, но и grokbuild",
+              "только grokbuild, вместо codex agy38flash", "не используй kimik3 вместо kimik3free",
+              "не используй grokbuild, вместо него возьми agy38flash", "kimik3free вместо kimik3",
+              "включая agy38flash вместо codex", "только kimik3free вместо kimik3", "don't use codex"]
+    bad, accepted = [], 0
+    for s in corpus:
+        named = _r.explicitly_named(_cp.deepcopy(base), route=s)
+        on, p = runs(s, panel="standard")
+        if on is None:
+            continue
+        accepted += 1
+        dropped = {c for c in p if any(str(w).startswith(("route: excluded by name", "route: replaced by"))
+                                       for w in p[c].get("why") or [])}
+        miss = sorted(c for c in named if c not in on and c not in dropped)
+        back = sorted(c for c in dropped if c in on)
+        if miss or back:
+            bad.append("%s: named but off %s, dropped but on %s" % (s, miss, back))
+    check(not bad and accepted >= 12,
+          "R153 И-8 (j) on %d accepted sentences the readers agree both ways: chosen and not dropped runs, dropped "
+          "or replaced does not" % accepted, "; ".join(bad)[:300])
+    sk = getattr(_r, "_subst_kind", None)
+    check(callable(sk) and "_subst_kind(" in inspect.getsource(_r._selection_tokens)
+          and "_subst_kind(" in inspect.getsource(_r.apply_route),
+          "R153 И-8 (k) ONE «вместо» decision: apply_route and _selection_tokens both ask _subst_kind",
+          "subst_kind=%s" % callable(sk))
 
 
 def suite_r153_i7_hotfix():
