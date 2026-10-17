@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.113.2 — 2026-10-17
+
+The first screen says what its sample run does and does not show. Nine reviewers read 1.113.1's new section: all nine caught the same arithmetic slip, and seven saw that a «dead links» column alone hid how many links were never confirmed.
+
+- **README and README.ru, «What a real run found»** (was «What one run returns», too close to «What one run looks like» further down). A Live column beside Dead, with one line on what each means; † on the three routes the published version leaves off, and the intro says the seven are not the default panel. «26 min 31 s, 15 seconds more than the slowest voice» replaces «27 minutes, the time of its slowest voice», which the table's own 26 min contradicted. The awesome-claude-code rule is quoted whole, with its exception, and linked; MiMo Flash's quote is marked as cut; Spark's two dead links are named as one real page cited twice. The default panel's cost and `--dry-run` close the section, with a link to the console sample.
+- **The data-flow sentence** names what the tool does on its own: a version check against GitHub at most once a week, as PRIVACY.md says.
+- **The hallucination check** is described as what it checks: dead links, links cited without being opened, quiet refusals.
+- The English README's terminal example says `--route "only CLI"` (it was the Russian phrase; both give the same plan); the tagline reads «Every AI model knows different things»; the Russian twin is reworded in eight places.
+- No code changed.
+
 ## 1.113.1 — 2026-10-17
 
 The README opens with what one run returns. Until now a first-time visitor read the promise and then, as the first section, a table of accounts, keys and CLIs: nothing on the page showed a run's output above that cost.

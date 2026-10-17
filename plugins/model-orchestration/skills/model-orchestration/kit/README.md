@@ -4,29 +4,31 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![no dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](INSTALL.md)
 
-**Every AI model knows its own things. Ask several at once and you get not only a check, but advice no single model would have given you — including on what you did not ask.**
+**Every AI model knows different things. Ask several at once and you get not only a check, but advice no single model would have given you — including on what you did not ask.**
 
-**One document goes to several AI models at once, and one report comes back.** Sending your document to the vendors you pick is the whole point; the tool itself has no server and collects nothing ([what goes where](PRIVACY.md)).
+**One document goes to several AI models at once, and one report comes back.** Sending your document to the AI vendors behind the channels you turn on is the whole point; the tool itself has no server and collects nothing, and on its own it only checks GitHub for a new version, at most once a week ([what goes where](PRIVACY.md)).
 
-## What one run returns
+## What a real run found
 
-A real run of version 1.113.0 on 2026-10-17. Seven CLI agents on the author's machine were asked where this tool should be listed and what would block a listing, with our own table of channels and their rules attached. From the run's REPORT.md:
+A run of version 1.113.0 on 2026-10-17, on the author's machine and accounts: seven CLI agents, not the published default panel (that one is below). They were asked where this tool should be listed and what would block a listing, with our own table of channels and their rules attached. From that run's REPORT.md, which stays on the author's machine:
 
-| Model (how it ran) | Time | Links cited | Dead links |
-|---|---|---|---|
-| GPT-6.1 Sol (Codex CLI) | 16 min | 50 | 0 |
-| Qwen 3.8 Max (Qwen Code CLI) | 26 min | 14 | 0 |
-| Grok 4.7 (Grok Build CLI) | 7 min | 21 | 0 |
-| Gemini 3.8 Flash (Antigravity CLI) | 5 min | 29 | 0 |
-| Muse Spark 1.3 (opencode) | 1 min | 22 | 2 |
-| MiMo v2.6 Pro (mimo CLI) | 8 min | 1 | 0 |
-| MiMo v2.6 Flash (opencode) | 12 min | 0 | — |
+| Model (how it ran) | Time | Links cited | Live | Dead |
+|---|---|---|---|---|
+| GPT-6.1 Sol (Codex CLI) | 16 min | 50 | 40 | 0 |
+| Qwen 3.8 Max (Qwen Code CLI) † | 26 min | 14 | 7 | 0 |
+| Grok 4.7 (Grok Build CLI) | 7 min | 21 | 17 | 0 |
+| Gemini 3.8 Flash (Antigravity CLI) | 5 min | 29 | 21 | 0 |
+| Muse Spark 1.3 (opencode, Go plan) † | 1 min | 22 | 16 | 2 |
+| MiMo v2.6 Pro (mimo CLI) † | 8 min | 1 | 1 | 0 |
+| MiMo v2.6 Flash (opencode) | 12 min | 0 | — | — |
 
-- **A rule our own table had missed.** It said we meet the entry rules of the awesome-claude-code list. Five of the seven (GPT-6.1 Sol, Qwen, Grok, Gemini, MiMo Pro) pointed to the next clause: «if your project requires any form of signup or payment, this is a blocker for reviewing it».
-- **A disagreement, kept in view.** Build an MCP server now? MiMo Flash: «Build it — as a thin wrapper, started now». The other six: not now.
-- **What was cited is not what was read.** Gemini cited 29 links and had opened 2 of them. Two of Muse Spark's links were shortened with «...» and lead to a 404.
+† A route the published version leaves off. *Live*: the link opened when the tool checked it; *dead*: it returned 404; the rest had moved, blocked the check or could not be checked. A live link does not show that the model read it.
 
-The run took 27 minutes, the time of its slowest voice. Three of the seven ran on the author's own accounts through channels the published version leaves off (Qwen Code CLI, mimo CLI, Muse Spark on the OpenCode Go plan); the panels it ships and what they cost are below.
+- **A rule our own table had missed.** It said we meet the entry rules of the awesome-claude-code list. Five of the seven (GPT-6.1 Sol, Qwen, Grok, Gemini, MiMo Pro) pointed to a rule further down [its CONTRIBUTING.md](https://github.com/hesreallyhim/awesome-claude-code/blob/main/CONTRIBUTING.md): «if your project requires any form of signup or payment, this is a blocker for reviewing it - I can only recommend such a resource on the basis of community adoption signals».
+- **A disagreement, kept in view.** Build an MCP server now? MiMo Flash, the one voice that cited no links: «Build it — as a thin wrapper, started now…». The other six: not now.
+- **What was cited is not what was read.** Gemini cited 29 links; the tool saw it open 2 of them. Muse Spark's two dead links are one real GitHub Docs page, cited twice with part of the path replaced by «...».
+
+The seven worked in parallel: 74 minutes of model time took 26 min 31 s, 15 seconds more than the slowest voice. The published default panel costs about $0.06 a run on your OpenRouter key plus your subscriptions (details below), and `--dry-run` shows the plan before anything is spent. What the console shows during a run is in [What one run looks like](#what-one-run-looks-like).
 
 A panel pays off twice:
 1. **Different knowledge.** Each model was trained on its own data and runs in its own harness: the vendor's CLI agent or an API, its own web search, its own way of reading pages. So when you ask "how should I design this" or "review this code", each one answers with its own recommendations, and together they cover more than any one of them.
@@ -38,7 +40,7 @@ Send the same document **to several independent AI models at once**: GPT, Gemini
 - what each model found and what it recommends;
 - its UNASKED section — what matters that you did not ask about;
 - where the models contradict each other;
-- a mechanical check that catches **AI hallucinations**: fabricated citations, invented sources and quiet refusals.
+- a mechanical check for the **AI hallucinations** a script can catch: dead links, links the model cited without opening them, and quiet refusals.
 
 **Any AI agent can install it, not only Claude Code.** Any agent with terminal access will do — for example Codex CLI, Cursor, Gemini CLI, opencode, Kimi Code or Qwen Code: this is plain Python with no dependencies. Give the agent the repository link and ask it to install the tool ([a ready-made request is under «Install»](#install)). The repository carries [AGENTS.md](AGENTS.md), the instructions for AI agents on how to install the tool and run a review, so from then on the agent runs the panel itself. The sequence an agent runs — `install.ps1`, `doctor.py` and a free `--dry-run` — was checked on 2026-10-05 from a plain terminal, without Claude Code.
 
@@ -76,7 +78,7 @@ To check what was found: `python doctor.py`. It prints which keys and programs i
 
 In Claude Code with the plugin (and in any agent you gave the line from the top of this page) just say it in plain words:
 
-| You say | What runs (version 1.113.1) |
+| You say | What runs (version 1.113.2) |
 |---|---|
 | **"second opinion"** (for example, "give me a second opinion on this file") | **The cheap panel**, the default: 5 models |
 | **"second opinion, CLI only"** | Only the CLI agents of the cheap panel: 4 models — Muse Spark, MiMo v2.6 Flash, Gemini 3.8 Flash and Grok 4.7. Not one paid request on your OpenRouter key |
@@ -88,7 +90,7 @@ In Claude Code with the plugin (and in any agent you gave the line from the top 
 | "only agy31pro" or "only agypro" | Gemini 3.1 Pro: it starts only when named |
 | "don't use openrouter" | Everything except the OpenRouter channels |
 
-From a terminal the same is done with flags: `--panel cheap` (the default), `--panel standard`, `--route "только CLI"`, `--only codex`, `--skip openrouter`. You can see the plan before anything is spent, for free: `python routing.py` or `--dry-run`.
+From a terminal the same is done with flags: `--panel cheap` (the default), `--panel standard`, `--route "only CLI"`, `--only codex`, `--skip openrouter`. You can see the plan before anything is spent, for free: `python routing.py` or `--dry-run`.
 
 ## Panels: prices as of 2026-10-05, line-up as of 1.112.0
 
