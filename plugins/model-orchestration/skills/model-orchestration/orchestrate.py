@@ -9189,8 +9189,16 @@ KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "he
 # файлы, а отправлять ссылки на документы и папки, чтобы они могли сами изучить дополнительное».
 # `hermes` is deliberately absent: its toolset grant is `web` only, so handing it a path would
 # name a capability it does not have - the model would report OUR gap as its own failure.
-# API kinds are structurally absent: a remote endpoint cannot open this disk.
-REFS_KINDS = ("codex", "agy", "grokcli", "claudecli", "qwencli")
+# `musecode` too: its file tools are rooted at its workspace (call_musecode). API kinds are
+# structurally absent: a remote endpoint cannot open this disk.
+# R154 (2026-10-17): opencode, mimocli and kimicli arrived after R46 and were never added here, so
+# they got every attachment INLINE: in a Page2AI round (T121) Spark received a 229K-char package in
+# one message, its cwd held no file, and it could open or run nothing on disk while codex ran 23
+# commands and grok 24 reads + 23 commands on the paths. Their own stores show the harness's
+# invocation reads outside its cwd (opencode `read` 761 completed on absolute paths, MiMo Code grep
+# 395 / glob 63, Kimi Read 144 / Grep 83, no refusal; runs/r154-spark-chat/). Their shell is on
+# (TOOLS_ALWAYS_FULL_KINDS), so they get the tools-ON contract, as claudecli and qwencli do.
+REFS_KINDS = ("codex", "agy", "grokcli", "claudecli", "qwencli", "opencode", "mimocli", "kimicli")
 
 
 # R142 И-2: the size from which a FAILED channel's text is an answer for the reader. The same number
@@ -11643,16 +11651,18 @@ def main():
     # read this disk, so the same --attach inlines for API channels and references for CLI ones;
     # the read-only contract is prose in the brief PLUS a mechanical no-write fence per channel.
     ap.add_argument("--attach", action="extend", nargs="*", default=[], metavar="FILE",
-                    help="a document reviewed alongside the brief. CLI channels (codex, agy, "
-                         "grok build) get the ABSOLUTE PATH and read it themselves, read-only, "
-                         "so they can also consult surrounding material; API channels get it "
-                         "INLINED as an ATTACHMENT block. The secrets scan covers the content "
-                         "either way. Repeatable")
+                    help="a document reviewed alongside the brief. CLI channels that run on this "
+                         "machine (codex, agy, grok build, Claude Code, Qwen, opencode, MiMo Code, "
+                         "Kimi Code) get the ABSOLUTE PATH and read it themselves, told to change "
+                         "nothing, so they can also consult surrounding material; API channels, "
+                         "Hermes and Muse Code get it INLINED as an ATTACHMENT block. The secrets "
+                         "scan covers the content either way. Repeatable")
     ap.add_argument("--attach-dir", action="extend", nargs="*", default=[], metavar="DIR",
-                    help="a folder of supporting material. Scanned text files are INLINED to "
-                         "all channels; CLI channels also get a VETTED COPY on disk and can "
-                         "read surrounding material. Binary/oversized files are excluded by the "
-                         "vetting scan (skips printed by name). Repeatable")
+                    help="a folder of supporting material. Its scanned text files are INLINED "
+                         "for the channels that get --attach inline; the CLI channels get the "
+                         "paths of a VETTED COPY on disk instead and can read surrounding "
+                         "material. Binary/oversized files are excluded by the vetting scan "
+                         "(skips printed by name). Repeatable")
     ap.add_argument("--attach-budget", type=int, default=0, metavar="CHARS",
                     help="max total chars for inline content (0 = unlimited). "
                          "If --attach files + --attach-dir scanned content exceeds "
@@ -12129,13 +12139,14 @@ def main():
         log("attachments: %d file(s), %d chars inline%s"
             % (len(atts), _att_chars,
                ("; %d folder(s), scanning..." % len(att_dirs)) if att_dirs else ""))
-        log("  API channels receive file(s) INLINE%s. CLI channels (codex, agy, grok build) "
-            "receive ABSOLUTE PATHS and read from this disk themselves - read-only, no write or "
-            "shell tools, and they may consult surrounding material. The Claude Code CLI "
-            "channel (cclopus46) is the exception: it runs with permission prompts bypassed, "
-            "so its shell and file-editing tools are live too."
-            % ("; folder files also INLINE to all channels after vetting scan"
-               if att_dirs else ""))
+        # R154: built from REFS_KINDS - the hard-coded «codex, agy, grok build» outlived five more kinds.
+        log("  CLI channels of the kinds %s receive ABSOLUTE PATHS%s and read from this disk "
+            "themselves, told to change nothing; they may consult surrounding material. Every other "
+            "channel (API, hermes, musecode) receives the file(s) INLINE. codex, agy and grok build are "
+            "read-only unless bypass is on; %s always run their shell and edit tools, so for them "
+            "read-only is the brief's rule, not a fence."
+            % (", ".join(REFS_KINDS), " (of a VETTED COPY for folders)" if att_dirs else "",
+               ", ".join(k for k in REFS_KINDS if k in TOOLS_ALWAYS_FULL_KINDS)))
         log("  🔴 refs mode TRUSTS the attached material: a hostile document can steer a CLI "
             "reviewer's read tools (grok build's read_file is not bounded by its cwd - "
             "measured) - and on cclopus46 its shell and edit tools as well. Attach material "

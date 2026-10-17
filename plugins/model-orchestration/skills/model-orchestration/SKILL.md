@@ -117,7 +117,7 @@ are the registry key, upper-cased.
 | `--marker` | literal string the reply must end with; absent ⇒ incomplete |
 | `--out` | run folder (default `./reviews`): outside every project, not TEMP. A new drive-root folder is refused |
 | `--system` | preset name or path (§0.2). The no-non-existence rule is appended — end the file with a newline |
-| `--attach` / `--attach-dir` | document / folder beside the brief. `--attach`: files **inline** to all channels (CLI also gets the **absolute path**). `--attach-dir`: scanned folder files **inline** to all channels; CLI also gets a **vetted copy** on disk (skips listed; original path never sent). 🔴 Refs trust the attachment: only material you authored |
+| `--attach` / `--attach-dir` | document / folder beside the brief. `--attach`: API channels get the file **inline**, CLIs (opencode, mimo, kimi too) only its **absolute path**. `--attach-dir`: same split, CLIs get a **vetted copy** (skips listed; original path never sent). 🔴 Refs trust the attachment: only material you authored |
 | `--answer-cap` | ask every reviewer to keep the FINAL answer under N chars (default `20000` ≈ 5K tokens; `0` = off and the `--ask` default). Prompt-level at the payload TAIL, after attachments — depth and `max_tokens` untouched; `HANDOFF.md` names who exceeded it or declared `TRUNCATED-BY-LIMIT` |
 | `--only` | restrict channels. Names, aliases and **group** words all work — vendor families and billing paths; `routing.py` prints every accepted spelling. 🔴 One channel per argument: `--only a b c`, never `--only "a b c"` |
 | `--skip` | the inverse of `--only`; on a clash (`--only <group> --skip <member>`) **skip wins** |

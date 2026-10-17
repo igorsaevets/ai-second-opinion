@@ -62,8 +62,9 @@ documents that hold the detail. It deliberately holds no channel list, no counts
   `fetch_tool` returns (limited to 5 calls). A GitHub URL in the brief does NOT give them the
   code — they must guess paths, and a wrong path is a wasted fetch. Use `--attach <file>` to
   inline file contents for API channels (CLI channels receive the path and read from disk).
-  `--attach-dir <dir>` scans the folder and sends all readable files inline to every channel;
-  CLI channels additionally receive a vetted copy on disk and can read surrounding material.
+  `--attach-dir <dir>` scans the folder and sends its readable files inline to the API
+  channels; CLI channels receive the paths of a vetted copy on disk instead and can read
+  surrounding material.
   For code review: `--attach` specific key files + `--attach-dir` for the full tree.
   All channels see both; CLI channels can additionally consult neighbouring files.
 - **The PII line is the operator's job, not the tool's.** Secrets are blocked outright;

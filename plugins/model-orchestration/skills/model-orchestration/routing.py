@@ -52,7 +52,10 @@ NEG = ["не использовать", "не используй", "не исп�
        "не нужно", "исключи", "исключить", "убери", "убрать", "выключи", "выключить",
        "отключи", "отключить", "без ", "кроме ", "минус ",
        "do not use", "don't use", "dont use", "skip", "without", "except", "exclude", "no "]
-SUBST = ["вместо", "взамен", "заменить на", "замени на", "instead of", "replace with", "->", "→"]
+# R153 И-11 (r153i9 Grok G1): «вместо того чтобы» is «instead of doing», not the pronoun «вместо того» (И-8):
+# «grokbuild вместо того чтобы использовать codex» ran codex and dropped grokbuild. The longest marker wins in _scan.
+SUBST = ["вместо", "взамен", "заменить на", "замени на", "instead of", "replace with", "->", "→",
+         "вместо того чтобы", "вместо того, чтобы", "вместо того чтоб", "вместо того, чтоб", "instead of using"]
 # R153 И-8: «вместо него / них / этого» points BACK at what the sentence just named («не используй X, вместо него Y»,
 # «kimik3, вместо него kimik3free»). One marker (the longest marker wins in _scan), so the pronoun is not lost and
 # the name after it is never read as the target - r153i7 (MiMo Pro): «kimik3, вместо него kimik3free» ran the PAID
@@ -98,6 +101,22 @@ ADD = ["и ещё", "и еще", "а также", "плюс ", "добавь", "
        # «вместо» target an ADD word introduces the replacement (apply_route).
        "возьми", "возьмите", "бери", "берите",
        "and also", "plus ", "add ", "including", "use ", "pick ", "choose ", "set "]
+# 🔴 R153 И-11 (2026-10-17, panel r153i9): FOUR LISTS THE POLARITY AND ORDER RULES NEEDED AND DID NOT HAVE.
+# «A -> B», «A, замени на B», «A replace with B» name the REPLACED channel first - the opposite of «Y вместо X». My
+# И-7 fix made the word before every SUBST marker the replacement, so «kimik3 -> kimik3free» ran the PAID kimik3 and
+# dropped the free one from 1.112.3 on (1.112.2 read it right; MiMo Pro P1, Grok G4). _swap_reversed turns them round.
+_REVERSED_SUBST = frozenset(("заменить на", "замени на", "replace with", "->", "→"))
+# After «только» an ADDITIVE word adds: «только добавь codex» ran codex ALONE in 1.112.4 (Spark S3) - the И-8
+# collapse took «добавь» for «используй». «только используй / возьми / выбери codex» stays «only codex».
+_ADDITIVE = frozenset(("и еще", "а также", "плюс ", "добавь", "добавить", "дополнительно", "вместе с", "включая",
+                       "включительно", "в том числе", "and also", "plus ", "add ", "including"))
+# The English negators both flips missed: «don't pick codex», «never use codex», «doesn't use codex» ADDED the
+# expensive codex (agy A1, Grok G2, Spark S1, MiMo Flash F2); «don’t» (U+2019) is folded to «'» in _scan.
+_NEGATOR = r"(?:не|нe|not|never|cannot|(?:do|does|did|wo|ca|could|would|should|must|need)n'?\s?t)"
+_APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'", "\x60": "'"})
+# Connectives that hold a NEG word: «кроме того, добавь codex» is «moreover», not «except» (Grok G6). Dropped only
+# before a comma, a colon, a dash or the end, so «кроме того дорогого codex» still excludes.
+_NOISE = ["кроме того", "кроме этого", "без разницы"]
 
 
 class RouteError(Exception):
@@ -1225,13 +1244,20 @@ def extract_panel(reg, text):
 
 def _scan(text, idx):
     """Produce an ordered stream of ('neg'|'subst'|'only'|entity) tokens with their positions."""
-    t = " " + text.lower().replace("ё", "е") + " "
+    # R153 И-11: «don’t use codex» (U+2019, what phones and word processors type) ADDED codex. One char for one char,
+    # so a position here is still the position in the text.
+    t = " " + text.lower().replace("ё", "е").translate(_APOSTROPHES) + " "
     marks = []
-    for kind, words in (("neg", NEG), ("subst", SUBST), ("subst", SUBST_ANAPHOR), ("only", ONLY), ("add", ADD)):
+    for kind, words in (("noise", _NOISE), ("neg", NEG), ("subst", SUBST), ("subst", SUBST_ANAPHOR), ("only", ONLY),
+                        ("add", ADD)):
         for w in words:
             for m in re.finditer(re.escape(w), t):
-                if w[0].isalnum() and (t[m.start() - 1].isalnum() or t[m.start() - 1] == "_"):
-                    continue      # R153 И-8: a marker starts a word - «refuse codex» held «use » and ADDED codex
+                if w[0].isalnum() and (t[m.start() - 1].isalnum() or t[m.start() - 1] in "_-"):
+                    # R153 И-8: a marker starts a word - «refuse codex» held «use » and ADDED codex. R153 И-11: a hyphen
+                    # too - «не-используй codex» and «non-use codex» ADDED codex (r153i9 Grok G5).
+                    continue
+                if kind == "noise" and not re.match(r"\s*(?:[,:;\u2013\u2014-]|$)", t[m.end():]):
+                    continue
                 # 🔴🔴 A NEGATED ADD IS A NEGATION, AND GETTING THIS WRONG PUT THE $12 CHANNEL IN
                 # A ROUND THAT SAID «NOT». Found by a reviewer, by execution, in the round that
                 # created it: «Запусти все, НЕ включая Terra pro» matched the ADD word «включая»
@@ -1241,15 +1267,32 @@ def _scan(text, idx):
                 # sentences a human would actually write meant the SAME thing and one of them
                 # was a lie. Checked here rather than in apply_route because a marker's polarity
                 # is a property of the token, not of the branch that later consumes it.
+                before = t[max(0, m.start() - 14):m.start()]
                 if kind in ("add", "only", "subst"):
-                    before = t[max(0, m.start() - 14):m.start()]
-                    if kind == "only" and re.search(r"(?:^|\s)(?:не|not)\s*$", before):
+                    if kind == "only" and re.search(r"(?:^|\s)%s\s*$" % _NEGATOR, before):
                         # R153 И-8: «запусти не только codex, но и grokbuild» / «not only codex» ADDS - the negated
-                        # «только» was an exclusion, and the sentence dropped both names.
+                        # «только» was an exclusion, and the sentence dropped both names. R153 И-11: «don't only use
+                        # codex» / «don't just use codex» too (they ran codex alone).
                         marks.append((m.start(), "add", w))
                         continue
-                    if re.search(r"(?:^|\s)(?:не|нe|without|not|кроме|без)\s*$", before):
+                    if re.search(r"(?:^|\s)(?:without|кроме|без|%s)\s*$" % _NEGATOR, before):
                         marks.append((m.start(), "neg", w))
+                        continue
+                    if kind == "only" and re.match(r"[\s,;:\u2013\u2014-]+(?:не|нe|not)\s", t[m.end():]):
+                        # 🔴 R153 И-11: «только не codex» and «всё что угодно, только не codex» - the commonest Russian
+                        # «anything but codex» - ran codex ALONE through every release: a bare «не» is no marker, so
+                        # «только» kept its meaning (r153i9 MiMo Flash F1). «только не используй codex» reads the same.
+                        marks.append((m.start(), "neg", w))
+                        continue
+                elif kind == "neg":
+                    if re.search(r"(?:^|\s)%s\s*$" % _NEGATOR, before):
+                        # R153 И-11: a negated exclusion includes - «не без ocspark13free» / «don't exclude
+                        # ocspark13free» turned the free Spark OFF and the paid spark13cont ON (r153i9 Grok G7, G11).
+                        marks.append((m.start(), "add", w))
+                        continue
+                    if w in ("кроме ", "except") and re.search(r"(?:^|\s)(?:ничего|никого|nothing|nobody)[\s,]*$",
+                                                                before):
+                        marks.append((m.start(), "only", w))       # R153 И-11: «ничего кроме X» = только X
                         continue
                 marks.append((m.start(), kind, w))
     # 🔴 R153 И-8: THE LONGEST MARKER WINS. Every marker word was matched on its own, so «don't use codex» held the
@@ -1264,7 +1307,7 @@ def _scan(text, idx):
             continue
         kept.append(mk)
         reach = max(reach, mk[0] + len(mk[2]))
-    marks = kept
+    marks = [mk for mk in kept if mk[1] != "noise"]      # a connective has won its span and says nothing
     ents = []
     taken = []
     for al, ent in idx:                       # longest-first, so "5.6 sol" wins over "5.6"
@@ -1287,7 +1330,9 @@ def _scan(text, idx):
             if first_kind == "neg" and kind != "neg":
                 cleaned.append(tok)                   # both: the «не» binds the names before it (R86 hoist)
             elif first_kind == "only" and kind == "add":
-                pass                                  # «только используй X» = only X
+                if tok[2] in _ADDITIVE:
+                    cleaned[-1] = tok                 # R153 И-11: «только добавь codex» adds (Spark S3; 1.112.3 did)
+                # else «только используй X» = only X
             elif first_kind == "only" and kind == "subst":
                 cleaned.append(tok)                   # an «only» sentence whose names come after «вместо»
             elif first_kind == "subst" and kind == "add":
@@ -1444,6 +1489,60 @@ def _detect_silent_drop(text, stream, alias_idx, reg):
 _ROUTE_MARKERS = ("neg", "subst", "only", "add")
 
 
+def _swap_reversed(stream, text, strict):
+    """
+    🔴 R153 И-11: «A -> B», «A, замени на B», «A replace with B» = «B вместо A» - the REPLACED channel comes first. The
+    И-7 order rule («the word before вместо is the replacement») read them backwards: «kimik3 -> kimik3free» ran the
+    PAID kimik3 and dropped the free one from 1.112.3 on. With one written word on each side (a model of the same
+    channel beside it does not count: «codex 5.5 -> 6.1 sol») the two words trade places, positions kept, and the
+    marker becomes «вместо»; any other shape is refused (strict) or left as it is (lenient).
+    """
+    out = list(stream)
+    for k, tok in enumerate(stream):
+        if tok[1] != "subst" or tok[2] not in _REVERSED_SUBST:
+            continue
+        lo, hi = k, k + 1
+        while lo > 0 and out[lo - 1][1] == "entity":
+            lo -= 1
+        while hi < len(out) and out[hi][1] == "entity":
+            hi += 1
+        left, right = out[lo:k], out[k + 1:hi]
+        one = all(len({t[0] for t in side}) == 1 or len({t[2][1] for t in side}) == 1 for side in (left, right))
+        if left and right and one:
+            a, b = k, k + 1
+            while a > lo and out[a - 1][0] == out[k - 1][0]:
+                a -= 1
+            while b < hi and out[b][0] == out[k + 1][0]:
+                b += 1
+            pl, pr = out[k - 1][0], out[k + 1][0]
+            out[a:b] = ([(pl, "entity", t[2]) for t in out[k + 1:b]] + [(tok[0], "subst", "вместо")]
+                        + [(pr, "entity", t[2]) for t in out[a:k]])
+            continue
+        if strict:
+            raise RouteError(
+                "%r uses «%s», which names the channel to REPLACE first («A %s B» = run B instead of A), but it does "
+                "not stand between exactly one name on each side, so the router cannot tell what replaces what. Say "
+                "«B вместо A», one swap at a time («kimik3free вместо kimik3, grokbuild вместо codex»)."
+                % (text, tok[2].strip(), tok[2].strip()))
+    return out
+
+
+def _join_subst_targets(stream):
+    """R153 И-11: «вместо kimik3 и codex возьми grokbuild» replaced kimik3 only and STARTED codex (r153i9 Grok G3; old):
+    the names between a «вместо» and the add word that introduces the replacement are ONE target (one position)."""
+    out = list(stream)
+    for k, tok in enumerate(out):
+        if tok[1] != "subst" or tok[2] in _SUBST_ANAPHOR_SET:
+            continue
+        j = k + 1
+        while j < len(out) and out[j][1] == "entity":
+            j += 1
+        if j < len(out) and out[j][1] == "add" and len({t[0] for t in out[k + 1:j]}) >= 2:
+            p0 = out[k + 1][0]
+            out[k + 1:j] = [(p0, "entity", t[2]) for t in out[k + 1:j]]
+    return out
+
+
 def _route_stream(stream, text=None, strict=False):
     """
     R153 И-7: put a route's tokens in the order BOTH readers walk them - apply_route (strict) and _selection_tokens
@@ -1453,8 +1552,10 @@ def _route_stream(stream, text=None, strict=False):
     the front (R86). «kimik3free вместо kimik3» -> an implicit «add» goes in front instead: the entity before
     «вместо» is the replacement, the one after it the target (the hoist read it backwards). «codex, не используй
     grokbuild» -> names on BOTH sides of a «не»: strict refuses (is codex kept or dropped?), lenient hoists.
+    R153 И-11: first the reversed markers turn round («A -> B» = «B вместо A», _swap_reversed) and «вместо A и B
+    возьми C» gets one target (_join_subst_targets).
     """
-    stream = list(stream)
+    stream = _join_subst_targets(_swap_reversed(list(stream), text, strict))
     first = next((i for i, t in enumerate(stream) if t[1] in _ROUTE_MARKERS), None)
     if not first:
         return stream
@@ -1510,9 +1611,13 @@ def _subst_kind(lt, i, pending_neg, prev_sel, neg_run):
     if n1 != "entity":
         return "refuse:dangling"
     if pending_neg is not None:
-        if n2 in ("entity", "add"):
+        if n2 == "add":
             return "prefix"
-        return "refuse:neg-list" if neg_run >= 2 else "anaphora"
+        if neg_run >= 2:
+            # R153 И-11: «не используй grokbuild, kimik3free вместо kimik3 codex» ran codex and dropped the free
+            # kimik3free; the other reading keeps kimik3free and drops codex (r153i9 Grok G11c/G13) - two readings.
+            return "refuse:neg-list"
+        return "prefix" if n2 == "entity" else "anaphora"
     if prev_sel is not None:
         return "prefix" if n2 == "add" else "infix"
     return "prefix"
@@ -1527,6 +1632,10 @@ def _dangling_subst_msg(text, vals):
 def _trailing_neg_msg(text, lt, i):
     j = max((k for k in range(i) if lt[k][0] in _ROUTE_MARKERS), default=-1)
     before = [v for k in range(j + 1, i) if lt[k][0] == "entity" for v in lt[k][1]]
+    if not before:
+        # R153 И-11: «не используй ничего, только codex» was told «after names ... (none)» (r153i9 MiMo Flash F-Q3a).
+        return ("%r has a «не ...» with no channel name after it, so it is not clear what it drops. Put the names you "
+                "exclude right after it: «не используй X»; for «nothing but X» say «только X»." % text)
     return ("%r ends a «не ...» with no name after it, after names the sentence already gave another instruction "
             "(%s): it cannot say which of them the «не» drops (r153i7: «kimik3 вместо kimik3free не используй» ran the "
             "PAID kimik3). Put the names you exclude right after it: «не используй X»."
@@ -1545,9 +1654,61 @@ def _subst_refusal(text, role, lt, i, pending_neg, prev_sel):
                 "используй %s»." % (text, _names(dropped), after, after, rest, last, after, rest, last, after,
                                      last, after, rest))
     if role == "refuse:anaphor":
+        earlier = [v for k in range(i) if lt[k][0] == "entity" for v in lt[k][1]]
+        if earlier:
+            # R153 И-11: «вместо codex возьми grokbuild, вместо него agy38flash» was told «names nothing before it»
+            # with two names before it (r153i9 MiMo Flash F-Q3b).
+            return ("%r says «%s», and it cannot tell which earlier name that points back at (%s). Name it: «вместо X "
+                    "возьми Y»." % (text, lt[i][1], _names(earlier)))
         return ("%r says «%s» but names nothing before it to replace. Say «вместо X возьми Y»."
                 % (text, lt[i][1]))
     return _dangling_subst_msg(text, prev_sel or pending_neg)
+
+
+# R153 И-11: the second reader's own word lists - deliberately NOT _scan's markers (see _negation_guard).
+_GUARD_NEG = frozenset(("не", "нe", "ни", "not", "no", "never", "cannot", "without", "except", "excluding", "exclude",
+                        "skip", "без", "кроме", "минус", "исключи", "исключить", "исключая", "убери", "убрать",
+                        "выключи", "выключить", "отключи", "отключить"))
+_GUARD_NEG_RE = re.compile(r"(?:do|does|did|wo|ca|could|would|should|must|need)n'?t$")
+_GUARD_CANCEL = frozenset(("только", "лишь", "only", "just"))
+_GUARD_NOTHING = frozenset(("ничего", "никого", "nothing", "nobody"))    # «ничего кроме X» = только X
+
+
+def _negation_guard(text, stream, plan, chosen):
+    """
+    🔴 R153 И-11 (2026-10-17): A SECOND READER THAT IS NOT A MIRROR. Three rounds in a row (r153i6, r153i7, r153i9)
+    found sentences that ran a channel the speaker had excluded, and each passed the suite's agreement check: apply_route
+    and _selection_tokens share _scan and _route_stream, so a defect both readers share is invisible to a test that
+    compares them («только не codex» ran codex ALONE through every release). This reader knows no markers. When an odd
+    number of negation words stands in the two words right before a channel's name and the route RUNS that channel by
+    name, the run stops and asks («только codex и не kimik3», «добавь codex, но не kimik3» ran the paid kimik3). It
+    never changes a plan; it only refuses. «не только X», «не без X», «don't exclude X» are even or cancelled. Only a
+    channel's LAST mention is read: «не используй cli, добавь codex» excludes the group and then adds codex (И-7 (h)).
+    """
+    t = " " + text.lower().replace("ё", "е").translate(_APOSTROPHES) + " "
+    last = {}
+    for pos, kind, ent in stream:
+        if kind == "entity":
+            last[ent[1]] = max(pos, last.get(ent[1], -1))
+    for chan, pos in last.items():
+        if chan not in chosen or not plan[chan]["enabled"]:
+            continue
+        ent = (None, chan)
+        window = []
+        head = re.sub(r"(ничего|никого|nothing|nobody)\s*,", r"\1 ", t[:pos])
+        for w in reversed(re.findall(r"[\w']+|[^\w\s'-]", head)):
+            if not (w[0].isalnum() or w[0] == "_") or len(window) == 2:
+                break
+            window.insert(0, w)
+        neg = [w for k, w in enumerate(window) if (w in _GUARD_NEG or _GUARD_NEG_RE.match(w))
+               and not (k + 1 < len(window) and window[k + 1] in _GUARD_CANCEL)
+               and not (k > 0 and window[k - 1] in _GUARD_NOTHING)]
+        if len(neg) % 2:
+            raise RouteError(
+                "%r puts «%s» right before %s, and this route would RUN %s: the router's grammar and a plain reading "
+                "of the words disagree, and that gap is money. Say «не используй %s» to drop it, or name it without "
+                "the «%s» («добавь %s», «только %s») to run it."
+                % (text, neg[-1], ent[1], ent[1], ent[1], neg[-1], ent[1], ent[1]))
 
 
 def apply_route(plan, reg, text):
@@ -1560,6 +1721,7 @@ def apply_route(plan, reg, text):
     # 🔴 R90 2026-09-14: refuse to drop model-looking words after a known channel.
     # See _detect_silent_drop for the full rationale and #44 criterion 1 in BACKLOG.md.
     _detect_silent_drop(text, stream, idx, reg)
+    scanned = stream                    # R153 И-11: the positions as written, for _negation_guard
 
     # 🔴 R86 2026-09-14 / R153 И-7 2026-10-16: ENTITIES BEFORE THE FIRST MARKER. Russian puts the object first
     # («в codex используй 5.6 sol»), so R86 hoisted that marker to the front - right for «используй» and for a
@@ -1766,6 +1928,9 @@ def apply_route(plan, reg, text):
                 plan[c]["enabled"] = True
                 plan[c].pop("_route_off", None)
                 plan[c]["why"].append("route: named explicitly (overrides default-off)")
+
+    # R153 И-11: the independent check, after every mode has run and before anything else reads the plan.
+    _negation_guard(text, scanned, plan, set(only_list) | set(selected))
 
     # A refused model with no stated replacement: fall back to the next model in registry order
     # and SAY SO in the plan. Registry order is curated, so this is deterministic - but it is
@@ -2262,20 +2427,24 @@ def _twins_of_excluded(plan, reg, named):
         gone = [c for c in members if _excluded_by_name(plan[c])]
         if not gone:
             continue
-        replaced = any(str(w).startswith("route: replaced by") for w in plan[gone[0]].get("why") or [])
         for c in members[members.index(gone[0]) + 1:]:
             if not plan[c]["enabled"] or c in (named or ()) or plan[c].get("_user_off"):
                 continue
             if (chans.get(c) or {}).get("cost") in _NON_PAID_COSTS:
                 continue
-            if replaced:
+            # 🔴 R153 И-11: EVERY gone member before c counts, not gone[0]. «grokbuild вместо wonder10» with
+            # `--skip mcwonder10cont` ran the paid orwonder (gone[0] was only skipped); the same for kimik3 and
+            # orspark13cont (r153i9 Grok G10, MiMo Flash F3, agy A-Q2-1).
+            before = [g for g in gone if members.index(g) < members.index(c)]
+            repl = [g for g in before if any(str(w).startswith("route: replaced by") for w in plan[g].get("why") or [])]
+            if repl:
                 plan[c]["enabled"] = False
                 plan[c]["why"].append(
                     "cascade: %s is replaced in this run, so its twin does not take its place - %s; name %s to "
-                    "start it" % (gone[0], _paid_label(c, plan, chans), c))
+                    "start it" % (repl[0], _paid_label(c, plan, chans), c))
             else:
                 plan[c]["why"].append("cascade: %s is excluded in this run, so its twin %s carries this voice - %s"
-                                      % (gone[0], c, _paid_label(c, plan, chans)))
+                                      % (", ".join(before), c, _paid_label(c, plan, chans)))
     return plan
 
 
@@ -2311,6 +2480,13 @@ def _apply_cascade(plan, reg, ready=None):
             except Exception:                            # noqa: BLE001 - see the docstring
                 verdict[c] = True
         winner = next((c for c in members if verdict[c] is True), members[0])
+        unready = [c for c in members[:members.index(winner)] if verdict[c] is not True]
+        chans = reg.get("channels") or {}
+        if unready and (chans.get(winner) or {}).get("cost") not in _NON_PAID_COSTS:
+            # R153 И-11: «добавь kimik3free» where it is not ready ran the paid kimik3 and no line said PAID (r153i9
+            # MiMo Pro P4; old).
+            plan[winner]["why"].append("cascade: %s not ready here, so %s carries this voice - %s"
+                                       % (", ".join(unready), winner, _paid_label(winner, plan, chans)))
         for c in members:
             if c == winner:
                 continue

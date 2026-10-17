@@ -7956,6 +7956,8 @@ def main():
                   suite_r153_i6_hotfix,
                   suite_r153_i7_hotfix,
                   suite_r153_i8_hotfix,
+                  suite_r154_refs_kinds,
+                  suite_r153_i11_hotfix,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -11720,9 +11722,9 @@ def suite_r137_i3_attach_truth():
     src = inspect.getsource(o.main)
     check(src.count("brief_refs_full if _tools_full(kind, cname, a, reg) else brief_refs") == 2,
           "R137 И-3: both dispatch sites (first pass and retry) pick the contract per channel")
-    check(set(o.TOOLS_ALWAYS_FULL_KINDS) & set(o.REFS_KINDS) == {"claudecli", "qwencli"},
-          "R137 И-3: among refs kinds only claudecli and qwencli always run every tool; codex, grok "
-          "and agy depend on bypass", repr(o.TOOLS_ALWAYS_FULL_KINDS))
+    check(set(o.REFS_KINDS) - set(o.TOOLS_ALWAYS_FULL_KINDS) == {"codex", "agy", "grokcli"},
+          "R137 И-3: among refs kinds codex, grok and agy depend on bypass; every other refs kind always runs "
+          "every tool (R154 added opencode, mimocli, kimicli)", repr(o.TOOLS_ALWAYS_FULL_KINDS))
 
 
 R138_GOLDEN_BEFORE = {
@@ -15251,6 +15253,185 @@ def suite_r150_i2_grok_compat():
           "(R150 И-3: a tree without the doc fails - it used to pass vacuously)", inst)
 
 
+def suite_r153_i11_hotfix():
+    """R153 И-11 (2026-10-17), kit 1.112.5 - what panel r153i9 found in the 1.112.4 route grammar, every input re-run on
+    1.112.4 first (`runs/r153-t107-kimi-mimo/i10/design-i10.md`, `i11/h_check.py`). A paid / expensive channel stands in
+    the slot each sentence turns off:
+    (a) MiMo Flash F1: «только не codex», «всё что угодно, только не codex», «only not codex» ran codex ALONE (old);
+    (b) agy A1 / Grok G2 / Spark S1 / MiMo Flash F2: «don't pick codex», «never use codex», «doesn't use codex», «don’t
+        use codex» (U+2019) ADDED codex (old); «don't only use codex» ran codex alone (1.112.4);
+    (c) MiMo Pro P1 / Grok G4: «kimik3 -> kimik3free», «kimik3, замени на kimik3free», «codex replace with grokbuild»
+        kept the REPLACED channel (the paid kimik3) - my И-7 order rule, since 1.112.3; a shape with two names on a side
+        is refused;
+    (d) Grok G1: «grokbuild вместо того чтобы использовать codex» ran codex (my И-8 anaphor «вместо того», 1.112.4);
+    (e) Grok G10 / MiMo Flash F3 / agy A-Q2-1: a replaced member's paid twin ran when an earlier member of the group was
+        only excluded (`--skip mcwonder10cont` + «grokbuild вместо wonder10» ran orwonder) - _twins_of_excluded read
+        gone[0];
+    (f) Grok G3: «вместо kimik3 и codex возьми grokbuild» started codex (old);
+    (g) Grok G7 / G11: «не без ocspark13free», «don't exclude ocspark13free» dropped the free Spark for the paid
+        spark13cont (kit; old);
+    (h) Spark S3: «только добавь codex» ran codex alone (1.112.4); Grok G5: «не-используй codex» ADDED codex (old);
+    (i) MiMo Pro P4: a named free member that is not ready hands its voice to the paid twin - the plan now says PAID;
+    (j) Grok G11c: «не используй grokbuild, kimik3free вместо kimik3 codex» (two readings, opposite money) refuses;
+    (k) the second reader (_negation_guard): «только grokbuild и не codex», «добавь grokbuild, но не codex» ran codex;
+        «ничего кроме kimik3free» = only kimik3free; messages for «не используй ничего, только codex» and a pronoun
+        with two antecedents;
+    (l) CONTROLS that worked on 1.112.4 and must keep working;
+    (m) both readers agree on the new sentences, and apply_route calls the second reader.
+    """
+    import copy as _cp
+    import inspect
+    import routing as _r
+    section("R153 И-11: «только не X», English negators, reversed «->», «вместо того чтобы», twins, second reader")
+
+    base = _r.load_registry(overlay=False)
+    kit = _cp.deepcopy(base)
+    for ch in kit["channels"].values():
+        if ch.get("distribution") == "local":
+            ch["enabled"] = False                         # what package.py does to a local channel
+
+    def runs(route, panel="cheap", reg=None, ready=None, skip=None):
+        try:
+            p = _r.resolve(_cp.deepcopy(reg or base), route=route, panel=panel, skip=skip,
+                           ready=ready or (lambda _n: True))
+        except _r.RouteError as e:
+            return None, str(e)
+        return sorted(c for c, s in p.items() if s.get("enabled")), p
+
+    def off(route, chan, **kw):                           # chan must not run; a refusal is safe
+        on, _p = runs(route, **kw)
+        return on is None or chan not in on
+
+    def ran_without(route, chan, **kw):                   # chan does not run and the round goes ahead
+        on, _p = runs(route, **kw)
+        return on is not None and chan not in on and len(on) >= 2
+
+    def swapped(route, new, old, **kw):
+        on, _p = runs(route, **kw)
+        return on is not None and new in on and old not in on
+
+    def added(route, chan, **kw):                         # the usual set AND chan
+        on, _p = runs(route, **kw)
+        return on is not None and chan in on and len(on) >= 3
+
+    a = [s for s in ("только не codex", "only not codex", "лишь не codex", "только, не codex")
+         if not ran_without(s, "codex")]
+    a += [s for s in ("всё что угодно, только не codex",) if not ran_without(s, "codex", panel=None)]
+    a += [s for s in ("only not kimik3",) if not ran_without(s, "kimik3", panel="standard")]
+    a += [s for s in ("только не codex и не kimik3",)
+          if not (ran_without(s, "kimik3", panel="standard") and ran_without(s, "codex", panel="standard"))]
+    check(not a, "R153 И-11 (a) «только не X» / «всё что угодно, только не X» exclude X; the round runs the rest",
+          "wrong: %r" % a)
+    b = [s for s in ("don't pick codex", "dont add codex", "don't choose codex", "never use codex", "doesn't use codex",
+                     "won't use codex", "don\u2019t use codex", "don t use codex") if not off(s, "codex")]
+    b += [s for s in ("don't only use codex", "don't just use codex") if not added(s, "codex")]
+    check(not b, "R153 И-11 (b) English negators exclude (incl. U+2019); «don't only use codex» adds", "wrong: %r" % b)
+    c = [s for s in ("kimik3 -> kimik3free", "kimik3, замени на kimik3free", "kimik3 replace with kimik3free")
+         if not swapped(s, "kimik3free", "kimik3", panel="standard")]
+    c += [s for s in ("codex -> grokbuild", "codex \u2192 grokbuild", "codex, заменить на grokbuild",
+                      "codex replace with grokbuild") if not swapped(s, "grokbuild", "codex", panel="standard")]
+    c += [s for s in ("codex, kimik3 -> grokbuild",) if runs(s, panel="standard")[0] is not None]
+    check(not c, "R153 И-11 (c) «A -> B» / «A, замени на B» / «A replace with B» run B instead of A; two names on a "
+          "side refuse", "wrong: %r" % c)
+    d = [s for s, new, old in (("grokbuild вместо того чтобы использовать codex", "grokbuild", "codex"),
+                               ("kimik3free вместо того чтобы использовать kimik3", "kimik3free", "kimik3"),
+                               ("вместо того чтобы использовать codex, возьми grokbuild", "grokbuild", "codex"),
+                               ("grokbuild instead of using codex", "grokbuild", "codex"))
+         if not swapped(s, new, old, panel="standard")]
+    check(not d, "R153 И-11 (d) «Y вместо того чтобы использовать X» runs Y, not X", "wrong: %r" % d)
+    e = []
+    for route, sk, bad, reg in (("grokbuild вместо wonder10", ["mcwonder10cont"], "orwonder", base),
+                                ("grokbuild вместо wonder10, не используй mcwonder10cont", None, "orwonder", base),
+                                ("grokbuild вместо kimik3free", ["nvkimik3"], "kimik3", base),
+                                ("grokbuild вместо spark13cont", ["ocspark13free"], "orspark13cont", kit)):
+        on, _p = runs(route, panel="standard", skip=sk, reg=reg)
+        if on is None or bad in on or "grokbuild" not in on:
+            e.append((route, sk, bad))
+    check(not e, "R153 И-11 (e) a replaced member's paid twin stays off when an earlier member is only excluded",
+          "wrong: %r" % e)
+    f = [pn for pn in ("cheap", "standard")
+         if not (off("вместо kimik3 и codex возьми grokbuild", "codex", panel=pn)
+                 and swapped("вместо kimik3 и codex возьми grokbuild", "grokbuild", "kimik3", panel=pn))]
+    check(not f, "R153 И-11 (f) «вместо A и B возьми C» replaces both A and B", "wrong on: %r" % f)
+    g = [s for s in ("не без ocspark13free", "don't exclude ocspark13free", "не исключи ocspark13free")
+         if not swapped(s, "ocspark13free", "spark13cont", reg=kit)]
+    check(not g, "R153 И-11 (g) a negated exclusion includes: the free Spark stays, the paid spark13cont does not start",
+          "wrong: %r" % g)
+    h = [s for s in ("только добавь codex", "only add codex", "только плюс codex") if not added(s, "codex")]
+    h += [s for s in ("не-используй codex", "non-use codex") if not off(s, "codex")]
+    check(not h, "R153 И-11 (h) «только добавь X» adds X to the round; a hyphen blocks a marker", "wrong: %r" % h)
+    on, p = runs("добавь kimik3free", panel="standard", reg=kit,
+                 ready=lambda n: "no key" if n == "kimik3free" else True)
+    why = " | ".join(p["kimik3"]["why"]) if on is not None and "kimik3" in on else ""
+    check(on is not None and ("kimik3" not in on or "PAID per call" in why),
+          "R153 И-11 (i) a named free member that is not ready: its paid twin's plan line says PAID",
+          "%r why=%r" % (on, why[-160:]))
+    j_on, j_msg = runs("не используй grokbuild, kimik3free вместо kimik3 codex", panel="standard")
+    check(j_on is None, "R153 И-11 (j) «не используй A, B вместо C D» reads two ways and refuses", "%r" % j_on)
+    k = [s for s in ("только grokbuild и не codex", "добавь grokbuild, но не codex", "use grokbuild but not codex")
+         if not off(s, "codex", panel="standard")]
+    nothing = [s for s in ("ничего кроме kimik3free", "ничего, кроме kimik3free", "nothing except kimik3free",
+                           "nothing but kimik3free") if runs(s, panel="standard")[0] != ["kimik3free"]]
+    m1 = runs("не используй ничего, только codex")[1]
+    m2 = runs("вместо codex возьми grokbuild, вместо него agy38flash", panel="standard")[1]
+    check(not k and not nothing and "no channel name after it" in str(m1) and "cannot tell which earlier" in str(m2),
+          "R153 И-11 (k) a «не» right before a channel the route runs stops the run; «ничего кроме X» = only X; two "
+          "refusals name what they lack", "guard misses %r / nothing %r / msgs %r | %r" % (k, nothing, str(m1)[:90],
+                                                                                     str(m2)[:90]))
+    ctrl = []
+    for s, ok in (("do not add codex", lambda: off("do not add codex", "codex")),
+                  ("don't use codex", lambda: off("don't use codex", "codex")),
+                  ("только не используй codex", lambda: ran_without("только не используй codex", "codex")),
+                  ("только используй codex", lambda: runs("только используй codex")[0] == ["codex"]),
+                  ("не используй kimik3, вместо него kimik3free",
+                   lambda: swapped("не используй kimik3, вместо него kimik3free", "kimik3free", "kimik3",
+                                   panel="standard")),
+                  ("kimik3free вместо kimik3",
+                   lambda: swapped("kimik3free вместо kimik3", "kimik3free", "kimik3", panel="standard")),
+                  ("kimik3, вместо того kimik3free",
+                   lambda: swapped("kimik3, вместо того kimik3free", "kimik3free", "kimik3", panel="standard")),
+                  ("запусти не только codex, но и grokbuild",
+                   lambda: added("запусти не только codex, но и grokbuild", "codex")
+                   and "grokbuild" in (runs("запусти не только codex, но и grokbuild")[0] or [])),
+                  ("codex вместо agy38flash",
+                   lambda: swapped("codex вместо agy38flash", "codex", "orgemini38flash")
+                   and off("codex вместо agy38flash", "agy38flash")),
+                  ("не используй grokbuild, вместо codex agy38flash",
+                   lambda: swapped("не используй grokbuild, вместо codex agy38flash", "agy38flash", "codex",
+                                   panel="standard")),
+                  ("не забудь добавить codex", lambda: added("не забудь добавить codex", "codex")),
+                  ("кроме codex", lambda: ran_without("кроме codex", "codex", panel="standard"))):
+        if not ok():
+            ctrl.append(s)
+    on, p = runs("не используй agy38flash")
+    why = " | ".join(p["orgemini38flash"]["why"]) if on is not None and "orgemini38flash" in on else ""
+    check(not ctrl and "PAID per call" in why,
+          "R153 И-11 (l) CONTROLS: «только используй», «не только», «вместо него / того», «Y вместо X», «кроме X», a "
+          "plain exclusion's paid twin says PAID", "broken: %r why=%r" % (ctrl, why[-120:]))
+    corpus = ["только не codex", "kimik3 -> kimik3free", "codex, замени на grokbuild",
+              "grokbuild вместо того чтобы использовать codex", "вместо kimik3 и codex возьми grokbuild",
+              "только добавь codex", "don't only use codex", "ничего кроме kimik3free",
+              "всё что угодно, только не codex", "не исключи codex", "never use codex", "kimik3free вместо kimik3"]
+    bad, accepted = [], 0
+    for s in corpus:
+        named = _r.explicitly_named(_cp.deepcopy(base), route=s)
+        on, p = runs(s, panel=None)
+        if on is None:
+            continue
+        accepted += 1
+        dropped = {c for c in p if any(str(w).startswith(("route: excluded by name", "route: replaced by"))
+                                       for w in p[c].get("why") or [])}
+        miss = sorted(c for c in named if c not in on and c not in dropped)
+        back = sorted(c for c in dropped if c in on)
+        if miss or back:
+            bad.append("%s: named but off %s, dropped but on %s" % (s, miss, back))
+    guard = getattr(_r, "_negation_guard", None)
+    check(not bad and accepted >= 10 and callable(guard) and "_negation_guard(" in inspect.getsource(_r.apply_route)
+          and "_scan(" not in inspect.getsource(guard),
+          "R153 И-11 (m) on %d accepted sentences the readers agree; apply_route asks a second reader that does not "
+          "use _scan" % accepted, "; ".join(bad)[:300] + " guard=%s" % callable(guard))
+
+
 def suite_r153_i8_hotfix():
     """R153 И-8 (2026-10-17), kit 1.112.4 - the route grammar the r153i7 panel probed, every input re-run on 1.112.3
     first (`runs/r153-t107-kimi-mimo/i8/route_probe_i8.py`):
@@ -16808,6 +16989,122 @@ def suite_r149_muse_wonder():
           "R149 (g) echocheck varies wonder10's own effort (its ladder tops at max); Spark stays on the "
           "tier's http_effort", "%r / %r" % (kw[:2], ks[:2]))
     shutil.rmtree(tmp, ignore_errors=True)
+
+
+def suite_r154_refs_kinds():
+    """R154 (2026-10-17), kit 1.112.5 - the CLI kinds added after R46 (opencode, mimocli, kimicli) were never put in
+    REFS_KINDS, so with --attach / --attach-dir they got every file INLINE while codex / agy / grok got the paths:
+    in a Page2AI round (T121) Spark received a 229K-char package in one message, its cwd held no file, and it could
+    open or run nothing on disk, while codex ran 23 commands and grok 24 reads + 23 commands on the paths. The
+    three CLIs' own stores show the harness's invocation reads outside its cwd (runs/r154-spark-chat/). Checks:
+    (a) opencode, mimocli and kimicli are REFS_KINDS with the tools-ON contract; musecode (file tools rooted at its
+        workspace) and hermes (web only) are not;
+    (b) a stubbed main() with --attach-dir: every dispatched channel of a refs kind gets the DOCUMENTS ON DISK
+        section with the vetted copy's path and NOT the file text, every other channel gets the text inline, and
+        a channel of the three new kinds was among them (else the check is vacuous);
+    (c) the attachments plan line names the kinds that get paths, the new three included, and no longer says
+        «CLI channels (codex, agy, grok build)»;
+    (d) `--help`: --attach names opencode among the path readers, --attach-dir no longer says INLINED to all channels;
+    (e) SKILL.md, references/briefs.md and AGENTS.md no longer say attachments go inline to every channel.
+    """
+    import json as _j
+    import shutil as _sh
+    import tempfile
+    import orchestrate as o
+    section("R154. Every CLI that runs on this machine gets attachments by path (opencode, MiMo Code, Kimi Code)")
+    new = ("opencode", "mimocli", "kimicli")
+    refs = tuple(getattr(o, "REFS_KINDS", ()))
+    full = tuple(getattr(o, "TOOLS_ALWAYS_FULL_KINDS", ()))
+    check(all(k in refs for k in new) and all(k in full for k in new),
+          "R154 (a) opencode, mimocli and kimicli read attachments by path, with the tools-ON contract", repr(refs))
+    check("musecode" not in refs and "hermes" not in refs,
+          "R154 (a) musecode (workspace-rooted file tools) and hermes (web only) still get attachments inline",
+          repr(refs))
+    td = tempfile.mkdtemp(prefix="r154-")
+    att = os.path.join(td, "att")
+    os.makedirs(att)
+    canary = "R154 canary line 7f3a91"
+    with open(os.path.join(att, "note.md"), "w", encoding="utf-8") as f:
+        f.write("# note" + chr(10) + canary + chr(10))
+    brief = os.path.join(td, "b.md")
+    with open(brief, "w", encoding="utf-8") as f:
+        f.write("Review the attached note." + chr(10) + "REVIEW-COMPLETE" + chr(10))
+    probe = chr(10).join([
+        "import json, os, sys",
+        "sys.path.insert(0, %r)" % str(HERE),
+        "import orchestrate as o",
+        "SENT, LOG = [], []",
+        "def stub(kind):",
+        "    def f(*a, **k):",
+        "        b = a[0] if a else k.get('brief', '')",
+        "        SENT.append({'kind': kind, 'name': k.get('name'), 'brief': b})",
+        "        return {'ok': True, 'text': 'stub' + chr(10) + 'REVIEW-COMPLETE', 'seconds': 0.0}",
+        "    return f",
+        "for n, kd in (('call_http_reviewer', 'http'), ('call_codex', 'codex'), ('call_agy', 'agy'),",
+        "              ('call_oai_reviewer', 'openrouter'), ('call_xai_responses', 'xai'),",
+        "              ('call_gemini_direct', 'gemini'), ('call_hermes', 'hermes'), ('call_grokcli', 'grokcli'),",
+        "              ('call_opencode', 'opencode'), ('call_claudecli', 'claudecli'), ('call_mimocli', 'mimocli'),",
+        "              ('call_qwencli', 'qwencli'), ('call_kimicli', 'kimicli'), ('call_musecode', 'musecode')):",
+        "    assert callable(getattr(o, n, None)), 'stub target missing: ' + n",
+        "    setattr(o, n, stub(kd))",
+        "o.log = lambda *a, **k: LOG.append(' '.join(str(x) for x in a))",
+        # the default panel (CLI kinds) and the standard one (API kinds too): both halves of (b) get exercised
+        "for i, extra in enumerate(([], ['--panel', 'standard'])):",
+        "    sys.argv = (['o', '--brief', %r, '--out', os.path.join(%r, 'o%%d' %% i), '--attach-dir', %r,"
+        % (brief, td, att),
+        "                 '--tier', 'strategic', '--no-citecheck', '--no-log'] + extra)",
+        "    rc = o.main()",
+        "print('RESULT=' + json.dumps({'rc': rc, 'sent': SENT, 'log': LOG}))",
+    ])
+    pf = os.path.join(td, "probe_r154.py")
+    with open(pf, "w", encoding="utf-8") as f:
+        f.write(probe + chr(10))
+    p = subprocess.run([PY, pf], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=240)
+    b = blob_of(p)
+    line = next((ln for ln in b.splitlines() if ln.startswith("RESULT=")), None)
+    check(bool(line), "R154 (b) the stubbed --attach-dir round produced a result", b[-300:])
+    if line:
+        data = _j.loads(line[len("RESULT="):])
+        sent = data["sent"]
+        bad = []
+        want = set(refs) | set(new)        # the new kinds must get paths whatever this module's REFS_KINDS says
+        for s in sent:
+            disk = "DOCUMENTS ON DISK" in s["brief"] and "attach-vetted" in s["brief"]
+            inl = canary in s["brief"]
+            if s["kind"] in want and not (disk and not inl):
+                bad.append("%s/%s refs kind: disk=%s inline=%s" % (s["name"], s["kind"], disk, inl))
+            if s["kind"] not in want and not (inl and not disk):
+                bad.append("%s/%s inline kind: disk=%s inline=%s" % (s["name"], s["kind"], disk, inl))
+        newk = sorted({s["kind"] for s in sent if s["kind"] in new})
+        inlk = sorted({s["kind"] for s in sent if s["kind"] not in want})
+        check(bool(sent) and not bad and bool(newk) and bool(inlk),
+              "R154 (b) refs kinds got the vetted copy's path and not the text, the others the text inline; "
+              "new kinds dispatched: %s; inline kinds: %s" % (",".join(newk), ",".join(inlk)),
+              "; ".join(bad)[:500] or repr([(s["name"], s["kind"]) for s in sent]))
+        al = [ln for ln in data["log"] if "ABSOLUTE PATHS" in ln]
+        check(bool(al) and all(k in al[0] for k in new)
+              and not any("CLI channels (codex, agy, grok build)" in ln for ln in data["log"]),
+              "R154 (c) the attachments plan line names the kinds that get paths, the new three included",
+              al[0][:300] if al else "no ABSOLUTE PATHS line")
+    h = subprocess.run([PY, str(HERE / "orchestrate.py"), "--help"], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=60)
+    ht = " ".join(blob_of(h).split())
+    a1 = ht.rsplit("--attach [FILE ...]", 1)[-1].split("--attach-dir [DIR ...]", 1)[0]
+    a2 = ht.rsplit("--attach-dir [DIR ...]", 1)[-1].split("--attach-budget", 1)[0]
+    check("opencode" in a1 and "INLINED to all channels" not in a2 and "VETTED COPY" in a2,
+          "R154 (d) --help: --attach names opencode, --attach-dir no longer says INLINED to all channels",
+          a1[:200] + " || " + a2[:200])
+    docs = [HERE / "SKILL.md", HERE / "references" / "briefs.md", HERE / "kit" / "AGENTS.md", HERE / "AGENTS.md"]
+    found = [d for d in docs if d.is_file()]
+    false = ("files **inline** to all channels", "sends file contents **inline** to every channel",
+             "sends all readable files **inline** to every channel",
+             "sends all readable files inline to every channel")
+    hits = ["%s: %s" % (d.name, f) for d in found for f in false
+            if f.lower() in " ".join(d.read_text(encoding="utf-8").split()).lower()]
+    check(any(d.name == "SKILL.md" for d in found) and not hits,
+          "R154 (e) SKILL.md, references/briefs.md and AGENTS.md no longer say attachments go inline to every channel",
+          "; ".join(hits) or repr([d.name for d in found]))
+    _sh.rmtree(td, ignore_errors=True)
 
 
 if __name__ == "__main__":

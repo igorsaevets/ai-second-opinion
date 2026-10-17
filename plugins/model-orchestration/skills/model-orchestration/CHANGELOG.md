@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.112.5 — 2026-10-17
+
+Route grammar fixes from the review panel on 1.112.4, each reproduced on the code before it was changed (a paid channel in the slot the sentence turns off), and attachments by path for three more CLI kinds.
+
+- **«только не X» and «всё что угодно, только не X» exclude X.** Every release so far started X ALONE: a bare «не» is no instruction word, so «только» kept its meaning. «only not X» and «лишь не X» the same.
+- **English negations exclude.** «don't pick codex», «don't add codex», «never use codex», «doesn't use codex», «won't use codex», and «don’t use codex» typed with a curly apostrophe started the expensive codex; «don't only use codex» ran codex alone. They exclude it now («don't only use codex» adds codex to the panel).
+- **«A -> B», «A, замени на B» and «A replace with B» run B instead of A.** Since 1.112.3 they kept A: «kimik3 -> kimik3free» ran the PAID kimik3 and switched the free one off. With more than one name on a side the run stops and asks for «B вместо A». «замени A на B» and «replace A with B» still stop.
+- **«Y вместо того чтобы использовать X» runs Y.** Since 1.112.4 it ran X («вместо того» was read as «instead of it»). «instead of using» is an instruction word too.
+- **A replaced channel's paid twin stays off when another member of its group is only excluded.** «grokbuild вместо wonder10» with `--skip mcwonder10cont` ran the paid orwonder; the same held for kimik3 and orspark13cont.
+- **«вместо A и B возьми C» replaces A and B.** B used to start.
+- **A negated exclusion includes.** «не без X», «не исключи X», «don't exclude X», «don't skip X» excluded X; with the free Spark that switched the free channel off and the paid spark13cont on.
+- **«только добавь X» adds X to the panel** (1.112.4 ran X alone). «не-используй X» with a hyphen is no longer read as «используй X». «ничего кроме X» means only X (it ran everything except X).
+- **When a free channel you named is not ready here and its paid twin carries the voice, the plan says PAID per call.**
+- **A second check that does not share the grammar.** When a negation word stands right before a channel's name and the route would still run that channel («только grokbuild и не codex», «добавь grokbuild, но не codex» started codex), the run stops and says how to write it. It never changes a plan.
+- **Two readings stop:** «не используй A, B вместо C D» (it ran D and dropped B). Clearer messages for «не используй ничего, только X» and for «вместо него» after two names; «кроме того, …» and «без разницы, …» are connectives, not exclusions.
+- **opencode, MiMo Code and Kimi Code read attached material from disk, like codex, Antigravity and Grok Build.**
+  With `--attach` / `--attach-dir` these three CLI kinds used to receive every file INLINE in one message (they
+  arrived after the rule «CLI agents get paths, not files» and were never added to it), and their working folder
+  held no file, so a reviewer could not open, search or run anything it was given: in a 21-file review the Spark
+  voice got 229K characters of text while codex and Grok Build read and ran the files by path. They now get the
+  absolute paths (of the vetted copy for folders) with the shell-on contract: read only, change nothing. Muse Code
+  (file tools limited to its workspace) and the API channels still get the text inline. The plan line, `--help`,
+  SKILL.md, `references/briefs.md` and AGENTS.md said attachments go inline to every channel and CLI channels get
+  the path as well; the CLI channels get the path only.
+
 ## 1.112.4 — 2026-10-17
 
 Route grammar fixes from the review panel on 1.112.3, each reproduced on the code before it was changed.

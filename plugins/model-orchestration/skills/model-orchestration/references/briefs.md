@@ -73,13 +73,14 @@ Then verify: a review with zero URLs has verified nothing, whatever its exit cod
 A code brief follows every rule above, plus four of its own, each paid for on a real round:
 
 - 🔴 **Attach the source — a URL is NOT a substitute.**
-  - `--attach <file>` sends file contents **inline** to every channel (API channels see
-    the text; CLI channels receive the **path** and read from disk, so they can also
-    consult surrounding material). ⚠ Large files are a token bomb — use `--attach-budget`
-    to cap inline content.
-  - `--attach-dir <dir>` scans the folder and sends all readable files **inline** to every
-    channel (binary, oversized, and file-cap files are excluded by the vetting scan).
-    CLI channels additionally receive a **vetted copy** on disk and can read surrounding
+  - `--attach <file>`: API channels (and Hermes, Muse Code) get the file contents **inline**;
+    every CLI that runs on this machine (codex, agy, grok build, Claude Code, Qwen, opencode,
+    MiMo Code, Kimi Code) gets only the **path** and reads it from disk, so it can also
+    consult surrounding material. ⚠ Large files are a token bomb for the inline channels —
+    use `--attach-budget` to cap inline content.
+  - `--attach-dir <dir>` scans the folder (binary, oversized, and file-cap files are excluded
+    by the vetting scan): the inline channels get every readable file **inline**, the CLI
+    channels the paths of a **vetted copy** on disk instead, and they can read surrounding
     material. ⚠ Large folders are a token bomb — use `--attach-budget` to cap total
     inline content.
   - For code review: `--attach` specific key files + `--attach-dir` for the full tree.
