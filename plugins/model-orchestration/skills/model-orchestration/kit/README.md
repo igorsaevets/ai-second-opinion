@@ -6,6 +6,28 @@
 
 **Every AI model knows its own things. Ask several at once and you get not only a check, but advice no single model would have given you — including on what you did not ask.**
 
+**One document goes to several AI models at once, and one report comes back.** Sending your document to the vendors you pick is the whole point; the tool itself has no server and collects nothing ([what goes where](PRIVACY.md)).
+
+## What one run returns
+
+A real run of version 1.113.0 on 2026-10-17. Seven CLI agents on the author's machine were asked where this tool should be listed and what would block a listing, with our own table of channels and their rules attached. From the run's REPORT.md:
+
+| Model (how it ran) | Time | Links cited | Dead links |
+|---|---|---|---|
+| GPT-6.1 Sol (Codex CLI) | 16 min | 50 | 0 |
+| Qwen 3.8 Max (Qwen Code CLI) | 26 min | 14 | 0 |
+| Grok 4.7 (Grok Build CLI) | 7 min | 21 | 0 |
+| Gemini 3.8 Flash (Antigravity CLI) | 5 min | 29 | 0 |
+| Muse Spark 1.3 (opencode) | 1 min | 22 | 2 |
+| MiMo v2.6 Pro (mimo CLI) | 8 min | 1 | 0 |
+| MiMo v2.6 Flash (opencode) | 12 min | 0 | — |
+
+- **A rule our own table had missed.** It said we meet the entry rules of the awesome-claude-code list. Five of the seven (GPT-6.1 Sol, Qwen, Grok, Gemini, MiMo Pro) pointed to the next clause: «if your project requires any form of signup or payment, this is a blocker for reviewing it».
+- **A disagreement, kept in view.** Build an MCP server now? MiMo Flash: «Build it — as a thin wrapper, started now». The other six: not now.
+- **What was cited is not what was read.** Gemini cited 29 links and had opened 2 of them. Two of Muse Spark's links were shortened with «...» and lead to a 404.
+
+The run took 27 minutes, the time of its slowest voice. Three of the seven ran on the author's own accounts through channels the published version leaves off (Qwen Code CLI, mimo CLI, Muse Spark on the OpenCode Go plan); the panels it ships and what they cost are below.
+
 A panel pays off twice:
 1. **Different knowledge.** Each model was trained on its own data and runs in its own harness: the vendor's CLI agent or an API, its own web search, its own way of reading pages. So when you ask "how should I design this" or "review this code", each one answers with its own recommendations, and together they cover more than any one of them.
 2. **An independent check.** The models never see each other's answers. When they agree, that means something; when they disagree, it means more. One AI agreeing with you proves nothing.
@@ -54,7 +76,7 @@ To check what was found: `python doctor.py`. It prints which keys and programs i
 
 In Claude Code with the plugin (and in any agent you gave the line from the top of this page) just say it in plain words:
 
-| You say | What runs (version 1.113.0) |
+| You say | What runs (version 1.113.1) |
 |---|---|
 | **"second opinion"** (for example, "give me a second opinion on this file") | **The cheap panel**, the default: 5 models |
 | **"second opinion, CLI only"** | Only the CLI agents of the cheap panel: 4 models — Muse Spark, MiMo v2.6 Flash, Gemini 3.8 Flash and Grok 4.7. Not one paid request on your OpenRouter key |

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.113.1 — 2026-10-17
+
+The README opens with what one run returns. Until now a first-time visitor read the promise and then, as the first section, a table of accounts, keys and CLIs: nothing on the page showed a run's output above that cost.
+
+- **README and README.ru: «What one run returns», right below the tagline.** A real run of 1.113.0 (2026-10-17, seven CLI agents asked where this tool should be listed): time and the citation check per model, a rule our own notes had missed, a disagreement, and the gap between links cited and pages opened. It names the three of the seven that ran through channels the published version leaves off.
+- **What leaves your machine is said on the first screen:** sending your document to the vendors you pick is the whole point, and the tool itself has no server and collects nothing (PRIVACY.md).
+- No code changed.
+
 ## 1.113.0 — 2026-10-17
 
 Muse Wonder starts only when you name it. Measured on 1.112.6: a standard panel without the Muse Code CLI ran the paid `wonder10` (Meta key, no per-run ceiling) or `orwonder` in every round; «only muse», «only openrouter» and «CLI only» pulled Wonder in; «only wonder 1.0» ran the paid `wonder10` even where the Muse Code subscription was ready.
