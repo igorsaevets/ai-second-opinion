@@ -58,18 +58,19 @@ channels, nothing is transmitted.
 ## Some channels are cheap because of their data terms
 
 Some tiers are discounted, or free, **in exchange for permission to train on what you send**. As
-published, the channels on such a tier are: `ocspark13free` (Meta's Muse Spark 1.3 Contributor,
-free, through the opencode CLI), `spark13cont` (the same contributor tier, reached directly),
-`orspark13cont` (the **same** contributor tier reached through OpenRouter — so the payload passes
+published, the channels on such a tier are: `spark13cont` (Meta's Muse Spark 1.3 Contributor,
+reached directly), `orspark13cont` (the **same** contributor tier reached through OpenRouter — so the payload passes
 OpenRouter's own policy on the way to Meta's contributor terms), and `ornemotron3ultra` (a free
-tier, which on OpenRouter requires the account-level prompt-training setting to be on).
+tier, which on OpenRouter requires the account-level prompt-training setting to be on). The free
+Spark through the opencode CLI (`ocspark13free`) was one of them until opencode stopped serving it
+on 2026-10-17; since 1.113.3 it ships switched off.
 
 This is not a defect and it is not hidden: each channel's data policy is printed in the plan before
 anything is spent — that printout, not the list above, is the current set — and it is the reason
 those channels cost almost nothing. If a brief should not be trained on, drop them for that run:
 
 ```
---skip ocspark13free spark13cont orspark13cont ornemotron3ultra
+--skip spark13cont orspark13cont ornemotron3ultra
 ```
 
 Assume retention on those tiers is permanent.

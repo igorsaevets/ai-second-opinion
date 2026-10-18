@@ -1431,10 +1431,25 @@ KNOWN_FAILURES = [
      "- per 5 hours 20%, per week 50%, per month 100% of the plan's monthly amount - or its "
      "billing: opencode 2.0.24 files GoUsageLimitError, billing_error and creditlimitexceeded "
      "under this same name.",
-     "The other channels' answers stand. A channel with a run-time fallback (ocspark13go -> the "
-     "free ocspark13free) hands the brief to it once after the round - its record says so. "
-     "Otherwise re-run this channel later, or leave it out with --skip <channel>; on a paid model "
-     "or plan, check the balance or the plan's usage page first. Do not re-run it in a loop."),
+     "The other channels' answers stand. A channel with a run-time fallback (mimov26pro -> "
+     "mimov26flash) hands the brief to it once after the round - its record says so; ocspark13go "
+     "has none since 1.113.3 (the free Spark it fell back to is gone from opencode). Otherwise "
+     "re-run this channel later, or leave it out with --skip <channel>; on a paid model or plan, "
+     "check the balance or the plan's usage page first. Do not re-run it in a loop."),
+    # R154 И-3 (2026-10-18): a vanished free model had no hint. `opencode/muse-spark-1.3-contributor-free` answered
+    # «provider.no-route: Model unavailable» from 2026-10-17 01:56Z and left `opencode models`, while models.dev
+    # still listed it; a #variant the model does not take answers «Variant unavailable» under the same name.
+    ("provider\\.no-route",
+     "opencode has no route to this model: it is not served (or no longer served), or the effort "
+     "variant (#high, #max ...) is not one this model takes. Free models come and go without "
+     "notice - opencode's free Muse Spark on 2026-10-17, NVIDIA's free Kimi K3 on 2026-10-15 - and `opencode "
+     "models` is the live list (models.dev, which feeds opencode's catalogue, lagged it by days). "
+     "Nothing is billed.",
+     "The other channels' answers stand. Run `opencode models` and look for the model. If it is "
+     "gone, switch the channel off in ~/.claude/model-orchestration.local.json - "
+     "{\"channels\": {\"<channel>\": {\"enabled\": false}}} - or leave it out with --skip "
+     "<channel>, and look for its replacement in the release notes. «Variant unavailable» is the "
+     "effort level: this channel's `effort` in channels.json is one the model does not take."),
     # R140 (2026-10-04) SUPERSEDES the R137 reading «a vendor capacity answer». Direct calls showed
     # the code behind this text: `no_available_channel` - AIHubMix has no upstream route for the
     # model and refuses in ~0.1 s, before any upstream is asked. The PAID `coding-kimi-k3` and
@@ -10752,6 +10767,26 @@ def _free_extras(primary):
             if c != primary and ch.get("enabled", True) and ch.get("cost") == "free"]
 
 
+def _ask_twins_note(names):
+    """
+    R154 И-3: the --ask list is printed BEFORE the plan, and the plan keeps one member of each cascade group
+    (two transports to one model are one voice). With ocnemotron3ultrafree beside ornemotron3ultra the line said
+    «goes to 6 channels» over a plan that ran 5. Both stay in the list - the cascade picks the one that is ready
+    HERE (no opencode -> the OpenRouter twin) - and this sentence says so. Never raises, like _free_extras.
+    """
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import routing
+        groups = routing.load_registry().get("_cascade_groups") or []
+    except Exception:                                    # noqa: BLE001 - see the docstring
+        return ""
+    pairs = [[c for c in g if c in names] for g in groups if isinstance(g, list)]
+    pairs = [p for p in pairs if len(p) > 1]
+    if not pairs:
+        return ""
+    return " One voice each, the first that is ready here runs: %s." % "; ".join(" / ".join(p) for p in pairs)
+
+
 def _channel_key_ready(ch):
     """
     True when the env var this channel's transport needs is present; True unconditionally for
@@ -11929,7 +11964,8 @@ def main():
                     "in channels.json, so a second opinion on a lookup costs nothing but the "
                     "seconds. 🔴 Free and near-free tiers are usually paid for with your text - "
                     "the plan below prints each channel's data policy. --only <channel> or "
-                    "--skip <channel> narrows it." % (len(a.only), ", ".join(a.only)))
+                    "--skip <channel> narrows it.%s" % (len(a.only), ", ".join(a.only),
+                                                       _ask_twins_note(a.only)))
         a.no_citecheck = True        # a lookup is not a review; the audit is for cited briefs
         global _citecheck_reason
         _citecheck_reason = ("--ask is a lookup, not a review - the citation audit is for briefs "

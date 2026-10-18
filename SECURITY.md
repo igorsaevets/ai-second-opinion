@@ -132,7 +132,7 @@ channel launches with its vendor's own bypass flag:
 | `nvkimik3` (and the local `kimik3free`) | kimi 2.1.1 | none: `-p` already runs every tool with no prompt (vendor default; `--auto` next to `-p` is refused, so it was dropped in v1.100.1). The safety directive rides every brief, the child env is an allowlist with no other vendor's key, and since v1.107.0 a timeout stops the agent's own commands too | — |
 | `agy31pro` / `36flash` / `38flash` | agy 1.2.2 | `--dangerously-skip-permissions` | `--sandbox` |
 | `cclopus46` | claude 2.1.270 | `--permission-mode bypassPermissions` (always on since v1.61.0) | — |
-| `ocspark13free` | opencode | (no field on purpose — `opencode run` is already YOLO by default) | — |
+| `ocmimo26flashfree`, `ocnemotron3ultrafree`, `ocglm53flashfree`, `ocdeepseekv41flashfree` (and `ocspark13go` when you switch it on) | opencode | (no field on purpose — `opencode run` is already YOLO by default) | — |
 
 `opencode` is intentionally excluded: its `run` subcommand runs with all permissions bypassed by
 default, so the concept has no per-channel switch to toggle. The dispatcher passes `bypass=` only

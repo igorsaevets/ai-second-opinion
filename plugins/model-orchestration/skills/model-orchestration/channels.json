@@ -216,6 +216,9 @@
         "ocspark13go",
         "ocspark13free",
         "ocmimo26flashfree",
+        "ocnemotron3ultrafree",
+        "ocglm53flashfree",
+        "ocdeepseekv41flashfree",
         "kimik3free",
         "nvkimik3",
         "mimov26pro",
@@ -415,7 +418,8 @@
       "kind": "opencode",
       "panel": "cheap",
       "vendor": "meta",
-      "enabled": true,
+      "enabled": false,
+      "_disabled_r154_i3": "R154 И-3 (2026-10-18): the model is gone from opencode. `opencode run` answered «provider.no-route: Model unavailable» (2026-10-17 01:56Z; its last success in opencode's store 2026-10-16 16:56Z); `opencode models` (v2.0.31) did not list it at 2026-10-17 12:15Z, 19:44Z and 2026-10-18 03:05Z, while models.dev still does - so models.dev is not the live list. Off everywhere: the kit's Spark voice is now spark13cont / orspark13cont (a key, paid per call, the plan says PAID); the operator's ocspark13go lost its run-time fallback to it. By its own name it still starts and fails with opencode's message. Re-enable when `opencode models` lists the model again.",
       "distribution": "both",
       "label": "OC Spark 1.3 Free",
       "cost": "free",
@@ -475,8 +479,7 @@
       ],
       "timeout": "40m",
       "_timeout": "Same as ocspark13free. A Go run that times out hands the brief to its fallback, which can take up to 40 more minutes after the round.",
-      "fallback": "ocspark13free",
-      "_fallback": "R146 И-3 (2026-10-08), the operator: «перенесем spark на подписку go а без подписки free как fallback если закончатся деньги и лимиты на аккаунте». The R142 run-time mechanism (run_fallbacks): when this channel ends the round with no answer (failed, under 2000 bytes of text), ocspark13free runs the same brief once after the round. The death the operator named is the plan's limit: the server's GoUsageLimitError, which opencode 2.0.24 files under `provider.quota` together with FreeUsageLimitError, billing_error, insufficient_quota, usage_not_included and creditlimitexceeded (read in its binary: runs/r146-i3-spark-go/oc_bin_quota_set.log); a lapsed plan, a timeout or any other death triggers it too. Both channels sit in the Spark `_cascade_groups` entry, so a round still runs ONE Spark: this one where opencode is installed, ocspark13free otherwise (the kit, where this channel is off). Not run when ocspark13free was excluded (--skip, a route), with --no-fallback, or in --task mode.",
+      "_fallback_removed_r154_i3": "R154 И-3 (2026-10-18): `fallback: ocspark13free` removed - that free model is gone from opencode (see ocspark13free._disabled_r154_i3), so the fallback could only fail a second time. No paid channel took its place: a run-time fallback must not start spending on its own. When the Go plan's limit is spent, this voice fails and says so. Was: R146 И-3 (2026-10-08), the operator: «перенесем spark на подписку go а без подписки free как fallback если закончатся деньги и лимиты на аккаунте». The R142 run-time mechanism (run_fallbacks): when this channel ends the round with no answer (failed, under 2000 bytes of text), ocspark13free runs the same brief once after the round. The death the operator named is the plan's limit: the server's GoUsageLimitError, which opencode 2.0.24 files under `provider.quota` together with FreeUsageLimitError, billing_error, insufficient_quota, usage_not_included and creditlimitexceeded (read in its binary: runs/r146-i3-spark-go/oc_bin_quota_set.log); a lapsed plan, a timeout or any other death triggers it too. Both channels sit in the Spark `_cascade_groups` entry, so a round still runs ONE Spark: this one where opencode is installed, ocspark13free otherwise (the kit, where this channel is off). Not run when ocspark13free was excluded (--skip, a route), with --no-fallback, or in --task mode.",
       "models": {
         "opencode-go/muse-spark-1.3-contributor": {
           "label": "Muse Spark 1.3 Contributor (via opencode, OpenCode Go plan)",
@@ -684,6 +687,125 @@
       ],
       "notes": "Free MiMo v2.6 Flash via opencode CLI. No API key needed. Flash is the lightweight sibling of MiMo v2.6 Pro (mimov26pro channel, direct Xiaomi API). Same opencode transport as ocspark13free — call_opencode(), stdin pipe, NDJSON output. Variants unavailable; runs at opencode's default reasoning depth. LIVE TESTED 2026-10-02: 'Say OK' answered 'OK' in 5.8s, cost=$0, model=opencode/mimo-v2.6-flash-free.",
       "_prompt_suffix_restored_r135": "R135 (2026-10-02): added. Training-tier channel (opencode free relay to Xiaomi). package.py strips from kit (default distribution=local)."
+    },
+    "ocnemotron3ultrafree": {
+      "read_order": 1,
+      "kind": "opencode",
+      "panel": "cheap",
+      "vendor": "nvidia",
+      "enabled": true,
+      "distribution": "both",
+      "label": "OC Nemotron 3 Ultra Free",
+      "cost": "free",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "_added_r154_i3": "the operator 2026-10-18: «у opencode есть же nemotron 3 ultra free, glm 5.3 flash, mimo 2.6 flash (кажется он даже есть в нашей панели), deepseek 4.1 flash. Давай их тогда тоже добавим.» Probe 2026-10-18 (runs/r154-spark-chat/i3/probe_free_i3.py, the harness's call_opencode): answered a review-shaped brief in 39 s and refuted the planted claim. Catalogue (models.dev 2026-10-18): context 1 000 000, output 128 000 - no output override needed. The same model as ornemotron3ultra (OpenRouter :free, standard panel): one cascade, opencode first, so a standard run asks Nemotron once.",
+      "model": "opencode/nemotron-3-ultra-free",
+      "effort": null,
+      "_effort": "Variants are UNAVAILABLE on this free model: measured 2026-10-18, `#high` -> «provider.no-route: Variant unavailable for opencode/nemotron-3-ultra-free: high»; models.dev lists no reasoning_options. It runs at opencode's default reasoning depth (call_opencode adds no #variant when effort is null).",
+      "timeout": "40m",
+      "_timeout": "Same rationale as ocmimo26flashfree: opencode CLI has no built-in timeout, caller-side via subprocess.run.",
+      "models": {
+        "opencode/nemotron-3-ultra-free": {
+          "label": "Nemotron 3 Ultra Free (via opencode)",
+          "data_policy": "Free relay through opencode's infrastructure (their terms apply) plus NVIDIA's model terms. Free at point of use - no API key, no billing.",
+          "aliases": [
+            "opencode/nemotron-3-ultra-free"
+          ]
+        }
+      },
+      "aliases": [
+        "ocnemotron3ultrafree",
+        "ocnemotron",
+        "opencode_nemotron"
+      ],
+      "notes": "Same opencode transport as ocmimo26flashfree: call_opencode(), stdin pipe, NDJSON output, tokens from opencode's store. No API key, no account. 🔴 free models come and go without notice (opencode's free Muse Spark 2026-10-17, NVIDIA's free Kimi K3 2026-10-15): `opencode models` is the live list, models.dev lags it.",
+      "_prompt_suffix_r154_i3": "Same class as ocmimo26flashfree (opencode free relay = training tier, R135). package.py strips it from the kit."
+    },
+    "ocglm53flashfree": {
+      "read_order": 1,
+      "kind": "opencode",
+      "panel": "cheap",
+      "vendor": "zai",
+      "enabled": true,
+      "distribution": "both",
+      "label": "OC GLM 5.3 Flash Free",
+      "cost": "free",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "_added_r154_i3": "the operator 2026-10-18: «у opencode есть же nemotron 3 ultra free, glm 5.3 flash, mimo 2.6 flash (кажется он даже есть в нашей панели), deepseek 4.1 flash. Давай их тогда тоже добавим.» Probe 2026-10-18 (probe_free_i3.py): answered a review-shaped brief at #max in 6 s and refuted the planted claim. A different model from orglm53 (GLM 5.3, metered OpenRouter, standard): its own voice, no cascade; the words «glm» / «глм» still name orglm53.",
+      "model": "opencode/glm-5.3-flash-free",
+      "effort": "max",
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ],
+      "_effort": "opencode v2 model#variant suffix; models.dev reasoning_options effort = low / high / max. Measured 2026-10-18, n=2 per level on one puzzle (opencode store, runs/r154-spark-chat/i3/probe_effort_i3.py): #low reasoning 39 / 39 tokens, #max 497 / 899 - disjoint, so the knob reaches the model; max is the ceiling.",
+      "opencode_limit": {
+        "context": 200000,
+        "output": 65536
+      },
+      "_opencode_limit": "R154 И-3: catalogue output 32 000 (models.dev 2026-10-18) and reasoning counts against it - the ocmimo26flashfree case (R153 И-2, finish=length with no text); raised the same way: call_opencode sends this block as the run's OPENCODE_CONFIG_CONTENT with `run --standalone`. 65536 leaves input room in the 200K window.",
+      "timeout": "40m",
+      "_timeout": "Same rationale as ocmimo26flashfree: opencode CLI has no built-in timeout, caller-side via subprocess.run.",
+      "models": {
+        "opencode/glm-5.3-flash-free": {
+          "label": "GLM 5.3 Flash Free (via opencode)",
+          "data_policy": "Free relay through opencode's infrastructure (their terms apply) plus Z.ai's model terms. Free at point of use - no API key, no billing.",
+          "aliases": [
+            "opencode/glm-5.3-flash-free"
+          ]
+        }
+      },
+      "aliases": [
+        "ocglm53flashfree",
+        "ocglm",
+        "opencode_glm"
+      ],
+      "notes": "Same opencode transport as ocmimo26flashfree: call_opencode(), stdin pipe, NDJSON output, tokens from opencode's store. No API key, no account. 🔴 free models come and go without notice (opencode's free Muse Spark 2026-10-17, NVIDIA's free Kimi K3 2026-10-15): `opencode models` is the live list, models.dev lags it.",
+      "_prompt_suffix_r154_i3": "Same class as ocmimo26flashfree (opencode free relay = training tier, R135). package.py strips it from the kit."
+    },
+    "ocdeepseekv41flashfree": {
+      "read_order": 1,
+      "kind": "opencode",
+      "panel": "cheap",
+      "vendor": "deepseek",
+      "enabled": true,
+      "distribution": "both",
+      "label": "OC DeepSeek V4.1 Flash Free",
+      "cost": "free",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "_added_r154_i3": "the operator 2026-10-18: «у opencode есть же nemotron 3 ultra free, glm 5.3 flash, mimo 2.6 flash (кажется он даже есть в нашей панели), deepseek 4.1 flash. Давай их тогда тоже добавим.» Probe 2026-10-18 (probe_free_i3.py): answered a review-shaped brief at #max in 6 s and refuted the planted claim. A different model from ordeepseekv4pro (V4 Pro, metered OpenRouter, standard): its own voice, no cascade; the words «deepseek» / «дипсик» still name ordeepseekv4pro.",
+      "model": "opencode/deepseek-v4.1-flash-free",
+      "effort": "max",
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ],
+      "_effort": "opencode v2 model#variant suffix; models.dev reasoning_options effort = low / high / max. Measured 2026-10-18, n=2 per level on one puzzle (opencode store, probe_effort_i3.py): #low reasoning 235 / 235 tokens, #max 658 / 1493 - disjoint, so the knob reaches the model; max is the ceiling.",
+      "opencode_limit": {
+        "context": 200000,
+        "output": 65536
+      },
+      "_opencode_limit": "R154 И-3: catalogue output 32 000 (models.dev 2026-10-18) and reasoning counts against it - the ocmimo26flashfree case (R153 И-2, finish=length with no text); raised the same way: call_opencode sends this block as the run's OPENCODE_CONFIG_CONTENT with `run --standalone`. 65536 leaves input room in the 200K window.",
+      "timeout": "40m",
+      "_timeout": "Same rationale as ocmimo26flashfree: opencode CLI has no built-in timeout, caller-side via subprocess.run.",
+      "models": {
+        "opencode/deepseek-v4.1-flash-free": {
+          "label": "DeepSeek V4.1 Flash Free (via opencode)",
+          "data_policy": "Free relay through opencode's infrastructure (their terms apply) plus DeepSeek's model terms. Free at point of use - no API key, no billing.",
+          "aliases": [
+            "opencode/deepseek-v4.1-flash-free"
+          ]
+        }
+      },
+      "aliases": [
+        "ocdeepseekv41flashfree",
+        "ocdeepseek",
+        "opencode_deepseek"
+      ],
+      "notes": "Same opencode transport as ocmimo26flashfree: call_opencode(), stdin pipe, NDJSON output, tokens from opencode's store. No API key, no account. 🔴 free models come and go without notice (opencode's free Muse Spark 2026-10-17, NVIDIA's free Kimi K3 2026-10-15): `opencode models` is the live list, models.dev lags it.",
+      "_prompt_suffix_r154_i3": "Same class as ocmimo26flashfree (opencode free relay = training tier, R135). package.py strips it from the kit."
     },
     "kimik3free": {
       "_permissions": "R137 И-2: NO bypass_permissions field on purpose - kimi `-p` already runs in AUTO permission mode (vendor docs: «--prompt cannot be used with --yolo, --auto, or --plan»; `--auto` + `-p` = «Cannot combine --prompt with --auto.», measured). Every tool runs unprompted; CLI_BYPASS_SAFETY_PROMPT always rides the brief.",
@@ -2155,6 +2277,10 @@
     [
       "ocmimo26flashfree",
       "mimov26flash"
+    ],
+    [
+      "ocnemotron3ultrafree",
+      "ornemotron3ultra"
     ],
     [
       "agy38flash",

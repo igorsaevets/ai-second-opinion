@@ -3182,6 +3182,19 @@ def suite_panels():
          "деньги и лимиты на аккаунте». The same Spark 1.3 Contributor as ocspark13free, on his "
          "OpenCode Go plan; the Spark cascade group keeps ONE Spark per round and ocspark13free is "
          "its run-time fallback. Free Spark answered 1 of 9 real rounds since 2026-10-05."),
+        ("R154 И-3 2026-10-18", "ADD", "ocnemotron3ultrafree",
+         "Igor 2026-10-18: «у opencode есть же nemotron 3 ultra free, glm 5.3 flash, mimo 2.6 flash ..., "
+         "deepseek 4.1 flash. Давай их тогда тоже добавим.» Free Nemotron 3 Ultra via the opencode CLI: no "
+         "key, no account, effort null (#high refused, measured); answered a review brief in 39 s. One "
+         "cascade with ornemotron3ultra (the same model). distribution both, like ocmimo26flashfree."),
+        ("R154 И-3 2026-10-18", "ADD", "ocglm53flashfree",
+         "Igor 2026-10-18 (same message). Free GLM 5.3 Flash via the opencode CLI at #max (low 39/39 vs "
+         "max 497/899 reasoning tokens, n=2, disjoint); answered a review brief in 6 s. Its own voice: "
+         "orglm53 is GLM 5.3, another model. distribution both."),
+        ("R154 И-3 2026-10-18", "ADD", "ocdeepseekv41flashfree",
+         "Igor 2026-10-18 (same message). Free DeepSeek V4.1 Flash via the opencode CLI at #max (low "
+         "235/235 vs max 658/1493 reasoning tokens, n=2, disjoint); answered a review brief in 6 s. Its "
+         "own voice: ordeepseekv4pro is V4 Pro, another model. distribution both."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -7980,6 +7993,7 @@ def main():
                   suite_r153_i12_hotfix,
                   suite_r153_i13_g10,
                   suite_r155_i3_wonder_by_name,
+                  suite_r154_i3_free_voices,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -14159,11 +14173,13 @@ def suite_r146_i3_spark_go():
                   "no fallback", "log line", "quota death", "diagnose"):
             check(False, "R146 И-3: ocspark13go exists (%s)" % n, "missing in channels.json")
         return
+    # 🔴 R154 И-3 (2026-10-18): the free Spark left opencode (provider.no-route since 2026-10-17), so the product
+    # checks below say «no fallback» now; (e) keeps the run-time fallback MECHANISM on a fixture registry.
     check(ch.get("kind") == "opencode" and ch.get("model") == "opencode-go/muse-spark-1.3-contributor"
           and ch.get("effort") == "xhigh" and ch.get("distribution") == "local"
-          and ch.get("fallback") == "ocspark13free" and ch.get("panel") == "cheap",
+          and ch.get("fallback") is None and ch.get("panel") == "cheap",
           "R146 И-3 (a) ocspark13go = opencode, opencode-go/muse-spark-1.3-contributor #xhigh, local, "
-          "cheap, fallback ocspark13free")
+          "cheap; no run-time fallback since R154 И-3 (the free Spark is gone)")
     grp = next((g for g in reg.get("_cascade_groups") or [] if "ocspark13free" in g), [])
     check(grp[:2] == ["ocspark13go", "ocspark13free"] and (reg.get("ask_default") or [None])[0] == "ocspark13go",
           "R146 И-3 (a) the Go Spark is first in the Spark cascade group and in ask_default", "group=%r" % grp)
@@ -14176,31 +14192,35 @@ def suite_r146_i3_spark_go():
     both = ["ocspark13go", "ocspark13free"]
     p = rt.resolve(rt.load_registry(), only=both, ready=yes)
     fb = (p.get("ocspark13go") or {}).get("fallback") or {}
-    check(p["ocspark13go"]["enabled"] and not p["ocspark13free"]["enabled"]
-          and fb.get("channel") == "ocspark13free" and fb.get("off") is None,
-          "R146 И-3 (b) both Sparks named: ONE runs (ocspark13go), the free one armed as its fallback", repr(fb))
+    check(p["ocspark13go"]["enabled"] and not p["ocspark13free"]["enabled"] and not fb,
+          "R146 И-3 (b) both Sparks named: ONE runs (ocspark13go), and since R154 И-3 nothing is armed as its "
+          "fallback", repr(fb))
     pc = rt.resolve(rt.load_registry(), panel="cheap", ready=yes)
     if ch.get("enabled"):
         check(pc["ocspark13go"]["enabled"] and not pc["ocspark13free"]["enabled"],
               "R146 И-3 (b) this tree's cheap panel runs the Go Spark, not the free one")
     else:
-        check(pc["ocspark13free"]["enabled"] and not pc["ocspark13go"]["enabled"],
-              "R146 И-3 (b) this tree (Go Spark off - the kit) runs the free Spark in the cheap panel")
+        keyed = [c for c in ("spark13cont", "orspark13cont") if (pc.get(c) or {}).get("enabled")]
+        check(not pc["ocspark13free"]["enabled"] and not pc["ocspark13go"]["enabled"] and len(keyed) == 1,
+              "R146 И-3 (b) this tree (Go Spark off - the kit): the free Spark is off since R154 И-3 and ONE "
+              "keyed Spark carries the voice", repr(keyed))
     p2 = rt.resolve(rt.load_registry(), only=both, skip=["ocspark13go"], ready=yes)
     check(p2["ocspark13free"]["enabled"] and not p2["ocspark13go"]["enabled"],
           "R146 И-3 (c) --skip ocspark13go: the free Spark runs instead")
     p3 = rt.resolve(rt.load_registry(), only=["ocspark13go"], skip=["ocspark13free"], ready=yes)
-    off3 = ((p3.get("ocspark13go") or {}).get("fallback") or {}).get("off") or ""
-    check(p3["ocspark13go"]["enabled"] and "excluded" in off3,
-          "R146 И-3 (c) --skip ocspark13free: the Go Spark runs, its fallback OFF with the reason", off3)
+    fb3 = (p3.get("ocspark13go") or {}).get("fallback") or {}
+    check(p3["ocspark13go"]["enabled"] and not fb3,
+          "R146 И-3 (c) --skip ocspark13free: the Go Spark runs; since R154 И-3 it has no fallback to turn off",
+          repr(fb3))
     kit = rt.load_registry(overlay=False)
     for c in (kit.get("channels") or {}).values():
         if isinstance(c, dict) and c.get("distribution") == "local":
             c["enabled"] = False
     p4 = rt.resolve(kit, panel="cheap", ready=yes)
-    check(p4["ocspark13free"]["enabled"] and not p4["ocspark13go"]["enabled"]
-          and not (p4["ocspark13free"].get("fallback") or {}),
-          "R146 И-3 (d) kit-shaped registry (local channels off): the free Spark is the Spark voice")
+    check(not p4["ocspark13free"]["enabled"] and not p4["ocspark13go"]["enabled"]
+          and (p4["spark13cont"]["enabled"] or p4["orspark13cont"]["enabled"]),
+          "R146 И-3 (d) kit-shaped registry (local channels off): the free Spark is off since R154 И-3, a keyed "
+          "Spark (spark13cont / orspark13cont) is the Spark voice")
 
     calls = []
 
@@ -14211,15 +14231,26 @@ def suite_r146_i3_spark_go():
         return f
 
     quota = {"ok": False, "text": "", "warnings": ["EXIT 1: provider.quota (HTTP 429): usage limit reached"]}
+    # The MECHANISM, on a fixture: the R146 wiring (Go Spark -> a free twin) put back by hand, because the
+    # product no longer has it (R154 И-3) and mimov26pro -> mimov26flash is another kind.
+    regfb = rt.load_registry()
+    regfb["channels"]["ocspark13go"]["fallback"] = "ocspark13free"
+    regfb["channels"]["ocspark13free"]["enabled"] = True
+    pfb = rt.resolve(regfb, only=both, ready=yes)
     res = {"ocspark13go": dict(quota)}
-    o.run_fallbacks(res, p, reg, ["ocspark13go"], submit=fake_submit, same_voice=rt.same_voice)
+    o.run_fallbacks(res, pfb, regfb, ["ocspark13go"], submit=fake_submit, same_voice=rt.same_voice)
     check(calls == ["ocspark13free"] and (res.get("ocspark13free") or {}).get("fallback_for") == "ocspark13go",
-          "R146 И-3 (e) the Go Spark died on its plan limit: the free Spark runs the same brief once",
+          "R146 И-3 (e) fixture: a run-time fallback runs the same brief once after a plan-limit death",
           "calls=%r" % calls)
     del calls[:]
     res = {"ocspark13go": {"ok": True, "text": "x" * 3000, "bytes": 3000}}
+    o.run_fallbacks(res, pfb, regfb, ["ocspark13go"], submit=fake_submit, same_voice=rt.same_voice)
+    check(calls == [], "R146 И-3 (e) fixture: the Go Spark answered - no fallback", "calls=%r" % calls)
+    del calls[:]
+    res = {"ocspark13go": dict(quota)}
     o.run_fallbacks(res, p, reg, ["ocspark13go"], submit=fake_submit, same_voice=rt.same_voice)
-    check(calls == [], "R146 И-3 (e) the Go Spark answered: no fallback", "calls=%r" % calls)
+    check(calls == [], "R146 И-3 (e) the real registry since R154 И-3: a Go-plan death runs nothing else",
+          "calls=%r" % calls)
 
     class _Done(object):
         returncode = 1
@@ -14245,8 +14276,9 @@ def suite_r146_i3_spark_go():
     check(not r.get("ok") and "provider.quota" in w,
           "R146 И-3 (f) a Go-limit death is a failure whose warning names provider.quota", w[:200])
     cause, _fix = o.diagnose(w)
-    check("OpenCode Go" in (cause or "") and "fallback" in (_fix or ""),
-          "R146 И-3 (g) diagnose() explains a Go-plan quota death and names the free fallback", (cause or "")[:160])
+    check("OpenCode Go" in (cause or "") and "has none since 1.113.3" in (_fix or ""),
+          "R146 И-3 (g) diagnose() explains a Go-plan quota death and, since R154 И-3, says the Go Spark has no "
+          "fallback", (_fix or "")[:160])
 
 
 def suite_r146_i4_tokens():
@@ -17531,6 +17563,118 @@ def suite_r155_i3_wonder_by_name():
     check("--only wonder10" in hint and "--only orwonder" in hint and "the Wonder cascade then runs" not in hint,
           "R155 И-3b (j) the Muse Code «not signed in» hint names --only wonder10 / --only orwonder, never «--skip: "
           "the Wonder cascade then runs wonder10»", hint[-200:])
+
+
+def suite_r154_i3_free_voices():
+    """R154 И-3 (2026-10-18): the free Spark left opencode; three free opencode voices joined the cheap panel.
+
+    Igor 2026-10-18: «у opencode есть же nemotron 3 ultra free, glm 5.3 flash, mimo 2.6 flash (кажется он даже есть
+    в нашей панели), deepseek 4.1 flash. Давай их тогда тоже добавим.» `opencode/muse-spark-1.3-contributor-free`
+    answers provider.no-route since 2026-10-17 and is gone from `opencode models`: it was the kit's Spark voice and
+    ocspark13go's run-time fallback. Fails on 1.113.2 except the two controls marked «control».
+    """
+    import copy
+    import tempfile
+    import routing as rt
+    import orchestrate as o
+    section("R154 И-3 free opencode voices (Nemotron 3 Ultra, GLM 5.3 Flash, DeepSeek V4.1 Flash); free Spark off")
+    reg = rt.load_registry(overlay=False)
+    ch = reg.get("channels") or {}
+    want = {"ocnemotron3ultrafree": ("opencode/nemotron-3-ultra-free", None, None),
+            "ocglm53flashfree": ("opencode/glm-5.3-flash-free", "max", 65536),
+            "ocdeepseekv41flashfree": ("opencode/deepseek-v4.1-flash-free", "max", 65536)}
+    for name, (model, effort, out) in want.items():
+        c = ch.get(name) or {}
+        lim = (c.get("opencode_limit") or {}).get("output")
+        check(c.get("kind") == "opencode" and c.get("model") == model and c.get("panel") == "cheap"
+              and c.get("cost") == "free" and c.get("enabled") is True and c.get("distribution") == "both"
+              and c.get("effort") == effort and lim == out,
+              "R154 И-3 (a) %s: opencode %s, cheap, free, on, shipped (both), effort %s, output limit %s"
+              % (name, model, effort, out),
+              repr({k: c.get(k) for k in ("kind", "model", "panel", "enabled", "distribution", "effort")}))
+
+    def yes(_n):
+        return True
+
+    kit = copy.deepcopy(reg)
+    for c in kit["channels"].values():
+        if isinstance(c, dict) and c.get("distribution") == "local":
+            c["enabled"] = False
+    pk = rt.resolve(copy.deepcopy(kit), panel="cheap", ready=yes)
+    free4 = ["ocmimo26flashfree"] + list(want)
+    on = [n for n in free4 if (pk.get(n) or {}).get("enabled")]
+    check(on == free4, "R154 И-3 (b) the kit-shaped cheap panel seats all four free opencode voices", repr(on))
+    sp = ch.get("ocspark13free") or {}
+    check(sp.get("enabled") is False and "no-route" in (sp.get("_disabled_r154_i3") or "")
+          and not (pk.get("ocspark13free") or {}).get("enabled"),
+          "R154 И-3 (c) ocspark13free is off with its dated reason, and the cheap panel does not seat it")
+    pn = rt.resolve(copy.deepcopy(kit), only=["ocspark13free"], ready=yes)
+    check((pn.get("ocspark13free") or {}).get("enabled") is True,
+          "R154 И-3 (c) control: by its own name ocspark13free still starts (and fails with opencode's message)")
+    pl = rt.resolve(copy.deepcopy(reg), panel="cheap", ready=yes)
+    check((ch.get("ocspark13go") or {}).get("fallback") is None
+          and not ((pl.get("ocspark13go") or {}).get("fallback") or {}),
+          "R154 И-3 (d) ocspark13go arms no run-time fallback: the free Spark it fell back to is gone")
+    pk2 = rt.resolve(copy.deepcopy(kit), panel="cheap",
+                     ready=lambda n: ("no MODEL_API_KEY" if n == "spark13cont" else True))
+    why = " ".join((pk2.get("orspark13cont") or {}).get("why") or [])
+    check(bool((pk2.get("orspark13cont") or {}).get("enabled")) and "carries this voice" in why
+          and "paid" in why.lower(),
+          "R154 И-3 (e) kit, an OpenRouter key and no Meta key: orspark13cont carries the Spark voice, the plan "
+          "says it is paid", why[:220])
+    ps = rt.resolve(copy.deepcopy(kit), panel="standard", ready=yes)
+    nem = [n for n in ("ocnemotron3ultrafree", "ornemotron3ultra") if (ps.get(n) or {}).get("enabled")]
+    check(nem == ["ocnemotron3ultrafree"], "R154 И-3 (f) standard panel: ONE Nemotron, the free opencode one",
+          repr(nem))
+    ps2 = rt.resolve(copy.deepcopy(kit), panel="standard",
+                     ready=lambda n: ("no opencode" if n == "ocnemotron3ultrafree" else True))
+    nem2 = [n for n in ("ocnemotron3ultrafree", "ornemotron3ultra") if (ps2.get(n) or {}).get("enabled")]
+    check(nem2 == ["ornemotron3ultra"], "R154 И-3 (f) control: no opencode here - the OpenRouter twin carries "
+                                        "the Nemotron voice", repr(nem2))
+
+    seen = []
+
+    class _Done(object):
+        returncode = 0
+        stdout = '{"type":"text","part":{"type":"text","text":"ok"}}\n'
+        stderr = ""
+
+    def fake_run(cmd, *a, **k):
+        seen.append(list(cmd) if isinstance(cmd, (list, tuple)) else [str(cmd)])
+        return _Done()
+
+    real_run, real_log = o.subprocess.run, o.log
+    try:
+        o.subprocess.run = fake_run
+        o.log = lambda *a, **k: None
+        for name in ("ocglm53flashfree", "ocnemotron3ultrafree"):
+            c = ch.get(name) or {}
+            out = os.path.join(tempfile.mkdtemp(prefix="r154i3-"), name.upper() + ".md")
+            try:
+                o.call_opencode("brief", "M-DONE", out, model=c.get("model") or ("opencode/" + name),
+                                effort=c.get("effort"), system="sys", timeout=60, name=name)
+            except Exception:                             # noqa: BLE001 - the argv is the finding
+                pass
+    finally:
+        o.subprocess.run, o.log = real_run, real_log
+    models = [cmd[cmd.index("-m") + 1] for cmd in seen if "-m" in cmd]
+    check("opencode/glm-5.3-flash-free#max" in models and "opencode/nemotron-3-ultra-free" in models,
+          "R154 И-3 (g) the call carries the registry's effort: GLM Flash as model#max, Nemotron with no #variant",
+          repr(models))
+    cause, fix = o.diagnose("EXIT 1: provider.no-route: Model unavailable")
+    check("come and go" in (cause or "") and "opencode models" in (fix or ""),
+          "R154 И-3 (h) a vanished opencode model (provider.no-route) gets a hint: `opencode models`, switch it off",
+          (cause or "")[:160])
+    cause, fix = o.diagnose("EXIT 1: provider.quota (HTTP 429): usage limit reached")
+    check("the free ocspark13free" not in (fix or "") and "has none since 1.113.3" in (fix or ""),
+          "R154 И-3 (i) the quota hint no longer promises the free Spark as ocspark13go's fallback", (fix or "")[:160])
+    tw = getattr(o, "_ask_twins_note", None)
+    note = tw(["ocspark13go", "ocnemotron3ultrafree", "ornemotron3ultra"]) if tw else ""
+    check("ocnemotron3ultrafree / ornemotron3ultra" in note and tw(["ocmimo26flashfree"]) == "",
+          "R154 И-3 (j) the --ask line says the two Nemotron transports are one voice (the plan runs one)", note)
+    cli = ((reg.get("groups") or {}).get("cli") or {}).get("channels") or []
+    check(all(n in cli for n in want), "R154 И-3 (k) the `cli` group names the three new CLI channels", repr(cli))
+
 
 if __name__ == "__main__":
     sys.exit(main())

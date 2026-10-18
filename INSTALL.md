@@ -400,14 +400,15 @@ assistant makes for you.
 **You need at least one channel** — the tool runs whatever is available and tells you exactly what
 it skipped and why. A missing key or a missing CLI is a normal, non-fatal condition, not an error.
 
-**No key at all gets you `--ask`.** The opencode CLI runs a **free** Spark 1.3 voice with no API
-key and no account — `npm install -g @opencode/cli` and you are done. For a full review panel,
+**No key at all gets you `--ask`.** The opencode CLI runs four **free** voices with no API key
+and no account — `npm install -g @opencode/cli` and you are done. (The free Spark 1.3 voice it
+used to give is gone since 2026-10-17.) For a full review panel,
 `OPENROUTER_API_KEY` alone reaches most of the model families here, which is enough for the
 disagreement this tool exists to produce. Everything else is optional.
 
 | what it needs | what that unlocks | cost |
 |---|---|---|
-| the opencode CLI v2 (`npm install -g @opencode/cli`) | `ocspark13free` — the **free** Spark 1.3 voice, and the default `--ask` channel; `ocmimo26flashfree` — the **free** MiMo v2.6 Flash | **free** |
+| the opencode CLI v2 (`npm install -g @opencode/cli`) | four **free** voices, in the cheap panel and in every `--ask`: `ocmimo26flashfree` (MiMo v2.6 Flash), `ocnemotron3ultrafree` (Nemotron 3 Ultra), `ocglm53flashfree` (GLM 5.3 Flash), `ocdeepseekv41flashfree` (DeepSeek V4.1 Flash). The free Spark 1.3 (`ocspark13free`) is gone since 2026-10-17 | **free** |
 | ~~the Kimi Code CLI + `NVIDIA_NIM_API_KEY`~~ — **not needed since 1.112.0** ([why](#kimi-code-cli-retired-free-kimi-k3-through-nvidia)) | `nvkimik3` ships switched off: NVIDIA retired its free Kimi K3 on 2026-10-15. Kimi K3 answers in the standard panel through `OPENROUTER_API_KEY` (`kimik3`) | — |
 | `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, a Muse Spark voice and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
 | `MODEL_API_KEY` | the Muse Spark voices reached directly from Meta | metered API |
@@ -496,9 +497,10 @@ export MODEL_API_KEY="<your key>"
 
 To point at a different endpoint, also set `MODEL_API_BASE`.
 
-**No Meta key?** `--ask` works without one. The default chain is: `ocspark13free` (opencode CLI,
-free, no key) → `spark13cont` (this key) → `orspark13cont` (OpenRouter key). If the opencode CLI
-is installed, `--ask` uses it first and never needs `MODEL_API_KEY` at all.
+**No Meta key?** `--ask` works without one. Its first channel is Muse Spark: `spark13cont` with
+this key, otherwise `orspark13cont` on the OpenRouter key (the same Contributor model and price).
+The free `ocspark13free` that used to come first is gone since 2026-10-17. The opencode CLI's free
+voices answer every `--ask` as well, key or no key.
 
 ### Google — `GEMINI_API_KEY`
 
@@ -587,7 +589,7 @@ certain a key is really gone after rotating it, that length is what changes.
 > incident behind that rule: a "masking" expression that kept the first 60 characters of a
 > 48-character key printed the whole thing.
 
-### opencode CLI (free Spark 1.3)
+### opencode CLI (four free voices)
 
 **Requires Node.js** (v18 or newer). If `npm` is not on your PATH, install Node.js from
 [nodejs.org](https://nodejs.org/) first — tick "Add to PATH" on Windows; on macOS `brew install
@@ -599,20 +601,24 @@ npm install -g @opencode/cli
 opencode --version              # must print 2.x
 ```
 
-The package `opencode-ai` is the v1 line (1.19.2 on 2026-10-16). The harness speaks v2 (`model#variant`, `run --standalone`); on v1 the free Spark voice fails at once and the harness says so.
+The package `opencode-ai` is the v1 line (1.19.2 on 2026-10-16). The harness speaks v2 (`model#variant`, `run --standalone`); on v1 those calls fail at once and the harness says so.
 
-No key, no account, no sign-in — the `opencode/` prefix models are free. This installs the
-opencode CLI from [opencode.ai](https://opencode.ai/), which hosts free access to Meta's Muse
-Spark 1.3 Contributor checkpoint among others. The cheap panel's free MiMo v2.6 Flash
-(`ocmimo26flashfree`) runs through the same CLI. Both are free relays and can refuse for a
-while with a usage limit (`provider.quota`); the run then says so for that voice.
+No key, no account, no sign-in for the `opencode/` models whose names end in `-free`. This
+installs the opencode CLI from [opencode.ai](https://opencode.ai/); the cheap panel's four free
+voices run through it: MiMo v2.6 Flash (`ocmimo26flashfree`), Nemotron 3 Ultra
+(`ocnemotron3ultrafree`), GLM 5.3 Flash (`ocglm53flashfree`) and DeepSeek V4.1 Flash
+(`ocdeepseekv41flashfree`), all run live on 2026-10-18. They are free relays: one can refuse for
+a while with a usage limit (`provider.quota`), or disappear — opencode stopped serving its free
+Muse Spark 1.3 on 2026-10-17 (`provider.no-route`). The run then says so for that voice and what
+to do; `opencode models` is the live list.
 
-**This is the default `--ask` channel** (`ocspark13free`). When the opencode CLI is installed,
-`--ask` uses it first — ahead of `spark13cont` (needs `MODEL_API_KEY`) and `orspark13cont`
-(needs `OPENROUTER_API_KEY`). A machine with none of them has no `--ask` channel, which is
-reported and skipped, not fatal.
+**Every `--ask` goes to these free voices too.** Its first channel is Muse Spark, which since
+1.113.3 needs a key: `spark13cont` (`MODEL_API_KEY`) or `orspark13cont` (`OPENROUTER_API_KEY`),
+both paid. A machine with neither reports that line as skipped, not fatal, and the free voices
+still answer.
 
-If the CLI is absent, the others work the same as before — you only lose the free default.
+If the CLI is absent, the others work the same as before — you lose the four free voices, and
+Nemotron 3 Ultra then answers the standard panel through OpenRouter (`ornemotron3ultra`).
 `doctor.py` reports whether the CLI is found and where. If yours is installed in an unusual
 location, set `OPENCODE_BIN` to the full path.
 

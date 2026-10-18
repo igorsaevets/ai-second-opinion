@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.113.3 — 2026-10-18
+
+opencode stopped serving its free Muse Spark on 2026-10-17, so in 1.113.2 the Spark line of every first run failed. Three other free opencode models join the cheap panel, and the docs say that Spark now costs money.
+
+- **Three free opencode voices in the cheap panel**, no key and no account: Nemotron 3 Ultra (`ocnemotron3ultrafree`), GLM 5.3 Flash (`ocglm53flashfree`) and DeepSeek V4.1 Flash (`ocdeepseekv41flashfree`). Run live together with MiMo v2.6 Flash on 2026-10-18: four of four answered and refuted the planted claim, quoting the docstring. GLM and DeepSeek run at effort max (their reasoning tokens at low and at max do not overlap, n=2) with a 65,536-token output limit, as MiMo Flash has; Nemotron takes no effort level, so none is sent.
+- **The free Spark is off.** `ocspark13free` (`opencode/muse-spark-1.3-contributor-free`) answers «provider.no-route» and is gone from `opencode models`; it ships switched off. The cheap panel's Spark voice is now `spark13cont` (Meta key) or `orspark13cont` (OpenRouter), $0.10 / $0.20 per 1M tokens and marked PAID in the plan; our first OpenRouter run cost $0.002.
+- **`ocspark13go` has no fallback.** It fell back to the free Spark; a fallback that starts paying on its own is not one we ship.
+- **One Nemotron voice.** The opencode Nemotron and `ornemotron3ultra` (OpenRouter) are one cascade: opencode first, OpenRouter only where opencode is missing (standard panel).
+- **Hints.** `provider.no-route` has its own now: the model is no longer served, or the effort variant is not one it takes; free models come and go; check `opencode models`. The `provider.quota` hint no longer promises the free Spark, and the `--ask` list line names cascade twins as one voice.
+- **Docs.** README and README.ru: the setup table, «There is no free Muse Spark any more», the «How to ask» counts (cheap 8, CLI only 6, standard 13, CLI only standard 7, for a reader who did steps 1-4, plus Codex for the standard rows), both panel tables, the fallback list, the Go paragraph, the data-terms paragraph. INSTALL, PRIVACY and SECURITY follow; INSTALL no longer says that every `opencode/` model is free.
+
 ## 1.113.2 — 2026-10-17
 
 The first screen says what its sample run does and does not show. Nine reviewers read 1.113.1's new section: all nine caught the same arithmetic slip, and seven saw that a «dead links» column alone hid how many links were never confirmed.

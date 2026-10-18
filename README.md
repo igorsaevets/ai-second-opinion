@@ -60,15 +60,17 @@ To start you need **one OpenRouter key and a couple of free programs**. Everythi
 
 | Step | What to do | What it gives you | What it costs (as of 2026-10-05) |
 |---|---|---|---|
-| **1. OpenRouter** — the main one | Sign up at [openrouter.ai](https://openrouter.ai), add credit and create a key (*Keys → Create Key*). Put it in the `OPENROUTER_API_KEY` variable in your own terminal, not in a chat with an AI ([how — INSTALL.md](INSTALL.md#openrouter--openrouter_api_key)) | The paid voices: MiMo in the cheap panel; Kimi K3, Qwen, DeepSeek, GLM and Nemotron in the standard one; a fallback route to Gemini and Muse Spark | Pay per token on the key; prices are in the tables below. OpenRouter takes a 5.5% fee when you buy credits. Free models: 50 requests a day, or 1000 a day once you have bought at least $10 of credits |
-| **2. opencode CLI** | `npm install -g @opencode/cli` (v2; had the old `opencode-ai`? `npm uninstall -g opencode-ai` first) | The free Muse Spark 1.3 voice (Meta). The free MiMo v2.6 Flash (Xiaomi) runs through it too | Free, no key and no account: that is how it works for us. OpenCode warns that its free models are available "for a limited time" |
+| **1. OpenRouter** — the main one | Sign up at [openrouter.ai](https://openrouter.ai), add credit and create a key (*Keys → Create Key*). Put it in the `OPENROUTER_API_KEY` variable in your own terminal, not in a chat with an AI ([how — INSTALL.md](INSTALL.md#openrouter--openrouter_api_key)) | The paid voices: Muse Spark (when you have no Meta key) and MiMo v2.6 Pro in the cheap panel; Kimi K3, Qwen, DeepSeek V4 Pro and GLM 5.3 in the standard one; a fallback route to Gemini 3.8 Flash and Nemotron | Pay per token on the key; prices are in the tables below. OpenRouter takes a 5.5% fee when you buy credits. Free models: 50 requests a day, or 1000 a day once you have bought at least $10 of credits |
+| **2. opencode CLI** | `npm install -g @opencode/cli` (v2; had the old `opencode-ai`? `npm uninstall -g opencode-ai` first) | Four free voices: MiMo v2.6 Flash (Xiaomi), Nemotron 3 Ultra (NVIDIA), GLM 5.3 Flash (Z.ai) and DeepSeek V4.1 Flash. No free Muse Spark since 2026-10-17 (see below) | Free, no key and no account: that is how it works for us (checked on 2026-10-18). OpenCode warns that its free models are available "for a limited time", and they do come and go |
 | **3. Antigravity CLI (`agy`)** | Install it, sign in with a Google account and run `patch_agy_permissions.py` **once**. Without that step the answers come back empty ([INSTALL.md](INSTALL.md#antigravity-cli-gemini)) | Gemini 3.8 Flash, and Gemini 3.1 Pro by name | Free on a personal Google account, with weekly limits. Google AI Pro ($19.99/month) and Ultra ($99.99 or $199.99/month) raise them |
 | **4. Grok Build CLI** | Install it and run `grok login` ([INSTALL.md](INSTALL.md#grok-build-cli)) | Grok 4.7 with live web search | An xAI account. xAI says Grok Build is now available to everyone; SuperGrok ($30/month) and SuperGrok Plus ($100/month) raise the limits. Whether the CLI works on a free account we have not checked |
 | **5. Codex CLI** — for the standard panel | Install it and sign in with a ChatGPT account ([INSTALL.md](INSTALL.md#codex-cli)) | GPT-6.1 Sol | A ChatGPT plan: Plus $20/month, Pro $200/month. OpenAI says Codex is also in Free and Go ($8/month); whether GPT-6.1 Sol is available there we have not checked. Limits are counted in 5-hour and weekly windows |
 | optional | Claude Code with a subscription ([INSTALL.md](INSTALL.md#claude-code-cli-claude-opus--off-by-default)) | Claude Opus 4.6. Off by default | Claude Pro $20/month, Max from $100/month. Claude Code is in every paid plan |
-| optional | A Meta key, `MODEL_API_KEY` ([INSTALL.md](INSTALL.md#spark--model_api_key)) | A second route to Muse Spark if opencode is not installed | Per key: $0.10 / $0.20 per 1M tokens (Contributor tier) |
+| optional | A Meta key, `MODEL_API_KEY` ([INSTALL.md](INSTALL.md#spark--model_api_key)) | Muse Spark straight from Meta: with this key the cheap panel's Spark voice runs here instead of through OpenRouter | Per key: $0.10 / $0.20 per 1M tokens (Contributor tier) |
 
 **There is no free Kimi any more.** NVIDIA retired its free Kimi K3 on 2026-10-15: the endpoint answers HTTP 410 «end of life». Versions 1.106–1.111 asked for a step «2b» (the Kimi Code CLI and an `NVIDIA_NIM_API_KEY`); since 1.112.0 nothing uses them, the `nvkimik3` channel ships switched off, and the cheap panel has no Kimi voice. Kimi K3 answers in the standard panel through OpenRouter (`kimik3`, paid). «only kimik3» starts that channel alone; «only kimi» does too on the standard panel, while on the default cheap panel it stops and asks you to name `kimik3`: a family word never moves you from free to paid in silence.
+
+**There is no free Muse Spark any more.** On 2026-10-17 opencode stopped serving its free Muse Spark 1.3 (`opencode/muse-spark-1.3-contributor-free`): the call answers «provider.no-route: Model unavailable» and the model is gone from `opencode models`. Since 1.113.3 its channel `ocspark13free` ships switched off, and the cheap panel's Spark voice is paid: `spark13cont` on a Meta key, otherwise `orspark13cont` on your OpenRouter key, $0.10 / $0.20 per 1M tokens either way ($0.002 in our first run); the plan marks it PAID. In its place opencode gives three more free voices, run live on 2026-10-18: Nemotron 3 Ultra, GLM 5.3 Flash and DeepSeek V4.1 Flash. Free models come and go without notice (NVIDIA's free Kimi K3 ended two days earlier); when one disappears, the run names it and says what to do, and `opencode models` is the live list.
 
 To check what was found: `python doctor.py`. It prints which keys and programs it found, and never prints a key itself: only present / absent and the length.
 
@@ -78,12 +80,12 @@ To check what was found: `python doctor.py`. It prints which keys and programs i
 
 In Claude Code with the plugin (and in any agent you gave the line from the top of this page) just say it in plain words:
 
-| You say | What runs (version 1.113.2) |
+| You say | What runs (version 1.113.3) |
 |---|---|
-| **"second opinion"** (for example, "give me a second opinion on this file") | **The cheap panel**, the default: 5 models |
-| **"second opinion, CLI only"** | Only the CLI agents of the cheap panel: 4 models — Muse Spark, MiMo v2.6 Flash, Gemini 3.8 Flash and Grok 4.7. Not one paid request on your OpenRouter key |
-| "standard panel" or "all models" | 11 models: the cheap panel plus GPT-6.1 Sol, Kimi K3 (through OpenRouter, paid), Qwen 3.8 Max, DeepSeek V4 Pro, GLM 5.3 and Nemotron. No Muse Wonder: since 1.113.0 it starts only when named |
-| "CLI only, standard panel" | 5 models: the four CLI agents plus Codex (GPT-6.1 Sol) |
+| **"second opinion"** (for example, "give me a second opinion on this file") | **The cheap panel**, the default: 8 models |
+| **"second opinion, CLI only"** | Only the CLI agents of the cheap panel: 6 models — MiMo v2.6 Flash, Nemotron 3 Ultra, GLM 5.3 Flash, DeepSeek V4.1 Flash, Gemini 3.8 Flash and Grok 4.7. Not one paid request on your OpenRouter key. Muse Spark is not among them since 1.113.3: without an OpenCode Go plan it is an API call |
+| "standard panel" or "all models" | 13 models: the cheap panel plus GPT-6.1 Sol, Kimi K3 (through OpenRouter, paid), Qwen 3.8 Max, DeepSeek V4 Pro and GLM 5.3. No Muse Wonder: since 1.113.0 it starts only when named |
+| "CLI only, standard panel" | 7 models: the six CLI agents plus Codex (GPT-6.1 Sol) |
 | "ask only codex", "only grok" | The one named channel |
 | "only wonder", "muse wonder", «вондер»; "add wonder" | One Muse Wonder, on your Muse Code subscription where the Muse Code CLI is installed. Without it the run stops before paying and names the paid ones: "only wonder10" (Meta key) or "only orwonder" (OpenRouter) runs that one |
 | "only kimi" | The run stops and says why: since 1.112.0 the cheap panel has no free Kimi, and the only Kimi it could start is `kimik3` (OpenRouter, paid). "only kimik3" runs it; on the standard panel "only kimi" runs it too |
@@ -92,7 +94,7 @@ In Claude Code with the plugin (and in any agent you gave the line from the top 
 
 From a terminal the same is done with flags: `--panel cheap` (the default), `--panel standard`, `--route "only CLI"`, `--only codex`, `--skip openrouter`. You can see the plan before anything is spent, for free: `python routing.py` or `--dry-run`.
 
-## Panels: prices as of 2026-10-05, line-up as of 1.112.0
+## Panels: prices as of 2026-10-05, line-up as of 1.113.3
 
 How to read the tables:
 - **Transport.** A *CLI agent* is the vendor's program on your computer (opencode, agy, grok, kimi, codex, claude). It runs on your subscription or for free and needs no OpenRouter key. *OpenRouter* is an API request on your key, paid per token.
@@ -100,22 +102,26 @@ How to read the tables:
 - **Price per 1M tokens** is from the OpenRouter catalogue on 2026-10-05, input / output.
 - **Per run** is the median of our runs from 1 September to 5 October 2026; n is the number of runs, each counted once. Yours will be higher or lower: it depends on the size of the document and the number of web searches. The tool prints the exact amount at the end of every run.
 
-### The cheap panel — the default: 5 models
+### The cheap panel — the default: 8 models
 
 | Model | Channel | Transport | Effort | Payment | Price per 1M (in / out) | Per run |
 |---|---|---|---|---|---|---|
-| Muse Spark 1.3 (Meta) | `ocspark13free` | opencode CLI agent | xhigh — the free version's ceiling | free | — | $0 |
+| Muse Spark 1.3 (Meta) | `orspark13cont`; `spark13cont` with a Meta key | OpenRouter; Meta's API with the key | xhigh (the ceiling) | per key | $0.10 / $0.20 | ≈ $0.002 (n=1, 2026-10-18: a 5,000-character brief, no web search) |
 | MiMo v2.6 Flash (Xiaomi) | `ocmimo26flashfree` | opencode CLI agent | the default: the free version takes no levels | free | — | $0 |
+| Nemotron 3 Ultra (NVIDIA) | `ocnemotron3ultrafree` | opencode CLI agent | the default: this free version takes no levels | free | — | $0 |
+| GLM 5.3 Flash (Z.ai) | `ocglm53flashfree` | opencode CLI agent | max (the ceiling) | free | — | $0 |
+| DeepSeek V4.1 Flash | `ocdeepseekv41flashfree` | opencode CLI agent | max (the ceiling) | free | — | $0 |
 | Gemini 3.8 Flash (Google) | `agy38flash` | Antigravity CLI agent (`agy`) | not set: agy decides | Google account: free, with weekly limits | — | $0 beyond the plan |
 | MiMo v2.6 Pro (Xiaomi) | `ormimopro` | OpenRouter | a reasoning budget of 85,000 tokens | per key | $0.435 / $0.87 | ≈ $0.06 (n=9) |
 | Grok 4.7 (xAI) | `grokbuild` | Grok Build CLI agent | xhigh (the ceiling) | xAI account or plan | — | $0 beyond the plan |
 
 If you lack the main transport, a fallback route to the same model takes over:
-- **Muse Spark.** No opencode → `spark13cont` (Meta key) → `orspark13cont` (OpenRouter, $0.10 / $0.20, effort xhigh).
+- **Muse Spark** has no free route since 2026-10-17: with a Meta key it runs as `spark13cont`, otherwise as `orspark13cont` (OpenRouter); both cost $0.10 / $0.20 and the plan marks them PAID. On an OpenCode Go plan it can run on the plan instead (`ocspark13go`, below).
+- **Nemotron 3 Ultra.** No opencode → `ornemotron3ultra` (OpenRouter: a free model, only its web searches are paid, ≈ $0.07 a run, n=6), on the standard panel only.
 - **Gemini 3.8 Flash.** No `agy` → `orgemini38flash` (OpenRouter, $0.75 / $3.75, effort high — this model's ceiling).
 - **Kimi K3.** Not in the cheap panel since 1.112.0: NVIDIA retired its free Kimi K3 on 2026-10-15 (HTTP 410, «end of life»), so `nvkimik3` ships switched off. Kimi answers in the standard panel through OpenRouter (`kimik3`); «only kimik3» starts it alone (on the cheap panel «only kimi» stops and asks for that name).
 
-**In total:** about $0.06 a run on your OpenRouter key plus your subscriptions. Expect about 15 minutes: MiMo v2.6 Pro thinks longest, its median is 14 minutes.
+**In total:** about $0.06 a run on your OpenRouter key plus your subscriptions; MiMo v2.6 Pro is almost all of it, and the paid Muse Spark added $0.002 in our first run (each OpenRouter web search it makes costs extra). Expect about 15 minutes: MiMo v2.6 Pro thinks longest, its median is 14 minutes.
 
 #### If you do not want MiMo Flash (or any other channel)
 
@@ -127,7 +133,7 @@ To stop a channel from starting, put this in `~/.claude/model-orchestration.loca
 
 Any other channel switches off the same way. If the file already exists, add the channel to its `channels` section. `python routing.py` shows who will run, spending nothing.
 
-**Spark on an OpenCode Go plan.** If you have an [OpenCode Go](https://opencode.ai/docs/go) subscription and opencode is signed in to it, turn on the `ocspark13go` channel: the same Muse Spark 1.3, but on your plan instead of the shared free quota (in our runs since 5 October the free version answered in 1 round of 9; the rest hit the quota). The free `ocspark13free` then stays as the backup: if the plan run gives no answer (limit reached, plan unpaid, timeout), the same brief goes to the free version once.
+**Spark on an OpenCode Go plan.** If you have an [OpenCode Go](https://opencode.ai/docs/go) subscription and opencode is signed in to it, turn on the `ocspark13go` channel: the same Muse Spark 1.3, on your plan instead of on your Meta or OpenRouter key. Since 1.113.3 it has no backup: the free version it used to fall back to is gone, and a backup that starts paying on its own is not one we ship. If the plan run gives no answer (limit reached, plan unpaid, timeout), its record says why and the other voices' answers stand.
 
 ```json
 { "channels": { "ocspark13go": { "enabled": true } } }
@@ -138,7 +144,7 @@ On the plan, Spark costs $0.10 / $0.20 per 1M tokens out of the plan's limits (o
 **If an answer is «word salad».** A model sometimes returns its own control tokens mixed with fragments of words in several languages instead of text: NVIDIA's free Kimi K3 did so from 6 October until it was retired, and users of other programs reported the same. The run marks such an answer **CORRUPTED OUTPUT**: `REPORT.md` says «🔴 CORRUPTED», `HANDOFF.md` tells you not to open it, and it does not count as an answer.
 
 
-### The standard panel — 11 models: the cheap one + 6
+### The standard panel — 13 models: the cheap one + 5
 
 | Model | Channel | Transport | Effort | Payment | Price per 1M (in / out) | Per run |
 |---|---|---|---|---|---|---|
@@ -147,7 +153,8 @@ On the plan, Spark costs $0.10 / $0.20 per 1M tokens out of the plan's limits (o
 | Qwen 3.8 Max (Alibaba) | `qwen38max` | OpenRouter | xhigh (the ceiling) | per key | $2.00 / $6.00 | ≈ $0.59 (n=3), see below |
 | DeepSeek V4 Pro | `ordeepseekv4pro` | OpenRouter | xhigh (the ceiling) | per key | $0.209 / $0.418 | ≈ $0.18 (n=3) |
 | GLM 5.3 (Z.ai) | `orglm53` | OpenRouter | max | per key | $0.05 / $7.00 | ≈ $0.19 (n=3) |
-| Nemotron 3 Ultra (NVIDIA) | `ornemotron3ultra` | OpenRouter | high (the ceiling) | free model | $0 / $0 | ≈ $0.07 (n=6): only the web searches are paid here |
+
+Nemotron 3 Ultra moved to the cheap panel in 1.113.3, free through opencode; its OpenRouter route, `ornemotron3ultra`, runs here only where opencode is missing.
 
 Muse Wonder left this panel in 1.113.0: it starts only when named (below, «By name only»).
 
@@ -287,7 +294,7 @@ document number against the register genuinely is research.
 
 ## What one run looks like
 
-You write your question in a plain text file and run one command. Below is the real output of a run on 2026-10-05, shortened, from before NVIDIA retired Kimi K3 (so the cheap panel still had six models): it checked five claims about OpenRouter and NVIDIA, one of which we made false on purpose.
+You write your question in a plain text file and run one command. Below is the real output of a run on 2026-10-05, shortened, from before NVIDIA retired Kimi K3 and opencode its free Muse Spark (so the cheap panel then had six models, `nvkimik3` and `ocspark13free` among them): it checked five claims about OpenRouter and NVIDIA, one of which we made false on purpose.
 
 ```
 [agy38flash] OK  275.2s  model=Gemini 3.8 Flash [gemini-3.8-flash]
@@ -343,13 +350,13 @@ prose copy of that list in this repository has been wrong within days of being w
 at one point, two different numbers four lines apart in this very file.)
 
 **Some channels are cheap because of their data terms, not despite them.** As published,
-`ocspark13free`, `spark13cont` and `orspark13cont` run the same Muse Spark 1.3 *Contributor* tier
-— through opencode, directly and through OpenRouter respectively — and `ornemotron3ultra` runs a
-*free* tier; on every one of them the vendor may use prompts and completions for training. That is
+`spark13cont` and `orspark13cont` run the same Muse Spark 1.3 *Contributor* tier — directly and
+through OpenRouter respectively — and `ornemotron3ultra` runs a *free* tier; on every one of them the vendor may use prompts and completions for training. That is
 the trade being made, it is stated in [PRIVACY.md](PRIVACY.md) with each vendor named, and the
 tool prints each channel's data policy in the plan **before** it spends anything — that line, not
 this paragraph, is the current list. If a brief should not be trained on, drop those channels for
-that run: `--skip ocspark13free spark13cont orspark13cont ornemotron3ultra`.
+that run: `--skip spark13cont orspark13cont ornemotron3ultra`. (The free Spark through opencode,
+`ocspark13free`, was on this list until opencode dropped it on 2026-10-17; it ships switched off.)
 
 Nothing else in this file will tell you when to avoid a channel, and that is deliberate. An
 earlier version carried a loud warning here and in the registry, and it was obeyed twice in ways
