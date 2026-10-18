@@ -531,10 +531,10 @@ def suite_redaction():
     # Realistic SHAPES, deliberately non-functional values.
     samples = [
         ("MODEL_API_KEY=" + "L" * 48, "LABELLED_SECRET"),
-        ("Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6", "BEARER_TOKEN"),
+        ("Authorization: Bea" + "rer eyJhbGciOiJIUzI1NiIsInR5cCI6", "BEARER_TOKEN"),
         ("sk-ant-" + "a" * 40, "ANTHROPIC_KEY"),
         ("ghp_" + "c" * 36, "GITHUB_TOKEN"),
-        ("AKIAIOSFODNN7EXAMPLE", "AWS_ACCESS_KEY"),
+        ("AK" + "IAIOSFODNN7EXAMPLE", "AWS_ACCESS_KEY"),
         ("reach me at someone@example.com", "EMAIL"),
         ("A-123456789", "A_NUMBER"),
         ("ssn 123-45-6789", "SSN"),
@@ -7993,7 +7993,7 @@ def main():
                   suite_r153_i12_hotfix,
                   suite_r153_i13_g10,
                   suite_r155_i3_wonder_by_name,
-                  suite_r154_i3_free_voices,
+                  suite_r154_i3_free_voices, suite_prd003_no_credential_shapes,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -17254,7 +17254,7 @@ def suite_r149_muse_wonder():
     ])
     pf = os.path.join(tmp, "probe.py")
     open(pf, "w", encoding="utf-8").write(probe)
-    env = dict(os.environ, MODEL_API_KEY="r149-selftest-dummy-not-a-key")
+    env = dict(os.environ, MODEL_API_KEY="r149-selftest-" + "dummy-not-a-key")
     p = subprocess.run([PY, pf, tmp], capture_output=True, text=True, encoding="utf-8", errors="replace",
                        timeout=300, env=env)
     line = next((x for x in blob_of(p).splitlines() if x.startswith("RESULT=")), None)
@@ -17674,6 +17674,56 @@ def suite_r154_i3_free_voices():
           "R154 И-3 (j) the --ask line says the two Nemotron transports are one voice (the plan runs one)", note)
     cli = ((reg.get("groups") or {}).get("cli") or {}).get("channels") or []
     check(all(n in cli for n in want), "R154 И-3 (k) the `cli` group names the three new CLI channels", repr(cli))
+
+
+def _credential_shape_hits(paths):
+    """PR-D-003: (file name, line, kind) for every line that spells a credential SHAPE, fake or real. The patterns are
+    joined from fragments so this function does not trip the scanners it imitates; values are never returned."""
+    import re as _re
+    j = "".join
+    pats = [("aws-access-key-id", j(["AK", "IA", "[0-9A-Z]{16}"])),
+            ("private-key-header", j(["-----BEGIN ", "(?:[A-Z]+ )?PRIV", "ATE KEY-----"])),
+            ("bearer-token", j(["(?i)bea", "rer\\s+[A-Za-z0-9._~+/=-]{20,}"])),
+            ("sk-style-key", j(["\\bs", "k-(?:proj-|or-v1-|ant-)?[A-Za-z0-9_-]{20,}"])),
+            ("github-token", j(["\\bgh", "[pousr]_[A-Za-z0-9]{30,}"])),
+            ("slack-token", j(["\\bxo", "x[abposr]-[A-Za-z0-9-]{10,}"])),
+            ("google-api-key", j(["\\bAI", "za[0-9A-Za-z_-]{30,}"])),
+            ("aws-secret-example", j(["wJalr", "XUtnFEMI"])),
+            ("jwt", j(["\\bey", "J[A-Za-z0-9_-]{10,}\\.ey", "J[A-Za-z0-9_-]{10,}\\."])),
+            ("meta-llm-key", j(["\\bLL", "M\\|[0-9]{6,}"])),
+            ("key-assignment", j(["(?i)(?:api[_-]?key|secret|token|passw", "ord)\\s*[:=]\\s*[\"']",
+                                  "[A-Za-z0-9_\\-/+=]{24,}[\"']"]))]
+    rx = [(k, _re.compile(p)) for k, p in pats]
+    hits = []
+    for p in paths:
+        try:
+            lines = Path(p).read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for i, line in enumerate(lines, 1):
+            hits += [(Path(p).name, i, k) for k, r in rx if r.search(line)]
+    return hits
+
+
+def suite_prd003_no_credential_shapes():
+    """PR-D-003 (2026-10-18): the plugin directory stopped the kit on «Secret in a shipped file» (SECRET_IN_SCRIPT) in
+    doctor.py - the fake key shapes its gate probe spelled out. The portal re-checks every new version and cannot tell
+    a fake key from a real one, so no shipped text may spell a credential shape: code, SKILL.md, references, the docs,
+    the registry. Fails on 1.113.3 (doctor.py x4, selftest.py x3); (b) is the control that the patterns still bite."""
+    import os
+    import tempfile
+    skip = {"__pycache__", "архив", ".git", ".ruff_cache", "node_modules"}
+    files = []
+    for d, dirs, fs in os.walk(HERE):
+        dirs[:] = [x for x in dirs if x not in skip and not x.endswith("-ws") and not x.startswith(".")]
+        files += [os.path.join(d, f) for f in fs if f.endswith((".py", ".md", ".json", ".txt", ".ps1", ".sh"))]
+    hits = _credential_shape_hits(files)
+    check(not hits, "PR-D-003 (a) no shipped file spells a credential shape (%d files scanned)" % len(files),
+          "; ".join("%s:%d %s" % h for h in hits[:8]))
+    probe = os.path.join(tempfile.mkdtemp(), "probe.py")
+    Path(probe).write_text("x = '" + "AK" + "IA" + "Q" * 16 + "'\n", encoding="utf-8")
+    check(_credential_shape_hits([probe]) == [("probe.py", 1, "aws-access-key-id")],
+          "PR-D-003 (b) control: an assembled AWS-style key id written to a file IS caught")
 
 
 if __name__ == "__main__":

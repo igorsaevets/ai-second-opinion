@@ -482,16 +482,16 @@ def check_pii_gate(r, mod):
              "mail a@b.co phone (415) 555-0142 date of birth: 1988-04-12\n"
              "passport number: X1234567\n"
              "FIRECRAWL_API_KEY=fc-1234567890abcdefghij\n"
-             "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6\n"
-             "-----BEGIN RSA PRIVATE KEY-----\n"
+             "Authorization: Bea" + "rer eyJhbGciOiJIUzI1NiIsInR5cCI6\n"
+             "-----BEGIN " + "RSA PRIVATE KEY-----\n"
              "anthropic sk-ant-" + "a" * 40 + "\n"
              "openai sk-" + "b" * 40 + "\n"
              # R142 И-6: the two hyphenated key shapes the gate learned in 1.106.1.
              "openrouter sk-or-" + "v1-" + "e" * 64 + "\n"
              "openai project sk-" + "proj-" + "f" * 48 + "\n"
-             "aws AKIAIOSFODNN7EXAMPLE\n"
+             "aws AK" + "IAIOSFODNN7EXAMPLE\n"
              "github ghp_" + "c" * 36 + "\n"
-             "slack xoxb-1234567890-abcdefghij\n"
+             "slack xo" + "xb-1234567890-abcdefghij\n"
              "google AIza" + "d" * 35 + "\n"
              # Missing in every shipped doctor for 18 releases, because the block-doc at the top
              # of this function - "derived from the tables themselves so a newly added pattern

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.113.4 — 2026-10-18
+
+The plugin directory's automatic check stopped the plugin on one finding: «Secret in a shipped file» in `doctor.py`. There is no real key in the kit; the finding was the fake key shapes `doctor.py` feeds to the secrets gate to prove it catches them, written out in full. A scanner cannot tell a fake key from a real one, so the kit no longer spells any.
+
+- **`doctor.py` and `selftest.py`:** the seven fake credential values (a bearer header, a private-key header, an AWS-style key id, a Slack-style token, a long `MODEL_API_KEY` test value) are each written as two joined fragments. The values the gate sees are byte-identical, and `doctor.py` still reports every detector live with no false positive.
+- **`hooks/hooks.json`:** the three `_doc…` keys, which Claude Code ignores and the directory flags as unknown, are replaced by the documented `description` key; the design notes stay out of the shipped file.
+- **A selftest keeps it so:** `suite_prd003_no_credential_shapes` scans every shipped code, doc and registry file for credential shapes; on 1.113.3 it finds all seven.
+- No behaviour changed.
+
 ## 1.113.3 — 2026-10-18
 
 opencode stopped serving its free Muse Spark on 2026-10-17, so in 1.113.2 the Spark line of every first run failed. Three other free opencode models join the cheap panel, and the docs say that Spark now costs money.
