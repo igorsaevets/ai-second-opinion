@@ -1839,6 +1839,26 @@ CHARS_PER_TOKEN = 4
 EST_BAND = "measured -13%..+16% against tiktoken o200k_base on 17 real files, EN and RU alike"
 
 
+# R154 И-8 (F9): the answer-cap block asks a reviewer to END its list of dropped findings «with the line
+# TRUNCATED-BY-LIMIT». A substring test flagged two r154i6 answers that said the opposite on that line
+# («TRUNCATED-BY-LIMIT not reached — nothing material was dropped», «TRUNCATED-BY-LIMIT: none — all
+# material findings kept»). A declaration is the token alone on its line (markdown decoration and a bullet
+# allowed), or the token + a separator + text that does not begin with a negation.
+_TRUNC_DECL_RE = re.compile(r"^[ \t>*_`#-]*TRUNCATED-BY-LIMIT[ \t*_`]*(?:[.:;,!\u2014\u2013-]+[ \t]*(.*))?$",
+                            re.M)
+_TRUNC_NEG_RE = re.compile(r"^[ \t*_`(]*(?:none\b|nothing\b|no\b|not\b|n/?a\b|"
+                           r"\u043d\u0435\u0442\b|\u043d\u0438\u0447\u0435\u0433\u043e|\u043d\u0435\b)", re.I)
+
+
+def _declares_truncation(body):
+    """True when a line of `body` declares a dropped finding (see _TRUNC_DECL_RE above)."""
+    for m in _TRUNC_DECL_RE.finditer(body or ""):
+        rest = (m.group(1) or "").strip()
+        if not rest or not _TRUNC_NEG_RE.match(rest):
+            return True
+    return False
+
+
 def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=None,
                   answer_cap=None):
     """
@@ -1900,6 +1920,10 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
         for _cn, _r in (results or {}).items():
             for _af in ((_r.get("attempt_files") or []) if isinstance(_r, dict) else []):
                 attempt_of[str(_af).lower()] = _cn
+        # R154 И-8 (F7): a retry that WON wrote its own copy of the answer (`<CH>.retry.md`, the record's
+        # `answer_copy`) - the same answer as the table's file, not a second opinion to compare against.
+        copy_of = {str(_r.get("answer_copy")).lower(): _cn for _cn, _r in (results or {}).items()
+                   if isinstance(_r, dict) and _r.get("answer_copy")}
         files, sidecars, attempts = [], [], []
         for fn in sorted(os.listdir(outdir)):
             if not fn.endswith(".md") or fn in skip:
@@ -1946,7 +1970,7 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
                 # half the promised length.
                 "chars": len(body),
                 "over_cap": bool(answer_cap) and len(body) > answer_cap,
-                "truncated_note": "TRUNCATED-BY-LIMIT" in body,
+                "truncated_note": _declares_truncation(body),        # R154 И-8 (F9): a declaring line
                 "bytes": size,
                 "stale": stale,
                 "est_tokens": size // CHARS_PER_TOKEN,
@@ -1975,6 +1999,11 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
         orphans = sorted(on_disk - claimed - {""})
         missing = sorted(n for n, r in results.items()
                          if not r.get("answer_file") and r.get("seconds") is not None)
+        # R154 И-8 (F8): the third disagreement the docstring promises - a record NAMES an answer file
+        # that is not in the folder (moved, deleted, never written). Checked on the filesystem itself.
+        claimed_absent = sorted("%s (%s)" % (r["answer_file"], n) for n, r in results.items()
+                                if isinstance(r, dict) and r.get("answer_file")
+                                and not os.path.isfile(os.path.join(outdir, str(r["answer_file"]))))
 
         L = ["# Handoff — what this round produced, and what reading it costs", "",
              "**Which files exist** was read off the filesystem — a directory listing of `%s` "
@@ -2028,7 +2057,15 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             L += ["📎 **Other attempts, kept for comparison, not counted above:** %s - the channel re-ran "
                   "once; its answer file in the table holds the attempt the harness chose, and that "
                   "record's note says why."
-                  % ", ".join("`%s` (%s)" % (x, attempt_of.get(x.lower(), "-")) for x in attempts), ""]
+                  % ", ".join("`%s` (%s%s)" % (x, attempt_of.get(x.lower(), "-"),
+                                               ": the winning retry's own copy - the same answer as the "
+                                               "table's file" if x.lower() in copy_of else "")
+                              for x in attempts), ""]
+        if claimed_absent:
+            L += ["🔴 **Named by a channel record but NOT on disk:** %s. The record says the harness "
+                  "wrote that answer; this folder does not have it (moved, deleted or never written). "
+                  "Check that channel in `diagnostics.json` before trusting its row in REPORT.md."
+                  % ", ".join("`%s`" % c for c in claimed_absent), ""]
         if missing:
             L += ["🔴 **Ran but left no answer file:** %s. Those channels cost time and possibly "
                   "money and produced nothing to read; their cause is in `diagnostics.json` → "
@@ -2150,6 +2187,8 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             log("  ran but wrote NO answer file: %s" % ", ".join(missing))
         if orphans:
             log("  on disk but claimed by no record: %s" % ", ".join(orphans))
+        if claimed_absent:
+            log("  named by a record but NOT on disk: %s" % ", ".join(claimed_absent))
         if answer_cap:
             _over = [f["file"] for f in fresh if f["over_cap"]]
             _trunc = [f["file"] for f in fresh if f["truncated_note"]]
@@ -2164,6 +2203,7 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             % os.path.join(os.path.abspath(outdir), "HANDOFF.md"))
         return {"files": fresh, "total_bytes": total, "est_tokens": est,
                 "orphans": orphans, "ran_without_file": missing, "attempts": attempts,
+                "claimed_absent": claimed_absent,
                 "stale_files": [f["file"] for f in stale_files],
                 "read_order_files": [f["file"] for f in fresh],
                 "over_cap": [f["file"] for f in fresh if f["over_cap"]],
@@ -4381,6 +4421,30 @@ def _cli_ndjson_error(raw):
     return last
 
 
+def _cli_ndjson_split(raw):
+    """R154 И-8 (F3): the streamed text BEFORE and AFTER the LAST `{"type":"error"}` frame, joined the way
+    `_cli_ndjson` joins it, as (before, after); ("", whole text) when the stream has no error frame. The
+    last frame, not the first: after two retries the part after the first error could still open with a
+    second cut draft."""
+    before, cur = "", ""
+    for line in (raw or "").split("\n"):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        if obj.get("type") == "error":
+            before, cur = before + cur, ""
+        elif obj.get("type") == "text":
+            part = obj.get("part")
+            cur += (part.get("text") or "") if isinstance(part, dict) else ""
+    return before, cur
+
+
 def _cli_error_lines(rc, text, raw, stderr, marker, warn, note, finished=None):
     """The EXIT / mid-run error lines shared by call_opencode and call_mimocli (R142 И-6).
 
@@ -4389,20 +4453,51 @@ def _cli_error_lines(rc, text, raw, stderr, marker, warn, note, finished=None):
     True, is an answer the CLI recovered from and completed: graded ok, with a ⚠ note naming the error.
     r154i4 threw away three complete reviews this way (opencode exited 1 after a mid-run ECONNRESET it had
     retried past). Without the verdict, or with any doubt, the grading is the old one.
+
+    R154 И-8 (F3): the store's `stop` cannot see a body cut in the MIDDLE - a draft streamed before the error,
+    then only a short closer with the marker after the CLI's retry (four r154i6 voices named the shape). The
+    text is split at the last error frame: nothing before it -> ok + the note; text before it -> ok only when
+    the part after it ALONE is a complete answer (`refusal_check` silent, the marker on its last line), the
+    note naming both lengths; otherwise a warning naming them (FAILED). r154i6's one real case (Nemotron)
+    streamed 0 chars before its error and 11 268 after it (`runs/r154-spark-chat/i8/oc_split_probe_i8.py`).
+    R154 И-8 (F4): an EXIT != 0 with NO error frame and the marker on the last line was graded ok with no
+    line at all, so the exit was invisible. Still ok (the content checks run on), now with a ⚠ note that
+    names opencode's store verdict when there is one.
     """
     err = _cli_ndjson_error(raw)
     complete = bool(marker) and _marker_on_last_line(text, marker)
     if rc != 0 and not text:
         warn.append("EXIT %d: %s" % (rc, scrub(err or stderr or raw or "")[:300]))
     elif err and rc != 0 and complete and finished is True:
-        note.append("⚠ EXIT %d after a mid-run error the CLI recovered from: %s - opencode's own store "
-                    "records the last step as finished (stop) and the end marker is on the last line, so "
-                    "the answer is graded complete (R154 И-6)" % (rc, scrub(err)[:300]))
+        before, after = _cli_ndjson_split(raw)
+        if not before.strip():
+            note.append("⚠ EXIT %d after a mid-run error the CLI recovered from: %s - opencode's own store "
+                        "records the last step as finished (stop) and the end marker is on the last line, so "
+                        "the answer is graded complete (R154 И-6); nothing was streamed before the error"
+                        % (rc, scrub(err)[:300]))
+        elif refusal_check(after, marker) is None and _marker_on_last_line(after, marker):
+            note.append("⚠ EXIT %d after a mid-run error the CLI recovered from: %s - %d chars were streamed "
+                        "before the error and %d after it; the part after it is a complete answer by itself and "
+                        "opencode's own store records the last step as finished (stop), so the answer is graded "
+                        "complete. Its first %d chars may be an abandoned draft (R154 И-8)"
+                        % (rc, scrub(err)[:300], len(before), len(after), len(before)))
+        else:
+            warn.append("EXIT %d after a mid-run error: %s - %d chars were streamed before it and %d after it, "
+                        "and the part after it is not a complete answer by itself (the end marker closes a short "
+                        "or partial text), so the body may be cut in the middle: NOT graded complete although "
+                        "opencode's store records a finished last step (R154 И-8)"
+                        % (rc, scrub(err)[:300], len(before), len(after)))
     elif err and (rc != 0 or not complete):
         warn.append("EXIT %d after %d chars of text - the CLI stopped on an error: %s"
                     % (rc, len(text), scrub(err)[:300]))
     elif err:
         note.append("the CLI reported an error mid-run and still finished: %s" % scrub(err)[:300])
+    elif rc != 0 and complete:
+        note.append("⚠ EXIT %d with no error frame in the stream; the end marker is on the last line, so the "
+                    "answer is graded complete%s (R154 И-8)"
+                    % (rc, "" if finished is None else
+                       "; opencode's own store records the last step as finished (stop)" if finished else
+                       "; opencode's own store does NOT record a finished last step - read the answer's end"))
 
 
 def _cli_timeout(name, exc, outfile, t0, timeout, model, effort=None):
@@ -4439,6 +4534,21 @@ def _opencode_store_path():
 _OC_SESSION_RE = re.compile(r'"sessionID"\s*:\s*"(ses_[A-Za-z0-9]+)"')
 
 
+def _opencode_root_id(con, sid, limit=16):
+    """R154 И-8 (F2): the ROOT of an opencode session id - `session_v2.parent_id` walked up (bounded,
+    cycle-safe). Both store readers key on the FIRST `sessionID` of the stream; a sub-agent's (child) id
+    there would make them judge the child, whose `stop` says nothing about the parent's answer (agy,
+    Grok, MiMo Pro and Spark raised it on r154i6). An id the store does not hold is returned as given."""
+    seen = set()
+    while sid and sid not in seen and len(seen) < limit:
+        seen.add(sid)
+        row = con.execute("SELECT parent_id FROM session_v2 WHERE id = ?", (sid,)).fetchone()
+        if not row or not row[0]:
+            return sid
+        sid = row[0]
+    return sid
+
+
 def _opencode_store_totals(raw, settle=3.0):
     """R146 И-4: this run's token and cost totals from opencode's own store, or None.
 
@@ -4469,9 +4579,10 @@ def _opencode_store_totals(raw, settle=3.0):
                  "sum(tokens_output), sum(tokens_reasoning), sum(tokens_cache_read), "
                  "sum(tokens_cache_write), sum(cost), min(time_idle IS NOT NULL) "
                  "FROM session_v2 WHERE id IN tree")
+            root = _opencode_root_id(con, m.group(1))        # R154 И-8 (F2)
             deadline = time.time() + settle
             while True:
-                row = con.execute(q, (m.group(1),)).fetchone()
+                row = con.execute(q, (root,)).fetchone()
                 if not row or not row[0] or row[7] or time.time() >= deadline:
                     break
                 time.sleep(0.5)
@@ -4481,7 +4592,7 @@ def _opencode_store_totals(raw, settle=3.0):
         return None
     if not row or not row[0]:
         return None
-    return {"session": m.group(1), "sessions": row[0], "input": row[1], "output": row[2],
+    return {"session": root, "sessions": row[0], "input": row[1], "output": row[2],
             "reasoning": row[3], "cache_read": row[4], "cache_write": row[5], "cost": row[6],
             "settled": bool(row[7])}
 
@@ -4750,8 +4861,9 @@ def _opencode_store_finished(raw):
     r154i4 (2026-10-18): three free voices hit `provider.transport` ECONNRESET mid-run; opencode wrote
     the error step, retried on its own (a `synthetic` row), and the model went on to `stop` with the end
     marker on its last line (`idle_outcome` `succeeded`) - and the CLI still exited 1, so the round graded
-    three complete reviews FAILED. Read-only, by the stream's sessionID, the main session only; the
-    `finish` / `error` fields and the row types only - never message text.
+    three complete reviews FAILED. Read-only, by the stream's sessionID walked up to its ROOT session
+    (R154 И-8: a sub-agent's id first in the stream judged the child); the `finish` / `error` fields and
+    the row types only - never message text.
     """
     m = _OC_SESSION_RE.search(raw or "")
     path = _opencode_store_path()
@@ -4764,10 +4876,11 @@ def _opencode_store_finished(raw):
         uri = "file:%s?mode=ro" % urllib.parse.quote(path.replace("\\", "/"), safe="/:")
         con = sqlite3.connect(uri, uri=True, timeout=2)
         try:
+            sid = _opencode_root_id(con, m.group(1))         # R154 И-8 (F2): the root, never a child
             rows = con.execute("SELECT type, data FROM session_message WHERE session_id = ? "
-                               "ORDER BY seq DESC LIMIT 50", (m.group(1),)).fetchall()
+                               "ORDER BY seq DESC LIMIT 50", (sid,)).fetchall()
             try:
-                row = con.execute("SELECT idle_outcome FROM session_v2 WHERE id = ?", (m.group(1),)).fetchone()
+                row = con.execute("SELECT idle_outcome FROM session_v2 WHERE id = ?", (sid,)).fetchone()
                 outcome = row[0] if row else None
             except Exception:                             # noqa: BLE001 - a store without the column
                 outcome = None
@@ -10096,24 +10209,53 @@ def _agy_plan_shape(text):
 
 def _agy_keep_first(outfile):
     """R154 И-6: move the FIRST attempt's file aside (`<CH>.first.md`) before the round writes the second
-    attempt's text into `outfile`; the new path, or None when there was nothing to move or the move failed.
+    attempt's text into `outfile`; the new path, or None when there was nothing to keep or both ways failed.
     r154i4: the note said the first answer «is kept at AGY38FLASH.md» - the file the round's final write
-    had just replaced with the second answer - and HANDOFF called the retry file an orphan."""
+    had just replaced with the second answer - and HANDOFF called the retry file an orphan.
+    R154 И-8 (F5): Windows refuses to MOVE a file another process holds open (E-245: PermissionError 5, a
+    reader is enough), and the final write then replaced the only copy of the first answer. A failed move
+    falls back to a COPY, which needs read access only."""
     base, ext = os.path.splitext(outfile)
     first_out = base + ".first" + (ext or ".md")
+    if not os.path.isfile(outfile):
+        return None
     try:
-        if os.path.isfile(outfile):
-            os.replace(outfile, first_out)
-            return first_out
+        os.replace(outfile, first_out)
+        return first_out
     except OSError:
         pass
-    return None
+    try:
+        shutil.copyfile(outfile, first_out)
+        return first_out
+    except OSError:
+        return None
 
 
-def _agy_attempt_files(*paths):
+def _agy_attempt_files(*paths, since=None):
     """The kept attempt files of one agy call, as names in its --out folder; HANDOFF lists them as
-    attempts of that channel (not orphans, not counted in the read)."""
-    return [os.path.basename(p) for p in paths if p and os.path.isfile(p)]
+    attempts of that channel (not orphans, not counted in the read).
+    R154 И-8 (F6): `since` = the call's start. A file older than that is a previous round's leftover in a
+    reused --out (this call's retry wrote nothing), never this call's attempt."""
+    out = []
+    for p in paths:
+        try:
+            if p and os.path.isfile(p) and (since is None or os.path.getmtime(p) >= since - 1):
+                out.append(os.path.basename(p))
+        except OSError:
+            continue
+    return out
+
+
+def _agy_undelivered(r, marker):
+    """R154 И-8 (F1): why an agy attempt is NOT a delivered review ("" when it is): no text, the CLI's
+    plan artifact, or no end marker - the test the plan retry always applied, now shared by both retries."""
+    if not (r or {}).get("text"):
+        return "it returned no text"
+    if r.get("plan_shape"):
+        return "it returned the CLI's plan artifact, not the review"
+    if marker and marker not in r["text"]:
+        return "it has no end marker"
+    return ""
 
 
 def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout="25m",
@@ -10146,6 +10288,7 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
     it about sources - and both failures are reported. Two ungrounded runs is a much stronger
     signal about the brief than one.
     """
+    t0 = time.time()                                       # R154 И-8 (F6): attempts are files written since
     first = _agy_once(brief, marker, workdir, outfile, model, effort, timeout, system,
                       add_dirs=add_dirs, bypass=bypass)
 
@@ -10156,8 +10299,7 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
         second = _agy_once(brief + AGY_PLAN_ESCALATION, marker,
                            os.path.join(workdir, "plan-retry"), retry_out,
                            model, effort, timeout, system, add_dirs=add_dirs, bypass=bypass)
-        if second.get("text") and not second.get("plan_shape") \
-                and (not marker or marker in second["text"]):
+        if not _agy_undelivered(second, marker):
             # Deliberately NOT chained into the zero-grounding re-run below: the cost bound is
             # exactly one extra attempt per call, announced before it is spent. If this retry
             # cited sources and opened none, _agy_once has ALREADY attached the zero-grounding
@@ -10165,17 +10307,19 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
             # what is skipped is only a third paid attempt, not the detection. The panel's own
             # reviewer called this "blind acceptance"; the warning path above is why it is not.
             kept = _agy_keep_first(outfile)
-            second["attempt_files"] = _agy_attempt_files(kept, retry_out)
+            second["attempt_files"] = _agy_attempt_files(kept, retry_out, since=t0)
+            second["answer_copy"] = (_agy_attempt_files(retry_out, since=t0) or [None])[0]    # F7
             second.setdefault("notes", []).append(
                 "SECOND ATTEMPT. The first run returned the CLI's plan artifact instead of the "
                 "review; it is kept at %s. This answer is the actual deliverable."
                 % (kept or "nowhere - its file could not be moved aside"))
             return second
-        first["attempt_files"] = _agy_attempt_files(retry_out)
+        first["attempt_files"] = _agy_attempt_files(retry_out, since=t0)
         first.setdefault("warnings", []).append(
             "RE-RUN ALSO FAILED TO DELIVER (kept at %s). Two attempts planned instead of "
             "working - the brief may be too large or too task-shaped for this channel's agent. "
-            "Shrink the brief or use a non-CLI channel for it." % retry_out)
+            "Shrink the brief or use a non-CLI channel for it."
+            % (retry_out if first["attempt_files"] else "nowhere - the retry wrote no file"))
         first["ok"] = False
         return first
 
@@ -10190,9 +10334,14 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
                        os.path.join(workdir, "retry"), retry_out,
                        model, effort, timeout, system, add_dirs=add_dirs, bypass=bypass)
 
-    if second.get("n_grounded"):
+    # R154 И-8 (F1): opening a URL is not delivering the review. r154i6 (Grok G4a): this branch took the
+    # second answer on `n_grounded` alone, so an incomplete second attempt that opened one page replaced a
+    # complete first one; the plan retry above always required text, no plan and the marker.
+    why_not = _agy_undelivered(second, marker)
+    if second.get("n_grounded") and not why_not:
         kept = _agy_keep_first(outfile)
-        second["attempt_files"] = _agy_attempt_files(kept, retry_out)
+        second["attempt_files"] = _agy_attempt_files(kept, retry_out, since=t0)
+        second["answer_copy"] = (_agy_attempt_files(retry_out, since=t0) or [None])[0]        # F7
         second.setdefault("notes", []).append(
             "SECOND ATTEMPT. The first run cited %d URL(s) and opened none of them; it is kept at "
             "%s. This answer grounded %d of %d. Prefer this one, but the first is worth a glance - "
@@ -10201,12 +10350,20 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
                second.get("n_grounded", 0), second.get("n_cited", 0)))
         return second
 
-    first["attempt_files"] = _agy_attempt_files(retry_out)
-    first.setdefault("warnings", []).append(
-        "RE-RUN ALSO GROUNDED NOTHING (kept at %s). Two independent attempts cited sources and "
-        "opened none, so this is not a fluke: treat every URL in this review as unverified and "
-        "check them with `citecheck.py --answer <file> --resolve-urls` before repeating any of "
-        "them." % retry_out)
+    first["attempt_files"] = _agy_attempt_files(retry_out, since=t0)
+    where = retry_out if first["attempt_files"] else "nowhere - the retry wrote no file"
+    if second.get("n_grounded"):
+        first.setdefault("warnings", []).append(
+            "RE-RUN OPENED %d SOURCE(S) BUT DID NOT DELIVER A REVIEW: %s (kept at %s). The FIRST answer is "
+            "returned; it cited %d URL(s) and opened none of them, so treat its URLs as unverified "
+            "(`citecheck.py --answer <file> --resolve-urls`) and read the retry file for what it opened."
+            % (second.get("n_grounded", 0), why_not, where, first.get("n_cited", 0)))
+    else:
+        first.setdefault("warnings", []).append(
+            "RE-RUN ALSO GROUNDED NOTHING (kept at %s). Two independent attempts cited sources and "
+            "opened none, so this is not a fluke: treat every URL in this review as unverified and "
+            "check them with `citecheck.py --answer <file> --resolve-urls` before repeating any of "
+            "them." % where)
     first["ok"] = False
     return first
 

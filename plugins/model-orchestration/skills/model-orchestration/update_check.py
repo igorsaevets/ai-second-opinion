@@ -274,7 +274,8 @@ def _changelog_section(text, version, max_lines=15, max_chars=2500):
 
 def read_local_changelog_section(latest_version):
     """CHANGELOG section for `latest_version` from the copy shipped INSIDE the skill folder
-    (package.py puts CHANGELOG.md there). "" if not found. Best-effort — no throws."""
+    (package.py puts a trimmed CHANGELOG.md there: the newest releases, always the one it built - R154 И-9).
+    "" if not found. Best-effort — no throws."""
     p = os.path.join(HERE, "CHANGELOG.md")
     try:
         with open(p, encoding="utf-8") as f:

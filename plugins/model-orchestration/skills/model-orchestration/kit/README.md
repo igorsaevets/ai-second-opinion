@@ -118,8 +118,8 @@ How to read the tables:
 
 If you lack the main transport, a fallback route to the same model takes over:
 - **Muse Spark** has no free route since 2026-10-17: with a Meta key it runs as `spark13cont`, otherwise as `orspark13cont` (OpenRouter); both cost $0.10 / $0.20, and the plan marks the OpenRouter one PAID. If the Contributor model fails, both retry on the Standard Muse Spark 1.3 at $1.25 / $4.25 (12.5× the input price, 21× the output); the OpenRouter route's spend guard stops a review at $1.00. On an OpenCode Go plan it can run on the plan instead (`ocspark13go`, below).
-- **Nemotron 3 Ultra.** No opencode → `ornemotron3ultra` (OpenRouter: a free model, only its web searches are paid, ≈ $0.07 a run, n=6), on the standard panel only.
-- **MiMo v2.6 Flash, GLM 5.3 Flash, DeepSeek V4.1 Flash** have no other route: without opencode they do not start, and the cheap panel runs 4 models (Muse Spark, Gemini 3.8 Flash, MiMo v2.6 Pro, Grok 4.7).
+- **Nemotron 3 Ultra.** No opencode → `ornemotron3ultra` (OpenRouter: a free model, only its web searches are paid, ≈ $0.07 a run, n=6), on the standard panel only, and as an `--ask` extra on an OpenRouter key.
+- **MiMo v2.6 Flash, GLM 5.3 Flash, DeepSeek V4.1 Flash** have no other route, and on the cheap panel neither has Nemotron 3 Ultra. Without opencode the plan still lists those four as `[RUN ]` and each fails at dispatch with «binary not found», spending nothing: 4 models answer (Muse Spark, Gemini 3.8 Flash, MiMo v2.6 Pro, Grok 4.7) and the report counts 4 failures. Say "without opencode" to leave them out of the run.
 - **Gemini 3.8 Flash.** No `agy` → `orgemini38flash` (OpenRouter, $0.75 / $3.75, effort high — this model's ceiling).
 - **Kimi K3.** Not in the cheap panel since 1.112.0: NVIDIA retired its free Kimi K3 on 2026-10-15 (HTTP 410, «end of life»), so `nvkimik3` ships switched off. Kimi answers in the standard panel through OpenRouter (`kimik3`); «only kimik3» starts it alone (on the cheap panel «only kimi» stops and asks for that name).
 

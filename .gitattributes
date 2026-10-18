@@ -5,9 +5,9 @@
 # box. The generator already writes LF; this makes git stop helpfully undoing that.
 * text=auto eol=lf
 
-# PowerShell is happy with either, but CRLF is what a Windows editor will produce anyway, so
-# declaring it prevents a spurious whole-file diff the first time someone edits it there.
-*.ps1 text eol=crlf
+# No other eol rule (R154 И-9). Until 1.113.6 a `*.ps1` rule asked for CRLF, and Anthropic's plugin
+# directory refused the repository before scanning it; its instruction: "Add eol=lf to every line-ending
+# rule, in place of any other eol setting, or delete the rule". PowerShell runs a script with LF endings.
 
 # Never touch these.
 *.png binary

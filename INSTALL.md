@@ -500,9 +500,10 @@ To point at a different endpoint, also set `MODEL_API_BASE`.
 **No Meta key?** `--ask` works without one. Its first channel is Muse Spark: `spark13cont` with
 this key, otherwise `orspark13cont` on the OpenRouter key (the same Contributor model and price;
 with the README's OpenCode Go overlay on, `ocspark13go` comes first). The free `ocspark13free` that
-used to come first is gone since 2026-10-17. The opencode CLI's free voices answer every `--ask` as
-well, key or no key. With an OpenRouter key `--ask` also asks `ornemotron3ultra`, a free model on
-OpenRouter: the model costs nothing, but each web search it makes bills that key.
+used to come first is switched off: its free model left opencode on 2026-10-17. The opencode CLI's free voices answer every `--ask` as
+well, key or no key. Without the opencode CLI, an OpenRouter key makes `--ask` ask Nemotron 3 Ultra
+through `ornemotron3ultra`, a free model on OpenRouter (with opencode it answers there instead): the
+model costs nothing, but each web search it makes bills that key.
 
 ### Google — `GEMINI_API_KEY`
 
@@ -567,7 +568,7 @@ export OPENROUTER_API_KEY="<your key>"
 > vendor may train on what you send (see [PRIVACY.md](PRIVACY.md)) — with an automatic fallback
 > to the Standard, non-training tier if the Contributor endpoint fails for your account: Muse
 > Spark 1.3 at $1.25 / $4.25 per 1M tokens, 12.5× the Contributor input price (the channel's spend
-> guard stops a review at $1.00). When `MODEL_API_KEY` is absent, `--ask` starts with this channel:
+> guard stops a review at $1.00). When `MODEL_API_KEY` is absent (without the Go overlay), `--ask` starts with this channel:
 > the choice comes from `ask_default` in `channels.json` and is printed when it fires.
 
 ### The premium batch panel — same keys, one more
@@ -620,8 +621,10 @@ to do; `opencode models` is the live list.
 both paid. On a machine with neither, that line fails with «MODEL_API_KEY not set»; that is not
 fatal, and the free voices still answer.
 
-If the CLI is absent, the others work the same as before — you lose the four free voices, and
-Nemotron 3 Ultra then answers the standard panel through OpenRouter (`ornemotron3ultra`).
+If the CLI is absent, the others work the same as before. The four free voices stay in the plan as
+`[RUN ]` and each fails at dispatch with «binary not found», spending nothing (say "without opencode"
+to leave them out), and Nemotron 3 Ultra then answers the standard panel through OpenRouter
+(`ornemotron3ultra`).
 `doctor.py` reports whether the CLI is found and where. If yours is installed in an unusual
 location, set `OPENCODE_BIN` to the full path.
 

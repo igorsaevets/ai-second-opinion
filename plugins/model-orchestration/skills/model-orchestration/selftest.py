@@ -7995,6 +7995,7 @@ def main():
                   suite_r155_i3_wonder_by_name,
                   suite_r154_i3_free_voices, suite_prd003_no_credential_shapes,
                   suite_r154_i6_opencode_word_grading_retry,
+                  suite_r154_i8_hotfix, suite_r154_i9_portal,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -17912,6 +17913,296 @@ def suite_r154_i6_opencode_word_grading_retry():
     paid = getattr(o, "_ask_paid_search", lambda _n: None)(["ocmimo26flashfree", "ornemotron3ultra", "nope"])
     check(paid == ["ornemotron3ultra"],
           "R154 И-6 (d) --ask names ornemotron3ultra as a free extra whose web searches bill", repr(paid))
+
+
+def suite_r154_i9_portal():
+    """R154 I-9 (2026-10-18), F14 of runs/r154-spark-chat/i7/triage-i7.md: Anthropic's plugin directory refused the
+    older submission before scanning for a CRLF line-ending rule in .gitattributes, and held v1.113.4 for a reviewer
+    on the plugin folder's 410 KB CHANGELOG.md (a non-image file of 256 KiB or more is held). The kit's .gitattributes
+    asks only for LF; the plugin folder's CHANGELOG.md is a trimmed copy that still carries the section
+    update_check.py reads. In an installed tree (no package.py, no kit/) the shipped file itself is checked.
+    Fails on 1.113.5.
+    """
+    import importlib.util
+    import update_check as uc
+    section("R154 I-9: the directory portal - .gitattributes eol rule, a trimmed plugin CHANGELOG")
+    here = os.path.dirname(os.path.abspath(__file__))
+    ga = os.path.join(here, "kit", "gitattributes")
+    if os.path.isfile(ga):
+        with open(ga, encoding="utf-8") as fh:
+            rules = [ln for ln in fh.read().splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+        eol = [r for r in rules if "eol=" in r]
+        check(all("eol=lf" in r for r in eol), "kit/gitattributes: every eol rule is eol=lf (the portal refuses "
+              "any other eol setting before scanning)", " | ".join(eol))
+    else:
+        check(True, "kit/gitattributes is not in this tree (an installed copy) - nothing to check")
+    pk_path = os.path.join(here, "package.py")
+    if not os.path.isfile(pk_path):
+        p = os.path.join(here, "CHANGELOG.md")
+        vp = os.path.join(here, "VERSION")
+        ver = open(vp, encoding="utf-8").read().strip() if os.path.isfile(vp) else ""
+        text = open(p, encoding="utf-8").read() if os.path.isfile(p) else ""
+        check(os.path.isfile(p) and os.path.getsize(p) < 256 * 1024 and bool(uc._changelog_section(text, ver)),
+              "installed tree: CHANGELOG.md is under 256 KiB and holds this version's section",
+              "%s bytes, version %r" % (os.path.getsize(p) if os.path.isfile(p) else "no file", ver))
+        return
+    spec = importlib.util.spec_from_file_location("mo_package_r154i9", pk_path)
+    pk = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pk)
+    trim = getattr(pk, "_plugin_changelog", None)
+    check(callable(trim), "package.py builds the plugin CHANGELOG through _plugin_changelog (a trimmed copy)")
+    if not callable(trim):
+        return
+    secs = ["## 9.9.%d - 2099-01-0%d\n\n%s\n\n" % (n, n, ("change %d " % n) * 100) for n in (5, 4, 3, 2, 1)]
+    full = "# Changelog\n\n" + "".join(secs)
+    out, kept, total = trim(full, "o/r", budget=2600)
+    check((kept, total) == (2, 5) and "## Older releases" in out and "3 older releases" in out
+          and "https://github.com/o/r/blob/main/CHANGELOG.md" in out,
+          "a 2.6 KB budget keeps the 2 newest of 5 sections, then a pointer to the full file", "%d/%d" % (kept, total))
+    check(all(uc._changelog_section(out, v) == uc._changelog_section(full, v) != "" for v in ("9.9.5", "9.9.4"))
+          and uc._changelog_section(out, "9.9.3") == "",
+          "update_check reads a kept version's section exactly as from the full file; a dropped one is absent")
+    out1, kept1, _t = trim(full, "o/r", budget=10)
+    check(kept1 == 1 and uc._changelog_section(out1, "9.9.5") == uc._changelog_section(full, "9.9.5"),
+          "the newest section is kept whatever its size (the one the update notice quotes)")
+    src = os.path.join(here, "kit", "CHANGELOG.md")
+    if os.path.isfile(src):
+        with open(src, encoding="utf-8") as fh:
+            real = fh.read()
+        top = next((ln[3:].split()[0] for ln in real.splitlines() if ln.startswith("## ")), "")
+        outr, kr, tr = trim(real, "o/r")
+        size = len(outr.encode("utf-8"))
+        check(size < 256 * 1024 and uc._changelog_section(outr, top) == uc._changelog_section(real, top) != "",
+              "the real kit/CHANGELOG.md trims under 256 KiB and keeps the newest section (%s) intact" % top,
+              "%d bytes, %d of %d sections" % (size, kr, tr))
+
+
+def suite_r154_i8_hotfix():
+    """R154 И-8 (2026-10-18), from panel r154i6 (triage `runs/r154-spark-chat/i7/triage-i7.md`, F1-F11): agy's
+    grounding retry must DELIVER (text, no plan, the marker) to replace the first answer; the opencode store
+    readers judge the ROOT session; a recovered opencode answer streamed partly before its error frame is ok only
+    when the part after it is complete alone; an exit != 0 with no error frame gets a note; a failed move of agy's
+    first attempt falls back to a copy; attempt files are this call's; a won retry's own file is the answer's copy;
+    HANDOFF names a record whose file is gone; TRUNCATED-BY-LIMIT is a declaring line; the plan's why-line for a
+    switched-off channel and the other panel's projection say what the code does. Fails on 1.113.5 except the
+    checks marked «control».
+    """
+    import copy
+    import json as _j
+    import sqlite3 as _sq
+    import tempfile
+    import time as _t
+    import routing as rt
+    import orchestrate as o
+    section("R154 И-8: agy retry, opencode root session + mid-body cut, HANDOFF lines, plan lines")
+    m = "MARK"
+
+    # ---- agy: F1, F5, F6, F7 -----------------------------------------------------------------------------------
+    def agy_case(second_text, n_grounded, stale_retry=False, hold_first=False):
+        ad = tempfile.mkdtemp(prefix="r154i8-agy-")
+        out = os.path.join(ad, "AGY38FLASH.md")
+        retry = os.path.join(ad, "AGY38FLASH.retry.md")
+        if stale_retry:
+            with open(retry, "w", encoding="utf-8", newline="\n") as f:
+                f.write("AN OLDER ROUND'S RETRY\n" + m)
+            old = _t.time() - 3600
+            os.utime(retry, (old, old))
+        calls = []
+
+        def _once(brief, marker, workdir, outfile, *a, **kw):
+            calls.append(outfile)
+            if len(calls) == 1:
+                body = "FIRST ANSWER, complete\n" + m
+                with open(outfile, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(body)
+                return {"ok": False, "text": body, "zero_grounding": True, "n_cited": 3,
+                        "warnings": ["ZERO GROUNDING"], "notes": []}
+            if second_text:
+                with open(outfile, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(second_text)
+            return {"ok": bool(n_grounded), "text": second_text, "n_grounded": n_grounded, "n_cited": 2,
+                    "warnings": [], "notes": []}
+
+        def _no_move(a, b):
+            raise PermissionError(5, "Access is denied (the destination is held open)")
+
+        saved = (o._agy_once, o.os.replace)
+        try:
+            o._agy_once = _once
+            if hold_first:
+                o.os.replace = _no_move
+            rec = o.call_agy("B", m, ad, out)
+        finally:
+            o._agy_once, o.os.replace = saved
+        with open(out, "w", encoding="utf-8", newline="\n") as f:          # the round's final write
+            f.write(rec.get("text") or "")
+        return ad, out, rec
+
+    ad, out, rec = agy_case("SECOND ANSWER, opened one page, cut before the end", 1)
+    ws = " ".join(rec.get("warnings") or [])
+    check((rec.get("text") or "").startswith("FIRST ANSWER") and rec.get("ok") is False
+          and "OPENED 1 SOURCE" in ws and "no end marker" in ws
+          and rec.get("attempt_files") == ["AGY38FLASH.retry.md"],
+          "R154 И-8 (F1) a grounding retry that opened a page but has no end marker does not replace the first "
+          "answer; the warning names both failures",
+          repr(((rec.get("text") or "")[:14], ws[:110], rec.get("attempt_files")))[:240])
+    ad, out, rec = agy_case("SECOND ANSWER, complete\n" + m, 2)
+    check((rec.get("text") or "").startswith("SECOND ANSWER")
+          and os.path.isfile(os.path.join(ad, "AGY38FLASH.first.md")),
+          "R154 И-8 (F1) control: a grounding retry that opened pages and delivered still wins",
+          repr((rec.get("text") or "")[:14]))
+    check(rec.get("answer_copy") == "AGY38FLASH.retry.md",
+          "R154 И-8 (F7) a won retry's record names its own file as the answer's copy", repr(rec.get("answer_copy")))
+    o.write_handoff(ad, {"agy38flash": dict(rec, answer_file="AGY38FLASH.md", seconds=1.0)}, marker=m)
+    hand = open(os.path.join(ad, "HANDOFF.md"), encoding="utf-8").read()
+    check("`AGY38FLASH.retry.md` (agy38flash: the winning retry's own copy" in hand
+          and "`AGY38FLASH.first.md` (agy38flash)" in hand,
+          "R154 И-8 (F7) HANDOFF labels the won retry's file as the answer's own copy, the first as the other attempt",
+          next((ln[:200] for ln in hand.splitlines() if "Other attempts" in ln), "(no attempts line)"))
+    ad, out, rec = agy_case("SECOND ANSWER, complete\n" + m, 2, hold_first=True)
+    firstf = os.path.join(ad, "AGY38FLASH.first.md")
+    kept = open(firstf, encoding="utf-8").read() if os.path.isfile(firstf) else ""
+    check(kept.startswith("FIRST ANSWER") and "AGY38FLASH.first.md" in " ".join(rec.get("notes") or []),
+          "R154 И-8 (F5) the first attempt is COPIED aside when the move is refused (a file held open on Windows)",
+          repr((kept[:14], " ".join(rec.get("notes") or [])[-80:]))[:200])
+    ad, out, rec = agy_case("", 0, stale_retry=True)
+    check(rec.get("attempt_files") == [] and "nowhere - the retry wrote no file" in " ".join(rec.get("warnings") or []),
+          "R154 И-8 (F6) an older round's <CH>.retry.md in a reused --out is not this call's attempt",
+          repr((rec.get("attempt_files"), " ".join(rec.get("warnings") or [])[:90]))[:200])
+
+    # ---- opencode store: F2 ----------------------------------------------------------------------------------------
+    td = tempfile.mkdtemp(prefix="r154i8-oc-")
+    xdg = os.path.join(td, "xdg")
+    os.makedirs(os.path.join(xdg, "opencode"))
+    con = _sq.connect(os.path.join(xdg, "opencode", "opencode.db"))
+    con.execute("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, idle_outcome TEXT, time_idle INTEGER, "
+                "tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER, tokens_cache_read INTEGER, "
+                "tokens_cache_write INTEGER, cost REAL)")
+    con.execute("CREATE TABLE session_message (session_id TEXT, type TEXT, seq INTEGER, data TEXT)")
+    con.execute("INSERT INTO session_v2 VALUES ('ses_R154root', NULL, 'succeeded', 1, 100, 50, 0, 0, 0, 0.01)")
+    con.execute("INSERT INTO session_v2 VALUES ('ses_R154kid', 'ses_R154root', 'failed', 1, 10, 5, 0, 0, 0, 0.001)")
+    for sid, rows in (("ses_R154root", [("user", {}), ("assistant", {"finish": "stop"})]),
+                      ("ses_R154kid", [("user", {}), ("assistant", {"finish": "error",
+                                                                     "error": {"type": "provider.transport"}})])):
+        for i, (typ, data) in enumerate(rows, 1):
+            con.execute("INSERT INTO session_message VALUES (?, ?, ?, ?)", (sid, typ, i, _j.dumps(data)))
+    con.commit()
+    con.close()
+
+    def oc_stream(*sids):
+        return "\n".join(_j.dumps({"type": "step_start", "sessionID": s, "part": {}}) for s in sids)
+
+    saved_xdg = os.environ.get("XDG_DATA_HOME")
+    try:
+        os.environ["XDG_DATA_HOME"] = xdg
+        fin_kid = o._opencode_store_finished(oc_stream("ses_R154kid", "ses_R154root"))
+        tot_kid = o._opencode_store_totals(oc_stream("ses_R154kid", "ses_R154root"), settle=0) or {}
+        fin_root = o._opencode_store_finished(oc_stream("ses_R154root", "ses_R154kid"))
+        tot_root = o._opencode_store_totals(oc_stream("ses_R154root", "ses_R154kid"), settle=0) or {}
+    finally:
+        if saved_xdg is None:
+            os.environ.pop("XDG_DATA_HOME", None)
+        else:
+            os.environ["XDG_DATA_HOME"] = saved_xdg
+    check(fin_kid is True and tot_kid.get("session") == "ses_R154root" and tot_kid.get("input") == 110,
+          "R154 И-8 (F2) a sub-agent's id first in the stream: both store readers judge the ROOT session (its verdict, "
+          "the totals of the whole tree)", repr((fin_kid, tot_kid.get("session"), tot_kid.get("input"))))
+    check(fin_root is True and tot_root.get("input") == 110,
+          "R154 И-8 (F2) control: the root's id first reads the same", repr((fin_root, tot_root.get("input"))))
+
+    # ---- _cli_error_lines: F3, F4 ------------------------------------------------------------------------------------
+    def tf(t):
+        return _j.dumps({"type": "text", "sessionID": "ses_x", "part": {"text": t}})
+    errf = _j.dumps({"type": "error", "sessionID": "ses_x",
+                     "error": {"type": "provider.transport", "status": 200, "message": "ECONNRESET"}})
+    draft = "A long review draft that the stream cut. " * 40
+    full = "The whole review, written after the retry, every finding kept. " * 20 + "\n" + m
+    closer = "\nThat is all.\n" + m
+    w, n = [], []
+    o._cli_error_lines(1, draft + closer, "\n".join([tf(draft), errf, tf(closer)]), "", m, w, n, finished=True)
+    check(bool(w) and "EXIT 1" in w[0] and "not a complete answer by itself" in w[0] and str(len(draft)) in w[0]
+          and not n,
+          "R154 И-8 (F3) a draft streamed before the error + only a short closer with the marker after it: NOT "
+          "graded complete, the warning names both lengths", repr((w[:1], n[:1]))[:220])
+    narr = "Let me check the code first."
+    w, n = [], []
+    o._cli_error_lines(1, narr + full, "\n".join([tf(narr), errf, tf(full)]), "", m, w, n, finished=True)
+    check(not w and bool(n) and ("%d chars were streamed before the error and %d after it" % (len(narr), len(full)))
+          in n[0],
+          "R154 И-8 (F3) narration before the error + a complete answer after it: ok, the note names both lengths",
+          repr((w[:1], n[:1]))[:220])
+    w, n = [], []
+    o._cli_error_lines(1, full, "\n".join([errf, tf(full)]), "", m, w, n, finished=True)
+    check(not w and bool(n) and n[0].startswith("⚠ EXIT 1"),
+          "R154 И-8 (F3) control: nothing streamed before the error (r154i6's Nemotron shape) stays ok with the note",
+          repr((w[:1], n[:1]))[:200])
+    w, n = [], []
+    o._cli_error_lines(1, full, tf(full), "", m, w, n, finished=True)
+    check(not w and any("no error frame" in x and "finished (stop)" in x for x in n),
+          "R154 И-8 (F4) exit 1 with no error frame and the marker last: ok with a ⚠ note naming the store verdict",
+          repr((w[:1], n[:1]))[:200])
+    w, n = [], []
+    o._cli_error_lines(0, full, tf(full), "", m, w, n)
+    check(not w and not n, "R154 И-8 (F4) control: exit 0, no error frame, the marker last - no line at all",
+          repr((w, n))[:200])
+
+    # ---- HANDOFF: F8, F9 ------------------------------------------------------------------------------------------
+    hd = tempfile.mkdtemp(prefix="r154i8-h-")
+    with open(os.path.join(hd, "HERE.md"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("an answer\n" + m)
+    h = o.write_handoff(hd, {"here": {"answer_file": "HERE.md", "seconds": 1.0},
+                             "gone": {"answer_file": "GONE.md", "seconds": 1.0}}, marker=m) or {}
+    hand = open(os.path.join(hd, "HANDOFF.md"), encoding="utf-8").read()
+    check(h.get("claimed_absent") == ["GONE.md (gone)"] and "NOT on disk" in hand and "`GONE.md (gone)`" in hand,
+          "R154 И-8 (F8) HANDOFF names a record whose answer file is not on disk", repr(h.get("claimed_absent")))
+    tdir = tempfile.mkdtemp(prefix="r154i8-t-")
+    bodies = {"NEG1.md": "review\nTRUNCATED-BY-LIMIT not reached — nothing material was dropped.\n",
+              "NEG2.md": "review\nTRUNCATED-BY-LIMIT: none — all material findings kept.\n",
+              "NEG3.md": "review\n`TRUNCATED-BY-LIMIT`: " + "\u043d\u0435\u0442" + "\n",
+              "POS1.md": "review\ndropped: one item\nTRUNCATED-BY-LIMIT\n",
+              "POS2.md": "review\n- **TRUNCATED-BY-LIMIT**: dropped the cost finding\n"}
+    res = {}
+    for fn, body in bodies.items():
+        with open(os.path.join(tdir, fn), "w", encoding="utf-8", newline="\n") as f:
+            f.write(body + m)
+        res[fn[:-3].lower()] = {"answer_file": fn, "seconds": 1.0}
+    h = o.write_handoff(tdir, res, marker=m, answer_cap=200) or {}
+    check(sorted(h.get("truncated") or []) == ["POS1.md", "POS2.md"],
+          "R154 И-8 (F9) TRUNCATED-BY-LIMIT counts on a declaring line only - «not reached», «: none», «: нет» are not "
+          "declared drops", repr(sorted(h.get("truncated") or [])))
+
+    # ---- routing: F10, F11 --------------------------------------------------------------------------------------
+    kit = rt.load_registry(overlay=False)
+    for c in kit["channels"].values():
+        if isinstance(c, dict) and c.get("distribution") == "local":
+            c["enabled"] = False
+    chans = kit["channels"]
+    off = sorted(nm for nm, c in chans.items() if isinstance(c, dict) and not c.get("enabled")
+                 and not c.get("explicit_only"))
+    txt = rt.format_plan(rt.resolve(copy.deepcopy(kit), ready=lambda _n: True), copy.deepcopy(kit))
+    check(bool(off) and "can still start it" not in txt and "only its own name starts it" in txt,
+          "R154 И-8 (F10) the plan's why-line for a switched-off channel: only its own name starts it",
+          repr((len(off), next((ln.strip()[:120] for ln in txt.splitlines() if "off by default" in ln), "-"))))
+    woke = []
+    for g, gd in sorted((kit.get("groups") or {}).items()):
+        if g.startswith("_") or not isinstance(gd, dict):
+            continue
+        for word in [g] + [str(a) for a in gd.get("aliases") or []]:
+            try:
+                p = rt.resolve(copy.deepcopy(kit), ready=lambda _n: True, only=[word])
+            except rt.RouteError:
+                continue
+            woke += ["%s->%s" % (word, nm) for nm in off if (p.get(nm) or {}).get("enabled")]
+    check(not woke, "R154 И-8 (F10) control: no group word starts a switched-off member (the why-line's claim)",
+          ", ".join(woke[:6]))
+    reg = rt.load_registry(overlay=False)
+    txt = rt.format_plan(rt.resolve(reg, panel="cheap"), reg)
+    line = next((ln for ln in txt.splitlines() if "would ALSO run" in ln), "")
+    named = {x.strip() for x in line.split(":", 1)[1].split(",")} if ":" in line else set()
+    eo = {nm for nm, c in reg["channels"].items() if isinstance(c, dict) and c.get("explicit_only")}
+    check(bool(named) and not (named & eo),
+          "R154 И-8 (F11) «--panel standard would ALSO run» names no explicit_only channel (they start by name only)",
+          repr(sorted(named & eo) or sorted(named)[:4]))
 
 
 if __name__ == "__main__":

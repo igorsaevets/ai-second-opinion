@@ -3383,12 +3383,15 @@ def format_plan(plan, reg):
             # reverse - what `cheap` gives up - has to be equally visible, because a panel that
             # silently reviews LESS is as much a defect as one that silently spends more.
             oadmits = set(panels[other]["includes"])
+            # R154 И-8 (F11): an `explicit_only` channel starts by its own name only, so switching the
+            # panel neither adds nor drops it - the line listed agy31pro / mcwonder10cont / orwonder /
+            # wonder10 as «would ALSO run» while a standard run started none of them.
             gain = sorted(c2 for c2, p2 in plan.items()
                           if reg["channels"][c2].get("panel") in oadmits - admits
-                          and p2.get("default_enabled"))
+                          and p2.get("default_enabled") and not p2.get("explicit_only"))
             lose = sorted(c2 for c2, p2 in plan.items()
                           if reg["channels"][c2].get("panel") in admits - oadmits
-                          and p2.get("default_enabled"))
+                          and p2.get("default_enabled") and not p2.get("explicit_only"))
             if gain:
                 lines.append("           - --panel %s would ALSO run: %s"
                              % (other, ", ".join(gain)))
@@ -3482,7 +3485,8 @@ def format_plan(plan, reg):
             lines.append("           - off by default in the registry (`enabled: false`)%s"
                          % (" - and `explicit_only`, so ONLY its own name starts it: no group, "
                             "no panel, no default" if p.get("explicit_only")
-                            else "; --only or a group word can still start it"))
+                            else "; only its own name starts it (`--only <name>`) - a group word, a "
+                            "panel or the default skips it"))
         if p["enabled"] and cost == "expensive":
             lines.append("           - cost: EXPENSIVE channel")
         # 🔴 A FALLBACK NOBODY IS TOLD ABOUT IS A SILENT MODEL SUBSTITUTION, and this registry has
