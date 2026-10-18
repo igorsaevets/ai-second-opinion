@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.113.5 — 2026-10-18
+
+From the first full panel of the three new free opencode voices: seven of eight answers were complete, and the report counted four.
+
+- **«opencode» names the opencode voices.** The word was the alias of `ocspark13free`, whose free model left opencode on 2026-10-17, so «only opencode» / `--only opencode` ran only that dead model and «without opencode» excluded nothing. It is now a group of every opencode channel: «only opencode» runs the ones that are on (in the kit the four free voices), «without opencode» drops them, and a switched-off member starts only by its own name. «опенкод» works too.
+- **A complete opencode answer after a recovered error is graded complete.** opencode exits 1 after a mid-run transport error (ECONNRESET) even when it retried and the model finished; three complete reviews were graded FAILED. When opencode's own store records the last step as finished (`stop`) and the end marker is on the last line, the answer is now graded ok, with a ⚠ note naming the error. Anything less stays FAILED.
+- **The agy retry keeps both attempts.** When agy's second attempt replaced the first (a plan instead of the review, or sources cited and none opened), the round wrote the second answer over the first while the note said the first was kept. The first now moves to `<CHANNEL>.first.md`, the note names it, and HANDOFF.md lists both attempt files instead of calling the retry file an orphan.
+- **Docs and printed text:** Muse Spark's automatic Standard fallback costs $1.25 / $4.25 per 1M tokens (README, INSTALL); the `--ask` line names an extra whose web searches bill (`ornemotron3ultra`) instead of saying a second opinion costs nothing; INSTALL no longer says the opencode CLI decides which channel answers `--ask` first; without opencode the cheap panel runs four models (README); two stale registry notes.
+- **Known, not fixed here:** opencode v2 resumes an interrupted session when a later opencode server starts on the same store («The server restarted while you were working»); in that panel a free voice's brief ran again 23 and 93 minutes later, with nobody collecting the answer. A private data folder per free run was measured to work (a free model answered from a fresh folder in 6 s, the shared store untouched); it ships once its side effects (MCP sign-ins, tool downloads) are measured.
+
 ## 1.113.4 — 2026-10-18
 
 The plugin directory's automatic check stopped the plugin on one finding: «Secret in a shipped file» in `doctor.py`. There is no real key in the kit; the finding was the fake key shapes `doctor.py` feeds to the secrets gate to prove it catches them, written out in full. A scanner cannot tell a fake key from a real one, so the kit no longer spells any.

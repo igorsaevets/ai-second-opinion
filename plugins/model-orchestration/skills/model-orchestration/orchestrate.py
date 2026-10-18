@@ -1893,7 +1893,14 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             if _af:
                 by_file[_af] = (_cn, _r.get("read_order"), _r.get("reading_note"),
                                 bool(_r.get("must_read")))
-        files, sidecars = [], []
+        # R154 И-6: a channel that re-ran once keeps its other attempt(s) beside its answer (agy:
+        # `<CH>.first.md`, `<CH>.retry.md`); its record names them, so they are neither answers to
+        # count nor orphans.
+        attempt_of = {}
+        for _cn, _r in (results or {}).items():
+            for _af in ((_r.get("attempt_files") or []) if isinstance(_r, dict) else []):
+                attempt_of[str(_af).lower()] = _cn
+        files, sidecars, attempts = [], [], []
         for fn in sorted(os.listdir(outdir)):
             if not fn.endswith(".md") or fn in skip:
                 continue
@@ -1901,6 +1908,9 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             # answer nor a foreign file; v1.108.0 listed it as both.
             if fn.lower().endswith(".quote-verify.md"):
                 sidecars.append(fn)
+                continue
+            if fn.lower() in attempt_of and os.path.isfile(os.path.join(outdir, fn)):
+                attempts.append(fn)
                 continue
             p = os.path.join(outdir, fn)
             if not os.path.isfile(p):
@@ -2014,6 +2024,11 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
                   "in that channel's answer (advisory); not counted above."
                   % ", ".join("`%s` (%s)" % (x, (by_file.get(x.lower()[:-len(_sc)] + ".md")
                                                  or ("-",))[0] or "-") for x in sidecars), ""]
+        if attempts:
+            L += ["📎 **Other attempts, kept for comparison, not counted above:** %s - the channel re-ran "
+                  "once; its answer file in the table holds the attempt the harness chose, and that "
+                  "record's note says why."
+                  % ", ".join("`%s` (%s)" % (x, attempt_of.get(x.lower(), "-")) for x in attempts), ""]
         if missing:
             L += ["🔴 **Ran but left no answer file:** %s. Those channels cost time and possibly "
                   "money and produced nothing to read; their cause is in `diagnostics.json` → "
@@ -2148,7 +2163,7 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
         log("  The manifest and a ready-to-paste resume prompt are in %s"
             % os.path.join(os.path.abspath(outdir), "HANDOFF.md"))
         return {"files": fresh, "total_bytes": total, "est_tokens": est,
-                "orphans": orphans, "ran_without_file": missing,
+                "orphans": orphans, "ran_without_file": missing, "attempts": attempts,
                 "stale_files": [f["file"] for f in stale_files],
                 "read_order_files": [f["file"] for f in fresh],
                 "over_cap": [f["file"] for f in fresh if f["over_cap"]],
@@ -4366,12 +4381,24 @@ def _cli_ndjson_error(raw):
     return last
 
 
-def _cli_error_lines(rc, text, raw, stderr, marker, warn, note):
-    """The EXIT / mid-run error lines shared by call_opencode and call_mimocli (R142 И-6)."""
+def _cli_error_lines(rc, text, raw, stderr, marker, warn, note, finished=None):
+    """The EXIT / mid-run error lines shared by call_opencode and call_mimocli (R142 И-6).
+
+    R154 И-6: `finished` is opencode's own verdict on the run (`_opencode_store_finished`; mimo passes
+    none). An EXIT != 0 after an error frame, with the end marker on the text's last line AND that verdict
+    True, is an answer the CLI recovered from and completed: graded ok, with a ⚠ note naming the error.
+    r154i4 threw away three complete reviews this way (opencode exited 1 after a mid-run ECONNRESET it had
+    retried past). Without the verdict, or with any doubt, the grading is the old one.
+    """
     err = _cli_ndjson_error(raw)
+    complete = bool(marker) and _marker_on_last_line(text, marker)
     if rc != 0 and not text:
         warn.append("EXIT %d: %s" % (rc, scrub(err or stderr or raw or "")[:300]))
-    elif err and (rc != 0 or not (marker and _marker_on_last_line(text, marker))):
+    elif err and rc != 0 and complete and finished is True:
+        note.append("⚠ EXIT %d after a mid-run error the CLI recovered from: %s - opencode's own store "
+                    "records the last step as finished (stop) and the end marker is on the last line, so "
+                    "the answer is graded complete (R154 И-6)" % (rc, scrub(err)[:300]))
+    elif err and (rc != 0 or not complete):
         warn.append("EXIT %d after %d chars of text - the CLI stopped on an error: %s"
                     % (rc, len(text), scrub(err)[:300]))
     elif err:
@@ -4714,6 +4741,55 @@ def _opencode_length_stop(raw, base_model, info, has_text):
                "; the answer stops mid-way" if has_text else "; no answer was written"))
 
 
+def _opencode_store_finished(raw):
+    """R154 И-6: opencode's own verdict on this run - True when its store says the run FINISHED: the
+    last assistant step ended `finish: stop` with no error, nothing was asked after it (no later user /
+    synthetic row), and the session's `idle_outcome` is not `failed` / `interrupted`. False when the
+    store says otherwise; None when it cannot tell (no session id, no store, no rows, a read error).
+
+    r154i4 (2026-10-18): three free voices hit `provider.transport` ECONNRESET mid-run; opencode wrote
+    the error step, retried on its own (a `synthetic` row), and the model went on to `stop` with the end
+    marker on its last line (`idle_outcome` `succeeded`) - and the CLI still exited 1, so the round graded
+    three complete reviews FAILED. Read-only, by the stream's sessionID, the main session only; the
+    `finish` / `error` fields and the row types only - never message text.
+    """
+    m = _OC_SESSION_RE.search(raw or "")
+    path = _opencode_store_path()
+    if not m or not os.path.isfile(path):
+        return None
+    outcome = None
+    try:
+        import sqlite3
+        import urllib.parse
+        uri = "file:%s?mode=ro" % urllib.parse.quote(path.replace("\\", "/"), safe="/:")
+        con = sqlite3.connect(uri, uri=True, timeout=2)
+        try:
+            rows = con.execute("SELECT type, data FROM session_message WHERE session_id = ? "
+                               "ORDER BY seq DESC LIMIT 50", (m.group(1),)).fetchall()
+            try:
+                row = con.execute("SELECT idle_outcome FROM session_v2 WHERE id = ?", (m.group(1),)).fetchone()
+                outcome = row[0] if row else None
+            except Exception:                             # noqa: BLE001 - a store without the column
+                outcome = None
+        finally:
+            con.close()
+    except Exception:                                     # noqa: BLE001 - never costs the round
+        return None
+    if outcome in ("failed", "interrupted"):
+        return False
+    for typ, data in rows:
+        if typ in ("user", "synthetic"):
+            return False                                  # asked again after the last answer step
+        if typ != "assistant":
+            continue                                      # system / idle rows
+        try:
+            d = json.loads(data or "{}")
+        except ValueError:
+            return None
+        return isinstance(d, dict) and d.get("finish") == "stop" and not d.get("error")
+    return None
+
+
 def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
                   timeout=2400, name="ocspark13free"):
     """opencode CLI (opencode.ai) — Spark 1.3 Contributor: FREE (`opencode/...-free`, no API key) or
@@ -4806,7 +4882,9 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     text, tokens, cost = _cli_ndjson(raw)
     tokens, cost, tsrc = _opencode_store_merge(raw, tokens, cost, note)
 
-    _cli_error_lines(p.returncode, text, raw, p.stderr, marker, warn, note)
+    # R154 И-6: opencode's own verdict, read only when the exit code alone would fail a written answer.
+    finished = _opencode_store_finished(raw) if p.returncode != 0 and text else None
+    _cli_error_lines(p.returncode, text, raw, p.stderr, marker, warn, note, finished=finished)
     if text:
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
@@ -10016,6 +10094,28 @@ def _agy_plan_shape(text):
     return len({m.group(1) for m in re.finditer(pat, text or "")}) >= 2
 
 
+def _agy_keep_first(outfile):
+    """R154 И-6: move the FIRST attempt's file aside (`<CH>.first.md`) before the round writes the second
+    attempt's text into `outfile`; the new path, or None when there was nothing to move or the move failed.
+    r154i4: the note said the first answer «is kept at AGY38FLASH.md» - the file the round's final write
+    had just replaced with the second answer - and HANDOFF called the retry file an orphan."""
+    base, ext = os.path.splitext(outfile)
+    first_out = base + ".first" + (ext or ".md")
+    try:
+        if os.path.isfile(outfile):
+            os.replace(outfile, first_out)
+            return first_out
+    except OSError:
+        pass
+    return None
+
+
+def _agy_attempt_files(*paths):
+    """The kept attempt files of one agy call, as names in its --out folder; HANDOFF lists them as
+    attempts of that channel (not orphans, not counted in the read)."""
+    return [os.path.basename(p) for p in paths if p and os.path.isfile(p)]
+
+
 def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout="25m",
              system=None, add_dirs=None, bypass=False):
     """
@@ -10064,10 +10164,14 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
             # WARNING to it (ok=False, the panel shows PROBLEM), so the failure stays loud -
             # what is skipped is only a third paid attempt, not the detection. The panel's own
             # reviewer called this "blind acceptance"; the warning path above is why it is not.
+            kept = _agy_keep_first(outfile)
+            second["attempt_files"] = _agy_attempt_files(kept, retry_out)
             second.setdefault("notes", []).append(
                 "SECOND ATTEMPT. The first run returned the CLI's plan artifact instead of the "
-                "review; it is kept at %s. This answer is the actual deliverable." % outfile)
+                "review; it is kept at %s. This answer is the actual deliverable."
+                % (kept or "nowhere - its file could not be moved aside"))
             return second
+        first["attempt_files"] = _agy_attempt_files(retry_out)
         first.setdefault("warnings", []).append(
             "RE-RUN ALSO FAILED TO DELIVER (kept at %s). Two attempts planned instead of "
             "working - the brief may be too large or too task-shaped for this channel's agent. "
@@ -10087,14 +10191,17 @@ def call_agy(brief, marker, workdir, outfile, model=None, effort="high", timeout
                        model, effort, timeout, system, add_dirs=add_dirs, bypass=bypass)
 
     if second.get("n_grounded"):
+        kept = _agy_keep_first(outfile)
+        second["attempt_files"] = _agy_attempt_files(kept, retry_out)
         second.setdefault("notes", []).append(
             "SECOND ATTEMPT. The first run cited %d URL(s) and opened none of them; it is kept at "
             "%s. This answer grounded %d of %d. Prefer this one, but the first is worth a glance - "
             "a model told to open sources sometimes narrows to what it can easily fetch."
-            % (first.get("n_cited", 0), outfile, second.get("n_grounded", 0),
-               second.get("n_cited", 0)))
+            % (first.get("n_cited", 0), kept or "nowhere - its file could not be moved aside",
+               second.get("n_grounded", 0), second.get("n_cited", 0)))
         return second
 
+    first["attempt_files"] = _agy_attempt_files(retry_out)
     first.setdefault("warnings", []).append(
         "RE-RUN ALSO GROUNDED NOTHING (kept at %s). Two independent attempts cited sources and "
         "opened none, so this is not a fluke: treat every URL in this review as unverified and "
@@ -10836,6 +10943,26 @@ def _channel_key_ready(ch):
     return True                                          # codex / hermes
 
 
+def _ask_paid_search(names):
+    """R154 И-6 (G8): the `--ask` extras whose web search bills although the model is priced `free` - an
+    OpenRouter channel with its registry `web` block on (today `ornemotron3ultra`: OpenRouter's web
+    plugin). The --ask line used to say a second opinion «costs nothing but the seconds». Never raises;
+    a registry that cannot be read names none."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import routing
+        chans = routing.load_registry().get("channels") or {}
+    except Exception:                                     # noqa: BLE001
+        return []
+    out = []
+    for n in names or []:
+        c = chans.get(n) if isinstance(chans.get(n), dict) else {}
+        w = c.get("web")
+        if isinstance(w, dict) and w.get("enabled") and c.get("kind") == "openrouter":
+            out.append(n)
+    return out
+
+
 def _pick_ask_channel(reg, key_ready):
     """
     Resolve --ask's default channel from the registry's `ask_default` list (R69).
@@ -10847,10 +10974,11 @@ def _pick_ask_channel(reg, key_ready):
     (registry, key predicate) so selftest can pin every branch without touching the environment.
 
     Igor's 2026-08-08 instruction «--ask по умолчанию идёт на spark12cont - оставляем на нем» is
-    preserved by ORDER, not by code: spark12cont is first in `ask_default`, so any machine with
-    a MODEL_API_KEY behaves exactly as before. What R69 adds is the second candidate: a kit
-    user whose only key is OPENROUTER_API_KEY gets their Spark voice (orspark12cont) instead of
-    a preflight failure on a channel they cannot run.
+    kept by ORDER, not by code. SUPERSEDED order (R154 И-6): `ask_default` is [ocspark13go,
+    ocspark13free, spark13cont, orspark13cont] - the Go plan's Spark first where it is set up (local
+    only), the free Spark switched off since 2026-10-17, then Meta's key, then OpenRouter. R69's point
+    stands: a kit user whose only key is OPENROUTER_API_KEY gets their Spark voice (orspark13cont)
+    instead of a preflight failure on a channel they cannot run.
     """
     order = [c for c in (reg.get("ask_default") or []) if isinstance(c, str)]
     chans = reg.get("channels") or {}
@@ -11960,12 +12088,17 @@ def main():
         if not a.only:
             a.only = [a.ask_channel] + _free_extras(a.ask_channel)
             if len(a.only) > 1:
+                _paid = _ask_paid_search(a.only[1:])
                 log("--ask goes to %d channels: %s. Everything after the first is priced `free` "
-                    "in channels.json, so a second opinion on a lookup costs nothing but the "
-                    "seconds. 🔴 Free and near-free tiers are usually paid for with your text - "
-                    "the plan below prints each channel's data policy. --only <channel> or "
-                    "--skip <channel> narrows it.%s" % (len(a.only), ", ".join(a.only),
-                                                       _ask_twins_note(a.only)))
+                    "in channels.json%s. 🔴 Free and near-free tiers are usually paid for with your "
+                    "text - the plan below prints each channel's data policy. --only <channel> or "
+                    "--skip <channel> narrows it.%s"
+                    % (len(a.only), ", ".join(a.only),
+                       ("; the model is free, but %s search%s the web on your OpenRouter key and "
+                        "each search is billed (R154 И-6)"
+                        % (", ".join(_paid), "es" if len(_paid) == 1 else "")) if _paid
+                       else ", so a second opinion on a lookup costs nothing but the seconds",
+                       _ask_twins_note(a.only)))
         a.no_citecheck = True        # a lookup is not a review; the audit is for cited briefs
         global _citecheck_reason
         _citecheck_reason = ("--ask is a lookup, not a review - the citation audit is for briefs "

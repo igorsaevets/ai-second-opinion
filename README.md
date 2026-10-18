@@ -80,13 +80,14 @@ To check what was found: `python doctor.py`. It prints which keys and programs i
 
 In Claude Code with the plugin (and in any agent you gave the line from the top of this page) just say it in plain words:
 
-| You say | What runs (version 1.113.3) |
+| You say | What runs (version 1.113.5) |
 |---|---|
 | **"second opinion"** (for example, "give me a second opinion on this file") | **The cheap panel**, the default: 8 models |
 | **"second opinion, CLI only"** | Only the CLI agents of the cheap panel: 6 models — MiMo v2.6 Flash, Nemotron 3 Ultra, GLM 5.3 Flash, DeepSeek V4.1 Flash, Gemini 3.8 Flash and Grok 4.7. Not one paid request on your OpenRouter key. Muse Spark is not among them since 1.113.3: without an OpenCode Go plan it is an API call |
 | "standard panel" or "all models" | 13 models: the cheap panel plus GPT-6.1 Sol, Kimi K3 (through OpenRouter, paid), Qwen 3.8 Max, DeepSeek V4 Pro and GLM 5.3. No Muse Wonder: since 1.113.0 it starts only when named |
 | "CLI only, standard panel" | 7 models: the six CLI agents plus Codex (GPT-6.1 Sol) |
 | "ask only codex", "only grok" | The one named channel |
+| "only opencode", «только opencode» | The opencode voices that are on: in the kit the four free ones (MiMo v2.6 Flash, Nemotron 3 Ultra, GLM 5.3 Flash, DeepSeek V4.1 Flash). "without opencode" runs everything else. Before 1.113.5 the word named only the free Spark that is gone since 2026-10-17 |
 | "only wonder", "muse wonder", «вондер»; "add wonder" | One Muse Wonder, on your Muse Code subscription where the Muse Code CLI is installed. Without it the run stops before paying and names the paid ones: "only wonder10" (Meta key) or "only orwonder" (OpenRouter) runs that one |
 | "only kimi" | The run stops and says why: since 1.112.0 the cheap panel has no free Kimi, and the only Kimi it could start is `kimik3` (OpenRouter, paid). "only kimik3" runs it; on the standard panel "only kimi" runs it too |
 | "only agy31pro" or "only agypro" | Gemini 3.1 Pro: it starts only when named |
@@ -98,7 +99,7 @@ From a terminal the same is done with flags: `--panel cheap` (the default), `--p
 
 How to read the tables:
 - **Transport.** A *CLI agent* is the vendor's program on your computer (opencode, agy, grok, kimi, codex, claude). It runs on your subscription or for free and needs no OpenRouter key. *OpenRouter* is an API request on your key, paid per token.
-- **Effort** is how hard the model thinks. The tool always sets the highest level the model accepts.
+- **Effort** is how hard the model thinks. Where a model takes a level, the tool sets the highest it accepts; the rows say where a free model takes none and where agy decides itself.
 - **Price per 1M tokens** is from the OpenRouter catalogue on 2026-10-05, input / output.
 - **Per run** is the median of our runs from 1 September to 5 October 2026; n is the number of runs, each counted once. Yours will be higher or lower: it depends on the size of the document and the number of web searches. The tool prints the exact amount at the end of every run.
 
@@ -106,7 +107,7 @@ How to read the tables:
 
 | Model | Channel | Transport | Effort | Payment | Price per 1M (in / out) | Per run |
 |---|---|---|---|---|---|---|
-| Muse Spark 1.3 (Meta) | `orspark13cont`; `spark13cont` with a Meta key | OpenRouter; Meta's API with the key | xhigh (the ceiling) | per key | $0.10 / $0.20 | ≈ $0.002 (n=1, 2026-10-18: a 5,000-character brief, no web search) |
+| Muse Spark 1.3 (Meta) | `orspark13cont`; `spark13cont` with a Meta key | OpenRouter; Meta's API with the key | xhigh (the ceiling) | per key | $0.10 / $0.20 (Standard fallback $1.25 / $4.25) | ≈ $0.002 (n=1, 2026-10-18: a 5,000-character brief, no web search) |
 | MiMo v2.6 Flash (Xiaomi) | `ocmimo26flashfree` | opencode CLI agent | the default: the free version takes no levels | free | — | $0 |
 | Nemotron 3 Ultra (NVIDIA) | `ocnemotron3ultrafree` | opencode CLI agent | the default: this free version takes no levels | free | — | $0 |
 | GLM 5.3 Flash (Z.ai) | `ocglm53flashfree` | opencode CLI agent | max (the ceiling) | free | — | $0 |
@@ -116,8 +117,9 @@ How to read the tables:
 | Grok 4.7 (xAI) | `grokbuild` | Grok Build CLI agent | xhigh (the ceiling) | xAI account or plan | — | $0 beyond the plan |
 
 If you lack the main transport, a fallback route to the same model takes over:
-- **Muse Spark** has no free route since 2026-10-17: with a Meta key it runs as `spark13cont`, otherwise as `orspark13cont` (OpenRouter); both cost $0.10 / $0.20, and the plan marks the OpenRouter one PAID. On an OpenCode Go plan it can run on the plan instead (`ocspark13go`, below).
+- **Muse Spark** has no free route since 2026-10-17: with a Meta key it runs as `spark13cont`, otherwise as `orspark13cont` (OpenRouter); both cost $0.10 / $0.20, and the plan marks the OpenRouter one PAID. If the Contributor model fails, both retry on the Standard Muse Spark 1.3 at $1.25 / $4.25 (12.5× the input price, 21× the output); the OpenRouter route's spend guard stops a review at $1.00. On an OpenCode Go plan it can run on the plan instead (`ocspark13go`, below).
 - **Nemotron 3 Ultra.** No opencode → `ornemotron3ultra` (OpenRouter: a free model, only its web searches are paid, ≈ $0.07 a run, n=6), on the standard panel only.
+- **MiMo v2.6 Flash, GLM 5.3 Flash, DeepSeek V4.1 Flash** have no other route: without opencode they do not start, and the cheap panel runs 4 models (Muse Spark, Gemini 3.8 Flash, MiMo v2.6 Pro, Grok 4.7).
 - **Gemini 3.8 Flash.** No `agy` → `orgemini38flash` (OpenRouter, $0.75 / $3.75, effort high — this model's ceiling).
 - **Kimi K3.** Not in the cheap panel since 1.112.0: NVIDIA retired its free Kimi K3 on 2026-10-15 (HTTP 410, «end of life»), so `nvkimik3` ships switched off. Kimi answers in the standard panel through OpenRouter (`kimik3`); «only kimik3» starts it alone (on the cheap panel «only kimi» stops and asks for that name).
 

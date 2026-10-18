@@ -7994,6 +7994,7 @@ def main():
                   suite_r153_i13_g10,
                   suite_r155_i3_wonder_by_name,
                   suite_r154_i3_free_voices, suite_prd003_no_credential_shapes,
+                  suite_r154_i6_opencode_word_grading_retry,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -12411,10 +12412,11 @@ def suite_r140_i4_env_fail_closed():
         (o._env_key, o.kimi_bin, o.subprocess.run, o._kimi_node_argv, o.neutral_cwd) = saved
     # R142 И-6: opencode and mimo now build their EXIT line in ONE helper (_cli_error_lines, which
     # also reads the stream's error frame); grok keeps its own. Still: every cut is scrubbed first.
+    # R154 И-6: the opencode call also passes `finished=` (the store's verdict), so the pin is the call's prefix.
     check(src.count('scrub(p.stderr or raw or "")[:300]') == 1
           and src.count('(p.stderr or raw or "")[:300]') == 1
           and src.count('scrub(err or stderr or raw or "")[:300]') == 1
-          and src.count("_cli_error_lines(p.returncode, text, raw, p.stderr, marker, warn, note)") == 2,
+          and src.count("_cli_error_lines(p.returncode, text, raw, p.stderr, marker, warn, note") == 2,
           "R140 И-4: every EXIT warning scrubs stderr before cutting it")
 
     # (b) the answer value scan
@@ -17724,6 +17726,192 @@ def suite_prd003_no_credential_shapes():
     Path(probe).write_text("x = '" + "AK" + "IA" + "Q" * 16 + "'\n", encoding="utf-8")
     check(_credential_shape_hits([probe]) == [("probe.py", 1, "aws-access-key-id")],
           "PR-D-003 (b) control: an assembled AWS-style key id written to a file IS caught")
+
+
+def suite_r154_i6_opencode_word_grading_retry():
+    """R154 И-6 (2026-10-18), from panel r154i4: (a) the word «opencode» names the opencode voices, not the dead
+    ocspark13free it was the alias of; (b) an opencode answer that is complete is graded ok, with a ⚠ note, when the
+    CLI exits 1 after a mid-run error it recovered from - opencode's own store is the judge; (c) the agy retry keeps
+    BOTH attempts, under names its record gives HANDOFF. Fails on 1.113.4 except the checks marked «control».
+    """
+    import copy
+    import json as _j
+    import sqlite3 as _sq
+    import tempfile
+    import routing as rt
+    import orchestrate as o
+    section("R154 И-6: the «opencode» word, opencode exit 1 after a recovered error, the agy retry files")
+
+    # (a) the word, on the kit-shaped registry (distribution=local channels off)
+    kit = rt.load_registry(overlay=False)
+    for c in kit["channels"].values():
+        if isinstance(c, dict) and c.get("distribution") == "local":
+            c["enabled"] = False
+    chans = kit["channels"]
+    oc_all = {n for n, c in chans.items() if isinstance(c, dict) and c.get("kind") == "opencode"}
+    oc_on = {n for n in oc_all if chans[n].get("enabled")}
+
+    def yes(_n):
+        return True
+
+    def runs(**kw):
+        try:
+            p = rt.resolve(copy.deepcopy(kit), ready=yes, **kw)
+        except rt.RouteError as exc:
+            return {"STOP: " + str(exc)[:80]}
+        return {n for n, s in p.items() if s.get("enabled")}
+
+    grp = (kit.get("groups") or {}).get("opencode") or {}
+    owners = sorted(n for n, c in chans.items()
+                    if isinstance(c, dict) and "opencode" in [str(a).lower() for a in c.get("aliases") or []])
+    check(set(grp.get("channels") or []) >= oc_all and "opencode" in (grp.get("aliases") or []) and not owners,
+          "R154 И-6 (a) «opencode» is the GROUP of every opencode channel and no channel's alias",
+          repr((sorted(grp.get("channels") or []), owners)))
+    for how, kw in (("«только opencode»", {"route": "только opencode"}),
+                    ("«only opencode»", {"route": "only opencode"}),
+                    ("«только опенкод»", {"route": "только опенкод"}),
+                    ("--only opencode", {"only": ["opencode"]})):
+        got = runs(**kw)
+        check(got == oc_on and len(oc_on) >= 4 and "ocspark13free" not in got,
+              "R154 И-6 (a) %s runs the enabled opencode voices, never the dead ocspark13free" % how,
+              repr(sorted(got)))
+    got = runs(route="без opencode")
+    check(bool(got) and not (got & oc_all), "R154 И-6 (a) «без opencode» drops every opencode voice",
+          repr(sorted(got)))
+    first = (grp.get("channels") or [None])[0]
+    check((chans.get(first) or {}).get("enabled") is True,
+          "R154 И-6 (a) the group's first member is an enabled voice (a route stop names a group's first member)",
+          repr(first))
+    check(runs(only=["ocspark"]) == {"ocspark13free"},
+          "R154 И-6 (a) control: the dead channel's own short name still names it (it then fails with its hint)")
+
+    # (b) grading: opencode's own store decides whether an exit-1 answer is complete
+    td = tempfile.mkdtemp(prefix="r154i6-oc-")
+    xdg = os.path.join(td, "xdg")
+    os.makedirs(os.path.join(xdg, "opencode"))
+    con = _sq.connect(os.path.join(xdg, "opencode", "opencode.db"))
+    con.execute("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, idle_outcome TEXT, time_idle INTEGER)")
+    con.execute("CREATE TABLE session_message (session_id TEXT, type TEXT, seq INTEGER, data TEXT)")
+    err_step = ("assistant", "error", {"type": "provider.transport", "message": "ECONNRESET"})
+    shapes = {   # the r154i4 shapes as opencode's store held them on 2026-10-18 (row types and finish only)
+        "ses_R154nemo": ("succeeded", ["user", ("assistant", "tool-calls", None), err_step, "synthetic",
+                                       ("assistant", "tool-calls", None), ("assistant", "stop", None), "idle"]),
+        "ses_R154deep": (None, ["user", ("assistant", "tool-calls", None), err_step, "synthetic"]),
+        "ses_R154fail": ("failed", ["user", ("assistant", "stop", None), "idle"]),
+    }
+    for sid, (outcome, rows) in shapes.items():
+        con.execute("INSERT INTO session_v2 VALUES (?, NULL, ?, 1)", (sid, outcome))
+        for i, row in enumerate(rows, 1):
+            if isinstance(row, tuple):
+                con.execute("INSERT INTO session_message VALUES (?, 'assistant', ?, ?)",
+                            (sid, i, _j.dumps({"finish": row[1], "error": row[2]})))
+            else:
+                con.execute("INSERT INTO session_message VALUES (?, ?, ?, '{}')", (sid, row, i))
+    con.commit()
+    con.close()
+
+    def stream(sid, body):
+        return "\n".join([_j.dumps({"type": "step_start", "sessionID": sid, "part": {}}),
+                          _j.dumps({"type": "error", "sessionID": sid,
+                                    "error": {"type": "provider.transport", "status": 200,
+                                              "message": "Connection lost while reading the response: ECONNRESET"}}),
+                          _j.dumps({"type": "text", "sessionID": sid, "part": {"text": body}})])
+
+    cur = {}
+
+    class _Done:
+        def __init__(self, out):
+            self.returncode, self.stdout, self.stderr = (0 if out == "2.0.31" else 1), out, ""
+
+    def _run(cmd, **kw):
+        return _Done("2.0.31" if "--version" in list(cmd) else cur["out"])
+
+    saved = (o.subprocess.run, o.opencode_bin, o.neutral_cwd, o._opencode_limit, o._opencode_supports_standalone)
+    saved_xdg = os.environ.get("XDG_DATA_HOME")
+    recs = {}
+    try:
+        os.environ["XDG_DATA_HOME"] = xdg
+        o.subprocess.run, o.opencode_bin, o.neutral_cwd = _run, (lambda: "opencode"), (lambda: td)
+        o._opencode_limit = lambda name, reg=None: None
+        o._opencode_supports_standalone = lambda b: False
+        for sid, body in (("ses_R154nemo", "review body\nMARK"), ("ses_R154deep", "I will open the sources"),
+                          ("ses_R154fail", "review body\nMARK"), ("ses_R154none", "review body\nMARK")):
+            cur["out"] = stream(sid, body)
+            recs[sid] = o.call_opencode("B", "MARK", os.path.join(td, sid + ".md"),
+                                        model="opencode/nemotron-3-ultra-free", name="ocnemotron3ultrafree")
+    finally:
+        o.subprocess.run, o.opencode_bin, o.neutral_cwd, o._opencode_limit, o._opencode_supports_standalone = saved
+        if saved_xdg is None:
+            os.environ.pop("XDG_DATA_HOME", None)
+        else:
+            os.environ["XDG_DATA_HOME"] = saved_xdg
+    nemo = recs.get("ses_R154nemo") or {}
+    check(nemo.get("ok") is True and not nemo.get("warnings")
+          and any(n.startswith("⚠ EXIT 1") and "provider.transport" in n for n in nemo.get("notes") or []),
+          "R154 И-6 (b) exit 1 after a recovered transport error, the store's last step `stop`, the marker last: "
+          "graded ok with a ⚠ note",
+          repr((nemo.get("ok"), (nemo.get("warnings") or [])[:1], [n[:50] for n in nemo.get("notes") or []]))[:240])
+    for sid, why in (("ses_R154deep", "the error step was the last answer step (DeepSeek at its exit)"),
+                     ("ses_R154fail", "the store says the session failed"),
+                     ("ses_R154none", "the store holds no such session")):
+        r = recs.get(sid) or {}
+        check(r.get("ok") is False and any("EXIT 1" in w for w in r.get("warnings") or []),
+              "R154 И-6 (b) control: still FAILED when %s" % why,
+              repr((r.get("ok"), (r.get("warnings") or [])[:1]))[:200])
+
+    # (c) the agy retry keeps both attempts
+    for won in (True, False):
+        ad = tempfile.mkdtemp(prefix="r154i6-agy-")
+        out = os.path.join(ad, "AGY38FLASH.md")
+        calls = []
+
+        def _once(brief, marker, workdir, outfile, *a, **kw):
+            calls.append(outfile)
+            body = "FIRST ANSWER\nMARK" if len(calls) == 1 else "SECOND ANSWER\nMARK"
+            with open(outfile, "w", encoding="utf-8", newline="\n") as f:
+                f.write(body)
+            if len(calls) == 1:
+                return {"ok": False, "text": body, "zero_grounding": True, "n_cited": 3,
+                        "warnings": ["ZERO GROUNDING"], "notes": []}
+            return {"ok": won, "text": body, "n_grounded": 2 if won else 0, "n_cited": 2,
+                    "warnings": [] if won else ["ZERO GROUNDING"], "notes": []}
+
+        saved_once = o._agy_once
+        try:
+            o._agy_once = _once
+            rec = o.call_agy("B", "MARK", ad, out)
+        finally:
+            o._agy_once = saved_once
+        with open(out, "w", encoding="utf-8", newline="\n") as f:       # the round's final write
+            f.write(rec.get("text") or "")
+        rec2 = dict(rec, answer_file="AGY38FLASH.md", seconds=1.0)
+        h = o.write_handoff(ad, {"agy38flash": rec2}, marker="MARK") or {}
+        hand = open(os.path.join(ad, "HANDOFF.md"), encoding="utf-8").read() \
+            if os.path.isfile(os.path.join(ad, "HANDOFF.md")) else ""
+        if won:
+            firstf = os.path.join(ad, "AGY38FLASH.first.md")
+            kept = open(firstf, encoding="utf-8").read() if os.path.isfile(firstf) else ""
+            note = " ".join(rec.get("notes") or [])
+            check(kept.startswith("FIRST ANSWER") and "AGY38FLASH.first.md" in note
+                  and sorted(rec.get("attempt_files") or []) == ["AGY38FLASH.first.md", "AGY38FLASH.retry.md"],
+                  "R154 И-6 (c) a grounding retry that wins keeps the first answer at <CH>.first.md, the note "
+                  "names it, the record lists both attempt files",
+                  repr((kept[:14], note[-70:], rec.get("attempt_files")))[:240])
+        else:
+            check((rec.get("attempt_files") or []) == ["AGY38FLASH.retry.md"]
+                  and open(out, encoding="utf-8").read().startswith("FIRST ANSWER"),
+                  "R154 И-6 (c) a retry that also grounds nothing returns the first answer and names the retry "
+                  "file as its attempt", repr(rec.get("attempt_files")))
+        check(not h.get("orphans") and len(h.get("attempts") or []) == (2 if won else 1)
+              and "AGY38FLASH.retry.md" in hand and "Other attempts" in hand,
+              "R154 И-6 (c) HANDOFF lists the kept attempt(s) of agy38flash, no orphan (%s)"
+              % ("retry won" if won else "retry failed too"),
+              repr((h.get("orphans"), h.get("attempts"))))
+
+    # (d) G8: the --ask line names an extra whose web search bills (the model is free, the search is not)
+    paid = getattr(o, "_ask_paid_search", lambda _n: None)(["ocmimo26flashfree", "ornemotron3ultra", "nope"])
+    check(paid == ["ornemotron3ultra"],
+          "R154 И-6 (d) --ask names ornemotron3ultra as a free extra whose web searches bill", repr(paid))
 
 
 if __name__ == "__main__":

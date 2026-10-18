@@ -498,9 +498,11 @@ export MODEL_API_KEY="<your key>"
 To point at a different endpoint, also set `MODEL_API_BASE`.
 
 **No Meta key?** `--ask` works without one. Its first channel is Muse Spark: `spark13cont` with
-this key, otherwise `orspark13cont` on the OpenRouter key (the same Contributor model and price).
-The free `ocspark13free` that used to come first is gone since 2026-10-17. The opencode CLI's free
-voices answer every `--ask` as well, key or no key.
+this key, otherwise `orspark13cont` on the OpenRouter key (the same Contributor model and price;
+with the README's OpenCode Go overlay on, `ocspark13go` comes first). The free `ocspark13free` that
+used to come first is gone since 2026-10-17. The opencode CLI's free voices answer every `--ask` as
+well, key or no key. With an OpenRouter key `--ask` also asks `ornemotron3ultra`, a free model on
+OpenRouter: the model costs nothing, but each web search it makes bills that key.
 
 ### Google — `GEMINI_API_KEY`
 
@@ -563,8 +565,9 @@ export OPENROUTER_API_KEY="<your key>"
 
 > `orspark13cont` runs Meta's *Contributor* tier through OpenRouter — discounted because the
 > vendor may train on what you send (see [PRIVACY.md](PRIVACY.md)) — with an automatic fallback
-> to the Standard, non-training tier if the Contributor endpoint fails for your account. When
-> neither the opencode CLI nor `MODEL_API_KEY` is present, `--ask` falls through to this channel:
+> to the Standard, non-training tier if the Contributor endpoint fails for your account: Muse
+> Spark 1.3 at $1.25 / $4.25 per 1M tokens, 12.5× the Contributor input price (the channel's spend
+> guard stops a review at $1.00). When `MODEL_API_KEY` is absent, `--ask` starts with this channel:
 > the choice comes from `ask_default` in `channels.json` and is printed when it fires.
 
 ### The premium batch panel — same keys, one more
@@ -614,8 +617,8 @@ to do; `opencode models` is the live list.
 
 **Every `--ask` goes to these free voices too.** Its first channel is Muse Spark, which since
 1.113.3 needs a key: `spark13cont` (`MODEL_API_KEY`) or `orspark13cont` (`OPENROUTER_API_KEY`),
-both paid. A machine with neither reports that line as skipped, not fatal, and the free voices
-still answer.
+both paid. On a machine with neither, that line fails with «MODEL_API_KEY not set»; that is not
+fatal, and the free voices still answer.
 
 If the CLI is absent, the others work the same as before — you lose the four free voices, and
 Nemotron 3 Ultra then answers the standard panel through OpenRouter (`ornemotron3ultra`).
