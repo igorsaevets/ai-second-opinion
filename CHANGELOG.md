@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.113.7 — 2026-10-19
+
+From the free voices' HTTP 429s of 2026-10-18 and the panel that studied them.
+
+- **One free voice of opencode's shared allowance, one fallback.** opencode's free MiMo v2.6 Flash, GLM 5.3 Flash and DeepSeek V4.1 Flash behave as ONE daily allowance of requests per network address (measured 2026-10-18/19: five free models were refused together, two of them never used from that machine, and the four probed again after 00:00 UTC answered). 1.113.6 started three of them in every cheap panel; on 2026-10-18 they had spent the allowance by 08:25Z and every round died with `provider.quota` until midnight. The cheap panel now starts MiMo v2.6 Flash only. GLM 5.3 Flash (`ocglm53flashfree`) is its run-time fallback: once, after the round, when MiMo ends without an answer, and nothing runs after it. DeepSeek V4.1 Flash (`ocdeepseekv41flashfree`) starts only when named. The cheap panel is 6 models (was 8), «CLI only» 4 (was 6), the standard panel 11 (was 13).
+- **No fallback into the same allowance; a refused allowance is skipped until 00:00 UTC.** After a `provider.quota` from a channel of the group no fallback of the group starts (it would be refused too). The refusal's UTC date is written to `~/.claude/model-orchestration.quota-state.json` (this machine's, outside the kit folder, safe to delete - PRIVACY.md); every later run that UTC day, `--ask` included, prints `[skip]` for the group's channels with the hours left, unless you name the channel; an answer from the group clears the date. `MODEL_ORCH_QUOTA_STATE` moves the file (`off`: never read or written). New registry field `quota_group`.
+- **The `provider.quota` hint no longer blames «every free user».** It said the free quota is «shared by every free user, so it runs out in bursts whatever your brief holds» - never measured, and false: the allowance is per network address, and the machine's own runs had spent it (395 model requests before the first refusal on 2026-10-18). It now says what was measured, quotes opencode's FAQ («200 requests/day»), names the free models measured outside the allowance (nemotron-3-ultra-free, beam-free, longcat-2.5-preview-free) and says that every run from your network spends it.
+- **Nemotron 3 Ultra through opencode carries the same reading note as through OpenRouter.** `ocnemotron3ultrafree` now has `ornemotron3ultra`'s `reading_note`, and `read_order` 3 instead of 1: the note follows the model, not one channel name.
+- **Docs (EN + RU).** README «You say» rows and panel tables, INSTALL's opencode section, PRIVACY (the state file), TECHNICAL (the mechanism), TROUBLESHOOTING («A free opencode voice shows `[skip]`»).
+
 ## 1.113.6 — 2026-10-18
 
 From the panel on 1.113.5 (eight voices, six complete answers) and from Anthropic's plugin directory.

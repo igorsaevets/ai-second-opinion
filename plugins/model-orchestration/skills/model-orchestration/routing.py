@@ -28,6 +28,7 @@ Standard library only.
 """
 
 import argparse
+import datetime
 import hashlib
 import json
 import os
@@ -2776,6 +2777,85 @@ def apply_fallback(plan, reg, ready=None):
                 off = "%s cannot run here (%s)" % (fb, verdict if isinstance(verdict, str)
                                                     and verdict else "its key or CLI is missing")
         p["fallback"] = {"channel": fb, "off": off}
+    return plan
+
+
+# R157 И-2 (2026-10-19): opencode's free models (opencode/...-free) behave as ONE daily allowance of requests per network
+# address - measured 2026-10-18/19 (five refused together at 23:23Z, two of them never used from that machine, all
+# answering at 00:01Z), not published: Zen's own limiter left the public repository on 2026-10-11. The registry marks
+# such channels with one `quota_group`. After a `provider.quota` from any member orchestrate.py writes the UTC date into
+# a state file OUTSIDE the skill tree (an update replaces the tree; the file is this machine's and never ships), and
+# every later round of that UTC day leaves the group out at plan time with the reason and the hours left, instead of
+# starting voices that die in 8 s (panels E-256). A channel named in the run still starts (another network, a vendor
+# change); an answer from a member clears the date.
+QUOTA_STATE_ENV = "MODEL_ORCH_QUOTA_STATE"
+QUOTA_STATE_NAME = "model-orchestration.quota-state.json"
+
+
+def quota_group(reg, name):
+    """The channel's `quota_group` (channels.json), or None."""
+    g = ((reg.get("channels") or {}).get(name) or {}).get("quota_group")
+    return g if isinstance(g, str) and g.strip() else None
+
+
+def quota_state_path():
+    """Where a quota group's refusal is remembered: beside the local overlay, outside the skill tree.
+    MODEL_ORCH_QUOTA_STATE overrides it ("" or "off": never read or written); the selftest points it into its temp world."""
+    v = os.environ.get(QUOTA_STATE_ENV)
+    if v is not None:
+        return None if v.strip().lower() in ("", "off") else v
+    return os.path.join(os.path.expanduser("~"), ".claude", QUOTA_STATE_NAME)
+
+
+def load_quota_state(path):
+    """The state file as {group: {"date": "YYYYMMDD", "at": "HH:MM:SSZ", "channel": name, ...}}; {} when it is absent or
+    unreadable - a broken file must never stop a round, it only loses one day's skip."""
+    if not path:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    groups = data.get("groups") if isinstance(data, dict) else None
+    if not isinstance(groups, dict):
+        return {}
+    return {g: v for g, v in groups.items() if isinstance(g, str) and isinstance(v, dict)}
+
+
+def quota_skips(state, now):
+    """{group: reason} for every group refused earlier on the UTC date of `now` (an aware datetime). A date other than
+    today's is ignored, so a skip never outlives 00:00 UTC whatever the file holds."""
+    now = now.astimezone(datetime.timezone.utc)
+    today = now.strftime("%Y%m%d")
+    nxt = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    left = max(0, int((nxt - now).total_seconds()) // 60)
+    out = {}
+    for g, v in sorted(state.items()):
+        if v.get("date") != today:
+            continue
+        out[g] = ("quota group «%s» was refused earlier today: %s got provider.quota at %s on this machine, and every "
+                  "channel of the group is refused until 00:00 UTC (in %d h %02d min), so it is not started; name it "
+                  "to run it anyway" % (g, v.get("channel") or "a member", v.get("at") or "?", left // 60, left % 60))
+    return out
+
+
+def apply_quota_skip(plan, reg, skips, named=()):
+    """R157 И-2: leave out every enabled channel whose quota group was refused earlier today (`skips` from quota_skips)
+    unless the human named it, and switch off an armed run-time fallback that draws on such a group. Called AFTER
+    resolve, so the panel, the route, the cascade and the fallbacks have all decided first."""
+    if not skips:
+        return plan
+    for c, p in plan.items():
+        g = quota_group(reg, c)
+        if p.get("enabled") and g in skips and c not in (named or ()):
+            p["enabled"] = False
+            p.setdefault("why", []).append(skips[g])
+    for c, p in plan.items():
+        fbk = p.get("fallback")
+        fg = quota_group(reg, fbk["channel"]) if fbk else None
+        if p.get("enabled") and fbk and not fbk.get("off") and fg in skips:
+            fbk["off"] = "it draws on quota group «%s», refused earlier today until 00:00 UTC" % fg
     return plan
 
 

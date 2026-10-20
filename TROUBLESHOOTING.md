@@ -182,6 +182,16 @@ you enabled.
 Run with `--dry-run` first, always. It is a **complete** preflight — plan, document, preset, key,
 both binaries, permissions and the privacy gate — and it spends nothing.
 
+### "A free opencode voice shows `[skip]` ... refused earlier today"
+
+The free allowance that MiMo v2.6 Flash, GLM 5.3 Flash and DeepSeek V4.1 Flash share was used up
+earlier this UTC day on your machine (`provider.quota`), and every run until 00:00 UTC would be
+refused in seconds, so the plan leaves them out and says how many hours are left. Nothing is
+wrong with your install, and nothing is billed. To try anyway, name the channel: `--only
+ocmimo26flashfree` or "only ocmimo26flashfree". To forget the refusal, delete
+`~/.claude/model-orchestration.quota-state.json`; the next run starts the voice again (and
+writes the file again if it is refused).
+
 ### "It worked yesterday"
 
 Compare yesterday's `diagnostics.json` with today's. This is why the file is written on **every**

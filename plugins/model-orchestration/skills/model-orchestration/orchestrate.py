@@ -1421,21 +1421,40 @@ KNOWN_FAILURES = [
      "higher cap or timeout only makes the round wait longer; a re-run at the same budget stops "
      "the same way (4 of 4, R144 И-2)."),
     # R142 И-6: second (FIRST until R144 И-4), because the text also says 429 / «Rate limit exceeded», which the generic
-    # rate-limit entry below matches - and «wait, or reroute» hides that nothing on THIS machine
-    # spent a shared free quota. Both free voices of 2026-10-05's rounds died on it (store:
+    # rate-limit entry below matches. SUPERSEDED (R157, 2026-10-18): «nothing on THIS machine spent a shared free
+    # quota» was never measured and is false - opencode Zen's free tier counts requests per client (IP) per UTC day on
+    # ONE counter for most free models (Zen's published limiter before 2026-10-11 + a live probe: 5 free models refused
+    # together, 2 of them never used from that machine; 395 / 453 / 469 of its own requests before the day's 429).
+    # Both free voices of 2026-10-05's rounds died on it (store:
     # `provider.quota`), at 1 s and mid-run. The mimo CLI writes the same NDJSON, hence «paid».
+    # R157 И-2 (2026-10-19), panel r157: «behaves as» - Zen's published limiter left the repository on 2026-10-11, and
+    # its handler proxied keyless free models to the private «new inference» BEFORE that limiter (handler.ts @d21b0790
+    # lines 112-119 vs 144-147); opencode's FAQ (console i18n en.ts line 301) says «200 requests/day». A fallback of
+    # the same quota_group is not started after it, and main remembers the refusal until 00:00 UTC.
     ("provider\\.quota",
-     "The provider's usage quota for this model is used up. On opencode's free models that quota "
-     "is shared by every free user, so it runs out in bursts whatever your brief holds, and "
-     "nothing is billed. On an OpenCode Go model (opencode-go/...) it is your Go plan's own limit "
-     "- per 5 hours 20%, per week 50%, per month 100% of the plan's monthly amount - or its "
-     "billing: opencode 2.0.24 files GoUsageLimitError, billing_error and creditlimitexceeded "
-     "under this same name.",
-     "The other channels' answers stand. A channel with a run-time fallback (mimov26pro -> "
-     "mimov26flash) hands the brief to it once after the round - its record says so; ocspark13go "
-     "has none since 1.113.3 (the free Spark it fell back to is gone from opencode). Otherwise "
-     "re-run this channel later, or leave it out with --skip <channel>; on a paid model or plan, "
-     "check the balance or the plan's usage page first. Do not re-run it in a loop."),
+     "The provider's usage quota for this model is used up. On opencode's free models "
+     "(opencode/...-free) it behaves as a daily allowance of requests per network address - "
+     "measured 2026-10-18/19; opencode's FAQ gives free models «a quota of 200 requests/day», and "
+     "the code behind it is not public since 2026-10-11, so the vendor can change it. Most free "
+     "models draw on one allowance: every model request (agent step) of every free voice, and every "
+     "earlier run of the day from any machine on your network, spends it. Measured outside it: "
+     "nemotron-3-ultra-free, beam-free, longcat-2.5-preview-free; which models share it can change. "
+     "Once it is used up the group stays refused until 00:00 UTC (refused from 08:25Z to 23:24Z on "
+     "2026-10-18, answering at 00:01Z), and a re-run from the same network before then gets the "
+     "same answer. Nothing is billed. "
+     "On an OpenCode Go model (opencode-go/...) it is your Go plan's own limit "
+     "- per 5 hours 20%, per week 50%, per month 100% of the monthly allowance, which differs per "
+     "model - or its billing: opencode 2.0.24 files GoUsageLimitError, billing_error and "
+     "creditlimitexceeded under this same name.",
+     "The other channels' answers stand. A free voice's fallback on the same allowance "
+     "(ocmimo26flashfree -> ocglm53flashfree) is not started after this error - it would be refused "
+     "too; a fallback outside it (mimov26pro -> mimov26flash, Xiaomi's metered API) still runs once "
+     "after the round - its record says so; ocspark13go has none since 1.113.3 (the free Spark it "
+     "fell back to is gone from opencode). This machine remembers a free refusal: later rounds that "
+     "UTC day leave the group out ([skip] with the hours left; name a channel to run it anyway). "
+     "Otherwise re-run this channel after 00:00 UTC, or leave it out with --skip <channel>; on a "
+     "paid model or plan, check the balance or the plan's usage page first. Do not re-run it in a "
+     "loop."),
     # R154 И-3 (2026-10-18): a vanished free model had no hint. `opencode/muse-spark-1.3-contributor-free` answered
     # «provider.no-route: Model unavailable» from 2026-10-17 01:56Z and left `opencode models`, while models.dev
     # still listed it; a #variant the model does not take answers «Variant unavailable» under the same name.
@@ -4391,7 +4410,7 @@ def _cli_ndjson(raw):
 def _cli_ndjson_error(raw):
     """The LAST `{"type":"error"}` frame of an opencode / mimo NDJSON stream as one line, or None.
 
-    R142 И-6: both free voices of the audit panel died on opencode's shared free quota MID-RUN,
+    R142 И-6: both free voices of the audit panel died on opencode's free daily allowance MID-RUN,
     after 58 and 117 s of steps (`provider.quota`, read in opencode's own store). The error frame
     comes last, so a warning cut from the first 300 chars of stdout showed a `step_start` frame
     («no stock diagnosis»), and Spark, which had printed 280 chars of narration, got no cause at
@@ -9429,6 +9448,82 @@ def _has_answer(r):
     return n >= SUBSTANTIAL_BYTES
 
 
+def _quota_group(reg, name):
+    """R157 И-2: the channel's `quota_group` (channels.json) or None - routing.quota_group, kept here so run_fallbacks
+    and record_quota_refusals work without routing."""
+    g = (((reg or {}).get("channels") or {}).get(name) or {}).get("quota_group")
+    return g if isinstance(g, str) and g.strip() else None
+
+
+def _quota_refused(r):
+    """R157 И-2: True when a channel's record names a `provider.quota` refusal (its error or a warning)."""
+    r = r if isinstance(r, dict) else {}
+    return "provider.quota" in " ".join([str(r.get("error") or "")] + [str(w) for w in (r.get("warnings") or [])])
+
+
+def record_quota_refusals(results, reg, path, now):
+    """R157 И-2: after the round and its fallbacks, write to the state file (routing.quota_state_path) the UTC date on
+    which a member's `provider.quota` refused its quota group, so later rounds that day leave the group out
+    (routing.apply_quota_skip); a member that answered, with no member refused, clears the group's date. The refused
+    record gets a note with the hours left. Returns the log lines. Never raises: a state file that cannot be written
+    loses one day's skip, never a round."""
+    refused, answered = {}, set()
+    for name in sorted(results):
+        r = results.get(name)
+        g = _quota_group(reg, name)
+        if not g or not isinstance(r, dict):
+            continue
+        if _quota_refused(r):
+            refused.setdefault(g, name)
+        elif r.get("ok"):
+            answered.add(g)
+    if not path or not (refused or answered):
+        return []
+    now = now.astimezone(datetime.timezone.utc)
+    nxt = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    left = max(0, int((nxt - now).total_seconds()) // 60)
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    groups = data.get("groups") if isinstance(data.get("groups"), dict) else {}
+    lines, changed = [], False
+    for g, name in sorted(refused.items()):
+        groups[g] = {"date": now.strftime("%Y%m%d"), "at": now.strftime("%H:%M:%SZ"), "channel": name,
+                     "why": "provider.quota"}
+        changed = True
+        results[name].setdefault("notes", []).append(
+            "QUOTA: refused on quota group «%s» - every channel of it is refused until 00:00 UTC (in %d h %02d min); "
+            "later rounds on this machine leave the group out until then (name a channel to run it anyway)."
+            % (g, left // 60, left % 60))
+        lines.append("QUOTA: %s was refused (provider.quota) - later runs on this machine leave quota group «%s» "
+                     "out until 00:00 UTC; name a channel to run it anyway (state: %s)" % (name, g, path))
+    for g in sorted(answered - set(refused)):
+        if g in groups:
+            del groups[g]
+            changed = True
+            lines.append("QUOTA: quota group «%s» answered again - its refusal date is cleared (state: %s)" % (g, path))
+    if not changed:
+        return lines
+    data["groups"] = groups
+    data["_about"] = ("model-orchestration (R157 И-2): the UTC date on which a quota group was refused on this "
+                      "machine; later rounds that day leave the group out. Safe to delete.")
+    try:
+        d = os.path.dirname(path)
+        if d and not os.path.isdir(d):
+            return lines + ["QUOTA: not remembered - %s does not exist" % d]
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, path)
+    except OSError as exc:
+        lines.append("QUOTA: could not write %s (%s) - the next round will try the group again" % (path, exc))
+    return lines
+
+
 def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, submit=None,
                   same_voice=None):
     """R142: run each failed channel's armed `fallback` once, after the round; mutates `results`.
@@ -9441,7 +9536,8 @@ def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, 
     cascade group; `ok` or SUBSTANTIAL_BYTES+ of text), so no round pays twice for one voice;
     not for a substantial partial answer (E-73: the
     end-marker check flags whole answers too - the reader judges those); after the auto-retry,
-    so a transient death is retried on the primary first; never in --task mode.
+    so a transient death is retried on the primary first; never in --task mode; never into a fallback of the same
+    `quota_group` after a `provider.quota` (R157 И-2: one allowance, so it would be refused too).
 
     `submit(executor, name)` dispatches one channel (main passes _submit_again); `same_voice(reg,
     name)` is routing.same_voice. The fallback's record carries `fallback_for`; both records get
@@ -9463,6 +9559,11 @@ def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, 
                 why_not = "OFF in this run - %s" % fbk["off"]
             elif no_fallback:
                 why_not = "--no-fallback"
+            elif (_quota_refused(r) and _quota_group(reg, fb)
+                  and _quota_group(reg, fb) == _quota_group(reg, cname)):
+                why_not = ("it draws on the same daily allowance (quota group «%s») that refused %s with "
+                           "provider.quota - it would be refused too, until 00:00 UTC"
+                           % (_quota_group(reg, cname), cname))
             elif fb in results:
                 why_not = "%s already ran in this round" % fb
             elif fb in _fb_jobs.values():
@@ -12238,12 +12339,16 @@ def main():
                 question = fh.read()
         if a.marker == "REVIEW-COMPLETE":
             a.marker = "ASK-DONE"
+        _ask_typed = a.ask_channel         # R157 И-3: None unless the human passed --ask-channel
         if a.ask_channel is None:
             a.ask_channel = _ask_default_channel()
             log("--ask channel: %s (resolved from `ask_default` in channels.json by which "
                 "transport key is present; --ask-channel <name> overrides)" % a.ask_channel)
         if not a.only:
             a.only = [a.ask_channel] + _free_extras(a.ask_channel)
+            # R157 И-3: these names are the harness's, not the human's: a quota group refused earlier today is left
+            # out of an --ask too (apply_quota_skip below); --ask-channel or --only, typed by the human, still runs it.
+            a.ask_named = [_ask_typed] if _ask_typed else []
             if len(a.only) > 1:
                 _paid = _ask_paid_search(a.only[1:])
                 log("--ask goes to %d channels: %s. Everything after the first is priced `free` "
@@ -12349,6 +12454,11 @@ def main():
             plan = routing.resolve(reg, route=a.route, only=a.only, skip=a.skip,
                                    sets=a.sets, tier=a.tier, panel=a.panel,
                                    ready=_cascade_ready(reg))
+            # R157 И-2: a quota group refused earlier this UTC day is left out (routing.apply_quota_skip).
+            plan = routing.apply_quota_skip(
+                plan, reg, routing.quota_skips(routing.load_quota_state(routing.quota_state_path()),
+                                               datetime.datetime.now(datetime.timezone.utc)),
+                routing.explicitly_named(reg, route=a.route, only=getattr(a, "ask_named", a.only), sets=a.sets))
             # R142 И-2: a fallback this invocation will never run is printed OFF, not "runs".
             for _fp in plan.values():
                 _fbk = _fp.get("fallback")
@@ -13251,6 +13361,10 @@ def main():
     if plan and routing is not None:
         run_fallbacks(results, plan, reg, want, no_fallback=getattr(a, "no_fallback", False),
                       task_mode=task_mode, submit=_submit_again, same_voice=routing.same_voice)
+        # R157 И-2: remember a quota group's refusal until 00:00 UTC (record_quota_refusals).
+        for _ql in record_quota_refusals(results, reg, routing.quota_state_path(),
+                                         datetime.datetime.now(datetime.timezone.utc)):
+            log("  " + _ql)
 
     # One authoritative assignment beats twenty literals scattered through the return statements
     # of five functions, which is where the old per-channel `"channel": "http"` lived.

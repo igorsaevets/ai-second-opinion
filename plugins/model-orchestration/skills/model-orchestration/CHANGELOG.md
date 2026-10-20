@@ -2,6 +2,16 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.113.7 — 2026-10-19
+
+From the free voices' HTTP 429s of 2026-10-18 and the panel that studied them.
+
+- **One free voice of opencode's shared allowance, one fallback.** opencode's free MiMo v2.6 Flash, GLM 5.3 Flash and DeepSeek V4.1 Flash behave as ONE daily allowance of requests per network address (measured 2026-10-18/19: five free models were refused together, two of them never used from that machine, and the four probed again after 00:00 UTC answered). 1.113.6 started three of them in every cheap panel; on 2026-10-18 they had spent the allowance by 08:25Z and every round died with `provider.quota` until midnight. The cheap panel now starts MiMo v2.6 Flash only. GLM 5.3 Flash (`ocglm53flashfree`) is its run-time fallback: once, after the round, when MiMo ends without an answer, and nothing runs after it. DeepSeek V4.1 Flash (`ocdeepseekv41flashfree`) starts only when named. The cheap panel is 6 models (was 8), «CLI only» 4 (was 6), the standard panel 11 (was 13).
+- **No fallback into the same allowance; a refused allowance is skipped until 00:00 UTC.** After a `provider.quota` from a channel of the group no fallback of the group starts (it would be refused too). The refusal's UTC date is written to `~/.claude/model-orchestration.quota-state.json` (this machine's, outside the kit folder, safe to delete - PRIVACY.md); every later run that UTC day, `--ask` included, prints `[skip]` for the group's channels with the hours left, unless you name the channel; an answer from the group clears the date. `MODEL_ORCH_QUOTA_STATE` moves the file (`off`: never read or written). New registry field `quota_group`.
+- **The `provider.quota` hint no longer blames «every free user».** It said the free quota is «shared by every free user, so it runs out in bursts whatever your brief holds» - never measured, and false: the allowance is per network address, and the machine's own runs had spent it (395 model requests before the first refusal on 2026-10-18). It now says what was measured, quotes opencode's FAQ («200 requests/day»), names the free models measured outside the allowance (nemotron-3-ultra-free, beam-free, longcat-2.5-preview-free) and says that every run from your network spends it.
+- **Nemotron 3 Ultra through opencode carries the same reading note as through OpenRouter.** `ocnemotron3ultrafree` now has `ornemotron3ultra`'s `reading_note`, and `read_order` 3 instead of 1: the note follows the model, not one channel name.
+- **Docs (EN + RU).** README «You say» rows and panel tables, INSTALL's opencode section, PRIVACY (the state file), TECHNICAL (the mechanism), TROUBLESHOOTING («A free opencode voice shows `[skip]`»).
+
 ## 1.113.6 — 2026-10-18
 
 From the panel on 1.113.5 (eight voices, six complete answers) and from Anthropic's plugin directory.
@@ -364,26 +374,6 @@ Everything left open around Kimi K3.
 - **The AIHubMix Kimi route has its agent on the same environment allowlist** as the NVIDIA one; it used to see every other vendor's key. That route (`kimik3free`, local installs only) is switched off while AIHubMix keeps answering `no_available_channel` (since 2026-10-02): in the cascade it stood before the paid Kimi.
 - Smaller: the env-route check reads the ~160 MB script-installed binary in chunks instead of whole; SECURITY.md no longer says Kimi runs with `--auto`.
 
-## 1.106.1 — 2026-10-05
-
-Fixes from a full code audit by the cheap panel (four of six voices answered: Kimi K3, Grok 4.7, Gemini 3.8 Flash, MiMo v2.6 Flash). Each fix was checked by running the code, and the new selftest checks fail on 1.106.0.
-
-- **The secret gate knows today's key shapes.** A bare OpenRouter key (`sk-or-v1-` + 64 hex) and OpenAI's `sk-proj-` / `sk-svcacct-` / `sk-admin-` keys passed the no-override gate and the log scrubber, because the old rule wanted 32 letters and digits right after `sk-`. Both now refuse the run and are scrubbed; prose such as «sk-learn» stays silent.
-- **A free voice that dies mid-run says why.** When opencode's shared free quota ran out after a minute of work, the report showed a raw `step_start` frame («no stock diagnosis»), or no cause at all when some text had been printed. The last error frame of the CLI's stream is now read, and `provider.quota` gets its own explanation: the quota is shared by every free user, nothing is billed, re-run later or `--skip` it. The same code path serves the MiMo CLI.
-- **A refusal longer than 800 characters is flagged.** It used to pass with no signal; now it gets a note to read its opening (a note, not a failure, because a real review can open with «I cannot provide a date for X, but…»). Russian refusals are recognised too.
-- The auto-retry line printed `prior_cost=$0.0000` for channels that report no price; it says «unknown» now. A `node.cmd` on PATH is no longer taken for Node when starting Kimi (that would bring back the cmd.exe route). The Grok plan line calls the effort «this model's ceiling» only when it is.
-- Docs: identifiers are reported by default as one line with a count and their kinds (`--warn-pii` lists them by line) — PRIVACY.md, SECURITY.md, README.md and SKILL.md said every run lists them by line. SKILL.md §0 said the bare command runs every enabled channel; it runs the default panel.
-
-## 1.106.0 — 2026-10-05
-
-The free MiMo v2.6 Flash and Kimi K3 through NVIDIA are in everyone's cheap panel now, and the standard panel asks Kimi once.
-
-- **Cheap panel: 6 voices by default** (was 4): `ocmimo26flashfree` (MiMo v2.6 Flash, free through the opencode CLI the kit already uses) and `nvkimik3` (Kimi K3 through the Kimi Code CLI and NVIDIA's free endpoint) ship ON. «CLI only» runs 5, the standard panel 11, «CLI only, standard» 6.
-- **One Kimi per run.** The paid `kimik3` (OpenRouter) joined `nvkimik3`'s cascade group as its last member: a standard run asks Kimi through NVIDIA when the CLI and the key are there, otherwise through OpenRouter. A cheap run never pulls the paid seat in. A local install that ran both now runs one (about $1.38 less per standard run).
-- **Without the Kimi Code CLI or `NVIDIA_NIM_API_KEY`** the cheap panel answers with five voices: the preflight says what is missing, where the free key comes from and how to switch the channel off, and the channel ends at once without sending anything.
-- **The vendor's install script works.** `kimi_bin()` also looks in `~/.kimi-code/bin`, where the official script puts its single binary (a terminal opened before the install has the old PATH). Measured with Kimi Code CLI 2.1.1: that binary, an empty Kimi home and only the NVIDIA key answered in 59 s. INSTALL.md has a Kimi Code CLI section.
-- README: the «turn it on yourself» marks and the three-line opt-in block are gone; in their place, what an install without Kimi sees and how to switch a channel off. Costs: standard about $1.8 a run, about $3.2 when Kimi answers through OpenRouter.
-
 ## Older releases
 
-145 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+147 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).

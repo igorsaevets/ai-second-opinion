@@ -5347,6 +5347,87 @@ def suite_r72_reading_protocol():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def suite_r154_i11pre_never_read_model():
+    """R154 И-11-pre. «никогда не читать ответ от Nemotron» (the operator, 2026-08-31) names a MODEL; the registry
+    carried it as `reading_note` on ONE channel id, ornemotron3ultra. R154 И-3 added ocnemotron3ultrafree - the
+    same Nemotron 3 Ultra through opencode - without the note: HANDOFF listed that answer at read 1 with nothing
+    under the table, and it was read in four rounds (И-3, И-5, И-7, И-10).
+
+    (a) DERIVED, never a list of names: every channel serving the model family of a NEVER-read channel carries a
+        NEVER-read note too. Family = the model id's last path segment: its leading letters, plus the second
+        token when that one is all letters (`muse-spark` and `muse-wonder` stay apart, every `nemotron-*` is one).
+        The control that can fail: the same check on a copy with one twin's note removed names that twin.
+    (b) a NEVER-read voice is not in read tier 1 («frontier reasoners - open these first»). Which tier a channel
+        sits in otherwise stays Igor's (R72 (b)); this pins only the contradiction.
+    (c) write_handoff, given the registry's own note for ocnemotron3ultrafree, prints it next to that file.
+    """
+    section("R154 И-11-pre. NEVER-read follows the model, not one channel id")
+    import orchestrate as o
+    import re as _re
+
+    def fam(model_id):
+        seg = str(model_id).split("/")[-1].lower() if model_id else ""
+        toks = seg.split("-")
+        m = _re.match(r"[a-z]+", toks[0])
+        if not m:
+            return ""
+        f = m.group(0)
+        if f == toks[0] and len(toks) > 1 and _re.fullmatch(r"[a-z]+", toks[1]):
+            f += "-" + toks[1]
+        return f
+
+    def never(ch):
+        return str(ch.get("reading_note") or "").startswith("NEVER read")
+
+    def fams(ch):
+        return {fam(m) for m in [ch.get("model")] + list((ch.get("models") or {}).keys())} - {""}
+
+    def violators(reg):
+        chans = {n: c for n, c in reg.get("channels", {}).items() if isinstance(c, dict)}
+        banned = set()
+        for c in chans.values():
+            if never(c):
+                banned |= fams(c)
+        return sorted(n for n, c in chans.items() if fams(c) & banned and not never(c))
+
+    reg = json.load(open(os.path.join(HERE, "channels.json"), encoding="utf-8"))
+    chans = {n: c for n, c in reg.get("channels", {}).items() if isinstance(c, dict)}
+    nev = sorted(n for n, c in chans.items() if never(c))
+    check(bool(nev), "the registry carries at least one NEVER-read note (the census below is not vacuous)",
+          repr(nev))
+    check(fam("nvidia/nemotron-3-ultra-550b-a55b:free") == fam("opencode/nemotron-3-ultra-free") == "nemotron"
+          and fam("opencode-go/muse-spark-1.3") != fam("muse-wonder-1.0"),
+          "the family key: both Nemotron ids are one family, Muse Spark and Muse Wonder are two")
+    bad = violators(reg)
+    check(not bad, "(a) every channel serving a NEVER-read model family carries the note too", ", ".join(bad))
+    if "ocnemotron3ultrafree" in chans:
+        cp = json.loads(json.dumps(reg))
+        cp["channels"]["ocnemotron3ultrafree"].pop("reading_note", None)
+        check(violators(cp) == ["ocnemotron3ultrafree"],
+              "(a) control: the same check names a twin whose note was removed", repr(violators(cp)))
+    tier1 = sorted(n for n in nev if chans[n].get("read_order") == 1)
+    check(not tier1, "(b) no NEVER-read voice sits in read tier 1 («open these first»)", ", ".join(tier1))
+    if "ocnemotron3ultrafree" in chans:
+        d = tempfile.mkdtemp(prefix="orch-r154i11pre-")
+        try:
+            mk = "R154-I11PRE-MARK"
+            for fn in ("OCNEMOTRON3ULTRAFREE.md", "GROKBUILD.md"):
+                with open(os.path.join(d, fn), "w", encoding="utf-8") as f:
+                    f.write("answer.\n" + mk)
+            results = {"ocnemotron3ultrafree": {
+                           "answer_file": "OCNEMOTRON3ULTRAFREE.md", "seconds": 1.0,
+                           "read_order": chans["ocnemotron3ultrafree"].get("read_order"),
+                           "reading_note": o._registry_default("ocnemotron3ultrafree", "reading_note", None)},
+                       "grokbuild": {"answer_file": "GROKBUILD.md", "seconds": 1.0, "read_order": 1}}
+            with contextlib.redirect_stdout(io.StringIO()):
+                o.write_handoff(d, results, marker=mk)
+            text = open(os.path.join(d, "HANDOFF.md"), encoding="utf-8").read()
+            check("`OCNEMOTRON3ULTRAFREE.md` (ocnemotron3ultrafree): NEVER read" in text,
+                  "(c) HANDOFF prints the registry's NEVER-read note next to the opencode Nemotron's file")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 def suite_r74_panel_fixes():
     """R74 — the fixes bought by the R73 full-code panel, each with the control that can fail.
 
@@ -7890,13 +7971,17 @@ def main():
                    # R139 И-2: the registry a probe once rewrote in place, and the updates folder
                    os.path.join(HERE, "channels.json"),
                    os.environ.get("MODEL_ORCH_UPDATES_DIR") or os.path.join(
-                       os.path.expanduser("~"), ".claude", "model-orchestration.updates")]
+                       os.path.expanduser("~"), ".claude", "model-orchestration.updates"),
+                   # R157 И-2: the quota state a real round writes - a test round must never arm the user's skip
+                   os.environ.get("MODEL_ORCH_QUOTA_STATE") or os.path.join(
+                       os.path.expanduser("~"), ".claude", "model-orchestration.quota-state.json")]
     _before = {p: _file_digest(p) for p in _real_files}
     _world = tempfile.mkdtemp(prefix="orch-selftest-world-")
     os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(_world, "claude-config")
     os.makedirs(os.environ["CLAUDE_CONFIG_DIR"])
     os.environ["MODEL_ORCH_UPDATE_STAMP"] = os.path.join(_world, "update-stamp.json")
     os.environ["MODEL_ORCH_UPDATES_DIR"] = os.path.join(_world, "updates")
+    os.environ["MODEL_ORCH_QUOTA_STATE"] = os.path.join(_world, "quota-state.json")     # R157 И-2
     # 🔴 R139 И-2: the same class, one layer out - PROGRAMS and the NETWORK. An audit of one run
     # on the author's machine: 220 starts of 11 installed vendor CLIs (each `--version` from the
     # environment report, `hermes` creating 24 folders in its home, 22 `codex app-server` quota
@@ -7996,6 +8081,8 @@ def main():
                   suite_r154_i3_free_voices, suite_prd003_no_credential_shapes,
                   suite_r154_i6_opencode_word_grading_retry,
                   suite_r154_i8_hotfix, suite_r154_i9_portal,
+                  suite_r154_i11pre_never_read_model, suite_r157_i2_free_fallback,
+                  suite_r157_i3_ask_quota_skip,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -13006,7 +13093,12 @@ def suite_r142_mimo_flash_fallback():
     good = {"ok": True, "text": "answer"}
 
     def go(pro, free, the_plan=plan, **kw):
+        import copy as _cp
         del calls[:]
+        # R157 И-2: ocmimo26flashfree has a fallback of its own now (GLM); this suite judges mimov26pro's, so the free
+        # Flash's is taken out of the fixture - suite_r157_i2_free_fallback tests that one.
+        the_plan = _cp.deepcopy(the_plan)
+        (the_plan.get("ocmimo26flashfree") or {}).pop("fallback", None)
         res = {"mimov26pro": dict(pro), "ocmimo26flashfree": dict(free)}
         o.run_fallbacks(res, the_plan, reg, ["mimov26pro", "ocmimo26flashfree"],
                         submit=fake_submit, same_voice=rt.same_voice, **kw)
@@ -17568,6 +17660,214 @@ def suite_r155_i3_wonder_by_name():
           "the Wonder cascade then runs wonder10»", hint[-200:])
 
 
+def suite_r157_i2_free_fallback():
+    """R157 И-2 (2026-10-19): ONE free voice of opencode's shared daily allowance, ONE fallback, and a refused quota
+    group left out for the rest of the UTC day.
+
+    Igor 2026-10-19: «оставить ... одну модель бесплатную mimo и добавить fallback на еще одну бесплатную модель, но
+    если и вторая не сработает, то просто написать, но дальше не идти». Measured in R157: opencode's free GLM 5.3
+    Flash, DeepSeek V4.1 Flash and MiMo 2.6 Flash (and two models never used here) were refused TOGETHER with
+    provider.quota from 08:25Z to 23:24Z on 2026-10-18 and answered again at 00:01Z; three voices of it in every round
+    had spent it. Fails on the R157 source except the check marked «control».
+    """
+    import copy
+    import datetime as dt
+    import inspect
+    import tempfile
+    import routing as rt
+    import orchestrate as o
+    section("R157 И-2 one free voice + one fallback; a refused quota group skipped until 00:00 UTC")
+    reg = rt.load_registry(overlay=False)
+    ch = reg.get("channels") or {}
+    names = ("ocmimo26flashfree", "ocglm53flashfree", "ocdeepseekv41flashfree", "ocspark13free", "ocnemotron3ultrafree")
+    grp = {n: (ch.get(n) or {}).get("quota_group") for n in names}
+    check(len({grp[n] for n in names[:4]}) == 1 and bool(grp["ocmimo26flashfree"]) and not grp["ocnemotron3ultrafree"],
+          "R157 И-2 (a) MiMo, GLM, DeepSeek and the free Spark share one quota_group; Nemotron (measured outside) has none",
+          repr(grp))
+    m, g, d = (ch.get(n) or {} for n in names[:3])
+    check(m.get("enabled") is True and m.get("fallback") == "ocglm53flashfree" and g.get("enabled") is False
+          and d.get("enabled") is False and g.get("distribution") == "both",
+          "R157 И-2 (b) the source (= kit) registry: MiMo Flash on with GLM as its fallback, GLM and DeepSeek off",
+          repr([(x.get("enabled"), x.get("fallback")) for x in (m, g, d)]))
+
+    def yes(_n):
+        return True
+
+    kit = copy.deepcopy(reg)
+    for c in kit["channels"].values():
+        if isinstance(c, dict) and c.get("distribution") == "local":
+            c["enabled"] = False
+    pk = rt.resolve(copy.deepcopy(kit), panel="cheap", ready=yes)
+    on = sorted(n for n in names[:4] if (pk.get(n) or {}).get("enabled"))
+    fbk = (pk.get("ocmimo26flashfree") or {}).get("fallback") or {}
+    check(on == ["ocmimo26flashfree"] and fbk.get("channel") == "ocglm53flashfree" and not fbk.get("off"),
+          "R157 И-2 (c) the kit-shaped cheap panel starts ONE voice of the allowance, MiMo Flash, with GLM armed as "
+          "its fallback", repr((on, fbk)))
+
+    def fallbacks(regx, plan, failed, outcome, primary="ocmimo26flashfree"):
+        calls = []
+
+        def submit(ex, name):
+            calls.append(name)
+            return ex.submit(lambda: dict(outcome))
+        res = {primary: dict(failed)}
+        o.run_fallbacks(res, plan, regx, {primary}, submit=submit, same_voice=rt.same_voice)
+        return calls, res
+
+    # (d) a timeout -> GLM once; GLM declares a fallback of its own in this fixture, and it must NOT run (no chain)
+    kit2 = copy.deepcopy(kit)
+    kit2["channels"]["ocglm53flashfree"]["fallback"] = "ocdeepseekv41flashfree"
+    pk2 = rt.resolve(copy.deepcopy(kit2), panel="cheap", ready=yes)
+    dead = {"ok": False, "error": "TIMEOUT after 2400", "text": "", "warnings": []}
+    calls, res = fallbacks(kit2, pk2, dead, dead)
+    notes = " ".join(res["ocmimo26flashfree"].get("notes") or [])
+    check(calls == ["ocglm53flashfree"] and "it failed too" in notes
+          and sorted(res) == ["ocglm53flashfree", "ocmimo26flashfree"],
+          "R157 И-2 (d) MiMo dies on a timeout -> GLM runs the brief ONCE; GLM fails too -> the record says so and nothing "
+          "else starts (GLM's own fallback never runs)", repr((calls, sorted(res), notes[:160])))
+    quota = {"ok": False, "error": None, "text": "",
+             "warnings": ["EXIT 1: provider.quota (HTTP 429): Rate limit exceeded. Please try again later."]}
+    calls, res = fallbacks(kit, pk, quota, {"ok": True, "text": "x" * 4000, "bytes": 4000})
+    notes = " ".join(res["ocmimo26flashfree"].get("notes") or [])
+    check(calls == [] and "same daily allowance" in notes and "00:00 UTC" in notes,
+          "R157 И-2 (e) MiMo refused with provider.quota -> GLM (the same allowance) is NOT started; the record says "
+          "why and until when", notes[:200])
+    kit3 = copy.deepcopy(kit)
+    kit3["channels"]["ocnemotron3ultrafree"]["fallback"] = "ocglm53flashfree"
+    kit3["channels"]["ocglm53flashfree"]["enabled"] = False         # as shipped now; on the old registry it was on
+    pk3 = rt.resolve(copy.deepcopy(kit3), panel="cheap", ready=yes)
+    calls, _ = fallbacks(kit3, pk3, quota, {"ok": True, "text": "x" * 4000, "bytes": 4000}, primary="ocnemotron3ultrafree")
+    check(calls == ["ocglm53flashfree"],
+          "R157 И-2 (f) control: a provider.quota from a channel OUTSIDE the group still hands the brief to its fallback "
+          "(the rule keys on the quota group, not on the error)", repr(calls))
+    qs = getattr(rt, "quota_skips", None)
+    now = dt.datetime(2026, 10, 19, 20, 30, tzinfo=dt.timezone.utc)
+    st = {"opencode-free": {"date": "20261019", "at": "08:25:33Z", "channel": "ocmimo26flashfree"}}
+    sk = qs(st, now) if qs else {}
+    old = qs({"opencode-free": dict(st["opencode-free"], date="20261018")}, now) if qs else {"x": 1}
+    why = sk.get("opencode-free", "")
+    check("until 00:00 UTC" in why and "3 h 30 min" in why and "08:25:33Z" in why and old == {},
+          "R157 И-2 (g) a refusal dated today (UTC) skips the group with the hours left (3 h 30 min at 20:30Z); "
+          "yesterday's skips nothing", why[:200])
+    tmpd = tempfile.mkdtemp(prefix="r157i2-")
+    try:
+        badf = os.path.join(tmpd, "bad.json")
+        with open(badf, "w", encoding="utf-8") as f:
+            f.write("{not json")
+        lq = getattr(rt, "load_quota_state", None)
+        check(lq is not None and lq(badf) == {} and lq(os.path.join(tmpd, "absent.json")) == {} and lq(None) == {},
+              "R157 И-2 (h) a broken or absent state file is an empty state - it never stops a round")
+        aq = getattr(rt, "apply_quota_skip", None)
+        p1 = aq(copy.deepcopy(pk), kit, sk) if aq else pk
+        w1 = " ".join((p1.get("ocmimo26flashfree") or {}).get("why") or [])
+        check(not (p1.get("ocmimo26flashfree") or {}).get("enabled") and "until 00:00 UTC" in w1
+              and (p1.get("ocnemotron3ultrafree") or {}).get("enabled"),
+              "R157 И-2 (i) a group refused today is left out of the plan with the reason; Nemotron (outside the "
+              "allowance) still runs", w1[:200])
+        p2 = aq(copy.deepcopy(pk), kit, sk, named={"ocmimo26flashfree"}) if aq else {}
+        fb2 = (p2.get("ocmimo26flashfree") or {}).get("fallback") or {}
+        check(bool((p2.get("ocmimo26flashfree") or {}).get("enabled")) and "refused earlier today" in (fb2.get("off") or ""),
+              "R157 И-2 (j) named by the human, MiMo still starts - and its GLM fallback (the same allowance) is off",
+              repr(fb2))
+        rq = getattr(o, "record_quota_refusals", None)
+        sp = os.path.join(tmpd, "state.json")
+        t0 = dt.datetime(2026, 10, 19, 8, 25, 33, tzinfo=dt.timezone.utc)
+        st1, st2, none_written = {}, {"x": 1}, False
+        if rq and lq:
+            rq({"ocspark13go": {"ok": False, "warnings": ["EXIT 1: provider.quota (HTTP 429): usage limit reached"]}},
+               kit, sp, t0)
+            none_written = not os.path.exists(sp)
+            rmimo = {"ocmimo26flashfree": dict(quota)}
+            rq(rmimo, kit, sp, t0)
+            st1 = lq(sp)
+            rq({"ocglm53flashfree": {"ok": True, "text": "x"}}, kit, sp, t0 + dt.timedelta(hours=17))
+            st2 = lq(sp)
+        e1 = st1.get("opencode-free") or {}
+        check(none_written and e1.get("date") == "20261019" and e1.get("channel") == "ocmimo26flashfree" and st2 == {},
+              "R157 И-2 (k) a member's provider.quota writes today's UTC date; a Go-plan refusal (no quota_group) "
+              "writes nothing; a member's later answer clears it", repr((none_written, e1, st2)))
+        sp3 = os.path.join(tmpd, "state3.json")
+        today = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d")
+        with open(sp3, "w", encoding="utf-8") as f:
+            json.dump({"groups": {"opencode-free": {"date": today, "at": "08:25:33Z",
+                                                    "channel": "ocmimo26flashfree"}}}, f)
+        brief = os.path.join(tmpd, "brief.md")
+        with open(brief, "w", encoding="utf-8") as f:
+            f.write("Say OK.\n")
+        env = dict(os.environ, MODEL_ORCH_QUOTA_STATE=sp3, PYTHONIOENCODING="utf-8")
+        env[rt.OVERLAY_ENV] = os.path.join(tmpd, "no-overlay.json")
+        p = subprocess.run([sys.executable, os.path.join(HERE, "orchestrate.py"), "--dry-run", "--panel", "cheap",
+                            "--brief", brief], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           env=env, timeout=180)
+        out = (p.stdout or "") + (p.stderr or "")
+        line = next((ln for ln in out.splitlines() if "] ocmimo26flashfree" in ln), "")
+        check("[skip]" in line and "refused earlier today" in out and "until 00:00 UTC" in out,
+              "R157 И-2 (l) a real --dry-run after today's refusal prints [skip] ocmimo26flashfree with the reason",
+              line[:160] or out[-300:])
+    finally:
+        shutil.rmtree(tmpd, ignore_errors=True)
+    cause, fix = o.diagnose("EXIT 1: provider.quota (HTTP 429): Rate limit exceeded. Please try again later.")
+    cause, fix = cause or "", fix or ""
+    check("200 requests/day" in cause and "behaves as" in cause and "longcat-2.5-preview-free" in cause
+          and "shared by every free user" not in cause and "every tool step" not in cause
+          and "[skip]" in fix and "not started" in fix,
+          "R157 И-2 (m) the provider.quota hint: «behaves as», the FAQ's 200 requests/day, the models outside it, the "
+          "[skip] state, no fallback into the same allowance", cause[:160])
+    src = inspect.getsource(o.main)
+    ia, ip_, ir, ifb = (src.find(x) for x in ("apply_quota_skip(", "format_plan(", "record_quota_refusals(",
+                                                "run_fallbacks("))
+    check(0 < ia < ip_ and ir > ifb > 0,
+          "R157 И-2 (n) main applies the skip BEFORE it prints the plan, and records refusals AFTER the fallbacks",
+          repr((ia, ip_, ir, ifb)))
+
+
+def suite_r157_i3_ask_quota_skip():
+    """R157 И-3 (2026-10-19): an --ask after today's quota refusal leaves the refused group out too.
+
+    Found while checking the release docs on the built kit (runs/r157-free-quota/i3/plan_probe_before.log): --ask
+    fills --only with its own channel list, so R157 И-2's skip read every --ask member as named by the human and
+    started the free MiMo, which the allowance refuses in seconds. Fails on the R157 И-2 code except the checks
+    marked «control».
+    """
+    import datetime as dt
+    import tempfile
+    import routing as rt
+    section("R157 И-3 --ask honours a quota group refused earlier today")
+    tmpd = tempfile.mkdtemp(prefix="r157i3-")
+    try:
+        sp = os.path.join(tmpd, "state.json")
+        today = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d")
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump({"groups": {"opencode-free": {"date": today, "at": "08:25:33Z",
+                                                    "channel": "ocmimo26flashfree"}}}, f)
+
+        def ask(extra, with_state):
+            env = dict(os.environ, PYTHONIOENCODING="utf-8")
+            env[rt.OVERLAY_ENV] = os.path.join(tmpd, "no-overlay.json")
+            env["MODEL_ORCH_QUOTA_STATE"] = sp if with_state else os.path.join(tmpd, "absent.json")
+            p = subprocess.run([sys.executable, os.path.join(HERE, "orchestrate.py"), "--dry-run",
+                                "--out", os.path.join(tmpd, "out"), "--ask", "Say OK."] + extra,
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=180)
+            out = (p.stdout or "") + (p.stderr or "")
+            return out, next((ln for ln in out.splitlines() if "] ocmimo26flashfree" in ln), "")
+        out0, line0 = ask([], False)
+        out1, line1 = ask([], True)
+        check("[RUN ]" in line0 and "[skip]" in line1 and "refused earlier today" in out1 and "until 00:00 UTC" in out1,
+              "R157 И-3 (a) --ask asks MiMo Flash on a clean day and leaves it out ([skip], the reason) after today's "
+              "refusal: the --ask list is the harness's, not a name the human typed",
+              line0.strip()[:70] + " | " + line1.strip()[:70])
+        out2, line2 = ask(["--only", "ocmimo26flashfree"], True)
+        check("[RUN ]" in line2,
+              "R157 И-3 (b) control: --ask --only ocmimo26flashfree after today's refusal still asks it (named)",
+              line2.strip()[:120] or out2[-200:])
+        out3, line3 = ask(["--ask-channel", "ocmimo26flashfree"], True)
+        check("[RUN ]" in line3,
+              "R157 И-3 (c) control: --ask --ask-channel ocmimo26flashfree after today's refusal still asks it (named)",
+              line3.strip()[:120] or out3[-200:])
+    finally:
+        shutil.rmtree(tmpd, ignore_errors=True)
+
+
 def suite_r154_i3_free_voices():
     """R154 И-3 (2026-10-18): the free Spark left opencode; three free opencode voices joined the cheap panel.
 
@@ -17590,9 +17890,11 @@ def suite_r154_i3_free_voices():
         c = ch.get(name) or {}
         lim = (c.get("opencode_limit") or {}).get("output")
         check(c.get("kind") == "opencode" and c.get("model") == model and c.get("panel") == "cheap"
-              and c.get("cost") == "free" and c.get("enabled") is True and c.get("distribution") == "both"
+              and c.get("cost") == "free" and c.get("enabled") is (name == "ocnemotron3ultrafree")
+              and c.get("distribution") == "both"
               and c.get("effort") == effort and lim == out,
-              "R154 И-3 (a) %s: opencode %s, cheap, free, on, shipped (both), effort %s, output limit %s"
+              "R154 И-3 (a) %s: opencode %s, cheap, free, shipped (both), effort %s, output limit %s; on = Nemotron "
+              "only since R157 И-2 (one voice of the free allowance)"
               % (name, model, effort, out),
               repr({k: c.get(k) for k in ("kind", "model", "panel", "enabled", "distribution", "effort")}))
 
@@ -17606,7 +17908,9 @@ def suite_r154_i3_free_voices():
     pk = rt.resolve(copy.deepcopy(kit), panel="cheap", ready=yes)
     free4 = ["ocmimo26flashfree"] + list(want)
     on = [n for n in free4 if (pk.get(n) or {}).get("enabled")]
-    check(on == free4, "R154 И-3 (b) the kit-shaped cheap panel seats all four free opencode voices", repr(on))
+    check(on == ["ocmimo26flashfree", "ocnemotron3ultrafree"],
+          "R154 И-3 (b) the kit-shaped cheap panel seats MiMo Flash + Nemotron (R157 И-2: one voice of the free "
+          "allowance; GLM is MiMo's fallback, DeepSeek starts by name)", repr(on))
     sp = ch.get("ocspark13free") or {}
     check(sp.get("enabled") is False and "no-route" in (sp.get("_disabled_r154_i3") or "")
           and not (pk.get("ocspark13free") or {}).get("enabled"),
@@ -17773,7 +18077,8 @@ def suite_r154_i6_opencode_word_grading_retry():
                     ("«только опенкод»", {"route": "только опенкод"}),
                     ("--only opencode", {"only": ["opencode"]})):
         got = runs(**kw)
-        check(got == oc_on and len(oc_on) >= 4 and "ocspark13free" not in got,
+        # R157 И-2: 2 enabled since GLM / DeepSeek free went off (one voice of the shared free allowance); was >= 4
+        check(got == oc_on and len(oc_on) >= 2 and "ocspark13free" not in got,
               "R154 И-6 (a) %s runs the enabled opencode voices, never the dead ocspark13free" % how,
               repr(sorted(got)))
     got = runs(route="без opencode")

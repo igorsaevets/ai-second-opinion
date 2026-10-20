@@ -400,7 +400,7 @@ assistant makes for you.
 **You need at least one channel** — the tool runs whatever is available and tells you exactly what
 it skipped and why. A missing key or a missing CLI is a normal, non-fatal condition, not an error.
 
-**No key at all gets you `--ask`.** The opencode CLI runs four **free** voices with no API key
+**No key at all gets you `--ask`.** The opencode CLI runs two **free** voices (and a free fallback) with no API key
 and no account — `npm install -g @opencode/cli` and you are done. (The free Spark 1.3 voice it
 used to give is gone since 2026-10-17.) For a full review panel,
 `OPENROUTER_API_KEY` alone reaches most of the model families here, which is enough for the
@@ -408,7 +408,7 @@ disagreement this tool exists to produce. Everything else is optional.
 
 | what it needs | what that unlocks | cost |
 |---|---|---|
-| the opencode CLI v2 (`npm install -g @opencode/cli`) | four **free** voices, in the cheap panel and in every `--ask`: `ocmimo26flashfree` (MiMo v2.6 Flash), `ocnemotron3ultrafree` (Nemotron 3 Ultra), `ocglm53flashfree` (GLM 5.3 Flash), `ocdeepseekv41flashfree` (DeepSeek V4.1 Flash). The free Spark 1.3 (`ocspark13free`) is gone since 2026-10-17 | **free** |
+| the opencode CLI v2 (`npm install -g @opencode/cli`) | two **free** voices, in the cheap panel and in every `--ask`: `ocmimo26flashfree` (MiMo v2.6 Flash) and `ocnemotron3ultrafree` (Nemotron 3 Ultra); `ocglm53flashfree` (GLM 5.3 Flash) answers once when MiMo Flash fails, `ocdeepseekv41flashfree` (DeepSeek V4.1 Flash) only when named. The free Spark 1.3 (`ocspark13free`) is gone since 2026-10-17 | **free** |
 | ~~the Kimi Code CLI + `NVIDIA_NIM_API_KEY`~~ — **not needed since 1.112.0** ([why](#kimi-code-cli-retired-free-kimi-k3-through-nvidia)) | `nvkimik3` ships switched off: NVIDIA retired its free Kimi K3 on 2026-10-15. Kimi K3 answers in the standard panel through `OPENROUTER_API_KEY` (`kimik3`) | — |
 | `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, a Muse Spark voice and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
 | `MODEL_API_KEY` | the Muse Spark voices reached directly from Meta | metered API |
@@ -593,7 +593,7 @@ certain a key is really gone after rotating it, that length is what changes.
 > incident behind that rule: a "masking" expression that kept the first 60 characters of a
 > 48-character key printed the whole thing.
 
-### opencode CLI (four free voices)
+### opencode CLI (two free voices and a fallback)
 
 **Requires Node.js** (v18 or newer). If `npm` is not on your PATH, install Node.js from
 [nodejs.org](https://nodejs.org/) first — tick "Add to PATH" on Windows; on macOS `brew install
@@ -608,22 +608,24 @@ opencode --version              # must print 2.x
 The package `opencode-ai` is the v1 line (1.19.2 on 2026-10-16). The harness speaks v2 (`model#variant`, `run --standalone`); on v1 those calls fail at once and the harness says so.
 
 No key, no account, no sign-in for the `opencode/` models whose names end in `-free`. This
-installs the opencode CLI from [opencode.ai](https://opencode.ai/); the cheap panel's four free
-voices run through it: MiMo v2.6 Flash (`ocmimo26flashfree`), Nemotron 3 Ultra
-(`ocnemotron3ultrafree`), GLM 5.3 Flash (`ocglm53flashfree`) and DeepSeek V4.1 Flash
-(`ocdeepseekv41flashfree`), all run live on 2026-10-18. They are free relays: one can refuse for
-a while with a usage limit (`provider.quota`), or disappear — opencode stopped serving its free
-Muse Spark 1.3 on 2026-10-17 (`provider.no-route`). The run then says so for that voice and what
-to do; `opencode models` is the live list.
+installs the opencode CLI from [opencode.ai](https://opencode.ai/); the cheap panel's two free
+voices run through it: MiMo v2.6 Flash (`ocmimo26flashfree`) and Nemotron 3 Ultra
+(`ocnemotron3ultrafree`). GLM 5.3 Flash (`ocglm53flashfree`) is MiMo Flash's fallback and
+DeepSeek V4.1 Flash (`ocdeepseekv41flashfree`) starts only when named; all four ran live on
+2026-10-18. They are free relays: one can disappear — opencode stopped serving its free Muse
+Spark 1.3 on 2026-10-17 (`provider.no-route`) — and MiMo, GLM and DeepSeek draw on one daily
+allowance of requests per network address, refused with `provider.quota` once it is used up,
+until 00:00 UTC (the README's cheap panel section says what the harness then does). The run says
+so for that voice and what to do; `opencode models` is the live list.
 
-**Every `--ask` goes to these free voices too.** Its first channel is Muse Spark, which since
+**Every `--ask` goes to the two free voices too.** Its first channel is Muse Spark, which since
 1.113.3 needs a key: `spark13cont` (`MODEL_API_KEY`) or `orspark13cont` (`OPENROUTER_API_KEY`),
 both paid. On a machine with neither, that line fails with «MODEL_API_KEY not set»; that is not
 fatal, and the free voices still answer.
 
-If the CLI is absent, the others work the same as before. The four free voices stay in the plan as
-`[RUN ]` and each fails at dispatch with «binary not found», spending nothing (say "without opencode"
-to leave them out), and Nemotron 3 Ultra then answers the standard panel through OpenRouter
+If the CLI is absent, the others work the same as before. The two free voices stay in the plan as
+`[RUN ]` and each fails at dispatch with «binary not found», spending nothing (MiMo Flash's fallback
+is OFF in that run; say "without opencode" to leave them out), and Nemotron 3 Ultra then answers the standard panel through OpenRouter
 (`ornemotron3ultra`).
 `doctor.py` reports whether the CLI is found and where. If yours is installed in an unusual
 location, set `OPENCODE_BIN` to the full path.

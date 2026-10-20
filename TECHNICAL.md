@@ -257,6 +257,22 @@ the same record.
 
 ---
 
+### A refused free allowance is skipped until 00:00 UTC (1.113.7)
+
+opencode's free MiMo v2.6 Flash, GLM 5.3 Flash and DeepSeek V4.1 Flash (and the retired free Spark)
+carry one `quota_group` in `channels.json`, `opencode-free`: they behave as one daily allowance of
+requests per network address (measured 2026-10-18/19; the vendor's limiter is not public). The kit
+starts one of them, MiMo Flash. Its `fallback` is GLM 5.3 Flash: run once after the round when
+MiMo ends without an answer, never into a chain, and never after `provider.quota`, because a
+member of the same group would be refused too. After the round `record_quota_refusals` writes a
+member's `provider.quota` to `~/.claude/model-orchestration.quota-state.json`
+(`{"groups": {"opencode-free": {"date": "YYYYMMDD", "at": "HH:MM:SSZ", "channel": ...,
+"why": "provider.quota"}}}`); a member's answer in a round with no refusal removes the group.
+Every later plan on that UTC date, `--ask` included, leaves the group's channels out (`[skip]`,
+with the hours to 00:00 UTC) unless the human named the channel (`--only`, a route, `--ask-channel`);
+a date other than today's is ignored, and an unreadable file is an empty one.
+`MODEL_ORCH_QUOTA_STATE` points it elsewhere (`off` or empty: never read or written).
+
 ## 5. Partial installs are a supported state
 
 A missing API key or a missing CLI disables exactly one channel and nothing else. The preflight
