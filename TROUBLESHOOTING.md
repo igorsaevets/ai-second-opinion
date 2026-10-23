@@ -36,7 +36,8 @@ A structured account of the run. The fields worth knowing:
 | `console` | The full console transcript. |
 | `traceback` | Present only if the tool itself crashed. |
 
-**Both files are stripped of secrets and personal data by construction, not by you remembering.**
+**Both files are stripped of secrets and personal-data shapes by construction, not by you remembering,
+and name your home folder as `~` (since 1.113.9).**
 Anything shaped like an API key, token, private key, email address, national ID, SSN, phone
 number or date of birth is replaced with a `[REDACTED:KIND]` marker before the file is written —
 and the same filter runs on the console output, so a crash cannot print a credential either.

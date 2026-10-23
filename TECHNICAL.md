@@ -282,10 +282,13 @@ a date other than today's is ignored, and an unreadable file is an empty one.
   channel printed «free model, no API key».
 - **A channel your settings file adds prints a short block** (2-4 lines), not one plan line per
   field; whether it needs `--accept-settings` is unchanged.
-- **An API channel that opens pages itself stops at its `timeout`.** `call_oai_reviewer` opens no
+- **An API channel that opens pages itself stops opening them at its `timeout`.** `call_oai_reviewer` opens no
   new page once the channel's `timeout` is spent and answers from what it has; the record marks
   it `time_stopped`. Until 1.113.7 the timeout was an idle limit: on the author's machine one
-  channel ran 75 minutes under a 20-minute timeout.
+  channel ran 75 minutes under a 20-minute timeout. The `timeout` does not yet bound ONE API read:
+  a streamed read waits per socket receive, so a connection that stays alive can outlast it (one
+  read in the panel on 1.113.8 ran 60 minutes under a 20-minute timeout); a deadline inside the
+  read is planned.
 - **Grok: an ended turn keeps its answer.** When Grok's own session says the turn ended but the
   `grok` process does not exit, the harness stops it 30 s later and keeps the answer (from the
   output, else from Grok's session record); the note says `LINGERED`. An HTTP 402 from xAI reads
@@ -468,7 +471,8 @@ An unexpected exception is turned into this file rather than a bare traceback. A
 terminal is lost when the window closes, and it is the one thing a user cannot usefully relay
 ("it says something about line 812").
 
-Both files are scrubbed by construction, which is what makes the intended workflow safe: hand
+Both files are scrubbed by construction (secret and personal-data shapes; since 1.113.9 the home
+folder is written as `~`), which is what makes the intended workflow safe: hand
 `diagnostics.json` to an AI assistant and ask it to fix the cause.
 
 ---

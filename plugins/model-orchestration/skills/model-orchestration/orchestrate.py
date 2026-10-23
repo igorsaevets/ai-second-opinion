@@ -200,7 +200,7 @@ def log(msg):
         if _LOG["path"]:
             try:
                 with open(_LOG["path"], "a", encoding="utf-8") as f:
-                    f.write(msg + "\n")
+                    f.write(scrub_home(msg) + "\n")    # R160 И-4: the file names no home folder
             except OSError:
                 pass          # a broken log must never take the run down with it
 
@@ -1291,12 +1291,41 @@ def scrub(text):
 
 
 def scrub_deep(obj):
-    """scrub() over an arbitrary JSON-shaped structure, keys included."""
+    """scrub() + scrub_home() over an arbitrary JSON-shaped structure, keys included."""
     if isinstance(obj, dict):
-        return {scrub(k): scrub_deep(v) for k, v in obj.items()}
+        return {scrub_home(scrub(k)): scrub_deep(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [scrub_deep(v) for v in obj]
-    return scrub(obj)
+    return scrub_home(scrub(obj))
+
+
+# 🔴 R160 И-4 (2026-10-23): THE HOME FOLDER NAMES ITS USER. Panel r160i2's diagnostics.json carried the Windows user
+# name 40 times, in 22 paths, under a README that called the file stripped of personal data (codex found it). scrub()
+# cannot see it - a path is not secret-shaped. scrub_home() turns the home folder into `~` in what is WRITTEN to
+# run.log (log()) and diagnostics.json (scrub_deep); the console keeps the real path, which its reader may copy.
+# Paths outside the home folder (the brief, --out, attachments) are kept: they are what a bug report needs.
+_HOME_RX = []
+
+
+def _home_rx():
+    if not _HOME_RX:
+        home = os.path.expanduser("~")
+        forms = set()
+        if home and home not in ("~", "/", "\\"):
+            forms.update((home, home.replace("\\", "/"), home.replace("\\", "\\\\")))
+            m = re.match(r"^([A-Za-z]):[\\/](.+)$", home)
+            if m:       # Git Bash / MSYS spells C:\Users\x as /c/Users/x
+                forms.add("/%s/%s" % (m.group(1).lower(), m.group(2).replace("\\", "/")))
+        alts = "|".join(re.escape(f) for f in sorted(forms, key=len, reverse=True))
+        _HOME_RX.append(re.compile("(?:%s)(?![\\w.-])" % alts, re.IGNORECASE if os.name == "nt" else 0)
+                        if alts else None)
+    return _HOME_RX[0]
+
+
+def scrub_home(text):
+    """The home folder in a path -> `~`. Anything that is not a str passes through unchanged."""
+    rx = _home_rx() if isinstance(text, str) else None
+    return rx.sub("~", text) if rx else text
 
 
 # R140 И-4: the answer scan's second half. SECRET_PATTERNS know SHAPES, and the answer scan strips

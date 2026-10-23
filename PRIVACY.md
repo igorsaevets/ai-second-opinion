@@ -60,8 +60,12 @@ channels, nothing is transmitted.
 Some tiers are discounted, or free, **in exchange for permission to train on what you send**. As
 published, the channels on such a tier are: `spark12cont` (Meta's Muse Spark 1.2 Contributor,
 reached directly), `orspark12cont` (the **same** contributor tier reached through OpenRouter — so the payload passes
-OpenRouter's own policy on the way to Meta's contributor terms), and `ornemotron3ultra` (a free
-tier, which on OpenRouter requires the account-level prompt-training setting to be on). The free
+OpenRouter's own policy on the way to Meta's contributor terms), `ornemotron3ultra` (a free
+tier, which on OpenRouter requires the account-level prompt-training setting to be on), and the two free
+voices through opencode Zen, `ocmimo26flashfree` and `ocnemotron3ultrafree` (opencode's Zen page, read
+2026-10-23: during its free period MiMo's data may be used to improve the model; Nemotron runs on
+NVIDIA's trial terms, which log use to improve NVIDIA's products and ask for no personal or
+confidential data). The free
 Spark through the opencode CLI (`ocspark13free`) was one of them until opencode stopped serving it
 on 2026-10-17; since 1.113.3 it ships switched off.
 
@@ -70,7 +74,7 @@ anything is spent — that printout, not the list above, is the current set — 
 those channels cost almost nothing. If a brief should not be trained on, drop them for that run:
 
 ```
---skip spark12cont orspark12cont ornemotron3ultra
+--skip spark12cont orspark12cont ornemotron3ultra ocmimo26flashfree ocnemotron3ultrafree
 ```
 
 Assume retention on those tiers is permanent.

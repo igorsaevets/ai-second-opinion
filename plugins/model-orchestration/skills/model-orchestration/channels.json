@@ -233,7 +233,6 @@
         "ocdeepseekv41flashfree",
         "ocstep5previewgo",
         "ocminimax31flashgo",
-        "ocminimax31flashfree",
         "kimik3free",
         "nvkimik3",
         "mimov26pro",
@@ -270,7 +269,6 @@
         "ocspark13free",
         "ocstep5previewgo",
         "ocminimax31flashgo",
-        "ocminimax31flashfree",
         "ocspark12go"
       ],
       "_added_r154_i6": "R154 И-6 (2026-10-18): «opencode» was the ALIAS of ocspark13free, whose free model left opencode on 2026-10-17 - so «только opencode» / `--only opencode` ran only that dead model and «без opencode» excluded nothing (measured on kit 1.113.4: runs/r154-spark-chat/i5/opencode_word_i5.py). The word follows the transport, like `cli`: a disabled member (ocspark13free) is not started by the word, only by its own name. The enabled free voices are listed first because a route stop names a group's first member.",
@@ -1189,24 +1187,23 @@
       "panel": "cheap",
       "vendor": "minimax",
       "enabled": false,
-      "quota_group": "opencode-free-minimax",
+      "_r160_i4": "R160 И-4 (2026-10-23) SUPERSEDES _added_r163's fallback, quota-group and cost sentences: opencode's model list of 2026-10-23 08:59Z holds opencode-go/minimax-m3.1-flash and no -free MiniMax id, and its Zen page (opencode.ai/docs/zen, read 2026-10-23) lists no free MiniMax - so the Go copy is the plan model (cost subscription, like ocspark12go), the Zen copy ocminimax31flashfree is RETIRED, and a group of one channel is gone with it.",
       "_quota_group_r163": "MEASURED 2026-10-22 09:31Z (R163 smoke): opencode-go/minimax-m3.1-flash-free and opencode/minimax-m3.1-flash-free were refused together with provider.quota while opencode/deepseek-v4.1-flash-free (group opencode-free) answered in the same run - so MiniMax's free copies sit on their OWN allowance, not the shared counter (R157's method). One group for both: a refusal leaves both out until 00:00 UTC, and the chain never runs Zen after Go's provider.quota. SUPERSEDES the first R163 guess (opencode-free), which skipped MiMo + DeepSeek on a MiniMax refusal.",
       "distribution": "local",
       "_distribution_r163": "R163 (2026-10-22): local - package.py ships it OFF in the kit (a user starts it by name); whether the kit's cheap panel gets it is the owner's kit decision (R160), not taken here.",
-      "label": "OC MiniMax M3.1 Flash Free (OpenCode Go)",
-      "cost": "free",
+      "label": "OC MiniMax M3.1 Flash (OpenCode Go)",
+      "cost": "subscription",
       "fetch_fallback_hint_ref": "mcp_fallback",
-      "model": "opencode-go/minimax-m3.1-flash-free",
+      "model": "opencode-go/minimax-m3.1-flash",
       "effort": null,
       "timeout": "40m",
-      "fallback": "ocminimax31flashfree",
       "_added_r163": "the operator 2026-10-22: «Подписка Go │ opencode-go/minimax-m3.1-flash-free fallback для аналогичной openrouter». R163 И-3: the OpenRouter :free voice it backed up is gone (OpenRouter's free launch period ended 2026-10-22 12:00 UTC; the operator: «Тогда openrouter M3.1 не добавляем»), and so is the chain it was the second link of. Off as a voice: it starts by name, with the Zen copy as its one fallback (the same quota group, so never after a provider.quota); both sit in one `_cascade_groups` entry. Cost: opencode.ai/docs/go (read 2026-10-22) lists «MiniMax M3.1 Flash Free» as Free / Unlimited «for a limited time»; at 09:31Z the same day this copy and the Zen one were both refused with provider.quota while DeepSeek's free voice answered - one event, so the page's «unlimited» did not hold that morning and how often it fails is not known.",
       "models": {
-        "opencode-go/minimax-m3.1-flash-free": {
-          "label": "MiniMax M3.1 Flash Free (via opencode, OpenCode Go)",
+        "opencode-go/minimax-m3.1-flash": {
+          "label": "MiniMax M3.1 Flash (via opencode, OpenCode Go)",
           "data_policy": "Through opencode's Go gateway (their terms apply).",
           "aliases": [
-            "opencode-go/minimax-m3.1-flash-free"
+            "opencode-go/minimax-m3.1-flash"
           ]
         }
       },
@@ -1214,40 +1211,7 @@
         "ocminimax31flashgo",
         "ocminimaxgo"
       ],
-      "notes": "MiniMax M3.1 Flash Free through the operator's OpenCode Go provider; 2nd link of the MiniMax chain."
-    },
-    "ocminimax31flashfree": {
-      "read_order": 3,
-      "kind": "opencode",
-      "panel": "cheap",
-      "vendor": "minimax",
-      "enabled": false,
-      "quota_group": "opencode-free-minimax",
-      "_quota_group_r163": "MEASURED 2026-10-22 09:31Z (R163 smoke): opencode-go/minimax-m3.1-flash-free and opencode/minimax-m3.1-flash-free were refused together with provider.quota while opencode/deepseek-v4.1-flash-free (group opencode-free) answered in the same run - so MiniMax's free copies sit on their OWN allowance, not the shared counter (R157's method). One group for both: a refusal leaves both out until 00:00 UTC, and the chain never runs Zen after Go's provider.quota. SUPERSEDES the first R163 guess (opencode-free), which skipped MiMo + DeepSeek on a MiniMax refusal.",
-      "distribution": "local",
-      "_distribution_r163": "R163 (2026-10-22): local - package.py ships it OFF in the kit (a user starts it by name); whether the kit's cheap panel gets it is the owner's kit decision (R160), not taken here.",
-      "label": "OC MiniMax M3.1 Flash Free",
-      "cost": "free",
-      "fetch_fallback_hint_ref": "mcp_fallback",
-      "model": "opencode/minimax-m3.1-flash-free",
-      "effort": null,
-      "timeout": "40m",
-      "_added_r163": "the operator 2026-10-22: «opencode │ opencode/minimax-m3.1-flash-free opencode fallback для аналогичной go». Off as a voice: the run-time fallback of ocminimax31flashgo (R163 И-3: the OpenRouter voice whose chain it ended is gone).",
-      "models": {
-        "opencode/minimax-m3.1-flash-free": {
-          "label": "MiniMax M3.1 Flash Free (via opencode)",
-          "data_policy": "Free relay through opencode's infrastructure (their terms apply). Free at point of use.",
-          "aliases": [
-            "opencode/minimax-m3.1-flash-free",
-            "oc minimax flash free"
-          ]
-        }
-      },
-      "aliases": [
-        "ocminimax31flashfree",
-        "ocminimax"
-      ],
-      "notes": "Free MiniMax M3.1 Flash via the opencode CLI (Zen); 3rd link of the MiniMax chain."
+      "notes": "MiniMax M3.1 Flash on the operator's OpenCode Go plan; off as a voice, it starts by name (no fallback since the Zen copy left opencode, R160 И-4)."
     },
     "ocglm53flashfree": {
       "read_order": 1,
@@ -2842,10 +2806,6 @@
     [
       "nvstep5preview",
       "ocstep5previewgo"
-    ],
-    [
-      "ocminimax31flashgo",
-      "ocminimax31flashfree"
     ]
   ],
   "_cascade_groups_doc": "Panel cascade: when several channels carry the SAME model through different transports, only the first READY one runs; the rest are skipped. Order matters - cheapest/free first. The panel runs independent VOICES in parallel; paying three transports for one voice is waste, not breadth. Added 2026-09-04 (the operator: 'незачем у одних и тех же моделей спрашивать'). R143 И-3 (2026-10-05): a group may span panels. kimik3 (standard, OpenRouter, paid) is the last member of nvkimik3's group; members are only the channels already in THIS run's plan, so a cheap run never pulls kimik3 in, and a standard run gets one Kimi - nvkimik3 when its CLI and key are here, else kimik3.",

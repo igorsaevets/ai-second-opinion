@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.113.9 — 2026-10-23
+
+What a six-model panel found in 1.113.8's notes and README, each claim checked against the shipped code and registry.
+
+- **run.log and diagnostics.json name no home folder.** It is written as `~` in both; the console keeps the real path. In 1.113.8 a run's diagnostics.json held your user name in every path under your home folder. Paths outside it (the brief, `--out`, attachments) are kept, and the README now says to glance at them before a public bug report.
+- **The builder refuses a `distribution: kit` channel that is off** (`package.py`, before it removes anything). Until 1.113.8 it switched such a channel back on, so an owner's «off» could ship on, with only a selftest in front of it. Its `local` line now says «a key, a plan or a CLI», not «a vendor key».
+- **MiniMax M3.1 Flash through opencode:** `ocminimax31flashgo` runs `opencode-go/minimax-m3.1-flash` on an OpenCode Go plan (it answered a live check on 2026-10-23); `ocminimax31flashfree` is retired, because opencode lists no free MiniMax since 2026-10-23. Both ship off, as before.
+- **README:** the cheap panel's price is what we measured (on the OpenRouter key only Muse Spark is paid, and only without a Meta key: $0.002 in our first run, each web search extra), not the $0.06 of the MiMo Pro voice that 1.113.8 switched off; the harness never SENDS a key or a password, while a CLI agent opens files by itself (SECURITY.md); prices carry their dates; OpenRouter's search is Exa only where a channel names it; the direct vendor keys reach other versions than the panels; a provider you add to opencode bills per call; «actually opened» holds where the channel reports it.
+- **PRIVACY.md and the README's `--skip` line** add the two free opencode voices, `ocmimo26flashfree` and `ocnemotron3ultrafree`: opencode's Zen page (read 2026-10-23) says MiMo's data may be used to improve the model during its free period, and Nemotron runs on NVIDIA's trial terms.
+- **Corrections to 1.113.8's notes.** «An API channel that opens pages stops at its timeout» holds for the pages it opens; one API read is not bounded by the `timeout` yet (in the panel on 1.113.8 one read ran 60 minutes under a 20-minute timeout), and a deadline inside the read is planned. «The kit's Nemotron voice is unchanged (`ocnemotron3ultrafree`; `ornemotron3ultra` without opencode)»: without opencode, `ornemotron3ultra` runs on the standard panel only. The MiniMax channels it announced as needing «a key or a plan beyond the kit's OpenRouter one»: the free one needed neither, and it is gone (above).
+- **Selftest.** New suite `suite_r160_i4_home_scrub`; `suite_r160_kit_defaults` (f) (g) test the builder's refusal; the R163 MiniMax mechanics run on a fixture.
+
 ## 1.113.8 — 2026-10-23
 
 The owner's choices for the kit's default panel, and everything that ran on the author's machine first since 1.113.7.

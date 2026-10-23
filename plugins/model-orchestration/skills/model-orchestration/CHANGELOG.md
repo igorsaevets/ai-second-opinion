@@ -2,6 +2,18 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.113.9 — 2026-10-23
+
+What a six-model panel found in 1.113.8's notes and README, each claim checked against the shipped code and registry.
+
+- **run.log and diagnostics.json name no home folder.** It is written as `~` in both; the console keeps the real path. In 1.113.8 a run's diagnostics.json held your user name in every path under your home folder. Paths outside it (the brief, `--out`, attachments) are kept, and the README now says to glance at them before a public bug report.
+- **The builder refuses a `distribution: kit` channel that is off** (`package.py`, before it removes anything). Until 1.113.8 it switched such a channel back on, so an owner's «off» could ship on, with only a selftest in front of it. Its `local` line now says «a key, a plan or a CLI», not «a vendor key».
+- **MiniMax M3.1 Flash through opencode:** `ocminimax31flashgo` runs `opencode-go/minimax-m3.1-flash` on an OpenCode Go plan (it answered a live check on 2026-10-23); `ocminimax31flashfree` is retired, because opencode lists no free MiniMax since 2026-10-23. Both ship off, as before.
+- **README:** the cheap panel's price is what we measured (on the OpenRouter key only Muse Spark is paid, and only without a Meta key: $0.002 in our first run, each web search extra), not the $0.06 of the MiMo Pro voice that 1.113.8 switched off; the harness never SENDS a key or a password, while a CLI agent opens files by itself (SECURITY.md); prices carry their dates; OpenRouter's search is Exa only where a channel names it; the direct vendor keys reach other versions than the panels; a provider you add to opencode bills per call; «actually opened» holds where the channel reports it.
+- **PRIVACY.md and the README's `--skip` line** add the two free opencode voices, `ocmimo26flashfree` and `ocnemotron3ultrafree`: opencode's Zen page (read 2026-10-23) says MiMo's data may be used to improve the model during its free period, and Nemotron runs on NVIDIA's trial terms.
+- **Corrections to 1.113.8's notes.** «An API channel that opens pages stops at its timeout» holds for the pages it opens; one API read is not bounded by the `timeout` yet (in the panel on 1.113.8 one read ran 60 minutes under a 20-minute timeout), and a deadline inside the read is planned. «The kit's Nemotron voice is unchanged (`ocnemotron3ultrafree`; `ornemotron3ultra` without opencode)»: without opencode, `ornemotron3ultra` runs on the standard panel only. The MiniMax channels it announced as needing «a key or a plan beyond the kit's OpenRouter one»: the free one needed neither, and it is gone (above).
+- **Selftest.** New suite `suite_r160_i4_home_scrub`; `suite_r160_kit_defaults` (f) (g) test the builder's refusal; the R163 MiniMax mechanics run on a fixture.
+
 ## 1.113.8 — 2026-10-23
 
 The owner's choices for the kit's default panel, and everything that ran on the author's machine first since 1.113.7.
@@ -360,15 +372,6 @@ A garbled vendor reply is now named instead of offered for reading; REPORT shows
 - **opencode channels: tokens and cost from opencode's own store.** The CLI's JSON stream sometimes carries no per-step usage frame, so the harness under-counted: a live run recorded 93 output tokens and no cost where opencode's store said 2 546 and $0.0097. The harness now reads the session's totals, including sub-agent child sessions, from `opencode.db` (read-only, by the stream's session id, numbers only; never `auth.json`), also after a timeout, and notes when the stream fell short.
 - **Muse Spark on an OpenCode Go plan: the `ocspark13go` channel, off by default.** With an OpenCode Go subscription, `{ "channels": { "ocspark13go": { "enabled": true } } }` in `~/.claude/model-orchestration.local.json` runs Spark on the plan (`#xhigh`, its ceiling: `#max` is refused) and keeps the free `ocspark13free` as its run-time fallback: one Spark per round, and the free one runs only when the plan run gave no answer. A plan-limit stop arrives as `provider.quota`, the same code as the free quota's; its diagnosis now names both and the fallback.
 
-## 1.108.1 — 2026-10-06
-
-Fixes from the review panel on 1.108.0: a failure that already cost money is no longer re-run automatically, and the Qwen salvage keeps every answer it can.
-
-- **A channel that already billed money is not re-run by itself any more.** The automatic retry after a transient stream error (since 1.84.0) also re-ran channels whose failed attempt had been billed: on 6 October GLM 5.3 billed $1.75, died on an upstream 429, and the retry billed again ($2.87 in all). Such a channel is now listed as «NOT AUTO-RETRIED - already billed», with what it cost and how to try again (the same command with `--only <channel>`); failures that cost nothing are still retried once. A metered API channel that reported no price but did generate tokens counts as billed.
-- **Qwen Code CLI salvage, from the panel's findings.** HANDOFF.md now tells an answer read back complete from the CLI's session log («📜 Recovered») from a resumed, partial one («🛟 Salvaged»), and gives neither label to a salvage that produced no finished review. If the resume wrote its answer and then stopped, the answer is read from the log instead of being lost. The session is resumed even when its log was not found (an unknown session id fails in about a second). The turn-cap stop (exit 53) is named like the budget stop (exit 55). A stopped run that printed an empty error result, or noise on stdout, is still salvaged, and its cause is read from stderr. A draft followed by a tool call is not taken as the answer, and a salvaged text under 2,000 characters is not graded as a review.
-- **Time:** the first run's limit now leaves room for both calls' 60-second kill margins, so the seat stays inside its 45-minute timeout (1.108.0 could overrun it by about two minutes); the salvage gets whatever time the first run left.
-- Smaller: `max_tool_calls: 0` now means no tool calls (it became 50); Qwen's automatic skill writing (`memory.enableAutoSkill`) is off for panel runs too; inherited `QWEN_RUNTIME_DIR` and `QWEN_CODE_MEMORY_LOCAL` are cleared, so the session log stays where the salvage looks; the per-run memory folder is removed even when the call fails with an error; the «alias snapshot» note accepts real dates only (`-0902`, `-04-02`, `-2603`, `-2024-11-20`, not `-9999` or `-4096`); HANDOFF.md no longer lists the harness's own quote-check files as answers or as foreign files; the plan line and the registry describe the Qwen timeout as it now works.
-
 ## Older releases
 
-149 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+150 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).

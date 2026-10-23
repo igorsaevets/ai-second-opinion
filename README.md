@@ -28,7 +28,7 @@ A run of version 1.113.0 on 2026-10-17, on the author's machine and accounts: se
 - **A disagreement, kept in view.** Build an MCP server now? MiMo Flash, the one voice that cited no links: «Build it — as a thin wrapper, started now…». The other six: not now.
 - **What was cited is not what was read.** Gemini cited 29 links; the tool saw it open 2 of them. Muse Spark's two dead links are one real GitHub Docs page, cited twice with part of the path replaced by «...».
 
-The seven worked in parallel: 74 minutes of model time took 26 min 31 s, 15 seconds more than the slowest voice. The published default panel costs about $0.06 a run on your OpenRouter key plus your subscriptions (details below), and `--dry-run` shows the plan before anything is spent. What the console shows during a run is in [What one run looks like](#what-one-run-looks-like).
+The seven worked in parallel: 74 minutes of model time took 26 min 31 s, 15 seconds more than the slowest voice. On your OpenRouter key the published default panel pays for one voice: only Muse Spark is paid, and only when you have no Meta key ($0.002 in our first run, each web search extra); the rest runs on your subscriptions or free (details below), and `--dry-run` shows the plan before anything is spent. What the console shows during a run is in [What one run looks like](#what-one-run-looks-like).
 
 A panel pays off twice:
 1. **Different knowledge.** Each model was trained on its own data and runs in its own harness: the vendor's CLI agent or an API, its own web search, its own way of reading pages. So when you ask "how should I design this" or "review this code", each one answers with its own recommendations, and together they cover more than any one of them.
@@ -80,7 +80,7 @@ To check what was found: `python doctor.py`. It prints which keys and programs i
 
 In Claude Code with the plugin (and in any agent you gave the line from the top of this page) just say it in plain words:
 
-| You say | What runs (version 1.113.8) |
+| You say | What runs (version 1.113.9) |
 |---|---|
 | **"second opinion"** (for example, "give me a second opinion on this file") | **The cheap panel**, the default: 5 models |
 | **"second opinion, CLI only"** | Only the CLI agents of the cheap panel: 4 models — MiMo v2.6 Flash, Nemotron 3 Ultra, Gemini 3.8 Flash and Grok 4.6. Not one paid request on your OpenRouter key. Muse Spark is not among them since 1.113.3: without an OpenCode Go plan it is an API call |
@@ -96,12 +96,12 @@ In Claude Code with the plugin (and in any agent you gave the line from the top 
 
 From a terminal the same is done with flags: `--panel cheap` (the default), `--panel standard`, `--route "only CLI"`, `--only codex`, `--skip openrouter`. You can see the plan before anything is spent, for free: `python routing.py` or `--dry-run`.
 
-## Panels: prices as of 2026-10-05, line-up as of 1.113.8
+## Panels: line-up as of 1.113.9, prices as dated below
 
 How to read the tables:
-- **Transport.** A *CLI agent* is the vendor's program on your computer (opencode, agy, grok, kimi, codex, claude). It runs on your subscription or for free and needs no OpenRouter key. *OpenRouter* is an API request on your key, paid per token.
+- **Transport.** A *CLI agent* is the vendor's program on your computer (opencode, agy, grok, kimi, codex, claude). It runs on your subscription or for free and needs no OpenRouter key (a provider you add to opencode yourself bills you per call). *OpenRouter* is an API request on your key, paid per token.
 - **Effort** is how hard the model thinks. Where a model takes a level, the tool sets the highest it accepts; the rows say where a free model takes none and where agy decides itself.
-- **Price per 1M tokens** is from the OpenRouter catalogue on 2026-10-05, input / output.
+- **Price per 1M tokens** is from the OpenRouter catalogue on 2026-10-05, input / output; a row that names another date was priced then.
 - **Per run** is the median of our runs from 1 September to 5 October 2026; n is the number of runs, each counted once. Yours will be higher or lower: it depends on the size of the document and the number of web searches. The tool prints the exact amount at the end of every run.
 
 ### The cheap panel — the default: 5 models
@@ -177,9 +177,9 @@ Muse Wonder left this panel in 1.113.0: it starts only when named (below, «By n
 
 ### Web search
 
-On the OpenRouter channels the search is done by the Exa plugin: $0.007 a request (up to 10 results). It is billed apart from the tokens, so it is paid even on a free model. The CLI agents search by themselves, within their plan.
+On the OpenRouter channels each web search is billed apart from the tokens, so it is paid even on a free model. A channel that names the Exa engine pays $0.007 a request (Exa includes up to 10 results; ours ask for 5); a channel that names none gets the model provider's own search where OpenRouter offers one (OpenAI, Anthropic, Google, Perplexity and SpaceXAI models, in OpenRouter's words), at that provider's price, and Exa otherwise (OpenRouter's web-search page, 2026-10-23). The CLI agents search by themselves, within their plan.
 
-**`python routing.py` always prints the live channel list.** The tables above are a snapshot of 2026-10-05, and the registry changes most weeks.
+**`python routing.py` always prints the live channel list.** The tables above are a snapshot: the line-up of 1.113.9, prices of 2026-10-05 unless a row gives its own date, and the registry changes most weeks.
 
 *Where the prices come from (2026-10-05):*
 - the OpenRouter catalogue `openrouter.ai/api/v1/models`, read at 09:15 UTC;
@@ -264,7 +264,7 @@ That answer is nearly worthless, for three reasons most people never check:
   *actually opened* the page it cited, or just listed it.
 - **It catches a model that quietly refused.** A model that declines a task still formats its
   reply correctly, so it passes every naive "did it finish?" check. This catches that.
-- **Nothing with a password or key ever leaves your machine.** Blocked outright, no override.
+- **The harness never sends a password or key.** A brief or attachment that holds one is refused outright, no override. A CLI agent opens files on your disk by itself, so what it may read is set by its own rules ([SECURITY.md](SECURITY.md)).
   Personal data — ID numbers, SSNs, emails, phone numbers, dates of birth — is **found, counted
   and reported in one line, and then SENT**; `--warn-pii` lists each by kind and line, and
   `--strict-pii` turns it into a hard stop. **Names and street
@@ -337,11 +337,11 @@ the run it came from.)
 ## What it costs, honestly
 
 In short, from our runs of September–October 2026:
-- **the cheap panel** — about $0.06 a run on your OpenRouter key plus subscriptions;
+- **the cheap panel** — on your OpenRouter key only Muse Spark is paid, and only when you have no Meta key ($0.002 in our first run, each web search extra), plus subscriptions;
 - **the standard one** — about $2.5: Kimi K3 now always answers there through OpenRouter (≈ $1.38 of it);
 - **CLI only** — $0 on the key, subscriptions only.
 
-The per-model breakdown is in the tables above. The accounts, none of which this tool provides, are listed under [«Getting started»](#getting-started-accounts-and-keys). *Optional:* the `GEMINI_API_KEY`, `XAI_API_KEY` and `MIMO_API_KEY` keys reach the same Gemini, Grok and MiMo models through the vendors' own APIs; those channels are off by default, details in [INSTALL.md](INSTALL.md#direct-vendor-alternatives-to-openrouter-off-by-default).
+The per-model breakdown is in the tables above. The accounts, none of which this tool provides, are listed under [«Getting started»](#getting-started-accounts-and-keys). *Optional:* the `GEMINI_API_KEY`, `XAI_API_KEY` and `MIMO_API_KEY` keys reach Gemini, Grok and MiMo through the vendors' own APIs, not always in the version a panel runs (Grok 4.20 and MiMo v2.5 Pro there; `python routing.py` prints each channel's model); those channels are off by default, details in [INSTALL.md](INSTALL.md#direct-vendor-alternatives-to-openrouter-off-by-default).
 
 **You do not need them all, and you should not start with them all.** Missing a key or a CLI is a
 normal condition, not an error — the tool runs whatever is available and tells you plainly what it
@@ -354,11 +354,11 @@ at one point, two different numbers four lines apart in this very file.)
 
 **Some channels are cheap because of their data terms, not despite them.** As published,
 `spark12cont` and `orspark12cont` run the same Muse Spark 1.2 *Contributor* tier — directly and
-through OpenRouter respectively — and `ornemotron3ultra` runs a *free* tier; on every one of them the vendor may use prompts and completions for training. That is
+through OpenRouter respectively — and `ornemotron3ultra`, `ocmimo26flashfree` and `ocnemotron3ultrafree` run *free* tiers; on every one of them the vendor may use prompts and completions for training or to improve its model. That is
 the trade being made, it is stated in [PRIVACY.md](PRIVACY.md) with each vendor named, and the
 tool prints each channel's data policy in the plan **before** it spends anything — that line, not
 this paragraph, is the current list. If a brief should not be trained on, drop those channels for
-that run: `--skip spark12cont orspark12cont ornemotron3ultra`. (The free Spark through opencode,
+that run: `--skip spark12cont orspark12cont ornemotron3ultra ocmimo26flashfree ocnemotron3ultrafree`. (The free Spark through opencode,
 `ocspark13free`, was on this list until opencode dropped it on 2026-10-17; it ships switched off.)
 
 Nothing else in this file will tell you when to avoid a channel, and that is deliberate. An
@@ -487,9 +487,10 @@ Every run writes two files next to its results:
 - **`diagnostics.json`** — a structured report: what is installed, what each model did, what
   failed, and for each problem a plain-language cause and a suggested fix.
 
-**Both are automatically stripped of keys, tokens and personal data**, so you can paste them
-straight into a chat with an AI assistant and ask it to fix the problem, or attach them to a bug
-report, without checking them first.
+**Both are automatically stripped of keys, tokens and personal-data shapes, and your home folder
+is written as `~`** (since 1.113.9), so you can paste them straight into a chat with an AI assistant and ask
+it to fix the problem. Before you attach them to a public bug report, glance at the paths of the files
+you passed (the brief, `--out`, attachments): they are kept, because a fix needs them.
 
 That is the intended workflow when you are stuck: hand `diagnostics.json` to your AI assistant and
 ask it to diagnose the cause. See **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**.
@@ -536,7 +537,7 @@ one calling it fatal is the most useful signal you will find.
 **How is this different from Perplexity or AI search?**<br>
 Perplexity gives you one synthesised answer with sources. This gives you several independent
 answers, shows you where they contradict each other, and then mechanically checks whether the
-sources each model cited actually exist and were actually opened. The disagreement and the audit
+sources each model cited actually exist and, where the channel reports it, were actually opened. The disagreement and the audit
 are what you are paying for.
 
 **Can I use this from Cursor / Windsurf / another coding tool?**<br>
@@ -549,13 +550,13 @@ MiMo, Grok, GLM, DeepSeek, Muse Spark and NVIDIA Nemotron. Start with that and a
 vendor access later for the models that benefit from it.
 
 **Is this expensive?**<br>
-No. The cheap panel costs about $0.06 a run on your OpenRouter key, plus subscriptions you most likely already have. Say "CLI only" and there is not one paid request on the key. The standard panel costs about $2.5 a run: since 1.112.0 Kimi K3 always answers there through OpenRouter. These are the medians of our runs in September–October 2026; the tool prints the exact amount of your run at its end. See [what it costs](#what-it-costs-honestly).
+No. On the cheap panel only Muse Spark is paid, and only when you have no Meta key ($0.002 in our first run, each web search extra) on your OpenRouter key, plus subscriptions you most likely already have. Say "CLI only" and there is not one paid request on the key. The standard panel costs about $2.5 a run: since 1.112.0 Kimi K3 always answers there through OpenRouter. The $2.5 is the median of our runs in September–October 2026, the $0.002 a single run; the tool prints the exact amount of your run at its end. See [what it costs](#what-it-costs-honestly).
 
 ## Found a bug? Want a feature? Want to work together?
 
 | What you want to do | Where it goes |
 |---|---|
-| **Report a bug** | [Open an issue](https://github.com/igorsaevets/ai-second-opinion/issues) and attach `diagnostics.json` — it is scrubbed by construction, so you can attach it without reading it first |
+| **Report a bug** | [Open an issue](https://github.com/igorsaevets/ai-second-opinion/issues) and attach `diagnostics.json` — keys, tokens and your home folder are scrubbed by construction; glance at the paths of the files you passed before posting |
 | **Ask for a feature, or suggest an improvement** | [Open an issue](https://github.com/igorsaevets/ai-second-opinion/issues) |
 | **Ask a question, or show what you built with it** | [Discussions](https://github.com/igorsaevets/ai-second-opinion/discussions) |
 | **Report a security problem** | [Report a vulnerability privately](https://github.com/igorsaevets/ai-second-opinion/security/advisories/new) — please do *not* open a public issue first. See [SECURITY.md](SECURITY.md) |

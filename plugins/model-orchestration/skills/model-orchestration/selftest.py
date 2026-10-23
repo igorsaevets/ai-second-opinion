@@ -3226,6 +3226,11 @@ def suite_panels():
          "R164 (same messages): Spark 1.3 in Standard mode on his Muse Code subscription at max (reasoning xhigh 2855-5083 vs max 7709-12488, n=2, disjoint); its own voice beside ocspark12go, first in the Spark 1.3 cascade, fallback mcspark12. distribution local."),
         ("R164 2026-10-22", "ADD", "mcspark12",
          "R164: mcspark13's run-time fallback (muse-spark-1.2, xhigh; max = HTTP 400), off as a voice; in the Spark 1.2 cascade, so it is skipped when ocspark12go answered. distribution local."),
+        ("R160 2026-10-23", "REMOVE", "ocminimax31flashfree",
+         "RETIRED - R160 И-4 (panel r160i2: mcspark13, codex): opencode's model list of 2026-10-23 08:59Z and its Zen "
+         "page (opencode.ai/docs/zen, read 2026-10-23) list no free MiniMax; the Go copy ocminimax31flashgo moved to "
+         "opencode-go/minimax-m3.1-flash (one live one-line ask answered, 2026-10-23 20:24Z). Off as a voice, never "
+         "in a panel's run.")
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -8120,7 +8125,7 @@ def main():
                   suite_r163_step5_minimax_chain, suite_r163_i3_hotfix, suite_keys_read_policy,
                   suite_r165_grok_turn_ended,
                   suite_r165_i2_task_keys,
-                  suite_r164_muse_spark, suite_r160_kit_defaults,
+                  suite_r164_muse_spark, suite_r160_kit_defaults, suite_r160_i4_home_scrub,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -17872,6 +17877,29 @@ def suite_r157_i2_free_fallback():
           repr((ia, ip_, ir, ifb)))
 
 
+def _r163_minimax_fixture(reg):
+    """R160 И-4 (2026-10-23): opencode dropped the Zen MiniMax - ocminimax31flashfree is RETIRED and
+    ocminimax31flashgo is the Go plan model with no fallback and no group. The R163 chain / quota-group / cascade
+    checks test the CODE's mechanics, so they run on the 2026-10-22 pair rebuilt here, never on the live registry."""
+    import copy
+    reg = copy.deepcopy(reg)
+    base = reg["channels"]["ocminimax31flashgo"]
+
+    def pair(name, model, alias):
+        c = copy.deepcopy(base)
+        c.update(model=model, cost="free", quota_group="opencode-free-minimax", aliases=[name, alias],
+                 models={model: {"label": "MiniMax M3.1 Flash Free (R163 fixture)", "aliases": [model]}})
+        c.pop("fallback", None)
+        return c
+    go = pair("ocminimax31flashgo", "opencode-go/minimax-m3.1-flash-free", "ocminimaxgo")
+    go["fallback"] = "ocminimax31flashfree"
+    reg["channels"]["ocminimax31flashgo"] = go
+    reg["channels"]["ocminimax31flashfree"] = pair("ocminimax31flashfree", "opencode/minimax-m3.1-flash-free",
+                                                   "ocminimax")
+    reg["_cascade_groups"] = list(reg.get("_cascade_groups") or []) + [["ocminimax31flashgo", "ocminimax31flashfree"]]
+    return reg
+
+
 def suite_r163_step5_minimax_chain():
     """R163 (2026-10-22). Igor: Step 5 Preview in the cheap panel on NVIDIA's free endpoint with its OpenCode Go copy as
     the run-time fallback; MiniMax M3.1 Flash through opencode (Go `-free`, then Zen free). Rewritten in R163 И-3: the
@@ -17904,15 +17932,14 @@ def suite_r163_step5_minimax_chain():
           "R163 (a) nvstep5preview: oai/nvidia, cheap, local, free, effort max, 131072, no search, fetch_url, fallback "
           "the Go copy (off as a voice)",
           repr({k: nv.get(k) for k in ("kind", "provider", "model", "reasoning", "max_tokens", "fallback")}))
-    check(ocg.get("model") == "opencode-go/minimax-m3.1-flash-free" and ocg.get("enabled") is False
-          and ocg.get("fallback") == "ocminimax31flashfree"
-          and ocz.get("model") == "opencode/minimax-m3.1-flash-free" and ocz.get("enabled") is False
-          and ocz.get("quota_group") and ocz.get("quota_group") == ocg.get("quota_group")
-          and ocz.get("quota_group") != (ch.get("ocmimo26flashfree") or {}).get("quota_group")
+    check(ocg.get("model") == "opencode-go/minimax-m3.1-flash" and ocg.get("enabled") is False
+          and ocg.get("cost") == "subscription" and not ocg.get("fallback") and not ocg.get("quota_group")
+          and not ocz and not any("ocminimax31flashfree" in grp for grp in reg.get("_cascade_groups") or [])
           and sfx,
-          "R163 (a) the MiniMax opencode pair: Go -> Zen, both off as voices, in their OWN quota group (measured, not "
-          "MiMo's); suffix on (or stripped by the kit)",
-          repr((ocg.get("enabled"), ocg.get("fallback"), ocz.get("enabled"), ocz.get("quota_group"))))
+          "R160 И-4 (was R163 (a)): MiniMax on opencode is the Go plan model only - subscription, no fallback, no "
+          "group, off as a voice; the Zen copy ocminimax31flashfree is RETIRED (opencode lists no free MiniMax, "
+          "2026-10-23); suffix on (or stripped by the kit)",
+          repr((ocg.get("model"), ocg.get("cost"), ocg.get("fallback"), ocg.get("quota_group"), bool(ocz))))
 
     sent = []
 
@@ -17960,6 +17987,9 @@ def suite_r163_step5_minimax_chain():
     def yes(_n):
         return True
 
+    # R160 И-4: the chain / quota-group / cascade checks below run on the R163 MiniMax pair as a FIXTURE (the Zen
+    # copy is retired; the Go copy has no fallback or group in the live registry).
+    reg = _r163_minimax_fixture(reg)
     regx = copy.deepcopy(reg)          # as on the owner's machine: the kit build turns these local channels off
     regx["channels"]["nvstep5preview"]["enabled"] = True
     pk = rt.resolve(copy.deepcopy(regx), panel="cheap", ready=yes)
@@ -18001,7 +18031,8 @@ def suite_r163_step5_minimax_chain():
     calls, res = run(pg, rg, {"ocminimax31flashfree": good}, first=good)
     check(calls == [] and "ocminimax31flashfree" not in res,
           "R163 (e) the Go MiniMax answers -> Zen never starts", repr((calls, sorted(res))))
-    pq = rt.apply_quota_skip(copy.deepcopy(pg), rg, {ocz.get("quota_group"): "refused earlier today"},
+    pq = rt.apply_quota_skip(copy.deepcopy(pg), rg, {rg["channels"]["ocminimax31flashfree"]["quota_group"]:
+                                                     "refused earlier today"},
                              named=("ocminimax31flashgo",))
     qf = (pq.get("ocminimax31flashgo") or {}).get("fallback") or {}
     calls, res = run(pq, rg, {"ocminimax31flashfree": good})
@@ -18043,6 +18074,7 @@ def suite_r163_i3_hotfix():
     import orchestrate as o
     section("R163 И-3: OpenRouter MiniMax out, no fallback chain, same-model groups, a time budget for tool loops")
     reg = rt.load_registry(overlay=False)
+    reg = _r163_minimax_fixture(reg)     # R160 И-4: the retired Zen MiniMax as a fixture for the mechanics checks
     ch = reg.get("channels") or {}
     gone = "orminimax31flashfree"
     named_by = [k for k, v in ch.items() if v.get("fallback") == gone]
@@ -19597,6 +19629,89 @@ def suite_r160_kit_defaults():
             named.append(n)
     check(named == ["ormimopro", "mimov26pro", "orspark13cont"],
           "R160 (e) by name each of ormimopro / mimov26pro / orspark13cont still starts", repr(named))
+    # R160 И-4 (A12, panel r160i2: grokbuild, ocspark12go, agy38flash): the BUILDER refuses a `kit` channel that is
+    # off - until 1.113.8 it switched it back ON and only (c) above stood in front of it. package.py is not shipped,
+    # so these run on the source only.
+    pk = HERE / "package.py"
+    if pk.is_file():
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("_pkg_r160i4", str(pk))
+        pkg = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pkg)
+        fx = copy.deepcopy(reg)
+        fx["channels"]["orspark12cont"] = dict(fx["channels"]["orspark12cont"], distribution="kit", enabled=False)
+        got = (pkg.kit_off_channels(reg), pkg.kit_off_channels(fx))
+        check(got == ([], ["orspark12cont"]),
+              "R160 И-4 (f) package.py names every `kit` channel that is off (none in the registry; the control "
+              "with orspark12cont at kit + off is named)", repr(got))
+        src = pk.read_text(encoding="utf-8")
+        ok = ('ch["enabled"] = True' not in src and "REFUSING TO BUILD" in src
+              and 0 < src.find("kit_off_channels(json.load") < src.find("shutil.rmtree(skill_out)"))
+        check(ok, "R160 И-4 (g) the builder flips nothing ON, and refuses before the old tree is removed")
+    else:
+        check(True, "R160 И-4 (f)(g) package.py is not in this tree (the kit does not ship the builder)")
+
+
+def suite_r160_i4_home_scrub():
+    """R160 И-4 (2026-10-23), panel r160i2 (codex): diagnostics.json carried the home folder - the Windows user name
+    40 times in 22 paths - under a README that calls the file stripped of personal data.
+    (a) scrub_home(): the home folder in its native, forward-slash, JSON-escaped and MSYS spellings -> `~`; a sibling
+        folder whose name starts with the same letters and a path outside home are kept; non-str passes through;
+    (b) scrub_deep() (diagnostics.json) scrubs keys and values;
+    (c) log(): the run.log line names no home folder, the console line keeps the real path;
+    (d) a real --dry-run: run.log names no home folder (and holds a `~` path whenever the console printed one).
+    """
+    import orchestrate as o
+    section("R160 И-4: run.log and diagnostics.json name no home folder")
+    home = os.path.expanduser("~")
+    fwd = home.replace("\\", "/")
+    native = os.path.join(home, "x.json")
+    escaped = os.path.join(home, "e.json").replace("\\", "\\\\")
+    m = re.match(r"^([A-Za-z]):[\\/](.+)$", home)
+    msys = "/%s/%s/m.txt" % (m.group(1).lower(), m.group(2).replace("\\", "/")) if m else ""
+    sib = os.path.join(home + "2", "k.txt")
+    cases = {"native": native, "fwd": fwd + "/f.txt", "escaped": escaped, "msys": msys, "sibling": sib,
+             "outside": "D:/AI_Scratch/x"}
+    got = {k: o.scrub_home(v) for k, v in cases.items() if v}
+    tilde = [k for k in ("native", "fwd", "escaped", "msys") if k in got]
+    check(all(got[k].startswith("~") for k in tilde) and got["sibling"] == sib and got["outside"] == cases["outside"]
+          and o.scrub_home(None) is None and o.scrub_home(7) == 7,
+          "R160 И-4 (a) scrub_home: native / forward-slash / JSON-escaped / MSYS home -> ~; a sibling folder and a "
+          "path outside home are kept; non-str passes through", repr(got)[:400])
+    d = o.scrub_deep({native: [native, {"k": escaped}], "n": 3})
+    k0 = next(iter(d))
+    check(k0.startswith("~") and d[k0][0].startswith("~") and d[k0][1]["k"].startswith("~") and d["n"] == 3,
+          "R160 И-4 (b) scrub_deep (diagnostics.json): keys and values lose the home folder", repr(d)[:300])
+    with tempfile.TemporaryDirectory() as td:
+        lp = os.path.join(td, "run.log")
+        saved = (o._LOG["path"], list(o._LOG["lines"]))
+        o._LOG["path"] = lp
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                o.log("probe " + native)
+        finally:
+            o._LOG["path"] = saved[0]
+            o._LOG["lines"][:] = saved[1]
+        filed = open(lp, encoding="utf-8").read()
+    check(home.lower() not in filed.lower() and "~" in filed and native in buf.getvalue(),
+          "R160 И-4 (c) log(): run.log names no home folder, the console keeps the real path", repr(filed)[:200])
+    with tempfile.TemporaryDirectory() as td:
+        bp = os.path.join(td, "brief.md")
+        with open(bp, "w", encoding="utf-8") as f:
+            f.write(BRIEF)
+        env = dict(os.environ, PYTHONIOENCODING="utf-8")
+        p = subprocess.run([PY, str(HERE / "orchestrate.py"), "--brief", bp, "--out", os.path.join(td, "rev"),
+                            "--dry-run"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=180, env=env)
+        rl = os.path.join(td, "rev", "run.log")
+        filed = open(rl, encoding="utf-8").read() if os.path.isfile(rl) else ""
+    con = ((p.stdout or "") + (p.stderr or "")).lower()
+    shown = home.lower() in con or fwd.lower() in con
+    low = filed.lower()
+    check(bool(filed) and home.lower() not in low and fwd.lower() not in low and (not shown or "~" in filed),
+          "R160 И-4 (d) a real --dry-run: run.log names no home folder (the console printed one: %s)" % shown,
+          "rc=%s run.log %d chars" % (p.returncode, len(filed)))
 
 
 def suite_keys_read_policy():
