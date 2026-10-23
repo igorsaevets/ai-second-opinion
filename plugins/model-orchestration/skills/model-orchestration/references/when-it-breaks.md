@@ -29,6 +29,9 @@ Read this when a run fails, or before diagnosing anything by reading source.
 | `REFUSING TO SPEND: your settings file changes where documents go` | a transport change has not been accepted | if you made it: `python routing.py --accept-settings`, once. If you did NOT make it, open the file first — that message exists because the settings file survives every update, so one write to it would redirect a channel permanently. `--dry-run` still works without accepting |
 | you want a channel this release does not have | add it yourself | a full block in your settings file with `"_new": true`, including `kind`, `label`, `model` and a `models` entry for it. It faces exactly the same validation as anything shipped |
 | `doctor.py` says `skill size ... over budget` | a maintainer's problem, not yours | nothing stops working; the assistant just sees less of the manual. `selftest.py` is where it is a hard failure |
+| `GROK SUBSCRIPTION LIMIT - xAI refused the turn with HTTP 402` | the usage the Grok subscription includes is used up (2026-10-22: the weekly limit) | every Grok run stops the same way until it is back; buying more usage on the account restored it at once. Not the brief, not the harness - do not retry the round |
+| `LINGERED - Grok's turn ended ..., but the grok process did not exit` | a Grok-side hang after a finished turn (1 of 456 runs, R165) | nothing: the harness stopped it 30 s later and kept the answer (stdout, else Grok's own session record) |
+| `time_stopped` in an API channel's record | the channel's `timeout` was spent while it was opening pages (since 1.113.8 a time budget, before an idle limit) | the answer is built from what it read; raise the channel's `timeout` in your settings only if the brief truly needs more pages |
 
 ## The general rule behind half of these
 

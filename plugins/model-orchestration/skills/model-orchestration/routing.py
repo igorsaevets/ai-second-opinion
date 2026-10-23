@@ -2557,6 +2557,54 @@ def _paid_label(c, plan, chans):
                                              "stops at $%s a run" % sg if sg else "no per-run spend ceiling")
 
 
+# R158 И-2: the billing path of an opencode channel, from its model's PROVIDER (the prefix before the first «/») and the
+# registry's `cost` - never from the kind. Five lines (the plan's tier note and web line, the preflight, the call log,
+# the --ask header) said «free model, no API key» for EVERY opencode channel: true for opencode Zen's free models,
+# false for the OpenCode Go plan and for a provider of the user's own opencode config (R158 И-1: 13 wokey.ai channels,
+# per token, printed as free on the one screen read before money moves). A missing `cost` reads «billing UNKNOWN»,
+# never free (panel r158i1, codex: «Missing or contradictory metadata means billing UNKNOWN, never implicitly free»).
+def _opencode_where(model):
+    """Who serves an opencode model: opencode Zen, the OpenCode Go plan, or a provider of the user's opencode config."""
+    m = str(model or "")
+    prov = m.split("/", 1)[0] if "/" in m else ""
+    if prov == "opencode":
+        return "opencode Zen (opencode's infrastructure)"
+    if prov == "opencode-go":
+        return "the OpenCode Go plan (opencode's infrastructure)"
+    if prov:
+        return "the provider %r of YOUR opencode config (its endpoint and key are set there)" % prov
+    return "an opencode provider (the model has no provider prefix)"
+
+
+def opencode_billing(model, cost):
+    """One phrase: how an opencode channel's call is paid. Shared by the plan (here) and orchestrate's lines."""
+    m = str(model or "")
+    prov = m.split("/", 1)[0] if "/" in m else ""
+    if prov == "opencode-go":
+        return "OpenCode Go plan (opencode's own login), counted against the plan's limits"
+    if prov == "opencode" and cost == "free":
+        return "free model, no API key"
+    where = _opencode_where(model)
+    if cost == "free":
+        return "free per the registry's cost - %s" % where
+    if cost == "subscription":
+        return "a subscription per the registry's cost - %s" % where
+    if cost:
+        return "PAID per call (cost %s) - %s" % (cost, where)
+    return "billing UNKNOWN (no cost in the registry) - %s" % where
+
+
+def ask_voice_label(cost):
+    """The --ask header beside every voice after the first: «free second voice» only when that voice's cost is free."""
+    if cost == "free":
+        return "free second voice"
+    if cost == "subscription":
+        return "second voice, on a subscription"
+    if cost:
+        return "second voice, PAID per call (cost %s)" % cost
+    return "second voice, billing unknown"
+
+
 def apply_panel(plan, reg, panel):
     """
     Narrow the plan to one panel. FILTERS DOWN ONLY - it never enables a channel.
@@ -2754,30 +2802,42 @@ def apply_fallback(plan, reg, ready=None):
         p.pop("fallback", None)
         if not fb or not p.get("enabled"):
             continue
-        off = None
-        rmember, rwhy = _replaced_twin(plan, reg, fb)
-        if fb not in chans or fb not in plan:
-            off = "%s is not in this registry" % fb
-        elif fb == cname:
-            off = "a channel cannot be its own fallback"
-        elif plan[fb].get("enabled"):
-            off = "%s already runs in this round as its own voice" % fb
-        elif plan[fb].get("_user_off"):
-            off = "%s is excluded in this run (%s)" % (fb, plan[fb]["_user_off"])
-        elif rmember:
-            off = "%s is the same model as %s, which this route replaced (%s)" % (fb, rmember, rwhy)
-        elif ((chans.get(fb) or {}).get("spend_guard") or {}).get("requires_ack"):
-            off = "%s needs --accept-spend (its spend_guard), which a fallback never asks for" % fb
-        elif ready is not None:
-            try:
-                verdict = ready(fb)
-            except Exception:                            # noqa: BLE001 - same rule as the cascade
-                verdict = True
-            if verdict is not True:
-                off = "%s cannot run here (%s)" % (fb, verdict if isinstance(verdict, str)
-                                                    and verdict else "its key or CLI is missing")
-        p["fallback"] = {"channel": fb, "off": off}
+        p["fallback"] = {"channel": fb, "off": _fallback_off(plan, reg, cname, fb, ready)}
+        # R163 И-3 (2026-10-22): ONE fallback, never a chain - R157 И-2's rule again. R163 had added an opt-in
+        # chain (`fallback_depth`) for one user, MiniMax «OpenRouter :free -> Go -> Zen free»; OpenRouter ended that
+        # :free variant on 2026-10-22 at 12:00 UTC, Igor dropped the channel («Тогда openrouter M3.1 не
+        # добавляем»), and the chain was left with no registry user and three defects its panel found (a link's
+        # answer reported one link at a time, chain lines with no timeout, `fallback_depth` 0 / "2" silently 1).
+        # Taken out rather than repaired for nobody; selftest R163 И-3 pins that the key arms nothing more.
     return plan
+
+
+def _fallback_off(plan, reg, cname, fb, ready):
+    """Why `fb` cannot run as a run-time fallback for `cname` in this plan, or None. R142's checks, in their order
+    (a helper since R163; the chain links it also served left in R163 И-3)."""
+    chans = reg.get("channels") or {}
+    rmember, rwhy = _replaced_twin(plan, reg, fb)
+    if fb not in chans or fb not in plan:
+        return "%s is not in this registry" % fb
+    if fb == cname:
+        return "a channel cannot be its own fallback"
+    if plan[fb].get("enabled"):
+        return "%s already runs in this round as its own voice" % fb
+    if plan[fb].get("_user_off"):
+        return "%s is excluded in this run (%s)" % (fb, plan[fb]["_user_off"])
+    if rmember:
+        return "%s is the same model as %s, which this route replaced (%s)" % (fb, rmember, rwhy)
+    if ((chans.get(fb) or {}).get("spend_guard") or {}).get("requires_ack"):
+        return "%s needs --accept-spend (its spend_guard), which a fallback never asks for" % fb
+    if ready is not None:
+        try:
+            verdict = ready(fb)
+        except Exception:                                # noqa: BLE001 - same rule as the cascade
+            verdict = True
+        if verdict is not True:
+            return "%s cannot run here (%s)" % (fb, verdict if isinstance(verdict, str)
+                                                and verdict else "its key or CLI is missing")
+    return None
 
 
 # R157 И-2 (2026-10-19): opencode's free models (opencode/...-free) behave as ONE daily allowance of requests per network
@@ -3008,9 +3068,11 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                                       _ceiling_phrase(reg, cname, p["model"], p.get("effort"))))
             elif p.get("kind") == "opencode":
                 p["timeout"] = t.get("opencode_timeout", p.get("timeout") or 120)
-                p["_tier_note"] = ("timeout %s only - effort stays %s (--variant flag), "
-                                   "free model via opencode CLI, no API key"
-                                   % (p["timeout"], p.get("effort") or "default"))
+                # R158 И-2: the billing path from the model's provider + the registry's cost, not «free» per kind.
+                p["_tier_note"] = ("timeout %s only - effort stays %s (--variant flag), opencode CLI: %s"
+                                   % (p["timeout"], p.get("effort") or "default",
+                                      opencode_billing(p.get("model"),
+                                                       ((reg.get("channels") or {}).get(cname) or {}).get("cost"))))
             elif p.get("kind") == "grokcli":
                 # R114: clamp effort against the model's own ladder. Without this,
                 # --set grokbuild=grok-4.5 with channel effort=xhigh would pass an
@@ -3346,9 +3408,10 @@ def _web_line(p):
                 "loop and opens the pages, so this channel's grounding is its own claim and the "
                 "harness fetches nothing to check it against")
     if kind == "opencode":
-        return ("web: opencode CLI's built-in agent tools - the free model runs through "
-                "opencode's infrastructure which may include search. The harness does not "
-                "control which tools the agent uses; grounding is the agent's own claim")
+        # R158 И-2: «the free model runs through opencode's infrastructure» was printed for a wokey channel too.
+        return ("web: opencode CLI's built-in agent tools - the model runs through %s, which may "
+                "include search. The harness does not control which tools the agent uses; "
+                "grounding is the agent's own claim" % _opencode_where(p.get("model")))
     if kind == "claudecli":
         return ("web: Claude Code CLI's built-in tools and every MCP server in YOUR Claude Code "
                 "config, ALL WITHOUT PERMISSION PROMPTS (`--permission-mode bypassPermissions`, "
@@ -3379,6 +3442,51 @@ def _web_line(p):
     return None
 
 
+# R158 И-2: the fields an ADDED channel's plan block prints by VALUE, in full - where a document goes, or where it goes
+# next (`fallback`); every other field the channel sets is printed by NAME, so nothing it sets is hidden.
+_ADDED_DEST_FIELDS = ("kind", "model", "provider", "provider_route", "base_url", "endpoint", "env_model", "fallback")
+_ADDED_SHOWN = frozenset(_ADDED_DEST_FIELDS) | {"cost", "enabled", "explicit_only", "aliases", "data_policy",
+                                                "prompt_suffix"}
+
+
+def _added_channel_lines(cname, ch, applied):
+    """The compact plan block of a channel the user's settings file ADDS (R158 И-2): 2-4 lines instead of one per
+    field. Panel r158i1 (6 of 6 voices): show the destination, the billing class, how it starts and what is added to
+    every brief, and keep every other field it sets visible by name."""
+    dest = ", ".join("%s %s" % (f, ch[f]) for f in _ADDED_DEST_FIELDS if ch.get(f) not in (None, "", [], {}))
+    cost = ch.get("cost")
+    if ch.get("kind") == "opencode":
+        bill = opencode_billing(ch.get("model"), cost)
+    elif cost:
+        bill = "cost %s%s" % (cost, "" if cost in _NON_PAID_COSTS else " - PAID per call")
+    else:
+        bill = "billing UNKNOWN (no cost)"
+    names = [cname] + [a for a in (ch.get("aliases") or []) if a != cname]
+    for mdef in (ch.get("models") or {}).values():
+        if isinstance(mdef, dict):
+            names += [a for a in (mdef.get("aliases") or []) if a not in names]
+    if ch.get("enabled") is False:
+        start = "OFF - starts only when named (%s)" % ", ".join(names)
+    elif ch.get("explicit_only"):
+        start = "ON, explicit_only - runs only when named (%s)" % ", ".join(names)
+    else:
+        start = "ON - runs in its panel (%s), and by name (%s)" % (ch.get("panel"), ", ".join(names))
+    ps = ch.get("prompt_suffix")
+    ps_text = (ps.get("text") if isinstance(ps, dict) and ps.get("enabled", True)
+               else ps if isinstance(ps, str) else None)
+    out = ["               %s; %s" % (dest or "no destination field", bill),
+           "               %s; prompt_suffix: %s" % (start, "YES - %d chars added to every brief" % len(ps_text)
+                                                      if ps_text else "none")]
+    dp = str(ch.get("data_policy") or "").strip()
+    if dp:
+        first = dp.split(". ", 1)[0].rstrip(".") + "."
+        out.append("               data: %s" % (first if len(first) <= 200 else first[:197] + "..."))
+    rest = sorted({f for c, f, _b, _a in applied if c == cname} - _ADDED_SHOWN)
+    if rest:
+        out.append("               also sets: %s (values in your settings file)" % ", ".join(rest))
+    return out
+
+
 def _short(value, cap=90):
     """A value a human can take in at a glance. The full object is in the file they are reading."""
     text = repr(value)
@@ -3398,10 +3506,20 @@ def format_plan(plan, reg):
                ) if ov.get("trust") == OVERLAY_TRUST_REDIRECTED else ""
         lines.append("  local settings: %s%s" % (ov["path"], via))
         sharp = {(c, f) for c, f, _b, _a in ov.get("sharp", [])}
+        # R158 И-2: an ADDED channel prints one compact block instead of a line per field - 13 wokey channels took
+        # the cheap plan from 115 to 342 lines on every run, the 🔴 lines drowned in their own `None -> value` rows.
+        # The block still says where a document goes, how the channel starts and what is added to every brief,
+        # and NAMES every other field it sets; the acceptance gate still covers every field (ov["sharp"]).
+        added_ch = {c for c in ov.get("added", []) if not str(c).startswith("tier:")}
         for cname in ov.get("added", []):
             lines.append("           - 🔴 %s is a channel YOUR settings file adds; it is not part "
                          "of this release" % cname)
+            if cname in added_ch:
+                lines.extend(_added_channel_lines(cname, (reg.get("channels") or {}).get(cname) or {},
+                                                  ov.get("applied", [])))
         for cname, field, before, after in ov.get("applied", []):
+            if cname in added_ch:
+                continue
             # 🔴 The sharp ones are marked in the SAME list rather than split into a second block.
             # A separate "dangerous changes" section is read as a section about someone else: what
             # has to be legible is that this line, among the ordinary ones, moves a document.
@@ -3589,7 +3707,11 @@ def format_plan(plan, reg):
                          % (fbk["channel"], fbk["off"]))
         elif fbk:
             fslot = plan.get(fbk["channel"]) or {}
-            sib = [s for s in same_voice(reg, fbk["channel"]) if (plan.get(s) or {}).get("enabled")]
+            # R163 И-3 (A2, panel r163): the fallback's same-model siblings OTHER than this channel. When this channel
+            # is one of them (Step 5 on NVIDIA with its Go copy as the fallback), the line says so, instead of R163's
+            # «nothing else here carries that model» printed while this very channel carried it.
+            _same = same_voice(reg, fbk["channel"])
+            sib = [s for s in _same if s != c and (plan.get(s) or {}).get("enabled")]
             lines.append("           - fallback: if this channel fails with under %d bytes of text "
                          "(no answer), %s (%s, %s) runs the same brief once, after the round "
                          "(up to %s more)"
@@ -3601,7 +3723,8 @@ def format_plan(plan, reg):
             lines.append("             %s; its answer is its own file. --no-fallback turns it off."
                          % ("- not if %s (the same model) answers in this round (ok, or %d+ "
                             "bytes)" % (" or ".join(sib), SUBSTANTIAL_BYTES)
-                            if sib else "- nothing else here carries that model"))
+                            if sib else "- the same model as this channel, over another transport"
+                            if c in _same else "- nothing else here carries that model"))
         # 🔴 THE PRICE LINE USED TO KEY ON THE WORD `expensive`, WHICH ONLY CODEX CARRIES - so the
         # channel that actually ran away printed nothing at all. Measured 2026-08-14: orgpt56terrapro
         # is tagged `metered`, the same word as a $0.10 channel, and billed $12.08 in one round while

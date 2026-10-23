@@ -273,6 +273,32 @@ with the hours to 00:00 UTC) unless the human named the channel (`--only`, a rou
 a date other than today's is ignored, and an unreadable file is an empty one.
 `MODEL_ORCH_QUOTA_STATE` points it elsewhere (`off` or empty: never read or written).
 
+### What 1.113.8 changed in a run
+
+- **What an opencode channel costs, in words.** The plan, the preflight, the call log and the
+  `--ask` header say how the channel's provider bills: opencode Zen's «free model», the OpenCode Go
+  plan, «PAID per call (cost metered)» with the provider's name for a provider your own opencode
+  config adds, or «billing UNKNOWN» (`routing.opencode_billing`). Until 1.113.7 every opencode
+  channel printed «free model, no API key».
+- **A channel your settings file adds prints a short block** (2-4 lines), not one plan line per
+  field; whether it needs `--accept-settings` is unchanged.
+- **An API channel that opens pages itself stops at its `timeout`.** `call_oai_reviewer` opens no
+  new page once the channel's `timeout` is spent and answers from what it has; the record marks
+  it `time_stopped`. Until 1.113.7 the timeout was an idle limit: on the author's machine one
+  channel ran 75 minutes under a 20-minute timeout.
+- **Grok: an ended turn keeps its answer.** When Grok's own session says the turn ended but the
+  `grok` process does not exit, the harness stops it 30 s later and keeps the answer (from the
+  output, else from Grok's session record); the note says `LINGERED`. An HTTP 402 from xAI reads
+  `GROK SUBSCRIPTION LIMIT`, and each run records the CLI's version (`cli_version`).
+- **Muse Code** calls pass `--contributor-mode` from the model id (INSTALL.md, Muse Code CLI).
+- **Key files** follow `channel_may_read_keys` (SECURITY.md, «Key and credential files»).
+- **The default line-up.** Grok Build plans `grok-4.6`; MiMo v2.6 Pro (`ormimopro`,
+  `mimov26pro`) and Spark 1.3 Contributor (`spark13cont`, `orspark13cont`, `ocspark13go`) are off
+  and start only by name; the Spark voice is Spark 1.2 Contributor (`spark12cont`, or
+  `orspark12cont` on OpenRouter). A channel meant to be off in the kit is `distribution: both` (or
+  `local`) with `enabled: false`: `package.py` switches a `distribution: kit` channel that is off
+  back on.
+
 ## 5. Partial installs are a supported state
 
 A missing API key or a missing CLI disables exactly one channel and nothing else. The preflight

@@ -58,8 +58,8 @@ channels, nothing is transmitted.
 ## Some channels are cheap because of their data terms
 
 Some tiers are discounted, or free, **in exchange for permission to train on what you send**. As
-published, the channels on such a tier are: `spark13cont` (Meta's Muse Spark 1.3 Contributor,
-reached directly), `orspark13cont` (the **same** contributor tier reached through OpenRouter — so the payload passes
+published, the channels on such a tier are: `spark12cont` (Meta's Muse Spark 1.2 Contributor,
+reached directly), `orspark12cont` (the **same** contributor tier reached through OpenRouter — so the payload passes
 OpenRouter's own policy on the way to Meta's contributor terms), and `ornemotron3ultra` (a free
 tier, which on OpenRouter requires the account-level prompt-training setting to be on). The free
 Spark through the opencode CLI (`ocspark13free`) was one of them until opencode stopped serving it
@@ -70,7 +70,7 @@ anything is spent — that printout, not the list above, is the current set — 
 those channels cost almost nothing. If a brief should not be trained on, drop them for that run:
 
 ```
---skip spark13cont orspark13cont ornemotron3ultra
+--skip spark12cont orspark12cont ornemotron3ultra
 ```
 
 Assume retention on those tiers is permanent.

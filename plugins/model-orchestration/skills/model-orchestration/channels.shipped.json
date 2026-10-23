@@ -23,7 +23,12 @@
         "spark13cont",
         "orspark13cont",
         "ocspark13free",
-        "ocspark13go"
+        "ocspark13go",
+        "ocspark12go",
+        "spark12cont",
+        "orspark12cont",
+        "mcspark13",
+        "mcspark12"
       ],
       "_membership_updated_2026_08_30": "orspark12cont added in R69 (RENAMED to orspark13cont R80, Spark 1.3 upgrade) - the same Contributor checkpoint through OpenRouter, for kit users who hold no MODEL_API_KEY. From this moment `spark` names the MODEL FAMILY across transports, exactly as `gemini` (2026-08-07) and `grok` (2026-08-08) already do, and «не используй spark» must drop all three. `label` renamed from «both» to «all» in the same edit - the agy group's 2026-08-13 lesson verbatim: a group's label has to describe its actual contents.",
       "aliases": [
@@ -36,6 +41,7 @@
     "wonder": {
       "label": "every Muse Wonder, all transports",
       "channels": [
+        "mcwonder10",
         "mcwonder10cont",
         "wonder10",
         "orwonder"
@@ -63,7 +69,13 @@
         "ocspark13go",
         "wonder10",
         "orwonder",
-        "mcwonder10cont"
+        "mcwonder10cont",
+        "ocspark12go",
+        "spark12cont",
+        "orspark12cont",
+        "mcspark13",
+        "mcspark12",
+        "mcwonder10"
       ],
       "_added_r149": "R149: the brand word. «только муза» = one Spark (its cascade) + one Wonder (its cascade); «не используй muse» drops both lines. Same shape as `gemini` (the family) over `agy` (a transport).",
       "_superseded_r155": "SUPERSEDED R155 И-3 (2026-10-17) for the Wonder half: every Wonder channel is explicit_only now (the operator: «Wonder ... только если явно назовут модель»), so «только муза» / «muse» = ONE Spark; Wonder starts only by its own word («вондер», the `wonder` group) or a channel name. «не используй muse» still drops both lines.",
@@ -219,6 +231,9 @@
         "ocnemotron3ultrafree",
         "ocglm53flashfree",
         "ocdeepseekv41flashfree",
+        "ocstep5previewgo",
+        "ocminimax31flashgo",
+        "ocminimax31flashfree",
         "kimik3free",
         "nvkimik3",
         "mimov26pro",
@@ -230,7 +245,11 @@
         "agy38flash",
         "grokbuild",
         "qwen38maxcli",
-        "mcwonder10cont"
+        "mcwonder10cont",
+        "ocspark12go",
+        "mcspark13",
+        "mcspark12",
+        "mcwonder10"
       ],
       "_added": "2026-09-21 (R115 И-2). Root cause of the Plugins ironmemo bug: user said «только CLI» but no group existed to express that. CLI kinds: opencode, claudecli, codex, agy, grokcli, mimocli, qwencli. The selftest structurally verifies that this group contains ALL channels whose kind is a CLI kind and NOTHING else - adding a new CLI channel without updating this list will fail the test. qwen38maxcli added 2026-09-30 (the operator's request).",
       "aliases": [
@@ -248,12 +267,32 @@
         "ocglm53flashfree",
         "ocdeepseekv41flashfree",
         "ocspark13go",
-        "ocspark13free"
+        "ocspark13free",
+        "ocstep5previewgo",
+        "ocminimax31flashgo",
+        "ocminimax31flashfree",
+        "ocspark12go"
       ],
       "_added_r154_i6": "R154 И-6 (2026-10-18): «opencode» was the ALIAS of ocspark13free, whose free model left opencode on 2026-10-17 - so «только opencode» / `--only opencode` ran only that dead model and «без opencode» excluded nothing (measured on kit 1.113.4: runs/r154-spark-chat/i5/opencode_word_i5.py). The word follows the transport, like `cli`: a disabled member (ocspark13free) is not started by the word, only by its own name. The enabled free voices are listed first because a route stop names a group's first member.",
       "aliases": [
         "opencode",
         "опенкод"
+      ]
+    },
+    "musecode": {
+      "label": "every channel that runs through the Muse Code CLI (Meta's subscription)",
+      "channels": [
+        "mcspark13",
+        "mcspark12",
+        "mcwonder10",
+        "mcwonder10cont"
+      ],
+      "_added_r164": "R164 (2026-10-22): «musecode» / «muse code» were ALIASES of mcwonder10cont, the one Muse Code channel until now - with Spark on Muse Code «только muse code» would have started Wonder and no Spark (R154 И-6's opencode class). The words name the transport now; Wonder stays explicit_only, so the word starts mcspark13 and a Wonder only by its own name.",
+      "aliases": [
+        "musecode",
+        "muse code",
+        "мьюз код",
+        "муза код"
       ]
     }
   },
@@ -293,12 +332,14 @@
     },
     "spark13cont": {
       "read_order": 1,
-      "must_read": true,
+      "contributor": true,
+      "_contributor": "2026-10-22, the operator: «Нельзя читать только моделям, которые бесплатные или обучаются (contributor), остальным можно.» A training-data tier: orchestrate.channel_may_read_keys() says NO for it. This channel is an API voice with no local file tools; the flag keeps the class explicit for any route that gains them.",
       "_must_read_doc": "★ Idea 3 (the operator, 2026-09-01): «читать ИИ самому самую умную, если запустил standart панель. А в cheap panel читать самому Spark». The ordering session reads THIS channel's answer ITSELF, whatever the context pressure - never delegated to a sub-agent, never dropped for room. One flag satisfies both halves of the instruction because this channel sits in BOTH panels and is the measured-strongest voice in each. Consumed by write_handoff only (sorts the ★ row first within its tier and prints the mandatory-minimum rule); never sent to any vendor; move the flag here as models rotate.",
       "kind": "http",
       "panel": "cheap",
       "vendor": "meta",
-      "enabled": true,
+      "enabled": false,
+      "_off_r164": "R164 (2026-10-22), the operator: «У меня и в kit spark 1.3 contributor заменить на 1.2 contributor и тоже сделать дефольно активной. Пулочается у меня будет чеерз muse 1.3 max а через opencode 1.2 cont» Off; the Spark Contributor voice is 1.2 now (ocspark12go / spark12cont / orspark12cont). Starts only by name.",
       "label": "Spark13Cont",
       "cost": "cheap",
       "model": "muse-spark-1.3-contributor",
@@ -350,26 +391,26 @@
       },
       "aliases": [
         "spark13cont",
-        "spark12cont",
         "spark13",
-        "spark12",
         "спарк13",
-        "спарк12",
-        "http13",
-        "http12"
+        "http13"
       ],
       "notes": "Same endpoint, same key, same verification as spark11. Runs as an independent voice, not a replacement. Primary model is Contributor ($0.10/M in); on failure, falls back to Standard ($1.25/M in) — same weights, a higher rate limit (dev.meta.ai/docs/pricing-rate-limits: 3,000 vs 150 RPM = 20x on 2026-10-18). R80 (2026-09-04): upgraded from muse-spark-1.2-contributor to muse-spark-1.3-contributor. Meta docs: 1.3 is 'tuned for agentic workflows with improved coding over 1.2'. Price identical at all tiers.",
       "_prompt_suffix_restored_r135": "R135 (2026-10-02): restored. Lost between R34 and R69 (40 rounds of editing before git). Code (_system_for) intact, only data missing. All 5 training-tier channels now carry it. package.py strips from kit (default distribution=local)."
     },
     "orspark13cont": {
       "read_order": 1,
+      "contributor": true,
+      "_contributor": "2026-10-22, the operator: «Нельзя читать только моделям, которые бесплатные или обучаются (contributor), остальным можно.» A training-data tier: orchestrate.channel_may_read_keys() says NO for it. This channel is an API voice with no local file tools; the flag keeps the class explicit for any route that gains them.",
       "kind": "openrouter",
       "panel": "cheap",
       "vendor": "meta",
       "provider": "openrouter",
-      "enabled": true,
-      "distribution": "kit",
-      "_distribution": "🔴 KIT ONLY since 2026-08-30 (R69). Locally this machine holds a direct MODEL_API_KEY, and spark12cont is the same model at the same Contributor price without the reseller in the path - running both would pay two vendors for one voice, which INSTALL.md itself tells users not to do. In the kit the calculus inverts, and this channel is the whole point of R69: a first-time user who holds ONLY an OPENROUTER_API_KEY had NO Spark voice at all, and the --ask default (spark12cont) pointed the one-shot path at the one channel they cannot run. package.py flips `enabled` on build and prints the flip.",
+      "enabled": false,
+      "_off_r164": "R164 (2026-10-22), the operator: «У меня и в kit spark 1.3 contributor заменить на 1.2 contributor и тоже сделать дефольно активной. Пулочается у меня будет чеерз muse 1.3 max а через opencode 1.2 cont» Off; the Spark Contributor voice is 1.2 now (ocspark12go / spark12cont / orspark12cont). Starts only by name.",
+      "distribution": "both",
+      "_distribution_r160": "2026-10-22 (R160): distribution both (was kit). R164 switched this channel off for the operator's «и в kit spark 1.3 contributor заменить на 1.2 contributor», but package.py switches a `kit` channel that is off back ON in the build: the R160 build of the R164 source printed «orspark13cont ON» and its cheap plan ran orspark13cont beside spark12cont (two Spark voices, one paid). Off in both worlds now; by name it still starts (`--only orspark13cont`).",
+      "_distribution": "SUPERSEDED 2026-10-22 (R160): off in both worlds - see _distribution_r160. 🔴 KIT ONLY since 2026-08-30 (R69). Locally this machine holds a direct MODEL_API_KEY, and spark12cont is the same model at the same Contributor price without the reseller in the path - running both would pay two vendors for one voice, which INSTALL.md itself tells users not to do. In the kit the calculus inverts, and this channel is the whole point of R69: a first-time user who holds ONLY an OPENROUTER_API_KEY had NO Spark voice at all, and the --ask default (spark12cont) pointed the one-shot path at the one channel they cannot run. package.py flips `enabled` on build and prints the flip.",
       "label": "OR Spark 1.3 Cont",
       "cost": "metered",
       "model": "meta/muse-spark-1.3-contributor",
@@ -422,15 +463,14 @@
         }
       },
       "aliases": [
-        "orspark13cont",
-        "orspark12cont",
-        "orspark",
-        "орспарк"
+        "orspark13cont"
       ],
       "notes": "The Spark voice for anyone whose only key is OPENROUTER_API_KEY - the same Contributor checkpoint as spark13cont, reached through the reseller. R80 (2026-09-04): upgraded from muse-spark-1.2-contributor to muse-spark-1.3-contributor. Meta docs: 1.3 is 'tuned for agentic workflows with improved coding over 1.2'. Price identical. When MODEL_API_KEY is absent, --ask resolves to this channel via `ask_default`."
     },
     "ocspark13free": {
       "read_order": 1,
+      "contributor": true,
+      "_contributor": "2026-10-22 (R165 И-2): the model is muse-spark-1.3-contributor-free (a training tier); cost free already kept it out of key files - the flag makes the census exact.",
       "kind": "opencode",
       "panel": "cheap",
       "vendor": "meta",
@@ -473,12 +513,244 @@
       "notes": "Free Spark 1.3 Contributor via opencode CLI. OFF since R154 И-3 (2026-10-18): the free model left opencode on 2026-10-17 (`provider.no-route`), so it never answers `--ask`: it is switched off, and it is not the kit's Spark - that is spark13cont (MODEL_API_KEY) or orspark13cont (OpenRouter), whichever key is set. Its own name still starts it; the run then fails with the vanished-model hint. Brief piped through stdin (solves both the hang bug and the 32KB cmdline limit). R132 (2026-10-02): effort xhigh (max unavailable on the free model).",
       "_prompt_suffix_restored_r135": "R135 (2026-10-02): added. Same training-tier text as spark13cont. package.py strips from kit (default distribution=local)."
     },
-    "ocspark13go": {
+    "ocspark12go": {
       "read_order": 1,
+      "contributor": true,
       "kind": "opencode",
       "panel": "cheap",
       "vendor": "meta",
       "enabled": false,
+      "distribution": "local",
+      "label": "OC Spark 1.2 Cont (OpenCode Go)",
+      "cost": "subscription",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "model": "opencode-go/muse-spark-1.2-contributor",
+      "effort": "xhigh",
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "minimal"
+      ],
+      "timeout": "40m",
+      "models": {
+        "opencode-go/muse-spark-1.2-contributor": {
+          "label": "Muse Spark 1.2 Contributor (via opencode, OpenCode Go plan)",
+          "data_policy": "Contributor tier through opencode's Go gateway: the payload passes opencode's infrastructure (their terms apply) and lands on Meta's Contributor data terms. Counted against the Go plan's limits, not billed per call.",
+          "aliases": [
+            "opencode-go/muse-spark-1.2-contributor",
+            "oc spark 1.2 go"
+          ]
+        }
+      },
+      "aliases": [
+        "ocspark12go",
+        "ocsparkgo",
+        "spark go",
+        "спарк го"
+      ],
+      "notes": "R164 (2026-10-22), the operator: «У меня и в kit spark 1.3 contributor заменить на 1.2 contributor и тоже сделать дефольно активной. Пулочается у меня будет чеерз muse 1.3 max а через opencode 1.2 cont» Spark 1.2 Contributor on his OpenCode Go plan (opencode 2.1.0 lists opencode-go/muse-spark-1.2-contributor; Go bills it against the plan's dollar limits). Replaces ocspark13go as the opencode Spark voice; first in the Spark 1.2 cascade. #xhigh: the 1.2 ceiling (Muse Code's catalogue and OpenRouter both stop 1.2 at xhigh). distribution local: the kit ships it off - a kit user without the Go plan gets spark12cont / orspark12cont. No fallback: there is no free 1.2 on Zen."
+    },
+    "spark12cont": {
+      "read_order": 1,
+      "contributor": true,
+      "_contributor": "2026-10-22, the operator: «Нельзя читать только моделям, которые бесплатные или обучаются (contributor), остальным можно.» A training-data tier: orchestrate.channel_may_read_keys() says NO for it. This channel is an API voice with no local file tools; the flag keeps the class explicit for any route that gains them.",
+      "must_read": true,
+      "kind": "http",
+      "panel": "cheap",
+      "vendor": "meta",
+      "enabled": true,
+      "label": "Spark12Cont",
+      "cost": "cheap",
+      "model": "muse-spark-1.2-contributor",
+      "fallback_model": "muse-spark-1.2",
+      "models": {
+        "muse-spark-1.2-contributor": {
+          "label": "Muse Spark 1.2 Contributor",
+          "data_policy": "Contributor tier - discounted pricing, Meta's Contributor data terms apply. See PRIVACY.md.",
+          "efforts": [
+            "xhigh",
+            "high",
+            "medium",
+            "low",
+            "minimal"
+          ],
+          "aliases": [
+            "muse-spark-1.2-contributor",
+            "spark 1.2 contributor",
+            "1.2-contributor"
+          ]
+        },
+        "muse-spark-1.2": {
+          "label": "Muse Spark 1.2 (Standard fallback)",
+          "data_policy": "Standard tier - prompts and completions are NOT used for training.",
+          "efforts": [
+            "xhigh",
+            "high",
+            "medium",
+            "low",
+            "minimal"
+          ],
+          "aliases": [
+            "muse-spark-1.2"
+          ]
+        }
+      },
+      "aliases": [
+        "spark12cont",
+        "spark12",
+        "спарк12",
+        "http12"
+      ],
+      "notes": "R164 (2026-10-22), the operator: «У меня и в kit spark 1.3 contributor заменить на 1.2 contributor и тоже сделать дефольно активной. Пулочается у меня будет чеерз muse 1.3 max а через opencode 1.2 cont» The kit's Spark voice moves from 1.3 Contributor to 1.2 Contributor on the same Meta Model API key (GET /v1/models lists muse-spark-1.2-contributor, read 2026-10-22). Its ceiling is xhigh (no max for 1.2 on any route), which the tier's http effort already sends. The legacy words spark12cont / spark12 / http12 (aliases of spark13cont since the R80 rename) now name this real 1.2 channel."
+    },
+    "orspark12cont": {
+      "read_order": 1,
+      "contributor": true,
+      "_contributor": "2026-10-22, the operator: «Нельзя читать только моделям, которые бесплатные или обучаются (contributor), остальным можно.» A training-data tier: orchestrate.channel_may_read_keys() says NO for it. This channel is an API voice with no local file tools; the flag keeps the class explicit for any route that gains them.",
+      "kind": "openrouter",
+      "panel": "cheap",
+      "vendor": "meta",
+      "provider": "openrouter",
+      "enabled": true,
+      "distribution": "kit",
+      "label": "OR Spark 1.2 Cont",
+      "cost": "metered",
+      "model": "meta/muse-spark-1.2-contributor",
+      "fallback_models": [
+        "meta/muse-spark-1.2"
+      ],
+      "reasoning": {
+        "effort": "xhigh"
+      },
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low",
+        "minimal"
+      ],
+      "max_tokens": 131072,
+      "spend_guard": {
+        "max_usd_per_review": 1.0,
+        "_arithmetic": "Computed for THIS chain, not copied. Primary at $0.10/M in, $0.20/M out: the worst runaway this project ever measured (7.4M billed input tokens in one round) would cost $0.74 here. What actually sizes the guard is the FALLBACK: muse-spark-1.2 (Standard) bills $1.25/M in, so the same runaway on the fallback tier would be $9.25 - $1.00 stops it at roughly a tenth of that while sitting ~20x above any normal review on the primary tier.",
+        "measured_usd": null
+      },
+      "web": {
+        "enabled": true,
+        "max_results": 5,
+        "_engine_deliberately_unset": "Same reasoning as orgemini36flash: naming `exa` would FORCE the excerpt engine. The catalogue prices web_search at $0.0025 for this model - exactly Meta's own $2.50/1K queries and below Exa's per-request fee (openrouter.ai/docs/features/web-search; $0.007 on 2026-10-18; $0.005 when this was written) - which reads as native Meta search being wired through OpenRouter. UNVERIFIED until a real round returns page-level citations; if the first runs come back with Exa's [...]-elided excerpts, the inference was wrong and this note must say so."
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 11
+      },
+      "models": {
+        "meta/muse-spark-1.2-contributor": {
+          "label": "Muse Spark 1.2 Contributor (via OpenRouter)",
+          "data_policy": "Contributor tier THROUGH OpenRouter: the payload passes OpenRouter (their privacy policy applies) and lands on Meta's Contributor data terms - discounted because the vendor may train on what you send. See PRIVACY.md.",
+          "aliases": [
+            "meta/muse-spark-1.2-contributor"
+          ]
+        },
+        "meta/muse-spark-1.2": {
+          "label": "Muse Spark 1.2 (Standard fallback, via OpenRouter)",
+          "data_policy": "Standard tier through OpenRouter - prompts and completions are NOT used for training. 12.5x the Contributor input price; fires only when the primary fails.",
+          "aliases": [
+            "meta/muse-spark-1.2"
+          ]
+        }
+      },
+      "aliases": [
+        "orspark12cont",
+        "orspark",
+        "орспарк"
+      ],
+      "notes": "R164 (2026-10-22), the operator: «У меня и в kit spark 1.3 contributor заменить на 1.2 contributor и тоже сделать дефольно активной. Пулочается у меня будет чеерз muse 1.3 max а через opencode 1.2 cont» OpenRouter's meta/muse-spark-1.2-contributor ($0.10 / $0.20 per 1M, supported_efforts xhigh..minimal, models API read 2026-10-22) - the kit's Spark for a user with an OpenRouter key only. Fallback model meta/muse-spark-1.2 ($1.25 / $4.25), the same arithmetic as orspark13cont's guard."
+    },
+    "mcspark13": {
+      "read_order": 1,
+      "contributor": false,
+      "kind": "musecode",
+      "panel": "cheap",
+      "vendor": "meta",
+      "enabled": false,
+      "fallback": "mcspark12",
+      "distribution": "local",
+      "label": "Muse Code Spark 1.3",
+      "cost": "subscription",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "model": "muse-spark-1.3",
+      "effort": "max",
+      "timeout": "40m",
+      "max_turns": 120,
+      "models": {
+        "muse-spark-1.3": {
+          "label": "Muse Spark 1.3 (Standard mode, Muse Code subscription)",
+          "data_policy": "Standard mode in Muse Code: the CLI runs with --contributor-mode off, so the content is not used to train Meta models (dev.meta.ai/docs/models.md). Counted against the user's Muse Code subscription, not billed per token.",
+          "efforts": [
+            "max",
+            "xhigh",
+            "high",
+            "medium",
+            "low",
+            "minimal"
+          ],
+          "aliases": [
+            "muse-spark-1.3 muse code"
+          ]
+        }
+      },
+      "aliases": [
+        "mcspark13",
+        "mcspark"
+      ],
+      "notes": "R164 (2026-10-22), the operator: «Давай добавим модель Muse Wonder через muse code cli, там у меня работает подписка. Но по дефолту не активна. И добавь spark 1.3 и 1.2 максимальный effort через muse code cli и 1.3 модель по дефолту активна, 1.2 ее fallback. У меня 1.3 Contributor замени на muse code.» / «У меня и в kit spark 1.3 contributor заменить на 1.2 contributor и тоже сделать дефольно активной. Пулочается у меня будет чеерз muse 1.3 max а через opencode 1.2 cont» Spark 1.3 at the CLI's highest effort on his Muse Code subscription (measured: runs/r164-muse-code-spark/i1/). Its own voice beside the opencode Spark 1.2 Contributor; first in the Spark 1.3 cascade (the same model as the 1.3 Contributor channels, in Standard mode). Run-time fallback mcspark12. distribution local: the kit ships it off (a kit user with Muse Code turns it on in the overlay). 🔴 CONTRIBUTOR MODE IS ON BY DEFAULT IN MUSE CODE AND IT SWAPS THE MODEL (R164, measured 2026-10-22 on 1.4.11-R6667.1): `--model muse-spark-1.3` with the user's default settings was SERVED as muse-spark-1.3-contributor; with `--contributor-mode off` as muse-spark-1.3. dev.meta.ai/docs/models.md (read 2026-10-22): Contributor mode «is on by default: it gives you more usage in exchange for letting Meta use your content to train future Meta models». call_musecode therefore sends --contributor-mode on/off on every run, derived from the model id it requests (Meta names the mode by the id: «muse-spark-1.3 for Standard mode or muse-spark-1.3-contributor for Contributor mode»)."
+    },
+    "mcspark12": {
+      "read_order": 1,
+      "contributor": false,
+      "kind": "musecode",
+      "panel": "cheap",
+      "vendor": "meta",
+      "enabled": false,
+      "distribution": "local",
+      "label": "Muse Code Spark 1.2",
+      "cost": "subscription",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "model": "muse-spark-1.2",
+      "effort": "xhigh",
+      "timeout": "40m",
+      "max_turns": 120,
+      "models": {
+        "muse-spark-1.2": {
+          "label": "Muse Spark 1.2 (Standard mode, Muse Code subscription)",
+          "data_policy": "Standard mode in Muse Code: the CLI runs with --contributor-mode off, so the content is not used to train Meta models (dev.meta.ai/docs/models.md). Counted against the user's Muse Code subscription, not billed per token.",
+          "efforts": [
+            "xhigh",
+            "high",
+            "medium",
+            "low",
+            "minimal"
+          ],
+          "aliases": [
+            "muse-spark-1.2 muse code"
+          ]
+        }
+      },
+      "aliases": [
+        "mcspark12"
+      ],
+      "notes": "R164 (2026-10-22), the operator: «1.2 ее fallback». mcspark13's run-time fallback, off as a voice. xhigh = the 1.2 ceiling (Muse Code's catalogue lists no max for 1.2). In the Spark 1.2 cascade with ocspark12go / spark12cont / orspark12cont (the same model, Standard vs Contributor mode), so after a round orchestrate skips it when that 1.2 voice already answered - one model is not asked twice."
+    },
+    "ocspark13go": {
+      "read_order": 1,
+      "contributor": true,
+      "_contributor": "2026-10-22 (R165 И-2): the model is muse-spark-1.3-contributor (a training tier, its prompt_suffix says so) - the flag was missing because the census keyed on the channel NAME and label; the operator: «Нельзя читать только моделям, которые бесплатные или обучаются (contributor), остальным можно.»",
+      "kind": "opencode",
+      "panel": "cheap",
+      "vendor": "meta",
+      "enabled": false,
+      "_off_r164": "R164 (2026-10-22), the operator: «У меня и в kit spark 1.3 contributor заменить на 1.2 contributor и тоже сделать дефольно активной. Пулочается у меня будет чеерз muse 1.3 max а через opencode 1.2 cont» Off; the Spark Contributor voice is 1.2 now (ocspark12go / spark12cont / orspark12cont). Starts only by name.",
       "distribution": "local",
       "_distribution": "LOCAL ONLY: it runs on the operator's own OpenCode Go subscription (opencode's own login for the opencode-go provider). package.py flips enabled to false in the kit tree, so an employee's Spark voice stays ocspark13free.",
       "label": "OC Spark 1.3 (OpenCode Go)",
@@ -509,10 +781,7 @@
         }
       },
       "aliases": [
-        "ocspark13go",
-        "ocsparkgo",
-        "spark go",
-        "спарк го"
+        "ocspark13go"
       ],
       "_added": "2026-10-08 (R146 И-3), the operator: «Тогда в след. промте давай перенесем spark на подписку go а без подписку free как fallback если закончатся деньги и лимиты на аккаунте». Why: since 2026-10-05 ocspark13free answered 1 of 9 real rounds - 7 died on opencode's free daily allowance (provider.quota at 0.7-5.8 s; R157: per client, one counter for most free models), 1 mid-run (runs/r146-i3-spark-go/find_spark_runs.log).",
       "notes": "Spark 1.3 Contributor through the operator's OpenCode Go subscription, on the plan's own quota. The cheap panel's Spark on this machine since R146 И-3. Its free twin ocspark13free is OFF since R154 И-3 (the free model left opencode on 2026-10-17). A Go failure does NOT fall through at run time: the cascade picks ONE member when the plan is made (by readiness), and only a channel's `fallback` field switches channels during a run - this one has none (corrected R154 И-9: the И-6 text said a Go failure falls through). Local only: the kit has no Go channel.",
@@ -616,8 +885,50 @@
       "_added": "R149 (2026-10-13): the kit's Wonder for OpenRouter-only users; same model and price as wonder10, reached through the reseller.",
       "notes": "Muse Wonder through OpenRouter for anyone whose only key is OPENROUTER_API_KEY. Effort max, spend guard $5 per review."
     },
+    "mcwonder10": {
+      "read_order": 1,
+      "contributor": false,
+      "kind": "musecode",
+      "panel": "standard",
+      "vendor": "meta",
+      "enabled": false,
+      "explicit_only": true,
+      "_explicit_only_r155": "R155 И-3 (2026-10-17), the operator: «Wonder в standart надо сделать по дефолту отключенным, только если явно назовут модель». No panel, default or broader group («muse», «openrouter», «cli», «все») starts it; the model's word («вондер», «wonder», «muse wonder», «wonder 1.0» - the `wonder` group, which is exactly one cascade: routing.one_voice_groups) or this channel's own name does, and the cascade starts ONE Wonder - Muse Code first. Where Muse Code is not ready the model's word stops before a paid Wonder and names it (R153 И-5 stop).",
+      "distribution": "local",
+      "label": "Muse Code Wonder 1.0",
+      "cost": "subscription",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "model": "muse-wonder-1.0",
+      "effort": "max",
+      "timeout": "45m",
+      "max_turns": 120,
+      "models": {
+        "muse-wonder-1.0": {
+          "label": "Muse Wonder 1.0 (Standard mode, Muse Code subscription)",
+          "data_policy": "Standard mode in Muse Code: the CLI runs with --contributor-mode off, so the content is not used to train Meta models (dev.meta.ai/docs/models.md). Counted against the user's Muse Code subscription, not billed per token.",
+          "efforts": [
+            "max",
+            "xhigh",
+            "high",
+            "medium",
+            "low",
+            "minimal"
+          ],
+          "aliases": [
+            "muse-wonder-1.0 muse code"
+          ]
+        }
+      },
+      "aliases": [
+        "mcwonder10",
+        "mcwonder"
+      ],
+      "notes": "R164 (2026-10-22), the operator: «Давай добавим модель Muse Wonder через muse code cli, там у меня работает подписка. Но по дефолту не активна. И добавь spark 1.3 и 1.2 максимальный effort через muse code cli и 1.3 модель по дефолту активна, 1.2 ее fallback. У меня 1.3 Contributor замени на muse code.» Muse Wonder 1.0 in Standard mode on his Muse Code subscription (served with --contributor-mode off, measured). Off by default: explicit_only, like every Wonder channel (R155 И-3) - only its name or the Wonder group word starts it; first in the Wonder cascade, before the Contributor seat mcwonder10cont. distribution local: the kit's Wonder seat stays mcwonder10cont."
+    },
     "mcwonder10cont": {
       "read_order": 1,
+      "contributor": true,
+      "_contributor": "2026-10-22, the operator: «Нельзя читать только моделям, которые бесплатные или обучаются (contributor), остальным можно.» A training-data tier: orchestrate.channel_may_read_keys() says NO for it - a CLI channel, so whatever restricts its key-file reads must key on this flag.",
       "kind": "musecode",
       "panel": "standard",
       "vendor": "meta",
@@ -652,12 +963,7 @@
         }
       },
       "aliases": [
-        "mcwonder10cont",
-        "mcwonder",
-        "musecode",
-        "muse code",
-        "мьюз код",
-        "муза код"
+        "mcwonder10cont"
       ],
       "_added": "R149 И-2 (2026-10-13). the operator: «Muse code с моделью Wonder добавим в панель Standart а не Cheap и не забудь что применить к ней надо промты для CLI». The one transport that reaches Wonder Contributor (Model API: 404 for this id, R149). First in the Wonder cascade, so a round runs it wherever the Muse Code binary is installed and wonder10 / orwonder only where it is not. The CLI prompts of a Contributor CLI seat: the mcp_fallback hint (its MCP page readers exist - the session export lists exa web_search / web_fetch) and the training-tier prompt_suffix, the same text as ocspark13go.",
       "_effort_ceiling_measured": "2026-10-13, runs/r149-muse-wonder/i2/effort_meter.py (echocheck's probe, n=2 each): xhigh 441-455 reasoning tokens, max 397-428 - the CLI and its catalogue accept max, the subscription does not think more for it. the operator: «по моей подписке effort максимальный Xhigh». The ladder stops at xhigh so a tier or an overlay asking for max is clamped here.",
@@ -721,7 +1027,7 @@
       "_reading_note_r154_i11pre": "R154 И-3 (2026-10-18) added this channel without the note: HANDOFF listed its answer at read 1 with nothing under the table, and it was read in four rounds (И-3, И-5, И-7, И-10). read_order 1 -> 3, its OpenRouter twin's tier. selftest suite_r154_i11pre_never_read_model derives the rule from the model family.",
       "cost": "free",
       "fetch_fallback_hint_ref": "mcp_fallback",
-      "_added_r154_i3": "the operator 2026-10-18: «у opencode есть же nemotron 3 ultra free, glm 5.3 flash, mimo 2.6 flash (кажется он даже есть в нашей панели), deepseek 4.1 flash. Давай их тогда тоже добавим.» Probe 2026-10-18 (runs/r154-spark-chat/i3/probe_free_i3.py, the harness's call_opencode): answered a review-shaped brief in 39 s and refuted the planted claim. Catalogue (models.dev 2026-10-18): context 1 000 000, output 128 000 - no output override needed. The same model as ornemotron3ultra (OpenRouter :free, standard panel): one cascade, opencode first, so a standard run asks Nemotron once.",
+      "_added_r154_i3": "the operator 2026-10-18: «у opencode есть же nemotron 3 ultra free, glm 5.3 flash, mimo 2.6 flash (кажется он даже есть в нашей панели), deepseek 4.1 flash. Давай их тогда тоже добавим.» Probe 2026-10-18 (runs/r154-spark-chat/i3/probe_free_i3.py, the harness's call_opencode): answered a review-shaped brief in 39 s and refuted the planted claim. Catalogue (models.dev 2026-10-18): context 1 000 000, output 128 000 - no output override needed. The same model as ornemotron3ultra (OpenRouter :free, standard panel): one cascade, opencode first, so a standard run asks Nemotron once (SUPERSEDED R162: NVIDIA's own endpoint, nvnemotron3ultra, now comes first where its key is; it ships off in the kit, so the kit order is unchanged).",
       "model": "opencode/nemotron-3-ultra-free",
       "effort": null,
       "_effort": "Variants are UNAVAILABLE on this free model: measured 2026-10-18, `#high` -> «provider.no-route: Variant unavailable for opencode/nemotron-3-ultra-free: high»; models.dev lists no reasoning_options. It runs at opencode's default reasoning depth (call_opencode adds no #variant when effort is null).",
@@ -743,6 +1049,205 @@
       ],
       "notes": "Same opencode transport as ocmimo26flashfree: call_opencode(), stdin pipe, NDJSON output, tokens from opencode's store. No API key, no account. 🔴 free models come and go without notice (opencode's free Muse Spark 2026-10-17, NVIDIA's free Kimi K3 2026-10-15): `opencode models` is the live list, models.dev lags it.",
       "_prompt_suffix_r154_i3": "Same class as ocmimo26flashfree (opencode free relay = training tier, R135). package.py strips it from the kit."
+    },
+    "nvnemotron3ultra": {
+      "read_order": 3,
+      "kind": "oai",
+      "provider": "nvidia",
+      "panel": "cheap",
+      "vendor": "nvidia",
+      "enabled": false,
+      "distribution": "local",
+      "_distribution_r162": "R162 (2026-10-22): local - this machine holds NVIDIA_NIM_API_KEY; package.py ships the channel OFF in the kit (a user starts it by name with their own key), so the kit's Nemotron cascade is unchanged (opencode, then OpenRouter :free). Shipping it ON is the owner's kit decision, not taken here.",
+      "label": "NV Nemotron 3 Ultra (NVIDIA free)",
+      "cost": "free",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "reading_note": "NEVER read this channel's answer. the operator, 2026-08-31: «никогда не читать ответ от Nemotron» - the rule names the MODEL, so it holds on every channel that serves Nemotron; this one is the same Nemotron 3 Ultra through NVIDIA's own endpoint. The channel runs because it is free, not because its answer is consulted.",
+      "_added_r162": "the operator 2026-10-22: «Смотри я сейчас по логам вижу что Nemotron идет через подписку opencode. Но мы так же в прошлых сессиях выяснили, что если включать бесплатные модели через opencode то они тратят лимиты. Что желательно 1 модель бесплатную или максимум 2, но следить, если перестанут отвечать, значит лучше отключить вторую. Но вель nemotron 3 ultra бесплатно работает и через nvidia nim может его только через тот канал сделать и как fallback https://openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b:free ?» Measured the same day (runs/r162-nemotron-nvidia/): the model is in NVIDIA's public list (83 models) and answered 16 of 16 tiny probes in 0.5-24 s; the opencode route (ocnemotron3ultrafree) bills $0 under opencode's FREE provider (`opencode`), not the Go plan (`opencode-go`, Spark only), and was measured OUTSIDE the free counter MiMo Flash draws on (R157, 2026-10-18). This channel takes Nemotron off opencode altogether; on the operator's machine his overlay turns ocnemotron3ultrafree off.",
+      "reasoning": {
+        "effort": "high"
+      },
+      "_reasoning": "Sent as the top-level `reasoning_effort` (OAI_PROVIDERS nvidia, depth effort_field). Judged by the meter 2026-10-22, n=2 per arm: none = 0 reasoning chars / 4 completion tokens, high = 91-131 chars / 38-63 tokens - disjoint; an invented value is a 400. API reference enum for this model: none / medium / high (default high) - `max` and `xhigh` are accepted but render the same 32-token prompt as high, so high is the ceiling. reasoning_budget stays at NVIDIA's default 16384.",
+      "max_tokens": 32768,
+      "_max_tokens": "NVIDIA API reference for this model: max_tokens 1..32768, default 16384; R43 rule = min(the vendor's cap, 131072). 32769 also returned 200 on 2026-10-22 - the documented cap is used, not the unenforced edge. With the default reasoning_budget 16384 the answer keeps >= 15.8K tokens.",
+      "web": {
+        "enabled": false,
+        "_none": "NVIDIA's endpoint has no search tool, so this voice gets the brief plus the harness page-fetch tool (pages it already knows), unlike its OpenRouter twin (Exa, billed per search on the OpenRouter account)."
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 16,
+        "_same_as_twin": "ornemotron3ultra's R55 value: the same model kept asking for pages past 11 there."
+      },
+      "timeout": "20m",
+      "_timeout": "A socket idle limit on the stream, not a wall clock. 20 min instead of the 40 min default: a stalled free endpoint should hand the brief to the fallback sooner (it runs only after the round).",
+      "fallback": "ornemotron3ultra",
+      "_fallback_r162": "the operator's design (R162): NVIDIA first, OpenRouter :free as the fallback. Run-time: when this channel ends the round with no answer, ornemotron3ultra gets the same brief once (run_fallbacks; never chains). OpenRouter's free limits read 2026-10-22: 1000 free-model requests a day on this account (credits purchased), the key's own $ limit applies to free models too.",
+      "models": {
+        "nvidia/nemotron-3-ultra-550b-a55b": {
+          "label": "Nemotron 3 Ultra 550B (NVIDIA free endpoint)",
+          "data_policy": "NVIDIA API Trial Terms of Service (free trial endpoint) plus NVIDIA's model terms (OpenMDW-1.1). Free at point of use - NVIDIA_NIM_API_KEY, no billing.",
+          "aliases": [
+            "nvidia/nemotron-3-ultra-550b-a55b"
+          ]
+        }
+      },
+      "aliases": [
+        "nvnemotron3ultra",
+        "nvnemotron",
+        "nvidia_nemotron"
+      ],
+      "notes": "Direct OpenAI-protocol call (call_oai_reviewer, provider nvidia): streamed, our fetch_url tool, tokens from the stream's usage frame. 🔴 NVIDIA's free models come and go (kimi-k3 answered 410 on 2026-10-15): GET https://integrate.api.nvidia.com/v1/models is the live list - runs/r162-nemotron-nvidia/nim_nemotron_probe.py prints it and never prints an answer.",
+      "_prompt_suffix": "Training-tier by the vendor's own terms, the same as nvkimik3 (NVIDIA API Trial Terms of Service §3.3(iv), read 2026-10-04). package.py strips it from the kit."
+    },
+    "nvstep5preview": {
+      "read_order": 2,
+      "kind": "oai",
+      "provider": "nvidia",
+      "panel": "cheap",
+      "vendor": "stepfun",
+      "enabled": false,
+      "distribution": "local",
+      "_distribution_r163": "R163 (2026-10-22): local - package.py ships it OFF in the kit (a user starts it by name); whether the kit's cheap panel gets it is the owner's kit decision (R160), not taken here.",
+      "label": "NV Step 5 Preview (NVIDIA free)",
+      "cost": "free",
+      "model": "stepfun-ai/step-5-preview",
+      "_added_r163": "the operator 2026-10-22: «добавим Step 5 Preview https://build.nvidia.com/stepfun-ai/step-5-preview по дефолту включена cli cheap и наверное через opencode / Добавим так же в opencode / OpenRouter │ minimax/minimax-m3.1-flash:free - по дефолту включена cli cheap / Подписка Go │ opencode-go/minimax-m3.1-flash-free fallback для аналогичной openrouter / opencode │ opencode/minimax-m3.1-flash-free opencode fallback для аналогичной go / wokey (сейчас) │ wokey/MiniMax-M3.1-Flash - добавлена, но отключена по дефолту» Measured the same day (runs/r163-step5-minimax/): in NVIDIA's public list (83 models); 18 of 18 tiny probes answered (0.6-41 s, the slow ones queued); function calling works (it called the offered fetch_url, finish tool_calls). StepFun's card: 600B MoE, 27B active, 1M context (huggingface.co/stepfun-ai/Step-5-Preview, read 2026-10-22). Other routes: OpenRouter stepfun/step-5-preview is PAID ($1 / $2.70 per M, no :free); opencode Go lists it (opencode-go/step-5-preview, on the Go limit); opencode's free Zen copy (step-5-preview-free) is no longer in the catalogue.",
+      "reasoning": {
+        "effort": "max"
+      },
+      "_reasoning": "Sent as the top-level `reasoning_effort` (OAI_PROVIDERS nvidia, depth effort_field). NVIDIA's API reference documents no reasoning_effort for this model - only chat_template_kwargs enable_thinking (on by default; «Do not set enable_thinking=false: it does not stop reasoning generation» - measured: the reasoning then lands in the answer text). Judged by the meter 2026-10-22 on one question, n=2 per arm: low = 286-380 reasoning chars / 99-126 completion tokens, max = 409-511 / 155-163 - disjoint; none = no reasoning_content; `bogus` = 400 listing none ... max (the PARAMETER's enum). The usage block's reasoning_tokens stays 0 here. Every value adds ~10 prompt tokens (rendered into the template); high / xhigh / max were not separated on a trivial question, so max = the accepted top.",
+      "max_tokens": 131072,
+      "_max_tokens": "NVIDIA API reference: max_tokens 1..1048576, default 4096, including reasoning and the final answer; R43 rule = min(the vendor's cap, 131072).",
+      "web": {
+        "enabled": false,
+        "_none": "NVIDIA's endpoint has no search tool: the brief plus the harness page-fetch tool (pages it already knows)."
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 16,
+        "_r163": "Function calling measured live 2026-10-22 (it called fetch_url); 16 = nvnemotron3ultra's value."
+      },
+      "timeout": "20m",
+      "_timeout": "As nvnemotron3ultra: a socket idle limit on the stream; a stalled free endpoint hands the brief to the fallback sooner (it runs only after the round).",
+      "fallback": "ocstep5previewgo",
+      "_fallback_r163": "the operator: «наверное через opencode». The free route is NVIDIA's; opencode's Step 5 is on the Go plan (opencode-go/step-5-preview: 430 requests / 5 h, 1,070 / week, 2,130 / month, opencode.ai/docs/go read 2026-10-22), so it is the run-time FALLBACK, not the voice: it spends the Go limit only when this channel ends the round with no answer.",
+      "models": {
+        "stepfun-ai/step-5-preview": {
+          "label": "Step 5 Preview (NVIDIA free endpoint)",
+          "data_policy": "NVIDIA API Trial Terms of Service (free trial endpoint) plus the StepFun Model License 1.0. Free at point of use; NVIDIA's free endpoints allow about 40 requests a minute.",
+          "aliases": [
+            "stepfun-ai/step-5-preview",
+            "step 5 preview",
+            "step-5-preview"
+          ]
+        }
+      },
+      "aliases": [
+        "nvstep5preview",
+        "nvstep5",
+        "step5",
+        "степ5"
+      ],
+      "notes": "Direct OpenAI-protocol call (call_oai_reviewer, provider nvidia): streamed, our fetch_url tool, reasoning returned in reasoning_content, tokens from the stream's usage frame."
+    },
+    "ocstep5previewgo": {
+      "read_order": 2,
+      "kind": "opencode",
+      "panel": "cheap",
+      "vendor": "stepfun",
+      "enabled": false,
+      "distribution": "local",
+      "_distribution_r163": "R163 (2026-10-22): local - package.py ships it OFF in the kit (a user starts it by name); whether the kit's cheap panel gets it is the owner's kit decision (R160), not taken here.",
+      "label": "OC Step 5 Preview (OpenCode Go)",
+      "cost": "subscription",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "model": "opencode-go/step-5-preview",
+      "effort": null,
+      "timeout": "40m",
+      "_added_r163": "R163: the run-time fallback of nvstep5preview (the operator: «наверное через opencode»); off as a voice - it starts by name or as that fallback. On the Go plan's limit (Step 5 Preview: 430 requests / 5 h, 1,070 / week, 2,130 / month - opencode.ai/docs/go, read 2026-10-22).",
+      "models": {
+        "opencode-go/step-5-preview": {
+          "label": "Step 5 Preview (via opencode, OpenCode Go plan)",
+          "data_policy": "Through opencode's Go gateway (their terms apply) plus the StepFun Model License 1.0. Counted against the Go plan's limit.",
+          "aliases": [
+            "opencode-go/step-5-preview",
+            "oc step 5 go"
+          ]
+        }
+      },
+      "aliases": [
+        "ocstep5previewgo",
+        "ocstep5go",
+        "step5go"
+      ],
+      "notes": "Step 5 Preview through the operator's OpenCode Go subscription; nvstep5preview's fallback."
+    },
+    "ocminimax31flashgo": {
+      "read_order": 3,
+      "kind": "opencode",
+      "panel": "cheap",
+      "vendor": "minimax",
+      "enabled": false,
+      "quota_group": "opencode-free-minimax",
+      "_quota_group_r163": "MEASURED 2026-10-22 09:31Z (R163 smoke): opencode-go/minimax-m3.1-flash-free and opencode/minimax-m3.1-flash-free were refused together with provider.quota while opencode/deepseek-v4.1-flash-free (group opencode-free) answered in the same run - so MiniMax's free copies sit on their OWN allowance, not the shared counter (R157's method). One group for both: a refusal leaves both out until 00:00 UTC, and the chain never runs Zen after Go's provider.quota. SUPERSEDES the first R163 guess (opencode-free), which skipped MiMo + DeepSeek on a MiniMax refusal.",
+      "distribution": "local",
+      "_distribution_r163": "R163 (2026-10-22): local - package.py ships it OFF in the kit (a user starts it by name); whether the kit's cheap panel gets it is the owner's kit decision (R160), not taken here.",
+      "label": "OC MiniMax M3.1 Flash Free (OpenCode Go)",
+      "cost": "free",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "model": "opencode-go/minimax-m3.1-flash-free",
+      "effort": null,
+      "timeout": "40m",
+      "fallback": "ocminimax31flashfree",
+      "_added_r163": "the operator 2026-10-22: «Подписка Go │ opencode-go/minimax-m3.1-flash-free fallback для аналогичной openrouter». R163 И-3: the OpenRouter :free voice it backed up is gone (OpenRouter's free launch period ended 2026-10-22 12:00 UTC; the operator: «Тогда openrouter M3.1 не добавляем»), and so is the chain it was the second link of. Off as a voice: it starts by name, with the Zen copy as its one fallback (the same quota group, so never after a provider.quota); both sit in one `_cascade_groups` entry. Cost: opencode.ai/docs/go (read 2026-10-22) lists «MiniMax M3.1 Flash Free» as Free / Unlimited «for a limited time»; at 09:31Z the same day this copy and the Zen one were both refused with provider.quota while DeepSeek's free voice answered - one event, so the page's «unlimited» did not hold that morning and how often it fails is not known.",
+      "models": {
+        "opencode-go/minimax-m3.1-flash-free": {
+          "label": "MiniMax M3.1 Flash Free (via opencode, OpenCode Go)",
+          "data_policy": "Through opencode's Go gateway (their terms apply).",
+          "aliases": [
+            "opencode-go/minimax-m3.1-flash-free"
+          ]
+        }
+      },
+      "aliases": [
+        "ocminimax31flashgo",
+        "ocminimaxgo"
+      ],
+      "notes": "MiniMax M3.1 Flash Free through the operator's OpenCode Go provider; 2nd link of the MiniMax chain."
+    },
+    "ocminimax31flashfree": {
+      "read_order": 3,
+      "kind": "opencode",
+      "panel": "cheap",
+      "vendor": "minimax",
+      "enabled": false,
+      "quota_group": "opencode-free-minimax",
+      "_quota_group_r163": "MEASURED 2026-10-22 09:31Z (R163 smoke): opencode-go/minimax-m3.1-flash-free and opencode/minimax-m3.1-flash-free were refused together with provider.quota while opencode/deepseek-v4.1-flash-free (group opencode-free) answered in the same run - so MiniMax's free copies sit on their OWN allowance, not the shared counter (R157's method). One group for both: a refusal leaves both out until 00:00 UTC, and the chain never runs Zen after Go's provider.quota. SUPERSEDES the first R163 guess (opencode-free), which skipped MiMo + DeepSeek on a MiniMax refusal.",
+      "distribution": "local",
+      "_distribution_r163": "R163 (2026-10-22): local - package.py ships it OFF in the kit (a user starts it by name); whether the kit's cheap panel gets it is the owner's kit decision (R160), not taken here.",
+      "label": "OC MiniMax M3.1 Flash Free",
+      "cost": "free",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "model": "opencode/minimax-m3.1-flash-free",
+      "effort": null,
+      "timeout": "40m",
+      "_added_r163": "the operator 2026-10-22: «opencode │ opencode/minimax-m3.1-flash-free opencode fallback для аналогичной go». Off as a voice: the run-time fallback of ocminimax31flashgo (R163 И-3: the OpenRouter voice whose chain it ended is gone).",
+      "models": {
+        "opencode/minimax-m3.1-flash-free": {
+          "label": "MiniMax M3.1 Flash Free (via opencode)",
+          "data_policy": "Free relay through opencode's infrastructure (their terms apply). Free at point of use.",
+          "aliases": [
+            "opencode/minimax-m3.1-flash-free",
+            "oc minimax flash free"
+          ]
+        }
+      },
+      "aliases": [
+        "ocminimax31flashfree",
+        "ocminimax"
+      ],
+      "notes": "Free MiniMax M3.1 Flash via the opencode CLI (Zen); 3rd link of the MiniMax chain."
     },
     "ocglm53flashfree": {
       "read_order": 1,
@@ -1727,6 +2232,7 @@
       "panel": "cheap",
       "vendor": "xiaomi",
       "enabled": false,
+      "_enabled_r160": "2026-10-22 (R160). the operator 2026-10-21: «mimo 2.6 Pro в kit по дефолту отключен, если не сказали иначе»; on this machine since R159 («mimo pro тратит много денег»; his overlay block is gone now). By name it still starts (`--only mimov26pro`), its run-time fallback mimov26flash only after it. Its cascade twin ormimopro is off too, so no paid MiMo Pro is promoted in its place (R159's dry run started ormimopro when only this one was off).",
       "bypass_permissions": true,
       "_bypass_permissions": "R122 (2026-09-22). mimo CLI uses --dangerously-skip-permissions (alias --yolo). Same blast radius as other CLI channels: every built-in tool runs without prompts. the operator: «Не забудь как и другим дать bypass permission».",
       "distribution": "local",
@@ -1876,8 +2382,9 @@
       "panel": "cheap",
       "vendor": "xiaomi",
       "provider": "openrouter",
-      "enabled": true,
-      "distribution": "kit",
+      "enabled": false,
+      "_enabled_r160": "2026-10-22 (R160). the operator 2026-10-21: «mimo 2.6 Pro в kit по дефолту отключен, если не сказали иначе» - off by default here and in the kit (his R159 measurement: the mimo CLI agent used 208K input + 6.03M cached tokens in one round). distribution both (was kit): package.py switches a `kit` channel that is off back ON in the build, so `kit` + off would have shipped it on. By name it still starts (`--only ormimopro`).",
+      "distribution": "both",
       "label": "OR MiMo v2.6 Pro",
       "cost": "metered",
       "model": "xiaomi/mimo-v2.6-pro",
@@ -2132,12 +2639,13 @@
       "vendor": "xai",
       "enabled": true,
       "bypass_permissions": true,
-      "_bypass_permissions": "R88 (2026-09-14) bypass knob; R137 И-2 (2026-10-03): when true, call_grokcli runs `--permission-mode bypassPermissions` with NO `--tools` allowlist - the FULL toolset (read_file/list_dir/grep at any absolute path, run_terminal_command shell, search_replace/write, web_search/web_fetch, MCP gateway search_tool/use_tool over the machine's MCP servers), minus GROK_BYPASS_REMOVED_TOOLS (ask_user_question, plan mode, scheduler_create/delete/list, send_feedback, image/video generation) and with GROK_BYPASS_DENY_RULES (firecrawl MCP, .env*, .ssh, .gnupg, grok/codex configs). When false: dontAsk + web-only allowlist, file tools only with --attach. Until R137 И-2 bypass changed only the permission mode and the tools stayed web-only, so this note's old «blast radius includes bash» was false. Blast radius now IS the operator's machine and every MCP server the CLI loads (incl. a write-capable git host token): read kit/SECURITY.md 'Bypass opt-in' before turning it on for briefs you did not write.",
+      "_bypass_permissions": "R88 (2026-09-14) bypass knob; R137 И-2 (2026-10-03): when true, call_grokcli runs `--permission-mode bypassPermissions` with NO `--tools` allowlist - the FULL toolset (read_file/list_dir/grep at any absolute path, run_terminal_command shell, search_replace/write, web_search/web_fetch, MCP gateway search_tool/use_tool over the machine's MCP servers), minus GROK_BYPASS_REMOVED_TOOLS (ask_user_question, plan mode, scheduler_create/delete/list, send_feedback, image/video generation) and with GROK_BYPASS_DENY_RULES (firecrawl MCP, .env*, .ssh, .gnupg, grok/codex configs) - SUPERSEDED 2026-10-22 (the operator: «Разреши ему читать ключи. Нельзя читать только моделям, которые бесплатные или обучаются (contributor), остальным можно.»): the key-file Read rules go only to a free or contributor channel (orchestrate.channel_may_read_keys); grokbuild is a subscription, so it gets the firecrawl rule alone and may read key files. When false: dontAsk + web-only allowlist, file tools only with --attach. Until R137 И-2 bypass changed only the permission mode and the tools stayed web-only, so this note's old «blast radius includes bash» was false. Blast radius now IS the operator's machine and every MCP server the CLI loads (incl. a write-capable git host token): read kit/SECURITY.md 'Bypass opt-in' before turning it on for briefs you did not write.",
       "🔴🔴_WHY_THIS_WAS_OFF_FOR_ONE_ROUND_AND_WHAT_ACTUALLY_BROKE_IT": "ON since 2026-08-16 (R45). It shipped OFF for exactly one round and the note here listed four arms proving «the flags were never the cause». 🔴 THAT CONCLUSION WAS WRONG AND SO WERE THE TWO THEORIES THAT FOLLOWED IT. `--no-plan` (the agent is literally called grok-build-plan) changed nothing; `--system-prompt-override` replacing the software-engineering-CLI persona changed nothing. All three explanations were guesses about a mechanism nobody had observed, because `--output-format json` shows only the final stopReason.\n\nWHAT IT ACTUALLY WAS, read off `--output-format streaming-messages-json` in one run: a tool_result with is_error=true and the text «User cancelled the execution for tool `web_fetch`». ONE DENIED TOOL DISCARDS THE ENTIRE TURN - the same failure the agy channel has documented since 2026-07-31, on a different binary. Two denials had to be cleared:\n  (1) web_fetch on any host outside x.ai. Isolated with one variable: same mode, same tool, dontAsk + docs.z.ai -> cancelled, dontAsk + docs.x.ai -> end_turn. That is why R44's short smoke test «worked» - it only ever fetched xAI's own docs - while every review failed, since reviewing means reading other vendors' pages.\n  (2) `use_tool`, the MCP gateway, reached for after SEVENTEEN successful fetches.\n\n🔴 THE GRANT IS SPELLED DIFFERENTLY FROM THE ALLOWLIST AND THE WRONG SPELLING IS SILENT: `--allow WebFetch` works, `--allow web_fetch` is accepted and grants nothing, while `--tools` wants the snake_case `web_fetch`. Same tool, two conventions, no error either way.\n\nRELEASE CONDITION MET, which is why this is on: 2026-08-16, the same 13.6 KB brief that produced 158 bytes in R44 returned **31 178 bytes**, `stopReason: end_turn`, `subtype: success`, marker on the last line, ZERO denied tools, 26 page fetches and 14 turns in 433 s. Its first working answer also found a real false positive in this harness's own transport_damage() check.\n\n🔴 SECURITY, TIGHTENED IN THE SAME CHANGE: read_file/list_dir/grep are no longer granted. R44 granted them believing the neutral `--cwd` made them harmless; measured on 2026-08-16, read_file served a file from `~/.grok/skills/` with that cwd in force. --cwd bounds where the agent STARTS, not what read_file can OPEN, and this channel's whole input is an untrusted brief. `search_tool`/`use_tool` are removed rather than granted for the same reason - `--tools` does not bound them, and this machine's MCP set includes a metered scraper and a git host with a write-capable token.",
-      "label": "Grok Build 4.7",
+      "label": "Grok Build 4.6",
       "cost": "subscription",
-      "model": "grok-4.7",
-      "_model_changed_r114": "R114 (2026-09-21), the operator: «grok-4.7 надо было поменять только у grokbuild». grok-4.7 released 2026-09-21: slug grok-4.7, 500K context, effort ladder [xhigh, high, medium, low] same as grok-4.6. Override: --set grokbuild=grok-4.5 (auto-clamps effort to high). History: R80 grok-4.6→grok-4.5; R44 grok-4.6 (original).",
+      "model": "grok-4.6",
+      "_model_r160": "2026-10-22 (R160). the operator 2026-10-21: «В kit grok тоже изменить с 4.7 на 4.6» - the kit follows his R159 choice (his overlay had set grok-4.6 on this machine since 2026-10-21; that block is gone now). The same Grok Build CLI and subscription (`-m grok-4.6`), the same effort ladder with xhigh on top (models['grok-4.6']); the label moves with the model. `--set grokbuild=grok-4.7` still runs 4.7.",
+      "_model_changed_r114": "SUPERSEDED 2026-10-22 (R160): the model is grok-4.6 again - see _model_r160. R114 (2026-09-21), the operator: «grok-4.7 надо было поменять только у grokbuild». grok-4.7 released 2026-09-21: slug grok-4.7, 500K context, effort ladder [xhigh, high, medium, low] same as grok-4.6. Override: --set grokbuild=grok-4.5 (auto-clamps effort to high). History: R80 grok-4.6→grok-4.5; R44 grok-4.6 (original).",
       "effort": "xhigh",
       "role": "code",
       "supported_efforts": [
@@ -2285,13 +2793,19 @@
   "default_panel": "cheap",
   "_default_panel_is_cheap_SINCE_2026_08_16": "Flipped 2026-08-16 (R45) on the operator's instruction «Дефолт сделай на дешевые», after being offered and declined in R42 and R44. WHAT THE OLD NOTE FEARED, kept because it names the real cost: a cheaper default silently removes codex, kimik3, qwen38max and spark11 from every round launched with no flag - including legal rounds in another project, where the loss is four VENDORS on a question with a filing deadline. A default that quietly spends more is a bug; a default that quietly reviews LESS is also a bug, and the second is harder to notice.\n\nWHY IT IS SAFE TO TAKE NOW, and this is a property of the code rather than a promise: the plan printer is SYMMETRIC. It already prints «--panel standard would ALSO run: codex, kimik3, qwen38max, spark11» on every cheap run, by name, from the same `gain`/`lose` computation that used to print the drop list on standard runs. So the loss the old note called invisible is printed before anything is spent, on every single round, and a reader who wants the four vendors back is told the exact flag. Verified by reading routing.py's panel block, not assumed from the fact that a feature with that name exists.\n\n🔴 WHAT STILL BITES, said plainly: this changes the default for OTHER PROJECTS' scripts too, and a script that passed no --panel now gets 4 vendors fewer without being edited. The mitigation is the printed line, not a guarantee - if a caller pipes the plan to a file nobody reads, the loss is silent again. Pass `--panel standard` explicitly in anything whose value depends on vendor breadth.",
   "ask_default": [
-    "ocspark13go",
-    "ocspark13free",
-    "spark13cont",
-    "orspark13cont"
+    "ocspark12go",
+    "spark12cont",
+    "orspark12cont"
   ],
   "_cascade_groups": [
     [
+      "ocspark12go",
+      "mcspark12",
+      "spark12cont",
+      "orspark12cont"
+    ],
+    [
+      "mcspark13",
       "ocspark13go",
       "ocspark13free",
       "spark13cont",
@@ -2306,6 +2820,7 @@
       "mimov26flash"
     ],
     [
+      "nvnemotron3ultra",
       "ocnemotron3ultrafree",
       "ornemotron3ultra"
     ],
@@ -2319,9 +2834,18 @@
       "kimik3"
     ],
     [
+      "mcwonder10",
       "mcwonder10cont",
       "wonder10",
       "orwonder"
+    ],
+    [
+      "nvstep5preview",
+      "ocstep5previewgo"
+    ],
+    [
+      "ocminimax31flashgo",
+      "ocminimax31flashfree"
     ]
   ],
   "_cascade_groups_doc": "Panel cascade: when several channels carry the SAME model through different transports, only the first READY one runs; the rest are skipped. Order matters - cheapest/free first. The panel runs independent VOICES in parallel; paying three transports for one voice is waste, not breadth. Added 2026-09-04 (the operator: 'незачем у одних и тех же моделей спрашивать'). R143 И-3 (2026-10-05): a group may span panels. kimik3 (standard, OpenRouter, paid) is the last member of nvkimik3's group; members are only the channels already in THIS run's plan, so a cheap run never pulls kimik3 in, and a standard run gets one Kimi - nvkimik3 when its CLI and key are here, else kimik3.",

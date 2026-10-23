@@ -17,8 +17,11 @@ python <SKILL_DIR>/orchestrate.py --brief TASK.md --task --only grokbuild --out 
   inputs: the CLI is told not to delete or overwrite them.
 - **Rules the CLI reads** (TASK DIRECTIVE, front of the brief, + preset `systems/task.md`): write
   only in the workdir — the scripts it runs included; outside it change nothing (no file, no
-  package install, no git fetch/commit in a repo there, no env var, registry or service); never
-  open credential files, with any tool; remote systems READ-only — a write is judged by its
+  package install, no git fetch/commit in a repo there, no env var, registry or service);
+  credential files (`.env*`, `~/.ssh`, CLI configs, token stores) by the channel's key policy
+  (`channel_may_read_keys`, since R165 И-2): a free or contributor channel is told never to open
+  them, with any tool; any other may read one the task needs and never copies a key into a file
+  or the report; remote systems READ-only — a write is judged by its
   effect, whatever the HTTP method — unless named with `--allow-remote "<system>: <purpose>"`
   (ONE quoted value per flag, printed in the plan; only that purpose is allowed there). An
   unallowed remote write is not sent: the CLI finishes the rest and lists it as `NOT SENT`,

@@ -1853,10 +1853,12 @@ def suite_settings_and_upgrade():
     # The shipped registry itself, layout-aware: ocspark13free is always enabled;
     # orspark13cont is distribution=kit (enabled false locally). Derive the expectation
     # from the file under test rather than hard-coding either layout.
-    _oc = pristine["channels"].get("ocspark13free") or {}
-    _ors = pristine["channels"].get("orspark13cont") or {}
+    # R164 (2026-10-22): the --ask list is the Spark 1.2 Contributor voice now (ocspark12go, spark12cont,
+    # orspark12cont); the 1.3 Contributor channels are off and out of ask_default.
+    _oc = pristine["channels"].get("ocspark12go") or {}
+    _ors = pristine["channels"].get("orspark12cont") or {}
     # With predicate rejecting both opencode and http kinds (simulating no binary, no META key):
-    _expect_no_oc_http = "orspark13cont" if _ors.get("enabled") else "ocspark13free"
+    _expect_no_oc_http = "orspark12cont" if _ors.get("enabled") else "ocspark12go"
     check(o._pick_ask_channel(pristine, lambda ch: ch.get("kind") not in ("opencode", "http"))
           == _expect_no_oc_http,
           "shipped registry: when both opencode and http are skipped, OR twin is the fallback",
@@ -3195,6 +3197,35 @@ def suite_panels():
          "Igor 2026-10-18 (same message). Free DeepSeek V4.1 Flash via the opencode CLI at #max (low "
          "235/235 vs max 658/1493 reasoning tokens, n=2, disjoint); answered a review brief in 6 s. Its "
          "own voice: ordeepseekv4pro is V4 Pro, another model. distribution both."),
+        ("R162 2026-10-22", "ADD", "nvnemotron3ultra",
+         "Igor 2026-10-22: «nemotron 3 ultra бесплатно работает и через nvidia nim может его только через тот "
+         "канал сделать и как fallback https://openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b:free». The same "
+         "Nemotron 3 Ultra on NVIDIA's own free endpoint (oai provider nvidia, reasoning_effort high measured), "
+         "first in the Nemotron cascade, fallback ornemotron3ultra. distribution local: the kit ships it off."),
+        ("R163 2026-10-22", "ADD", "nvstep5preview",
+         "Igor 2026-10-22 («добавим Step 5 Preview ... по дефолту включена cli cheap»). StepFun Step 5 Preview on NVIDIA's free endpoint (oai provider nvidia, reasoning_effort max: low 286-380 vs max 409-511 reasoning chars, n=2, disjoint), fallback the Go copy. distribution local: the kit ships it off."),
+        ("R163 2026-10-22", "ADD", "ocstep5previewgo",
+         "R163: nvstep5preview's fallback on the OpenCode Go plan (opencode-go/step-5-preview); off as a voice. distribution local."),
+        ("R163 2026-10-22", "ADD", "orminimax31flashfree",
+         "Igor 2026-10-22 («OpenRouter │ minimax/minimax-m3.1-flash:free - по дефолту включена cli cheap»). MiniMax M3.1 Flash :free, effort xhigh (low 27/27 vs xhigh 33/35 reasoning tokens, n=2, disjoint); fallback chain depth 2: Go, then Zen. distribution local."),
+        ("R163 2026-10-22", "ADD", "ocminimax31flashgo",
+         "R163: 2nd link of the MiniMax chain (opencode-go/minimax-m3.1-flash-free); off as a voice. distribution local."),
+        ("R163 2026-10-22", "ADD", "ocminimax31flashfree",
+         "R163: 3rd link of the MiniMax chain (opencode/minimax-m3.1-flash-free, Zen free, in the opencode free quota group - assumed); off as a voice. distribution local."),
+        ("R163 2026-10-22", "REMOVE", "orminimax31flashfree",
+         "RETIRED - Igor 2026-10-22 (R163 И-2): «Тогда openrouter M3.1 не добавляем» - OpenRouter's :free launch period "
+         "for minimax/minimax-m3.1-flash ended 2026-10-22 12:00 UTC (model page). Off in his overlay at once; out of "
+         "channels.json and the overlay in R163 И-3."),
+        ("R164 2026-10-22", "ADD", "ocspark12go",
+         "Igor 2026-10-22: «добавь spark 1.3 и 1.2 максимальный effort через muse code cli и 1.3 модель по дефолту активна, 1.2 ее fallback», then «У меня и в kit spark 1.3 contributor заменить на 1.2 contributor и тоже сделать дефольно активной». Spark 1.2 Contributor on his OpenCode Go plan, first in the Spark 1.2 cascade; takes ocspark13go's place (off, by name only). xhigh = the 1.2 ceiling. distribution local."),
+        ("R164 2026-10-22", "ADD", "spark12cont",
+         "R164: the kit's Spark 1.2 Contributor on the Meta Model API key (replaces spark13cont, off); second in the Spark 1.2 cascade, the ★ read."),
+        ("R164 2026-10-22", "ADD", "orspark12cont",
+         "R164: the kit's Spark 1.2 Contributor through OpenRouter (replaces orspark13cont, off); last in the Spark 1.2 cascade. distribution kit."),
+        ("R164 2026-10-22", "ADD", "mcspark13",
+         "R164 (same messages): Spark 1.3 in Standard mode on his Muse Code subscription at max (reasoning xhigh 2855-5083 vs max 7709-12488, n=2, disjoint); its own voice beside ocspark12go, first in the Spark 1.3 cascade, fallback mcspark12. distribution local."),
+        ("R164 2026-10-22", "ADD", "mcspark12",
+         "R164: mcspark13's run-time fallback (muse-spark-1.2, xhigh; max = HTTP 400), off as a voice; in the Spark 1.2 cascade, so it is skipped when ocspark12go answered. distribution local."),
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -4801,7 +4832,9 @@ def suite_r59_grokbuild_cyrillic_and_recitation():
     # The bump is CHANNEL-SPECIFIC. Every OTHER openrouter channel that carries a fetch_tool
     # must keep the default 11 - a bump-everywhere would multiply cost on paid channels.
     for name, ch in reg["channels"].items():
-        if name == "ornemotron3ultra":
+        if name == "ornemotron3ultra" or (ch or {}).get("cost") == "free":
+            # R162: nvnemotron3ultra (the same FREE model on NVIDIA's endpoint) carries its twin's 16 - the
+            # guard is about PAID channels, where every extra fetch round is a bill.
             continue
         ft = (ch or {}).get("fetch_tool") or {}
         if ft.get("enabled") and ft.get("max_calls") is not None:
@@ -8082,7 +8115,12 @@ def main():
                   suite_r154_i6_opencode_word_grading_retry,
                   suite_r154_i8_hotfix, suite_r154_i9_portal,
                   suite_r154_i11pre_never_read_model, suite_r157_i2_free_fallback,
-                  suite_r157_i3_ask_quota_skip,
+                  suite_r157_i3_ask_quota_skip, suite_r158_i2_opencode_billing,
+                  suite_r162_nemotron_nvidia,
+                  suite_r163_step5_minimax_chain, suite_r163_i3_hotfix, suite_keys_read_policy,
+                  suite_r165_grok_turn_ended,
+                  suite_r165_i2_task_keys,
+                  suite_r164_muse_spark, suite_r160_kit_defaults,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -11861,8 +11899,8 @@ R138_GOLDEN_BEFORE = {
     "grok.argv.bypass=True.refs=True": "f3ad07f02a817e4a",   # R150 И-4: +3 --deny (sessions, MCP OAuth, kimi-cli)
     "grok.prompt.bypass=False.refs=False": "7fd767f70586b77a",
     "grok.prompt.bypass=False.refs=True": "57fe754bf739fcf1",
-    "grok.prompt.bypass=True.refs=False": "e313a10a15bf330e",
-    "grok.prompt.bypass=True.refs=True": "e313a10a15bf330e",
+    "grok.prompt.bypass=True.refs=False": "2290629691e4ea45",  # 2026-10-22 key-file policy: the denied branch
+    "grok.prompt.bypass=True.refs=True": "2290629691e4ea45",   # now also names its shell gate (was e313a10a15bf330e)
     "main.brief": "b17e5d21bd0e7ab4",
     "main.rc": 0,
     "main.system": "59b505567b05ce0b",
@@ -12068,7 +12106,10 @@ def suite_r138_task_mode():
               == "bypassPermissions" and not os.path.exists(os.path.join(wg, "PROMPT.md")),
               "R138 (c): grok starts IN its workdir, bypassed, and the harness's PROMPT.md stays "
               "out of it", repr(g)[:200])
-        check(gp.startswith(o.GROK_TASK_CONTEXT) and "TASK DIRECTIVE" in gp and wg in gp
+        # 2026-10-22 (key-file policy): the task context's key-file sentence follows the --deny rules the
+        # call carries - this fake registry gives grokbuild no `cost`, so it is not free and may read keys
+        check(gp.startswith(o._grok_task_context(o.channel_may_read_keys("grokbuild", reg)))
+              and "TASK DIRECTIVE" in gp and wg in gp
               and "SAFETY DIRECTIVE" not in gp and "Write the finished review" not in gp
               and "READ ONLY: modify, create or delete nothing" not in gp,
               "R138 (c): grok reads the task context + TASK DIRECTIVE, not the review preamble "
@@ -14275,9 +14316,11 @@ def suite_r146_i3_spark_go():
           and ch.get("fallback") is None and ch.get("panel") == "cheap",
           "R146 И-3 (a) ocspark13go = opencode, opencode-go/muse-spark-1.3-contributor #xhigh, local, "
           "cheap; no run-time fallback since R154 И-3 (the free Spark is gone)")
-    grp = next((g for g in reg.get("_cascade_groups") or [] if "ocspark13free" in g), [])
-    check(grp[:2] == ["ocspark13go", "ocspark13free"] and (reg.get("ask_default") or [None])[0] == "ocspark13go",
-          "R146 И-3 (a) the Go Spark is first in the Spark cascade group and in ask_default", "group=%r" % grp)
+    # R164 (2026-10-22): the Go Spark is Spark 1.2 Contributor now (ocspark12go); ocspark13go is off, by name only.
+    grp = next((g for g in reg.get("_cascade_groups") or [] if "ocspark12go" in g), [])
+    check(grp[:1] == ["ocspark12go"] and (reg.get("ask_default") or [None])[0] == "ocspark12go",
+          "R146 И-3 (a) the Go Spark (ocspark12go since R164) is first in its Spark cascade group and in "
+          "ask_default", "group=%r" % grp)
 
     def yes(_n):
         return True
@@ -14291,12 +14334,14 @@ def suite_r146_i3_spark_go():
           "R146 И-3 (b) both Sparks named: ONE runs (ocspark13go), and since R154 И-3 nothing is armed as its "
           "fallback", repr(fb))
     pc = rt.resolve(rt.load_registry(), panel="cheap", ready=yes)
-    if ch.get("enabled"):
-        check(pc["ocspark13go"]["enabled"] and not pc["ocspark13free"]["enabled"],
-              "R146 И-3 (b) this tree's cheap panel runs the Go Spark, not the free one")
+    if ((reg.get("channels") or {}).get("ocspark12go") or {}).get("enabled"):
+        check(pc["ocspark12go"]["enabled"] and not pc["ocspark13free"]["enabled"]
+              and not pc["ocspark13go"]["enabled"],
+              "R146 И-3 (b) this tree's cheap panel runs the Go Spark (ocspark12go since R164), not the free "
+              "one and not the 1.3 one")
     else:
-        keyed = [c for c in ("spark13cont", "orspark13cont") if (pc.get(c) or {}).get("enabled")]
-        check(not pc["ocspark13free"]["enabled"] and not pc["ocspark13go"]["enabled"] and len(keyed) == 1,
+        keyed = [c for c in ("spark12cont", "orspark12cont") if (pc.get(c) or {}).get("enabled")]
+        check(not pc["ocspark13free"]["enabled"] and not pc["ocspark12go"]["enabled"] and len(keyed) == 1,
               "R146 И-3 (b) this tree (Go Spark off - the kit): the free Spark is off since R154 И-3 and ONE "
               "keyed Spark carries the voice", repr(keyed))
     p2 = rt.resolve(rt.load_registry(), only=both, skip=["ocspark13go"], ready=yes)
@@ -14312,10 +14357,10 @@ def suite_r146_i3_spark_go():
         if isinstance(c, dict) and c.get("distribution") == "local":
             c["enabled"] = False
     p4 = rt.resolve(kit, panel="cheap", ready=yes)
-    check(not p4["ocspark13free"]["enabled"] and not p4["ocspark13go"]["enabled"]
-          and (p4["spark13cont"]["enabled"] or p4["orspark13cont"]["enabled"]),
+    check(not p4["ocspark13free"]["enabled"] and not p4["ocspark12go"]["enabled"]
+          and (p4["spark12cont"]["enabled"] or p4["orspark12cont"]["enabled"]),
           "R146 И-3 (d) kit-shaped registry (local channels off): the free Spark is off since R154 И-3, a keyed "
-          "Spark (spark13cont / orspark13cont) is the Spark voice")
+          "Spark 1.2 Contributor (spark12cont / orspark12cont, R164) is the Spark voice")
 
     calls = []
 
@@ -17086,14 +17131,15 @@ def suite_r149_i2_muse_code():
     check(m.get("kind") == "musecode" and m.get("model") == "muse-wonder-1.0-contributor"
           and m.get("effort") == "xhigh" and (mdl.get("efforts") or [None])[0] == "xhigh"
           and m.get("panel") == "standard" and m.get("cost") == "subscription"
-          and casc == [["mcwonder10cont", "wonder10", "orwonder"]]
+          and casc == [["mcwonder10", "mcwonder10cont", "wonder10", "orwonder"]]
           and all("mcwonder10cont" in ((grp.get(g) or {}).get("channels") or []) for g in ("cli", "wonder",
                                                                                          "muse"))
           and m.get("fetch_fallback_hint_ref") == "mcp_fallback"
           and (m.get("prompt_suffix") or {}) == ref
           and (not ref or ref.get("enabled") is True),
           "R149 И-2 (a) mcwonder10cont = musecode, Wonder Contributor at xhigh (ladder tops at xhigh), "
-          "standard, first in the Wonder cascade, in cli/wonder/muse, carries the CLI prompts",
+          "standard, in the Wonder cascade right after its Standard twin mcwonder10 (R164), in cli/wonder/muse, "
+          "carries the CLI prompts",
           repr((m.get("kind"), m.get("effort"), casc)))
 
     check("musecode" in o.KNOWN_KINDS and ("musecode", "MUSE_BIN", "muse") in o.CLI_BINARIES
@@ -17233,20 +17279,23 @@ def suite_r149_i2_muse_code():
         p = rt.resolve(rt.load_registry(), ready=ready, **kw)
         return sorted(cn for cn, s in p.items() if s.get("enabled")), p
     on = chs["mcwonder10cont"].get("enabled", True)
+    # R164: «только вондер» seats the Standard Muse Code Wonder where it is on (Igor's tree), the Contributor one in
+    # the kit view (mcwonder10 is distribution local).
+    seat = (lambda r: "mcwonder10" if ((r.get("channels") or {}).get("mcwonder10") or {}).get("enabled") else "mcwonder10cont")(reg)
     std, _ = runs(panel="standard")
     cheap, _ = runs(panel="cheap")
     rw, _ = runs(route="только вондер")
-    nob, _ = runs(ready=lambda n: n != "mcwonder10cont", panel="standard")
+    nob, _ = runs(ready=lambda n: n not in ("mcwonder10", "mcwonder10cont"), panel="standard")
     _, pm = runs(only=["mcwonder10cont"], tier="max")
-    wonders = ("mcwonder10cont", "wonder10", "orwonder")
+    wonders = ("mcwonder10", "mcwonder10cont", "wonder10", "orwonder")
     pmc = pm.get("mcwonder10cont") or {}
     sysm = o._system_for("BASE", pmc)
     hint = (reg.get("hints") or {}).get("mcp_fallback") or "\0"
     # R155 И-3 (2026-10-17): the standard panel seats NO Wonder until it is named (explicit_only); «только вондер»
     # still seats Muse Code alone.
-    check((not on or ([x for x in std if x in wonders] == [] and rw == ["mcwonder10cont"]
-                      and "mcwonder10cont" not in nob and pmc.get("effort") == "xhigh"))
-          and "mcwonder10cont" not in cheap
+    check((not on or ([x for x in std if x in wonders] == [] and rw == [seat]
+                      and seat not in nob and pmc.get("effort") == "xhigh"))
+          and not {"mcwonder10", "mcwonder10cont"} & set(cheap or [])
           and hint.strip()[:60] in sysm
           and ("STANDING NOTE" in sysm) == bool((m.get("prompt_suffix") or {}).get("enabled")),
           "R149 И-2 (h) «только вондер» seats Muse Code alone; the standard panel none (R155: only when named); "
@@ -17271,7 +17320,7 @@ def suite_r149_muse_wonder():
     reg = rt.load_registry()
     chs = reg.get("channels") or {}
     # R149 И-2 (2026-10-13): Muse Code (mcwonder10cont) became the Wonder cascade's first member.
-    WONDERS = tuple(c for c in ("mcwonder10cont", "wonder10", "orwonder") if c in chs)
+    WONDERS = tuple(c for c in ("mcwonder10", "mcwonder10cont", "wonder10", "orwonder") if c in chs)  # R164
     w, ow = chs.get("wonder10"), chs.get("orwonder")
     if not (w and ow):
         for n in "abcdefg":
@@ -17285,13 +17334,13 @@ def suite_r149_muse_wonder():
           and (ow.get("reasoning") or {}).get("effort") == "max" and ow.get("distribution") == "kit"
           and ow.get("panel") == "standard"
           and 0 < float((ow.get("spend_guard") or {}).get("max_usd_per_review") or 0) <= 5
-          and casc == [["mcwonder10cont", "wonder10", "orwonder"]]
+          and casc == [["mcwonder10", "mcwonder10cont", "wonder10", "orwonder"]]
           and not any(c in (reg.get("ask_default") or []) for c in ("wonder10", "orwonder")),
           "R149 (a) wonder10 = http muse-wonder-1.0 max, orwonder = openrouter meta/muse-wonder max (kit, "
           "guard <= $5), standard panel, ONE cascade of their own, not in ask_default", repr(casc))
     words = {x: set(rt.canon_channel_safe(reg, x)) for x in ("wonder", "вондер", "muse", "муза", "spark",
                                                             "спарк")}
-    check(words["wonder"] == words["вондер"] == {"mcwonder10cont", "wonder10", "orwonder"}
+    check(words["wonder"] == words["вондер"] == {"mcwonder10", "mcwonder10cont", "wonder10", "orwonder"}  # R164
           and {"wonder10", "spark13cont"} <= words["muse"] == words["муза"]
           and not words["spark"] & {"wonder10", "orwonder"} and words["spark"] == words["спарк"],
           "R149 (b) wonder/вондер = the Wonder family; muse/муза = Spark + Wonder; spark/спарк = Spark only",
@@ -17508,7 +17557,9 @@ def suite_r155_i3_wonder_by_name():
     import copy as _cp
     import routing as _r
     section("R155 И-3: Muse Wonder only when named (explicit_only + the model's word)")
-    W = ("mcwonder10cont", "wonder10", "orwonder")
+    W = ("mcwonder10", "mcwonder10cont", "wonder10", "orwonder")  # R164: + the Standard Muse Code seat
+    def _r164_seat(r):  # R160 И-2: a def, not an assigned lambda (ruff E731 in the kit's pre-commit)
+        return "mcwonder10" if ((r.get("channels") or {}).get("mcwonder10") or {}).get("enabled") else "mcwonder10cont"
     base = _r.load_registry(overlay=False)
     kit = _cp.deepcopy(base)
     for ch in kit["channels"].values():
@@ -17541,7 +17592,7 @@ def suite_r155_i3_wonder_by_name():
     check(all((chs.get(c) or {}).get("explicit_only") is True for c in W)
           and ov.get("wonder") == list(W) and "kimi" in ov and set(ov) <= {"wonder", "kimi"}
           and "wonder 1.0" in ali and "вондер 1.0" in ali and "wonder 1.0" not in mal and "muse-wonder-1.0" in mal,
-          "R155 И-3 (a) the three Wonder channels are explicit_only; one-voice groups = wonder + kimi; «wonder 1.0» "
+          "R155 И-3 (a) the Wonder channels (four since R164) are explicit_only; one-voice groups = wonder + kimi; «wonder 1.0» "
           "is the model's word (the group), not wonder10's model alias",
           repr((sorted(ov), [c for c in W if not (chs.get(c) or {}).get("explicit_only")], mal)))
 
@@ -17576,11 +17627,11 @@ def suite_r155_i3_wonder_by_name():
             for kw in ({"route": "только вондер"}, {"route": "only wonder"}, {"route": "только muse wonder"},
                        {"route": "только wonder 1.0"}, {"route": "только вондер 1.0"}, {"only": ["wonder"]}):
                 w = wonders(reg, panel=panel, **kw)
-                if w != ["mcwonder10cont"]:
+                if w != [_r164_seat(reg)]:
                     bad.append((tag, panel, kw, w))
         on, _p = runs(reg, panel="standard", route="добавь вондер")
         on0, _p = runs(reg, panel="standard")
-        if on is None or on0 is None or sorted(set(on) - set(on0)) != ["mcwonder10cont"]:
+        if on is None or on0 is None or sorted(set(on) - set(on0)) != [_r164_seat(reg)]:
             bad.append((tag, "standard", "добавь вондер", on))
     check(not bad, "R155 И-3 (d) all ready: «только вондер», «only wonder», «только muse wonder», «только wonder "
                    "1.0», `--only wonder` start exactly Muse Code; «добавь вондер» adds exactly it", repr(bad[:4]))
@@ -17821,6 +17872,580 @@ def suite_r157_i2_free_fallback():
           repr((ia, ip_, ir, ifb)))
 
 
+def suite_r163_step5_minimax_chain():
+    """R163 (2026-10-22). Igor: Step 5 Preview in the cheap panel on NVIDIA's free endpoint with its OpenCode Go copy as
+    the run-time fallback; MiniMax M3.1 Flash through opencode (Go `-free`, then Zen free). Rewritten in R163 И-3: the
+    OpenRouter :free MiniMax voice and the fallback CHAIN it used are gone (suite_r163_i3_hotfix pins that). (a) the
+    registry: nvstep5preview (oai/nvidia, effort max, fallback the Go copy), the MiniMax Go and Zen copies off as voices,
+    Go -> Zen, both in their OWN quota group; (b) the Step 5 body call_oai_reviewer sends: reasoning_effort max, no
+    search, fetch_url offered; (c) the cheap plan arms ONE fallback for Step 5; (d) a fallback never chains (R157 И-2);
+    (e) run_fallbacks: the Go MiniMax dead -> Zen runs once and says for whom; Go answers -> Zen never starts; (f) a
+    quota group refused today turns Go's Zen fallback OFF; (f2) Go refused with provider.quota -> Zen never starts;
+    (i) the human excludes Step 5's Go copy -> OFF. Fixtures enable the local channels themselves (the kit build turns
+    them off, R162 #5).
+    """
+    import copy
+    import routing as rt
+    import orchestrate as o
+    section("R163 Step 5 Preview (NVIDIA free, Go fallback) + the MiniMax opencode pair")
+    reg = rt.load_registry(overlay=False)
+    ch = reg.get("channels") or {}
+    nv, g5, ocg, ocz = (ch.get(n) or {} for n in ("nvstep5preview", "ocstep5previewgo", "ocminimax31flashgo",
+                                                  "ocminimax31flashfree"))
+    sfx = all(((c.get("prompt_suffix") or {}).get("enabled") is True or "prompt_suffix" not in c)
+              for c in (nv, ocg, ocz))
+    check(nv.get("kind") == "oai" and nv.get("provider") == "nvidia" and nv.get("model") == "stepfun-ai/step-5-preview"
+          and nv.get("panel") == "cheap" and nv.get("distribution") == "local" and nv.get("cost") == "free"
+          and (nv.get("reasoning") or {}).get("effort") == "max" and nv.get("max_tokens") == 131072
+          and not (nv.get("web") or {}).get("enabled") and (nv.get("fetch_tool") or {}).get("enabled") is True
+          and nv.get("fallback") == "ocstep5previewgo"
+          and g5.get("model") == "opencode-go/step-5-preview" and g5.get("enabled") is False
+          and g5.get("cost") == "subscription" and g5.get("distribution") == "local",
+          "R163 (a) nvstep5preview: oai/nvidia, cheap, local, free, effort max, 131072, no search, fetch_url, fallback "
+          "the Go copy (off as a voice)",
+          repr({k: nv.get(k) for k in ("kind", "provider", "model", "reasoning", "max_tokens", "fallback")}))
+    check(ocg.get("model") == "opencode-go/minimax-m3.1-flash-free" and ocg.get("enabled") is False
+          and ocg.get("fallback") == "ocminimax31flashfree"
+          and ocz.get("model") == "opencode/minimax-m3.1-flash-free" and ocz.get("enabled") is False
+          and ocz.get("quota_group") and ocz.get("quota_group") == ocg.get("quota_group")
+          and ocz.get("quota_group") != (ch.get("ocmimo26flashfree") or {}).get("quota_group")
+          and sfx,
+          "R163 (a) the MiniMax opencode pair: Go -> Zen, both off as voices, in their OWN quota group (measured, not "
+          "MiMo's); suffix on (or stripped by the kit)",
+          repr((ocg.get("enabled"), ocg.get("fallback"), ocz.get("enabled"), ocz.get("quota_group"))))
+
+    sent = []
+
+    class _Stop(Exception):
+        pass
+
+    def fake_urlopen(rq, timeout=None):
+        sent.append(json.loads(rq.data.decode("utf-8")))
+        raise _Stop("captured")
+
+    envs = ("NVIDIA_NIM_API_KEY",)
+    keep_open, keep_env = o.urllib.request.urlopen, {e: os.environ.get(e) for e in envs}
+    out = os.path.join(tempfile.mkdtemp(prefix="orch-r163-"), "X.md")
+    try:
+        o.urllib.request.urlopen = fake_urlopen
+        for e in envs:
+            os.environ[e] = "test-not-a-key"
+        try:
+            o.call_oai_reviewer("brief", "R163-MARK", out, model=nv.get("model"), name="nvstep5preview",
+                                web=nv.get("web"), reasoning=nv.get("reasoning"), max_tokens=nv.get("max_tokens"),
+                                fetch_tool=nv.get("fetch_tool"), provider=nv.get("provider") or "openrouter",
+                                timeout=5)
+        except _Stop:
+            pass
+        except Exception:                                # noqa: BLE001 - the capture is what is judged
+            pass
+    finally:
+        o.urllib.request.urlopen = keep_open
+        for e, v in keep_env.items():
+            if v is None:
+                os.environ.pop(e, None)
+            else:
+                os.environ[e] = v
+    bn = next((b for b in sent if b.get("model") == "stepfun-ai/step-5-preview"), {})
+
+    def tools(b):
+        return [((t or {}).get("function") or {}).get("name") for t in (b.get("tools") or [])]
+    check(bn.get("reasoning_effort") == "max" and "reasoning" not in bn and bn.get("max_tokens") == 131072
+          and bn.get("stream") is True and "plugins" not in bn and tools(bn) == ["fetch_url"]
+          and "chat_template_kwargs" not in bn,
+          "R163 (b) the Step 5 body: reasoning_effort max, no reasoning block, 131072, streamed, fetch_url, no "
+          "enable_thinking (the docs: false does not stop reasoning)",
+          repr({k: bn.get(k) for k in ("reasoning_effort", "max_tokens", "stream")}) + " keys=%r" % sorted(bn))
+
+    def yes(_n):
+        return True
+
+    regx = copy.deepcopy(reg)          # as on the owner's machine: the kit build turns these local channels off
+    regx["channels"]["nvstep5preview"]["enabled"] = True
+    pk = rt.resolve(copy.deepcopy(regx), panel="cheap", ready=yes)
+    f5 = (pk.get("nvstep5preview") or {}).get("fallback") or {}
+    check((pk.get("nvstep5preview") or {}).get("enabled") and f5.get("channel") == "ocstep5previewgo"
+          and not f5.get("off") and "then" not in f5,
+          "R163 (c) the cheap plan: Step 5 runs with ONE fallback (its Go copy)", repr(f5))
+    k2 = copy.deepcopy(regx)
+    k2["channels"]["ocglm53flashfree"]["fallback"] = "ocdeepseekv41flashfree"
+    p2 = rt.resolve(copy.deepcopy(k2), panel="cheap", ready=yes)
+    mf = (p2.get("ocmimo26flashfree") or {}).get("fallback") or {}
+    check(mf.get("channel") == "ocglm53flashfree" and "then" not in mf,
+          "R163 (d) a fallback never chains: MiMo's GLM keeps no `then` though GLM declares a fallback in this "
+          "fixture", repr(mf))
+
+    dead = {"ok": False, "error": "TIMEOUT after 1200", "text": "", "warnings": []}
+    good = {"ok": True, "text": "x" * 4000, "bytes": 4000}
+
+    def run(plan, regx_, outcomes, primary="ocminimax31flashgo", first=None):
+        calls = []
+
+        def submit(ex, name):
+            calls.append(name)
+            return ex.submit(lambda: dict(outcomes.get(name) or dead))
+        res = {primary: dict(first or dead)}
+        o.run_fallbacks(res, plan, regx_, {primary}, submit=submit, same_voice=rt.same_voice)
+        return calls, res
+
+    rg = copy.deepcopy(regx)
+    rg["channels"]["ocminimax31flashgo"]["enabled"] = True
+    pg = rt.resolve(copy.deepcopy(rg), panel="cheap", ready=yes)
+    fz = (pg.get("ocminimax31flashgo") or {}).get("fallback") or {}
+    calls, res = run(pg, rg, {"ocminimax31flashfree": good})
+    check(fz.get("channel") == "ocminimax31flashfree" and not fz.get("off") and calls == ["ocminimax31flashfree"]
+          and (res.get("ocminimax31flashfree") or {}).get("fallback_for") == "ocminimax31flashgo"
+          and (res.get("ocminimax31flashfree") or {}).get("ok") is True,
+          "R163 (e) the Go MiniMax ends with no answer -> its Zen fallback runs the brief ONCE and names whom it ran for",
+          repr((fz, calls, {k: (v.get("fallback_for"), v.get("ok")) for k, v in res.items()})))
+    calls, res = run(pg, rg, {"ocminimax31flashfree": good}, first=good)
+    check(calls == [] and "ocminimax31flashfree" not in res,
+          "R163 (e) the Go MiniMax answers -> Zen never starts", repr((calls, sorted(res))))
+    pq = rt.apply_quota_skip(copy.deepcopy(pg), rg, {ocz.get("quota_group"): "refused earlier today"},
+                             named=("ocminimax31flashgo",))
+    qf = (pq.get("ocminimax31flashgo") or {}).get("fallback") or {}
+    calls, res = run(pq, rg, {"ocminimax31flashfree": good})
+    check((pq.get("ocminimax31flashgo") or {}).get("enabled") and "refused earlier today" in str(qf.get("off"))
+          and calls == [] and "ocminimax31flashfree" not in res,
+          "R163 (f) MiniMax's opencode quota group refused today, the Go copy named -> it runs, its Zen fallback is OFF",
+          repr((qf, calls)))
+    quota = {"ok": False, "error": None, "text": "",
+             "warnings": ["EXIT 1: provider.quota (HTTP 429): Rate limit exceeded. Please try again later."]}
+    calls, res = run(pg, rg, {"ocminimax31flashfree": good}, first=quota)
+    check(calls == [] and "ocminimax31flashfree" not in res
+          and "same daily allowance" in " ".join((res.get("ocminimax31flashgo") or {}).get("notes") or []),
+          "R163 (f2) Go refused with provider.quota -> Zen (the same quota group, measured live 2026-10-22) never "
+          "starts", repr((calls, sorted(res))))
+    ps = rt.resolve(copy.deepcopy(regx), panel="cheap", ready=yes, skip=["ocstep5previewgo"])
+    sf = (ps.get("nvstep5preview") or {}).get("fallback") or {}
+    check(sf.get("channel") == "ocstep5previewgo" and "excluded" in str(sf.get("off")),
+          "R163 (i) the human excludes Step 5's Go copy -> the fallback is OFF in this run", repr(sf))
+
+
+def suite_r163_i3_hotfix():
+    """R163 И-3 (2026-10-22), from panel r163 (triage runs/r163-step5-minimax/triage-i2.md). (a) OpenRouter's MiniMax
+    :free voice is gone (its launch period ended 2026-10-22 12:00 UTC; Igor: «Тогда openrouter M3.1 не добавляем») and
+    nothing names it; no channel declares `fallback_depth`, a key nothing reads any more; (b) a fallback never chains,
+    even with `fallback_depth` set; (c) run_fallbacks starts no second link, even for a plan slot that carries one;
+    (d) A2: the Step 5 pair and the MiniMax opencode pair are cascade groups; (e) census: a channel whose fallback
+    serves the SAME model shares a cascade group with it; (f) two enabled Step 5 copies -> one voice, the fallback stays
+    armed; (g) pin: the group does not suppress its own fallback (the root failed, so it has no answer); (h) the plan
+    line calls a same-model fallback that and never names the failing channel as its own sibling; (j) A8: an API tool
+    loop stops opening pages at the channel's `timeout` (a fake clock, 400 s a round) and answers in one final no-tools
+    turn, with `time_stopped`, a note and a log line; a long timeout changes nothing.
+    """
+    import copy
+    import io
+    import json as _json
+    import re
+    import urllib.request
+    import routing as rt
+    import orchestrate as o
+    section("R163 И-3: OpenRouter MiniMax out, no fallback chain, same-model groups, a time budget for tool loops")
+    reg = rt.load_registry(overlay=False)
+    ch = reg.get("channels") or {}
+    gone = "orminimax31flashfree"
+    named_by = [k for k, v in ch.items() if v.get("fallback") == gone]
+    depth = [k for k, v in ch.items() if "fallback_depth" in v]
+    check(gone not in ch and not named_by and not depth
+          and not any(gone in g for g in reg.get("_cascade_groups") or [] if isinstance(g, list))
+          and not any(gone in v for v in (reg.get("groups") or {}).values() if isinstance(v, list)),
+          "R163 И-3 (a) orminimax31flashfree is gone and nothing names it; no channel declares fallback_depth",
+          repr((gone in ch, named_by, depth)))
+
+    def yes(_n):
+        return True
+
+    rx = copy.deepcopy(reg)
+    for n in ("nvstep5preview", "ocminimax31flashgo"):
+        rx["channels"][n]["enabled"] = True
+    rx["channels"]["ocminimax31flashgo"]["fallback_depth"] = 2
+    rx["channels"]["ocminimax31flashfree"]["fallback"] = "ocglm53flashfree"
+    pb = rt.resolve(copy.deepcopy(rx), panel="cheap", ready=yes)
+    gb = (pb.get("ocminimax31flashgo") or {}).get("fallback") or {}
+    check(gb.get("channel") == "ocminimax31flashfree" and "then" not in gb
+          and not any("then" in ((s or {}).get("fallback") or {}) for s in pb.values()),
+          "R163 И-3 (b) `fallback_depth: 2` arms ONE fallback - no `then` anywhere in the plan", repr(gb))
+
+    dead = {"ok": False, "error": "TIMEOUT after 1200", "text": "", "warnings": []}
+    good = {"ok": True, "text": "x" * 4000, "bytes": 4000}
+
+    def run(plan, regx_, outcomes, primary):
+        calls = []
+
+        def submit(ex, name):
+            calls.append(name)
+            return ex.submit(lambda: dict(outcomes.get(name) or dead))
+        res = {primary: dict(dead)}
+        o.run_fallbacks(res, plan, regx_, {primary}, submit=submit, same_voice=rt.same_voice)
+        return calls, res
+
+    pc = copy.deepcopy(pb)
+    pc["ocminimax31flashgo"]["fallback"] = {"channel": "ocminimax31flashfree", "off": None,
+                                            "then": [{"channel": "ocglm53flashfree", "off": None}]}
+    calls, _res = run(pc, rx, {"ocglm53flashfree": good}, "ocminimax31flashgo")
+    check(calls == ["ocminimax31flashfree"],
+          "R163 И-3 (c) run_fallbacks runs ONE fallback: a slot that still carries a `then` (R163's shape) starts no "
+          "second link when the first also ends with no answer", repr(calls))
+
+    sv = [rt.same_voice(reg, n) for n in ("nvstep5preview", "ocstep5previewgo", "ocminimax31flashgo",
+                                          "ocminimax31flashfree")]
+    check(sv == [["ocstep5previewgo"], ["nvstep5preview"], ["ocminimax31flashfree"], ["ocminimax31flashgo"]],
+          "R163 И-3 (d) A2: Step 5 (NVIDIA + Go) and the MiniMax opencode pair are cascade groups - same_voice both "
+          "ways", repr(sv))
+
+    def base(m):
+        return re.sub(r"(:free|-free)$", "", str(m or "").rsplit("/", 1)[-1].lower())
+    pairs = sorted((k, v["fallback"]) for k, v in ch.items() if v.get("fallback") in ch
+                   and base(v.get("model")) and base(v.get("model")) == base(ch[v["fallback"]].get("model")))
+    loose = [p for p in pairs if p[1] not in rt.same_voice(reg, p[0])]
+    check(pairs and not loose,
+          "R163 И-3 (e) census: every channel whose fallback serves the SAME model shares a cascade group with it "
+          "(%d pair(s))" % len(pairs), repr({"pairs": pairs, "loose": loose}))
+
+    r2 = copy.deepcopy(reg)
+    for n in ("nvstep5preview", "ocstep5previewgo"):
+        r2["channels"][n]["enabled"] = True
+    p2 = rt.resolve(copy.deepcopy(r2), panel="cheap", ready=yes)
+    s5, g5 = p2.get("nvstep5preview") or {}, p2.get("ocstep5previewgo") or {}
+    f2 = s5.get("fallback") or {}
+    check(s5.get("enabled") and not g5.get("enabled") and any("cascade:" in str(w) for w in g5.get("why") or [])
+          and f2.get("channel") == "ocstep5previewgo" and not f2.get("off"),
+          "R163 И-3 (f) both Step 5 copies on -> one voice (NVIDIA, the free one); the Go copy stays its armed fallback",
+          repr((s5.get("enabled"), g5.get("enabled"), g5.get("why"), f2)))
+
+    p3 = rt.resolve(copy.deepcopy(rx), panel="cheap", ready=yes)
+    calls, _res = run(p3, rx, {"ocstep5previewgo": good}, "nvstep5preview")
+    check(calls == ["ocstep5previewgo"],
+          "R163 И-3 (g) pin: the Step 5 group does not suppress its own fallback - NVIDIA failed, so the Go copy runs",
+          repr(calls))
+
+    txt = rt.format_plan(p3, rx)
+    k = txt.find("(no answer), ocstep5previewgo (")
+    blk = txt[k:k + 700].split("--no-fallback")[0] if k >= 0 else ""
+    check(k >= 0 and "the same model as this channel, over another transport" in blk
+          and "nothing else here carries that model" not in blk,
+          "R163 И-3 (h) A2: Step 5's plan line calls its Go fallback the same model (R163 printed «nothing else here "
+          "carries that model» while this channel carried it)", blk[-400:])
+    rn = copy.deepcopy(reg)
+    for n in ("nvnemotron3ultra", "ocnemotron3ultrafree"):
+        rn["channels"][n]["enabled"] = True
+    tn = rt.format_plan(rt.resolve(copy.deepcopy(rn), panel="cheap", ready=yes), rn)
+    kn = tn.find("(no answer), ornemotron3ultra (")
+    bn = tn[kn:kn + 700].split("--no-fallback")[0] if kn >= 0 else ""
+    check(kn >= 0 and "not if nvnemotron3ultra" not in bn,
+          "R163 И-3 (h) the Nemotron fallback line never names nvnemotron3ultra, the failing channel itself, as the "
+          "voice whose answer would make the fallback unnecessary", bn[-300:])
+
+    def sse(*events):
+        return (b"".join(("data: " + _json.dumps(e) + "\n").encode() for e in events) + b"data: [DONE]\n")
+
+    class FakeResp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    seq_n = [0]
+
+    def fetch_round():
+        seq_n[0] += 1
+        return sse({"choices": [{"delta": {"content": "opening a page", "tool_calls": [{"index": 0, "id": "c1",
+                    "function": {"name": "fetch_url",
+                                 "arguments": _json.dumps({"url": "https://example.gov/t%d" % seq_n[0]})}}]}}],
+                    "model": "test/model"},
+                   {"usage": {"prompt_tokens": 1000, "completion_tokens": 100}})
+    answer = sse({"choices": [{"delta": {"content": "the review\nEND-01"}}], "model": "test/model"},
+                 {"usage": {"prompt_tokens": 2000, "completion_tokens": 300}})
+    real_time = o.time
+
+    class Clock:
+        def __init__(self):
+            self.t = 1.0e6
+
+        def time(self):
+            return self.t
+
+        def __getattr__(self, k):
+            return getattr(real_time, k)
+
+    def tb_run(timeout):
+        clock, n, bodies, logs = Clock(), [0], [], []
+
+        def fake_urlopen(req, timeout=None):
+            n[0] += 1
+            clock.t += 400.0
+            b = _json.loads(req.data.decode())
+            bodies.append(b)
+            if b.get("tool_choice") == "none" or "tools" not in b:
+                return FakeResp(answer)
+            return FakeResp(fetch_round())
+        keep = (urllib.request.urlopen, o._safe_fetch_url, o.log, o.time)
+        had = os.environ.get("OPENROUTER_API_KEY")
+        urllib.request.urlopen, o._safe_fetch_url, o.time = fake_urlopen, (lambda url: "PAGE TEXT " * 50), clock
+        o.log = lambda *a, **k: logs.append(" ".join(str(x) for x in a))
+        os.environ["OPENROUTER_API_KEY"] = "test-dummy-not-a-real-key"     # never the real one into a fake
+        try:
+            r = o.call_oai_reviewer("brief", "END-01", None, model="test/model", name="probe", timeout=timeout,
+                                    fetch_tool={"enabled": True, "max_calls": 3})
+        finally:
+            urllib.request.urlopen, o._safe_fetch_url, o.log, o.time = keep
+            if had is None:
+                os.environ.pop("OPENROUTER_API_KEY", None)
+            else:
+                os.environ["OPENROUTER_API_KEY"] = had
+        return r, n[0], bodies, logs
+
+    r1, n1, b1, l1 = tb_run(1000)
+    r0, n0, _b0, _l0 = tb_run(100000)
+    last = b1[-1] if b1 else {}
+    tmsg = [str(m.get("content") or "") for m in (last.get("messages") or []) if m.get("role") == "tool"]
+    check(r1.get("time_stopped") is True and n1 == 3 and "END-01" in (r1.get("text") or "")
+          and last.get("tool_choice") == "none" and any("time budget" in x for x in tmsg)
+          and any("TIME BUDGET" in x for x in (r1.get("notes") or []))
+          and any("TIME BUDGET" in x for x in l1),
+          "R163 И-3 (j) A8: 400 s a round under a 1000 s timeout -> no page after the 2nd round, one final no-tools "
+          "turn answers; time_stopped, the model told why, a note and a log line",
+          repr({"n": n1, "time_stopped": r1.get("time_stopped"), "ok": r1.get("ok"), "fetches": r1.get("fetches"),
+                "tool_choice": last.get("tool_choice"), "tool_msgs": [x[:40] for x in tmsg]}))
+    check(r0.get("time_stopped") is None and n0 == 5 and "END-01" in (r0.get("text") or ""),
+          "R163 И-3 (j) control: a 100000 s timeout -> the fetch budget (3) ends the loop as before, no time stop",
+          repr({"n": n0, "time_stopped": r0.get("time_stopped"), "ok": r0.get("ok")}))
+
+
+def suite_r162_nemotron_nvidia():
+    """R162 (2026-10-22). Igor: Nemotron 3 Ultra through NVIDIA's own free endpoint, OpenRouter :free as the fallback,
+    off opencode. (a) OAI_PROVIDERS gains `nvidia` (NVIDIA_NIM_API_KEY, streamed, no search, effort as the top-level
+    `reasoning_effort`); (b) the request call_oai_reviewer sends for the registry's nvnemotron3ultra: reasoning_effort
+    high, no OpenRouter `reasoning` / MiMo `thinking` block, max_tokens 32768, streamed with usage, fetch_url offered,
+    no search plugin; a `budget` reaches `reasoning_budget`; (c) the registry: local distribution, NEVER-read note,
+    fallback ornemotron3ultra, first in the Nemotron cascade group; (d) plans: ready -> nvnemotron3ultra carries the
+    voice in cheap and standard with the fallback armed, the OpenRouter twin skipped by the cascade; not ready (no key)
+    -> another member carries it; the kit view (local channels off) keeps the old cascade winner; (e) readiness follows
+    the provider's key.
+    """
+    import copy
+    import routing as rt
+    import orchestrate as o
+    section("R162 Nemotron 3 Ultra on NVIDIA's free endpoint, OpenRouter :free as the fallback")
+    pv = o.OAI_PROVIDERS.get("nvidia") or {}
+    check(pv.get("key_env") == "NVIDIA_NIM_API_KEY" and "integrate.api.nvidia.com" in str(pv.get("url"))
+          and str(pv.get("url")).endswith("/chat/completions") and pv.get("depth") == "effort_field"
+          and pv.get("search") == "none" and pv.get("streaming") is True,
+          "R162 (a) OAI_PROVIDERS['nvidia']: NVIDIA_NIM_API_KEY, /chat/completions, effort_field, no search, streamed",
+          repr({k: pv.get(k) for k in ("key_env", "url", "depth", "search", "streaming")}))
+    reg = rt.load_registry(overlay=False)
+    ch = (reg.get("channels") or {}).get("nvnemotron3ultra") or {}
+    sent = []
+
+    class _Stop(Exception):
+        pass
+
+    def fake_urlopen(rq, timeout=None):
+        sent.append(json.loads(rq.data.decode("utf-8")))
+        raise _Stop("captured")
+
+    keep_open, keep_env = o.urllib.request.urlopen, os.environ.get("NVIDIA_NIM_API_KEY")
+    out = os.path.join(tempfile.mkdtemp(prefix="orch-r162-"), "NV.md")
+    try:
+        o.urllib.request.urlopen = fake_urlopen
+        os.environ["NVIDIA_NIM_API_KEY"] = "nv-test-not-a-key"
+        for reasoning in (ch.get("reasoning"), {"effort": "high", "budget": 1000}):
+            try:
+                o.call_oai_reviewer("brief", "R162-MARK", out, model=ch.get("model"), name="nvnemotron3ultra",
+                                    web=ch.get("web"), reasoning=reasoning, max_tokens=ch.get("max_tokens"),
+                                    fetch_tool=ch.get("fetch_tool"), provider=ch.get("provider") or "openrouter",
+                                    timeout=5)
+            except _Stop:
+                pass
+            except Exception:                            # noqa: BLE001 - the capture is what is judged
+                pass
+    finally:
+        o.urllib.request.urlopen = keep_open
+        if keep_env is None:
+            os.environ.pop("NVIDIA_NIM_API_KEY", None)
+        else:
+            os.environ["NVIDIA_NIM_API_KEY"] = keep_env
+    b = sent[0] if sent else {}
+    tools = [((t or {}).get("function") or {}).get("name") for t in (b.get("tools") or [])]
+    check(bool(b) and b.get("model") == "nvidia/nemotron-3-ultra-550b-a55b" and b.get("reasoning_effort") == "high"
+          and "reasoning" not in b and "thinking" not in b and b.get("max_tokens") == 32768 and b.get("stream") is True
+          and (b.get("stream_options") or {}).get("include_usage") is True and "plugins" not in b
+          and tools == ["fetch_url"] and "reasoning_budget" not in b,
+          "R162 (b) the body for nvnemotron3ultra: reasoning_effort high, no reasoning/thinking block, max_tokens "
+          "32768, streamed with usage, fetch_url only, no search plugin",
+          repr({k: b.get(k) for k in ("model", "reasoning_effort", "max_tokens", "stream", "stream_options")})
+          + " tools=%r keys=%r" % (tools, sorted(b)))
+    b2 = next((x for x in sent[1:] if x.get("reasoning_budget") is not None), {})
+    check(b2.get("reasoning_budget") == 1000 and b2.get("reasoning_effort") == "high",
+          "R162 (b) a registry `budget` reaches the wire as reasoning_budget", repr(len(sent)))
+    groups = [g for g in (reg.get("_cascade_groups") or []) if "nvnemotron3ultra" in g]
+    check(ch.get("kind") == "oai" and ch.get("provider") == "nvidia" and ch.get("distribution") == "local"
+          and str(ch.get("reading_note") or "").startswith("NEVER read") and ch.get("fallback") == "ornemotron3ultra"
+          and ch.get("cost") == "free" and ch.get("panel") == "cheap" and ch.get("read_order") == 3
+          and ((ch.get("prompt_suffix") or {}).get("enabled") is True or "prompt_suffix" not in ch)
+          and not (ch.get("web") or {}).get("enabled")
+          and groups == [["nvnemotron3ultra", "ocnemotron3ultrafree", "ornemotron3ultra"]],
+          "R162 (c) the registry: oai/nvidia, local, NEVER-read, fallback ornemotron3ultra, first of the Nemotron group",
+          repr({k: ch.get(k) for k in ("kind", "provider", "distribution", "fallback", "panel")}) + repr(groups))
+
+    regx = copy.deepcopy(reg)  # R162 kit: the kit build turns this local channel off - set it as on the owner's machine
+    if "nvnemotron3ultra" in regx["channels"]:  # absent on the old code (the NC) - its checks then fail, not raise
+        regx["channels"]["nvnemotron3ultra"]["enabled"] = True
+
+    def ready_nv(n):
+        return True
+
+    def no_nv(n):
+        return "NVIDIA_NIM_API_KEY is not set" if n == "nvnemotron3ultra" else True
+
+    for panel in ("cheap", "standard"):
+        p = rt.apply_fallback(rt.resolve(copy.deepcopy(regx), panel=panel, ready=ready_nv), regx, ready=ready_nv)
+        fb = (p.get("nvnemotron3ultra") or {}).get("fallback") or {}
+        on = sorted(n for n in ("nvnemotron3ultra", "ocnemotron3ultrafree", "ornemotron3ultra")
+                    if (p.get(n) or {}).get("enabled"))
+        check(on == ["nvnemotron3ultra"] and fb.get("channel") == "ornemotron3ultra" and not fb.get("off"),
+              "R162 (d) %s, NVIDIA ready: nvnemotron3ultra alone carries Nemotron, ornemotron3ultra armed as its "
+              "fallback" % panel, repr((on, fb)))
+    p = rt.resolve(copy.deepcopy(regx), panel="standard", ready=no_nv)
+    on = sorted(n for n in ("nvnemotron3ultra", "ocnemotron3ultrafree", "ornemotron3ultra") if (p.get(n) or {}).get("enabled"))
+    check(len(on) == 1 and on != ["nvnemotron3ultra"],
+          "R162 (d) standard, NVIDIA key missing: another member carries the voice (one Nemotron)", repr(on))
+    kit = copy.deepcopy(reg)
+    for c in kit["channels"].values():
+        if isinstance(c, dict) and c.get("distribution") == "local":
+            c["enabled"] = False
+    pk = rt.resolve(copy.deepcopy(kit), panel="cheap", ready=ready_nv)
+    on = sorted(n for n in ("nvnemotron3ultra", "ocnemotron3ultrafree", "ornemotron3ultra") if (pk.get(n) or {}).get("enabled"))
+    check(on == ["ocnemotron3ultrafree"],
+          "R162 (d) control - the kit view (local channels off): the cheap Nemotron is still the opencode one", repr(on))
+    keep_env = os.environ.get("NVIDIA_NIM_API_KEY")
+    try:
+        os.environ["NVIDIA_NIM_API_KEY"] = "nv-test-not-a-key"
+        with_key = o._channel_key_ready(ch)
+        os.environ.pop("NVIDIA_NIM_API_KEY", None)
+        keep_reg = o._env_key
+        o._env_key = lambda name: os.environ.get(name, "")      # no HKCU fallback inside the check
+        try:
+            without = o._channel_key_ready(ch)
+        finally:
+            o._env_key = keep_reg
+    finally:
+        if keep_env is not None:
+            os.environ["NVIDIA_NIM_API_KEY"] = keep_env
+    check(with_key is True and without is False,
+          "R162 (e) readiness follows NVIDIA_NIM_API_KEY (present -> ready, absent -> not)", repr((with_key, without)))
+
+
+def suite_r158_i2_opencode_billing():
+    """R158 И-2 (2026-10-21): an opencode channel's billing path follows its model's provider and the registry's
+    `cost`; a channel the settings file ADDS prints one compact plan block.
+
+    R158 И-1 added 13 wokey.ai channels (kind opencode, cost metered) to the operator's settings file: the plan's tier
+    note and web line, the preflight, the call log and the --ask header called every one «free model, no API key» /
+    «free second voice», and the cheap plan grew from 115 to 342 lines (one line per field of each added channel).
+    Fails on the R158 И-1 code except the checks marked «control».
+    """
+    import inspect
+    import re
+    import tempfile
+    import routing as rt
+    import orchestrate as o
+    section("R158 И-2 opencode billing path (free Zen / Go plan / a provider of the user's config) + added-channel block")
+    bill = getattr(rt, "opencode_billing", None)
+    for model, cost, want, never in (("opencode/mimo-v2.6-flash-free", "free", "free model", "PAID"),
+                                     ("opencode-go/muse-spark-1.3-contributor", "subscription", "OpenCode Go plan",
+                                      "free"),
+                                     ("wokey/gpt-6.1-sol", "metered", "PAID per call", "free"),
+                                     ("wokey-anthropic/claude-opus-5-5", None, "billing UNKNOWN", "free")):
+        got = bill(model, cost) if bill else ""
+        check(want in got and never not in got,
+              "R158 И-2 (a) opencode_billing(%r, %r) says %r, never %r" % (model, cost, want, never), got[:120])
+    lab = getattr(rt, "ask_voice_label", None)
+    labs = [lab(c) for c in ("free", "metered", "subscription", None)] if lab else ["", "", "", ""]
+    check(labs[0] == "free second voice" and "PAID" in labs[1] and all("free" not in x for x in labs[1:]),
+          "R158 И-2 (b) the --ask header says «free second voice» only for a free voice (metered = PAID, no cost = "
+          "unknown)", " | ".join(labs))
+    msrc = inspect.getsource(o.main)
+    check('"   (free second voice)"' not in msrc and "ask_voice_label(" in msrc,
+          "R158 И-2 (c) main() takes the --ask label from ask_voice_label, not a fixed «free second voice»", "")
+    csrc = inspect.getsource(o.call_opencode)
+    check("_opencode_billing_line(name, base_model)" in csrc and '"free model, no API key")' not in csrc,
+          "R158 И-2 (d) the call log's phrase comes from the registry (_opencode_billing_line), not «free» per kind", "")
+    reg = rt.load_registry(overlay=False)
+    data = {"channels": {
+        "wktest": {"_new": True, "kind": "opencode", "model": "wokey/gpt-6.1-sol", "cost": "metered", "enabled": True,
+                   "panel": "standard", "distribution": "local", "effort": None, "timeout": "40m", "read_order": 1,
+                   "label": "GPT-6.1 Sol (test, via wokey.ai)", "vendor": "openai", "aliases": ["wktest"],
+                   "data_policy": "Paid relay through wokey.ai (per token, the balance). wokey sees the payload.",
+                   "models": {"wokey/gpt-6.1-sol": {"label": "GPT-6.1 Sol", "aliases": ["wokey/gpt-6.1-sol",
+                                                                                      "wk test sol"]}}},
+        "ocspark13go": {"timeout": "33m"}}}
+    rt.apply_overlay(reg, path="(suite r158 i2)", trust=rt.OVERLAY_TRUST_HOME, data=data)
+    text = rt.format_plan(rt.resolve(reg, tier="max", only=["wktest"]), reg)
+    sec = text.split("local settings:", 1)[-1].split("-" * 78, 1)[0]
+    check("🔴 wktest is a channel YOUR settings file adds" in sec and "wktest.model: None" not in sec
+          and "wktest.data_policy" not in sec and sec.count("wktest") <= 3,
+          "R158 И-2 (e) an ADDED channel prints no `field: None -> value` line per field (the plan grew 115 -> 342 "
+          "lines with 13 of them)", "%d mentions" % sec.count("wktest"))
+    check("kind opencode, model wokey/gpt-6.1-sol" in sec and "PAID per call (cost metered)" in sec
+          and "wk test sol" in sec and "data: Paid relay through wokey.ai (per token, the balance)." in sec,
+          "R158 И-2 (f) its block shows kind + model in full, the billing class, every spelling that starts it and "
+          "the data policy's first sentence", sec.strip()[:300])
+    check("also sets:" in sec and "read_order" in sec and "label" in sec and "models" in sec,
+          "R158 И-2 (g) every other field it sets is NAMED (nothing it sets is hidden)", "")
+    check("ocspark13go.timeout: " in sec and "(yours, not the shipped default)" in sec,
+          "R158 И-2 (h) control: a change to a SHIPPED channel still prints its own field line", "")
+    sharp = {f for c, f, _b, _a in reg["_overlay"]["sharp"] if c == "wktest"}
+    check({"kind", "model", "cost", "data_policy", "aliases"} <= sharp,
+          "R158 И-2 (i) control: acceptance still covers every sharp field of the added channel", ", ".join(sorted(sharp)))
+
+    def block(t, name):
+        ls = t.splitlines()
+        i = next((k for k, ln in enumerate(ls) if ("] %s" % name) in ln), None)
+        if i is None:
+            return ""
+        out = [ls[i]]
+        for ln in ls[i + 1:]:
+            if re.match(r"\s*\[[A-Za-z ]{4}\]", ln) or ln.startswith("-" * 20):
+                break
+            out.append(ln)
+        return "\n".join(out)
+    def line_of(blk, needle):
+        return next((ln for ln in blk.splitlines() if needle in ln), "")
+    wk = block(text, "wktest")
+    wk_tier, wk_web = line_of(wk, "(--variant flag)"), line_of(wk, "web: opencode CLI")
+    check("opencode CLI: PAID per call (cost metered)" in wk_tier and "free" not in wk_tier and "free" not in wk_web
+          and "the model runs through the provider 'wokey' of YOUR opencode config" in wk_web,
+          "R158 И-2 (j) the plan's tier note and web line call the wokey channel PAID and name its provider",
+          (wk_tier.strip() + " | " + wk_web.strip())[:300])
+    go = line_of(block(rt.format_plan(rt.resolve(reg, tier="max", only=["ocspark13go"]), reg), "ocspark13go"), "(--variant flag)")
+    check("opencode CLI: OpenCode Go plan" in go and "free" not in go,
+          "R158 И-2 (k) the Go-plan channel's tier note names the plan, not «free model»", go.strip()[:200])
+    zen = line_of(block(rt.format_plan(rt.resolve(reg, tier="max", only=["ocmimo26flashfree"]), reg), "ocmimo26flashfree"),
+                  "(--variant flag)")
+    check("free model" in zen and "PAID" not in zen,
+          "R158 И-2 (l) control: a free opencode Zen channel is still called free", zen.strip()[:200])
+    tmpd = tempfile.mkdtemp(prefix="r158i2-")
+    saved = (o.opencode_bin, rt.load_registry)
+    try:
+        o.opencode_bin = lambda: sys.executable
+        rt.load_registry = lambda *a, **k: reg
+        pf = list(o.channel_preflight(["wktest", "ocmimo26flashfree"], tmpd,
+                                      kinds={"wktest": "opencode", "ocmimo26flashfree": "opencode"},
+                                      plan={"wktest": {"model": "wokey/gpt-6.1-sol"},
+                                            "ocmimo26flashfree": {"model": "opencode/mimo-v2.6-flash-free"}}))
+    finally:
+        o.opencode_bin, rt.load_registry = saved
+        shutil.rmtree(tmpd, ignore_errors=True)
+    l1 = next((x for x in pf if x.startswith("wktest:") and "opencode CLI present" in x), "")
+    l2 = next((x for x in pf if x.startswith("ocmimo26flashfree:") and "opencode CLI present" in x), "")
+    check("PAID per call" in l1 and "free" not in l1,
+          "R158 И-2 (m) the preflight calls a wokey channel PAID, not «free model, no API key needed»", l1[:160])
+    check("free model" in l2, "R158 И-2 (n) control: the preflight still calls a free Zen model free", l2[:160])
+
+
 def suite_r157_i3_ask_quota_skip():
     """R157 И-3 (2026-10-19): an --ask after today's quota refusal leaves the refused group out too.
 
@@ -17905,6 +18530,8 @@ def suite_r154_i3_free_voices():
     for c in kit["channels"].values():
         if isinstance(c, dict) and c.get("distribution") == "local":
             c["enabled"] = False
+        elif isinstance(c, dict) and c.get("distribution") == "kit" and not c.get("enabled", True):
+            c["enabled"] = True   # R160: package.py's other flip - a `kit` channel that is off ships ON
     pk = rt.resolve(copy.deepcopy(kit), panel="cheap", ready=yes)
     free4 = ["ocmimo26flashfree"] + list(want)
     on = [n for n in free4 if (pk.get(n) or {}).get("enabled")]
@@ -17923,12 +18550,12 @@ def suite_r154_i3_free_voices():
           and not ((pl.get("ocspark13go") or {}).get("fallback") or {}),
           "R154 И-3 (d) ocspark13go arms no run-time fallback: the free Spark it fell back to is gone")
     pk2 = rt.resolve(copy.deepcopy(kit), panel="cheap",
-                     ready=lambda n: ("no MODEL_API_KEY" if n == "spark13cont" else True))
-    why = " ".join((pk2.get("orspark13cont") or {}).get("why") or [])
-    check(bool((pk2.get("orspark13cont") or {}).get("enabled")) and "carries this voice" in why
-          and "paid" in why.lower(),
-          "R154 И-3 (e) kit, an OpenRouter key and no Meta key: orspark13cont carries the Spark voice, the plan "
-          "says it is paid", why[:220])
+                     ready=lambda n: ("no MODEL_API_KEY" if n == "spark12cont" else True))
+    why = " ".join((pk2.get("orspark12cont") or {}).get("why") or [])
+    check(bool((pk2.get("orspark12cont") or {}).get("enabled")) and "carries this voice" in why
+          and "paid" in why.lower() and not (pk2.get("orspark13cont") or {}).get("enabled"),
+          "R154 И-3 (e) kit, an OpenRouter key and no Meta key: orspark12cont carries the Spark voice (the 1.2 "
+          "Contributor since R164; orspark13cont stays off), the plan says it is paid", why[:220])
     ps = rt.resolve(copy.deepcopy(kit), panel="standard", ready=yes)
     nem = [n for n in ("ocnemotron3ultrafree", "ornemotron3ultra") if (ps.get(n) or {}).get("enabled")]
     check(nem == ["ocnemotron3ultrafree"], "R154 И-3 (f) standard panel: ONE Nemotron, the free opencode one",
@@ -18508,6 +19135,563 @@ def suite_r154_i8_hotfix():
     check(bool(named) and not (named & eo),
           "R154 И-8 (F11) «--panel standard would ALSO run» names no explicit_only channel (they start by name only)",
           repr(sorted(named & eo) or sorted(named)[:4]))
+
+
+def suite_r165_grok_turn_ended():
+    """R165 (Krasinski panel, 2026-10-22): Grok's turn ended `completed` with the whole answer and the marker, grok.exe
+    stayed alive, and the harness reported «TIMEOUT after 40m» and threw the answer away (runs/r165-grok-turn-ended).
+    (a) a REAL child that writes its turn end into a fake Grok record, prints nothing and sleeps: _run_grok stops it a
+        grace after the turn ends, not at the timeout - and its whole tree (the heartbeat stops);
+    (b) a child that prints and exits at once is untouched (no watch result);
+    (c) call_grokcli at a TIMEOUT whose record says the turn ENDED completed with the marker: ok, the answer read from
+        Grok's record (the assistant lines joined), a note that says so, no TIMEOUT error, the answer file written;
+    (d) the same with no marker: still a TIMEOUT, and diagnose() no longer says «took longer» / «raise the timeout»;
+    (e) a refusal note names WHO refused (Grok's own check vs a --deny rule) and the next call the model made;
+    (f) a 402 reads as the subscription's limit: one warning, its own diagnosis, no END MARKER line;
+    (g) the record names the grok CLI version THIS run started (`_grok_cli_version` asks the binary);
+    (h) agy's normal ending no longer reads «zombie terminated».
+    """
+    import inspect as _ins
+    import json as _j
+    import shutil as _sh
+    import subprocess as _sp
+    import sys as _sys
+    import tempfile
+    import time
+    import uuid as _uu
+    import orchestrate as o
+    section("R165 Grok: the turn ended, the process did not")
+    td = tempfile.mkdtemp(prefix="r165-")
+    gh = os.path.join(td, "gh")
+    std = getattr(o, "_STDLIB_SUBPROCESS_RUN", _sp.run)
+    saved = (o.subprocess.run, o.grok_bin, o.neutral_cwd, os.environ.get("GROK_HOME"),
+             getattr(o, "GROK_POLL", None), getattr(o, "GROK_LINGER_GRACE", None))
+
+    def _sess(sid, assistant, events, results=()):
+        d = os.path.join(gh, "sessions", "grp", sid)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "chat_history.jsonl"), "w", encoding="utf-8") as f:
+            f.write(_j.dumps({"type": "user", "content": "BRIEF " + o.GROK_REFUSED_UNCHECKABLE
+                              if hasattr(o, "GROK_REFUSED_UNCHECKABLE") else "BRIEF"}) + "\n")
+            for t in assistant:
+                f.write(_j.dumps({"type": "assistant", "content": t}) + "\n")
+            for i, t in enumerate(results):
+                f.write(_j.dumps({"type": "tool_result", "tool_call_id": "c%d" % i, "content": t}) + "\n")
+        with open(os.path.join(d, "events.jsonl"), "w", encoding="utf-8") as f:
+            for e in events:
+                f.write(_j.dumps(e) + "\n")
+
+    TS = "2026-10-22T08:42:40.780Z"
+    started = {"type": "turn_started", "ts": "2026-10-22T08:21:36.687Z", "turn_number": 0}
+    ended = {"type": "turn_ended", "outcome": "completed", "ts": TS}
+    try:
+        os.environ["GROK_HOME"] = gh
+        o.subprocess.run = std
+        # (a) a real lingering child
+        child = (
+            "import json, os, sys, time\n"
+            "home, sid, beat = sys.argv[1], sys.argv[2], sys.argv[3]\n"
+            "d = os.path.join(home, 'sessions', 'grp', sid)\n"
+            "os.makedirs(d, exist_ok=True)\n"
+            "open(os.path.join(d, 'chat_history.jsonl'), 'w').write(json.dumps({'type': 'assistant', "
+            "'content': 'REVIEW R165-DONE'}) + chr(10))\n"
+            "open(os.path.join(d, 'events.jsonl'), 'w').write(json.dumps({'type': 'turn_ended', "
+            "'outcome': 'completed', 'ts': '%s'}) + chr(10))\n"
+            "while True:\n"
+            "    open(beat, 'a').write('x')\n"
+            "    time.sleep(0.2)\n" % TS)
+        script = os.path.join(td, "fake_grok.py")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write(child)
+        o.GROK_POLL, o.GROK_LINGER_GRACE = 0.3, 1
+        sid, beat = str(_uu.uuid4()), os.path.join(td, "beat.txt")
+        t0, info = time.time(), None
+        try:
+            _res, info = o._run_grok([_sys.executable, script, gh, sid, beat], 60, None, sid)
+        except Exception as exc:                          # noqa: BLE001 - the old tree has no _run_grok
+            info = {"raised": repr(exc)[:120]}
+        el = time.time() - t0
+        time.sleep(0.6)
+        n1 = os.path.getsize(beat) if os.path.exists(beat) else -1
+        time.sleep(1.0)
+        n2 = os.path.getsize(beat) if os.path.exists(beat) else -1
+        check(isinstance(info, dict) and info.get("turn") == ("completed", TS)
+              and info.get("lingered") is not None and el < 20,
+              "R165 (a) a grok that stays alive after its turn ENDED is stopped a grace later, not at the timeout",
+              repr((info, round(el, 1))))
+        check(n1 > 0 and n1 == n2,
+              "R165 (a2) the stopped grok is really gone (its heartbeat stops)", repr((n1, n2)))
+        # (b) a child that prints and exits: nothing to watch
+        quick = os.path.join(td, "quick.py")
+        with open(quick, "w", encoding="utf-8") as f:
+            f.write("import json\nprint(json.dumps({'text': 'OK R165-DONE'}))\n")
+        try:
+            r2, i2 = o._run_grok([_sys.executable, quick], 60, None, "no-such-session")
+            got = (r2.returncode, '"OK R165-DONE"' in (r2.stdout or ""), i2)
+        except Exception as exc:                          # noqa: BLE001
+            got = repr(exc)[:120]
+        check(got == (0, True, {}), "R165 (b) a grok that prints and exits is untouched", repr(got))
+        # (c) the TIMEOUT backstop: the record says the turn ENDED with the whole answer
+        o.grok_bin = lambda: "grok"
+        o.neutral_cwd = lambda: os.path.join(td, "ncwd")
+        body = ["Looking at the brief.\n", "THE REVIEW\nR165-DONE"]
+
+        def _timeout_with(assistant):
+            def run(cmd, **kw):
+                if "--session-id" in cmd:
+                    _sess(cmd[cmd.index("--session-id") + 1], assistant, [started, ended])
+                raise _sp.TimeoutExpired(cmd, kw.get("timeout"), output="")
+            return run
+
+        o.subprocess.run = _timeout_with(body)
+        r = o.call_grokcli("B", "R165-DONE", os.path.join(td, "wc"), os.path.join(td, "GC.md"), timeout=7)
+        on_disk = open(os.path.join(td, "GC.md"), encoding="utf-8").read() if os.path.isfile(
+            os.path.join(td, "GC.md")) else None
+        check(r.get("ok") is True and r.get("text") == "".join(body) and not r.get("error")
+              and on_disk == "".join(body) and r.get("answer_source") == "grok-session"
+              and any("turn had ENDED" in n for n in r.get("notes") or []),
+              "R165 (c) a TIMEOUT whose turn ENDED with the marker keeps the answer, read from Grok's own record",
+              repr((r.get("ok"), r.get("error"), r.get("answer_source"), (r.get("notes") or [])[:1]))[:300])
+        # (d) the same, but the answer has no marker: a TIMEOUT that does not advise a longer timeout
+        o.subprocess.run = _timeout_with(["THE REVIEW without its marker"])
+        r = o.call_grokcli("B", "R165-DONE", os.path.join(td, "wd"), os.path.join(td, "GD.md"), timeout=7)
+        err = r.get("error") or ""
+        cause, fix = o.diagnose(err)
+        check(not r.get("ok") and err.startswith("TIMEOUT after 7") and "turn ended: completed" in err
+              and (cause or "").startswith("Grok finished its turn") and "longer timeout would not help"
+              in (fix or ""),
+              "R165 (d) a finished turn without the marker is still a TIMEOUT, diagnosed as such - not «took longer»",
+              repr((err[:160], cause)))
+        # (e) who refused, and what the model did next
+        o.subprocess.run = saved[0]
+        notes = {}
+        for kind, msg in (("own", "No user is available to approve this command in this non-interactive "
+                                  "session, and it could not be checked against the permission rules. Name "
+                                  "the files explicitly."),
+                          ("rule", "Denied by permission policy: Read(**/.ssh/**)")):
+            sid = str(_uu.uuid4())
+            _sess(sid, ["x"], [started,
+                               {"type": "tool_started", "tool_name": "run_terminal_command", "ts": "2026-10-22T08:38:04Z"},
+                               {"type": "permission_resolved", "tool_name": "run_terminal_command",
+                                "decision": "deny", "wait_ms": 9, "ts": "2026-10-22T08:38:04Z"},
+                               {"type": "tool_started", "tool_name": "list_dir", "ts": "2026-10-22T08:38:18Z"},
+                               {"type": "tool_completed", "tool_name": "list_dir", "outcome": "success",
+                                "duration_ms": 14, "tool_call_id": "c9", "ts": "2026-10-22T08:38:18Z"},
+                               ended], results=[msg])
+            notes[kind] = o._grok_session_note(os.path.join(td, "ncwd"), time.time(), None, sid)
+        check("1 tool call(s) refused" in notes["own"] and "GROK'S OWN CHECK" in notes["own"]
+              and "refused by a deny rule" not in notes["own"] and "next `list_dir` (success)" in notes["own"]
+              and "by a --deny rule this harness passes" in notes["rule"] and "GROK'S OWN CHECK" not in notes["rule"],
+              "R165 (e) a refusal says who refused it (Grok's own check vs our --deny rule) and what ran next",
+              repr((notes["own"][-260:], notes["rule"][-160:])))
+        # (f) a 402 = the subscription's limit
+        err402 = ('Error: Internal error: {\n  "message": "API error (status 402 Payment Required): Grok Build '
+                  'usage balance exhausted",\n  "http_status": 402\n}')
+        o.subprocess.run = lambda cmd, **kw: _sp.CompletedProcess(cmd, 1, "", err402)
+        r = o.call_grokcli("B", "R165-DONE", os.path.join(td, "wf"), os.path.join(td, "GF.md"), timeout=7)
+        w = r.get("warnings") or []
+        cause, _fix = o.diagnose(w[0] if w else "")
+        check(not r.get("ok") and len(w) == 1 and w[0].startswith("GROK SUBSCRIPTION LIMIT")
+              and "usage balance exhausted" in w[0] and "HTTP 402" in (cause or ""),
+              "R165 (f) a 402 reads as the Grok subscription's limit: one line, its own diagnosis, no END MARKER",
+              repr((w, cause))[:300])
+        # (g) the version THIS run started
+        try:
+            v = o._grok_cli_version(_sys.executable) if o.subprocess.run is std else "seam"
+            o.subprocess.run = std
+            v = o._grok_cli_version(_sys.executable)
+        except Exception as exc:                          # noqa: BLE001
+            v = repr(exc)[:80]
+        check("cli_version" in r and isinstance(v, str) and v.startswith("Python"),
+              "R165 (g) the grok record carries cli_version, asked of the binary the run starts",
+              repr((v, "cli_version" in r)))
+        # (h) agy's normal ending
+        src = _ins.getsource(o._run_agy)
+        check("zombie terminated at" not in src and "nothing lost" in src,
+              "R165 (h) agy's normal ending no longer reads «zombie terminated»")
+    finally:
+        o.subprocess.run, o.grok_bin, o.neutral_cwd = saved[:3]
+        if saved[3] is None:
+            os.environ.pop("GROK_HOME", None)
+        else:
+            os.environ["GROK_HOME"] = saved[3]
+        if saved[4] is not None:
+            o.GROK_POLL, o.GROK_LINGER_GRACE = saved[4], saved[5]
+        _sh.rmtree(td, ignore_errors=True)
+
+
+def suite_r165_i2_task_keys():
+    """R165 И-2 (2026-10-22). Igor: «Разреши ему читать ключи. Нельзя читать только моделям, которые бесплатные или
+    обучаются (contributor), остальным можно.» and «Надо было наоборот обычным моделям разрешить, если у них стоял
+    запрет». The --task directive told EVERY task CLI «Never open credential files ... with any tool», whatever its
+    cost, and the paid Grok task context said «the TASK DIRECTIVE asks you not to open them».
+    (a) _task_directive(keys_ok=True) opens the files and bars only copying a key; the default and keys_ok=False keep
+        «Never open credential files»;
+    (b) _task_job sends each task CLI kind (opencode, mimo, grok) the sentence its channel_may_read_keys answer says:
+        a paid / metered channel open, a free or contributor one shut - read from the brief each dispatcher receives,
+        and for grok the same answer as its --deny rules (keys_ok);
+    (c) the paid Grok task context no longer says the directive asks it not to open them;
+    (d) references/tasks.md states the per-channel rule instead of the old blanket ban.
+    (e) every channel whose MODEL id names a contributor tier carries contributor: true - ocspark13go
+        (muse-spark-1.3-contributor on the Go plan) lacked it: the R165 census keyed on the name and label.
+    """
+    import types
+    import orchestrate as o
+    section("R165 И-2: the --task directive follows the key policy (paid open, free / contributor shut)")
+    shut, opened = "Never open credential files", "are open to you"
+    try:
+        d_open = o._task_directive("W", [], keys_ok=True)
+    except Exception as exc:                              # noqa: BLE001 - the old signature: a FAIL, not a crash
+        d_open = "RAISED " + repr(exc)[:120]
+    d_def, d_shut = o._task_directive("W", []), None
+    try:
+        d_shut = o._task_directive("W", [], keys_ok=False)
+    except Exception as exc:                              # noqa: BLE001
+        d_shut = "RAISED " + repr(exc)[:120]
+    check(shut not in d_open and opened in d_open and "never copy a key, token or password" in d_open
+          and shut in d_def and opened not in d_def and shut in (d_shut or "") and opened not in (d_shut or ""),
+          "R165 И-2 (a) keys_ok opens credential files and bars copying a key; the default and keys_ok=False keep "
+          "«Never open credential files»", repr((d_open[-260:] if d_open.startswith("RAISED") else
+                                                  d_open[d_open.find("service."):][:240])))
+    reg = {"channels": {
+        "ocpaid": {"kind": "opencode", "cost": "subscription"}, "ocfree": {"kind": "opencode", "cost": "free"},
+        "occont": {"kind": "opencode", "cost": "metered", "contributor": True},
+        "mimopaid": {"kind": "mimocli", "cost": "metered"},
+        "grokpaid": {"kind": "grokcli", "cost": "subscription", "bypass_permissions": True},
+        "grokfree": {"kind": "grokcli", "cost": "free", "bypass_permissions": True}}}
+    got = {}
+
+    def _cap(cname):
+        def f(brief, *args, **kw):
+            got[cname] = (brief, kw.get("keys_ok"))
+            return {"channel": cname, "ok": True}
+        return f
+
+    saved = (o.call_opencode, o.call_mimocli, o.call_grokcli)
+    a = types.SimpleNamespace(allow_remote=[], marker="TASK-COMPLETE", all_bypass=False, bypass_permissions=[])
+    try:
+        for cname, slot in reg["channels"].items():
+            o.call_opencode = o.call_mimocli = o.call_grokcli = _cap(cname)
+            try:
+                o._task_job(slot["kind"], cname, dict(slot), "CBRIEF", a, reg, "SYS", "OUT.md", "HWORK", False,
+                            "WDIR-" + cname)
+            except Exception as exc:                      # noqa: BLE001
+                got[cname] = ("RAISED " + repr(exc)[:120], None)
+    finally:
+        o.call_opencode, o.call_mimocli, o.call_grokcli = saved
+    verdict = {c: ("open" if opened in b and shut not in b else "shut" if shut in b and opened not in b else "??")
+               for c, (b, _k) in got.items()}
+    want = {"ocpaid": "open", "ocfree": "shut", "occont": "shut", "mimopaid": "open", "grokpaid": "open",
+            "grokfree": "shut"}
+    check(verdict == want,
+          "R165 И-2 (b) each task CLI kind gets the credential sentence of ITS channel: paid / metered open, free or "
+          "contributor shut (read from the brief each dispatcher received)", repr(verdict))
+    check(got.get("grokpaid", (None, None))[1] is True and got.get("grokfree", (None, None))[1] is False,
+          "R165 И-2 (b2) a grok task's directive and its --deny rules (keys_ok) come from the same answer",
+          repr({c: got.get(c, (None, None))[1] for c in ("grokpaid", "grokfree")}))
+    t_open = o._grok_task_context(True)
+    check("asks you not to open" not in t_open and "are not blocked for you" in t_open
+          and "never copy a key, token or password" in t_open,
+          "R165 И-2 (c) the paid Grok task context no longer says the directive asks it not to open them",
+          t_open[t_open.find("Credential"):][:200])
+    doc = os.path.join(os.path.dirname(os.path.abspath(o.__file__)), "references", "tasks.md")
+    txt = open(doc, encoding="utf-8").read() if os.path.isfile(doc) else ""
+    flat = " ".join(txt.split())
+    check(bool(txt) and "never open credential files, with any tool;" not in flat
+          and "channel_may_read_keys" in flat and "free or contributor" in flat,
+          "R165 И-2 (d) references/tasks.md states the per-channel key-file rule, not the old blanket ban",
+          doc if not txt else flat[flat.find("credential"):][:200])
+    import routing as rt
+    src = (rt.load_registry(overlay=False) or {}).get("channels") or {}
+    named = sorted(n for n, c in src.items() if isinstance(c, dict)
+                   and "contributor" in str(c.get("model") or "").lower())
+    missing = [n for n in named if src[n].get("contributor") is not True]
+    check(bool(named) and not missing,
+          "R165 И-2 (e) every channel whose MODEL id names a contributor tier carries contributor: true "
+          "(%d found; a census by name / label missed ocspark13go)" % len(named), repr(missing or named))
+
+
+def suite_r164_muse_spark():
+    """R164 (2026-10-22). Igor: «добавь spark 1.3 и 1.2 максимальный effort через muse code cli и 1.3 модель по
+    дефолту активна, 1.2 ее fallback», «Muse Wonder через muse code cli ... по дефолту не активна» and «У меня и в kit
+    spark 1.3 contributor заменить на 1.2 contributor и тоже сделать дефольно активной».
+    (a) the registry: mcspark13 (muse-spark-1.3, Standard, max, cheap, on, local, fallback mcspark12), mcspark12
+        (muse-spark-1.2, xhigh, off), mcwonder10 (muse-wonder-1.0, Standard, max, explicit_only), the 1.2 Contributor
+        voice ocspark12go / spark12cont / orspark12cont (contributor: true, on), the 1.3 Contributor channels off;
+    (b) cascades and --ask: Spark 1.2 = [ocspark12go, mcspark12, spark12cont, orspark12cont], mcspark13 first in the
+        1.3 group, mcwonder10 first in Wonder's, ask_default leads with ocspark12go and names no 1.3 Contributor;
+    (c) the cheap plan (registry only) runs mcspark13 AND ocspark12go, arms mcspark12 for mcspark13, and
+        same_voice(mcspark12) holds ocspark12go - so the fallback is skipped when that 1.2 voice answered;
+    (d) call_musecode sends --contributor-mode off for a Standard id and on for a -contributor id (measured: the
+        user's default ON served muse-spark-1.3 as muse-spark-1.3-contributor), with the effort on argv;
+    (e) every musecode channel's `contributor` flag equals what its model id says (the flag and argv agree);
+    (f) «muse code» names the transport group (was mcwonder10cont's alias) and runs Spark, never a Wonder.
+    """
+    import subprocess as _sp
+    import orchestrate as o
+    import routing as rt
+    section("R164: Spark 1.3 / 1.2 and Wonder through the Muse Code CLI; the Contributor Spark is 1.2")
+    reg = rt.load_registry(overlay=False)
+    ch = reg["channels"]
+    def g(n):  # R160 И-2: a def, not an assigned lambda (ruff E731 in the kit's pre-commit)
+        return ch.get(n) or {}
+    want = {
+        "mcspark13": dict(kind="musecode", model="muse-spark-1.3", contributor=False, effort="max", panel="cheap",
+                          enabled=True, distribution="local", fallback="mcspark12"),
+        "mcspark12": dict(kind="musecode", model="muse-spark-1.2", contributor=False, effort="xhigh", enabled=False),
+        "mcwonder10": dict(kind="musecode", model="muse-wonder-1.0", contributor=False, effort="max",
+                           explicit_only=True, panel="standard", distribution="local"),
+        "ocspark12go": dict(kind="opencode", model="opencode-go/muse-spark-1.2-contributor", contributor=True,
+                            enabled=True, panel="cheap", distribution="local"),
+        "spark12cont": dict(model="muse-spark-1.2-contributor", contributor=True, enabled=True),
+        "orspark12cont": dict(model="meta/muse-spark-1.2-contributor", contributor=True, enabled=True),
+        "ocspark13go": dict(enabled=False), "spark13cont": dict(enabled=False), "orspark13cont": dict(enabled=False)}
+    if (HERE / "VERSION").is_file():   # R160: a BUILT kit tree (R60's shipped run, CI) - package.py turns local off
+        want["mcspark13"]["enabled"] = want["ocspark12go"]["enabled"] = False
+    bad = ["%s.%s=%r (want %r)" % (n, k, g(n).get(k), v) for n, w in want.items() for k, v in w.items()
+           if g(n).get(k) != v]
+    check(not bad, "R164 (a) the Muse Code Spark / Wonder channels and the 1.2 Contributor voice are as Igor set them, "
+          "the 1.3 Contributor channels off", "; ".join(bad))
+    cas = [c for c in reg.get("_cascade_groups") or [] if isinstance(c, list)]
+    ok_b = (["ocspark12go", "mcspark12", "spark12cont", "orspark12cont"] in cas
+            and any(c[:1] == ["mcspark13"] and "spark13cont" in c for c in cas)
+            and any(c[:1] == ["mcwonder10"] and "mcwonder10cont" in c for c in cas)
+            and (reg.get("ask_default") or [None])[0] == "ocspark12go"
+            and not {"ocspark13go", "spark13cont", "orspark13cont"} & set(reg.get("ask_default") or []))
+    check(ok_b, "R164 (b) the Spark 1.2 cascade, mcspark13 / mcwonder10 first in theirs, --ask leads with ocspark12go",
+          "cascades=%s ask_default=%s" % ([c for c in cas if "mcspark13" in c or "ocspark12go" in c
+                                           or "mcwonder10" in c], reg.get("ask_default")))
+    try:
+        shipped = (HERE / "VERSION").is_file()   # R160: in a built kit Muse Code and the Go plan ship off
+        res = rt.resolve(reg, panel="cheap", tier="max", ready=(lambda _n: True) if shipped else None)
+        plan = res[0] if isinstance(res, tuple) else res
+        if "fallback" not in plan.get("mcspark13", {}):
+            rt.apply_fallback(plan, reg)
+        on = sorted(n for n, p in plan.items() if p.get("enabled"))
+        fb = plan.get("mcspark13", {}).get("fallback") or {}
+        sv = rt.same_voice(reg, "mcspark12")
+        if shipped:
+            ok_c = ("spark12cont" in on and "orspark12cont" not in on and "ocspark12go" in sv
+                    and not {"mcspark13", "mcspark12", "ocspark12go", "ocspark13go", "spark13cont",
+                             "orspark13cont"} & set(on))
+        else:
+            ok_c = ("mcspark13" in on and "ocspark12go" in on and fb.get("channel") == "mcspark12"
+                    and fb.get("off") is None and "ocspark12go" in sv
+                    and not {"ocspark13go", "spark13cont", "orspark13cont", "mcspark12"} & set(on))
+        why_c = "kit=%s on=%s fallback=%s same_voice(mcspark12)=%s" % (shipped, on, fb, sv)
+    except Exception as exc:                              # noqa: BLE001
+        ok_c, why_c = False, "RAISED " + repr(exc)[:200]
+    check(ok_c, "R164 (c) the cheap plan runs mcspark13 AND ocspark12go, arms mcspark12, and counts it the same voice "
+          "as ocspark12go (a built kit: spark12cont, Muse Code / the Go plan off)", why_c)
+    seen = []
+    old = (o._run_tree, o._musecode_usage, o.muse_bin)
+    term = json.dumps({"payload": {"kind": "run_terminal", "terminal": "completed", "text": "fine\nM-R164"}})
+
+    def fake_run(cmd, **kw):
+        seen.append(list(cmd))
+        return _sp.CompletedProcess(cmd, 0, stdout=term + "\n", stderr="")
+    try:
+        o._run_tree, o._musecode_usage, o.muse_bin = fake_run, (lambda *a, **k: {}), (lambda: "muse-fake")
+        tmp = tempfile.mkdtemp(prefix="r164-")
+        for m, e in (("muse-spark-1.3", "max"), ("muse-wonder-1.0-contributor", "xhigh")):
+            o.call_musecode("brief", "M-R164", os.path.join(tmp, "a.md"), model=m, effort=e, timeout=60, name="t")
+    except Exception as exc:                              # noqa: BLE001
+        seen.append(["RAISED", repr(exc)[:160]])
+    finally:
+        o._run_tree, o._musecode_usage, o.muse_bin = old
+
+    def mode(cmd):
+        return cmd[cmd.index("--contributor-mode") + 1] if "--contributor-mode" in cmd else None
+    ok_d = (len(seen) == 2 and mode(seen[0]) == "off" and mode(seen[1]) == "on"
+            and seen[0][seen[0].index("--reasoning-effort") + 1] == "max")
+    check(ok_d, "R164 (d) call_musecode sends --contributor-mode off for muse-spark-1.3 and on for a -contributor id",
+          "modes=%s" % [mode(c) if c[:1] != ["RAISED"] else c for c in seen])
+    mis = sorted(n for n, c in ch.items() if isinstance(c, dict) and c.get("kind") == "musecode"
+                 and c.get("contributor") is not str(c.get("model", "")).endswith("-contributor"))
+    check(not mis, "R164 (e) every musecode channel's contributor flag equals what its model id says", ", ".join(mis))
+    try:
+        res = rt.resolve(reg, only=["muse code"], panel="cheap", tier="max")
+        plan = res[0] if isinstance(res, tuple) else res
+        on_f = sorted(n for n, p in plan.items() if p.get("enabled"))
+    except Exception as exc:                              # noqa: BLE001
+        on_f = ["RAISED " + repr(exc)[:160]]
+    words = {a.lower() for c in ch.values() if isinstance(c, dict) for a in c.get("aliases") or []}
+    check(on_f == ([] if (HERE / "VERSION").is_file() else ["mcspark13"]) and "muse code" not in words
+          and "muse code" in (reg["groups"].get("musecode") or {}).get("aliases", []),
+          "R164 (f) «muse code» is the transport group and starts Spark 1.3, never a Wonder", "on=%s" % on_f)
+
+
+def suite_r160_kit_defaults():
+    """R160 (2026-10-22). Igor 2026-10-21: «В kit grok тоже изменить с 4.7 на 4.6» and «mimo 2.6 Pro в kit по дефолту
+    отключен, если не сказали иначе»; and the R164 bug the R160 build found: package.py switches a `distribution: kit`
+    channel that is off back ON in the build, so orspark13cont (off since R164) shipped on beside spark12cont.
+    (a) grokbuild plans grok-4.6 with its label, and models['grok-4.6'] keeps xhigh on top;
+    (b) MiMo v2.6 Pro is off by default: ormimopro (distribution both) and mimov26pro, and no ENABLED channel serves
+        xiaomi/mimo-v2.6-pro (a census by model id, not by name);
+    (c) no channel is `distribution: kit` AND off (package.py would ship it on); the control with orspark13cont back
+        at kit + off is reported;
+    (d) the kit-shaped plans (package.py's two flips, every channel ready): cheap and standard run no MiMo Pro and no
+        Spark 1.3 Contributor, exactly one Spark Contributor voice (spark12cont), and grokbuild at grok-4.6;
+    (e) by name each of ormimopro / mimov26pro / orspark13cont still starts in the kit-shaped registry.
+    """
+    import copy
+    import routing as rt
+    section("R160: the kit follows Igor's grok-4.6 and MiMo Pro off; no `kit` channel ships against its own flag")
+    reg = rt.load_registry(overlay=False)
+    ch = reg["channels"]
+    g = ch.get("grokbuild") or {}
+    efs = ((g.get("models") or {}).get("grok-4.6") or {}).get("efforts") or []
+    check(g.get("model") == "grok-4.6" and g.get("label") == "Grok Build 4.6" and g.get("enabled") is True
+          and efs[:1] == ["xhigh"],
+          "R160 (a) grokbuild plans grok-4.6, labelled so, with xhigh on top of its effort ladder",
+          repr((g.get("model"), g.get("label"), efs)))
+    pro = sorted(n for n, c in ch.items() if isinstance(c, dict) and "mimo-v2.6-pro" in str(c.get("model", ""))
+                 and c.get("enabled", True))
+    om, mp = ch.get("ormimopro") or {}, ch.get("mimov26pro") or {}
+    check(om.get("enabled") is False and om.get("distribution") == "both" and mp.get("enabled") is False and not pro,
+          "R160 (b) MiMo v2.6 Pro is off by default: ormimopro (distribution both) and mimov26pro; no enabled channel "
+          "serves it", "enabled MiMo Pro: %s" % pro)
+
+    def kit_off(r):
+        return sorted(n for n, c in (r.get("channels") or {}).items() if isinstance(c, dict)
+                      and c.get("distribution") == "kit" and not c.get("enabled", True))
+    neg = copy.deepcopy(reg)
+    neg["channels"]["orspark13cont"]["distribution"] = "kit"
+    check(not kit_off(reg) and kit_off(neg) == ["orspark13cont"],
+          "R160 (c) no channel is `distribution: kit` and off (package.py would ship it ON); the control with "
+          "orspark13cont back at kit + off is reported", "live=%s control=%s" % (kit_off(reg), kit_off(neg)))
+    kit = copy.deepcopy(reg)
+    for c in kit["channels"].values():                    # package.py's two distribution flips
+        if not isinstance(c, dict):
+            continue
+        if c.get("distribution") == "local" and c.get("enabled", True):
+            c["enabled"] = False
+        elif c.get("distribution") == "kit" and not c.get("enabled", True):
+            c["enabled"] = True
+    kch = kit["channels"]
+    rows, bad = [], []
+    for panel in ("cheap", "standard"):
+        try:
+            res = rt.resolve(copy.deepcopy(kit), panel=panel, tier="max", ready=lambda _n: True)
+            plan = res[0] if isinstance(res, tuple) else res
+        except Exception as exc:                          # noqa: BLE001
+            bad.append("%s RAISED %r" % (panel, exc))
+            continue
+        on = sorted(n for n, p in plan.items() if p.get("enabled"))
+        cont = [n for n in on if "muse-spark" in str((kch.get(n) or {}).get("model", ""))
+                and str((kch.get(n) or {}).get("model", "")).endswith("-contributor")]
+        rows.append("%s %d: %s" % (panel, len(on), ",".join(on)))
+        if ({"ormimopro", "mimov26pro"} & set(on) or cont != ["spark12cont"]
+                or (plan.get("grokbuild") or {}).get("model") != "grok-4.6"):
+            bad.append(panel)
+    check(not bad, "R160 (d) the kit-shaped cheap and standard plans run no MiMo Pro and no Spark 1.3 Contributor, one "
+          "Spark Contributor voice (spark12cont), and grokbuild at grok-4.6", " | ".join(rows + bad))
+    named = []
+    for n in ("ormimopro", "mimov26pro", "orspark13cont"):
+        try:
+            res = rt.resolve(copy.deepcopy(kit), only=[n], tier="max", ready=lambda _n: True)
+            plan = res[0] if isinstance(res, tuple) else res
+        except Exception:                                 # noqa: BLE001
+            continue
+        if (plan.get(n) or {}).get("enabled"):
+            named.append(n)
+    check(named == ["ormimopro", "mimov26pro", "orspark13cont"],
+          "R160 (e) by name each of ormimopro / mimov26pro / orspark13cont still starts", repr(named))
+
+
+def suite_keys_read_policy():
+    """2026-10-22, Igor: «Разреши ему читать ключи. Нельзя читать только моделям, которые бесплатные или обучаются
+    (contributor), остальным можно.» (a) channel_may_read_keys: NO for cost free or contributor, YES otherwise, NO for
+    an unknown channel; (b) every Contributor channel in the registry carries contributor: true (derived from the
+    registry, so a new one cannot ship without it); (c) call_grokcli with keys_ok gets only the metered-MCP --deny
+    rule and its operating context says key files are open and never to be copied into the reply; without keys_ok it
+    gets every rule and is told how its shell gate refuses; the log line says which; (d) the --task context follows
+    keys_ok; (e) every call_grokcli call site passes keys_ok from channel_may_read_keys (call sites counted, the
+    R50 class); (f) the live registry: grokbuild YES, every free channel and every contributor NO.
+    """
+    import inspect
+    import tempfile
+    import routing as rt
+    import orchestrate as o
+    section("Key files: free and contributor channels may not read them, every other channel may (Igor 22.10)")
+    reg = rt.load_registry(overlay=False)
+    ch = reg.get("channels") or {}
+    fn = getattr(o, "channel_may_read_keys", None)
+    fake = {"channels": {"paid": {"cost": "subscription"}, "free1": {"cost": "free"}, "free2": {"cost": " Free "},
+                         "contrib": {"cost": "subscription", "contributor": True}, "metered": {"cost": "metered"}}}
+    got = {n: (fn(n, fake) if fn else None) for n in ("paid", "free1", "free2", "contrib", "metered", "nosuch")}
+    check(got == {"paid": True, "free1": False, "free2": False, "contrib": False, "metered": True, "nosuch": False},
+          "keys (a) channel_may_read_keys: subscription / metered YES; free, contributor, unknown NO", repr(got))
+    labelled = sorted(n for n, c in ch.items() if isinstance(c, dict)
+                      and (n.endswith("cont") or "contributor" in str(c.get("label", "")).lower()))
+    missing = [n for n in labelled if ch[n].get("contributor") is not True]
+    check(bool(labelled) and not missing,
+          "keys (b) every Contributor channel in the registry carries contributor: true (%d found)" % len(labelled),
+          repr(missing or labelled))
+
+    td = tempfile.mkdtemp(prefix="keys-policy-")
+    seen = []
+
+    class _GrokDone:
+        returncode = 0
+        stdout = '{"text": "ok\\nKEYS-DONE", "stopReason": "end_turn"}'
+        stderr = ""
+
+    def _run(cmd, **kw):
+        seen.append(list(cmd))
+        return _GrokDone()
+
+    saved = (o.subprocess.run, o.grok_bin, o.neutral_cwd)
+    out = {}
+    try:
+        o.neutral_cwd = lambda: td
+        o.grok_bin = lambda: "grok.exe"
+        o.subprocess.run = _run
+        for tag, k in (("open", True), ("shut", False)):
+            wd = os.path.join(td, "grok-" + tag)
+            try:
+                o.call_grokcli("BRIEF", "KEYS-DONE", wd, os.path.join(td, tag + ".md"), bypass=True, keys_ok=k)
+                argv = seen[-1]
+                pr = open(os.path.join(o._ascii_safe_workdir(os.path.abspath(wd), "grokbuild", "grokbuild"),
+                                       "PROMPT.md"), encoding="utf-8").read()
+                out[tag] = ([argv[i + 1] for i, x in enumerate(argv) if x == "--deny"], pr)
+            except Exception as exc:        # noqa: BLE001 - the old signature has no keys_ok: a FAIL, not a crash
+                out[tag] = (None, repr(exc)[:160])
+    finally:
+        o.subprocess.run, o.grok_bin, o.neutral_cwd = saved
+    d_open, p_open = out.get("open", (None, ""))
+    d_shut, p_shut = out.get("shut", (None, ""))
+    check(d_open == ["MCPTool(firecrawl__*)"] and "are not blocked in this run" in p_open
+          and "never copy a key, token or password" in p_open and "denied by rule" not in p_open,
+          "keys (c) grok with keys_ok: only the metered-MCP rule, no Read rule; told key files are open and never to "
+          "be copied into the reply", repr(d_open)[:200])
+    check(d_shut is not None and "MCPTool(firecrawl__*)" in d_shut and "Read(**/auth.json)" in d_shut
+          and "Read(**/.ssh/**)" in d_shut and "denied by rule" in p_shut and "is refused in this unattended run" in p_shut,
+          "keys (c) grok without keys_ok: every rule, and told its shell gate refuses a command whose files it cannot "
+          "tell", repr(d_shut)[:200])
+    note_open = o._grok_tools_note(True, False, True) if d_open is not None else ""
+    note_shut = o._grok_tools_note(True, False, False) if d_open is not None else ""
+    check("READABLE" in note_open and "Read(" not in note_open and "Read(**/auth.json)" in note_shut
+          and "denied (a free or contributor channel)" in note_shut,
+          "keys (c) the log line says which: key files READABLE, or the rules it denies", note_open[-160:])
+    gtc = getattr(o, "_grok_task_context", None)
+    t_open = gtc(True) if gtc else ""
+    check(gtc is not None and gtc(False) == o.GROK_TASK_CONTEXT and "refuses credential files" not in t_open
+          and "are not blocked for you" in t_open and "never copy a key, token or password" in t_open
+          and "_grok_task_context(keys_ok)" in inspect.getsource(o.call_grokcli),
+          "keys (d) the --task context says the same as the --deny rules the call carries", t_open[-200:])
+    src = "\n".join(ln.split("#", 1)[0] for ln in inspect.getsource(o).splitlines())   # comments name it too
+    sites = src.count("call_grokcli(") - src.count("def call_grokcli(") + src.count("call_grokcli,")
+    passed = src.count("keys_ok=channel_may_read_keys(cname, reg)")
+    check(sites == 3 and passed == sites,
+          "keys (e) every call_grokcli call site passes keys_ok=channel_may_read_keys(cname, reg) (%d of %d)"
+          % (passed, sites), "sites %d, passing %d" % (sites, passed))
+    free = sorted(n for n, c in ch.items() if isinstance(c, dict) and str(c.get("cost")).lower() == "free")
+    contrib = sorted(n for n, c in ch.items() if isinstance(c, dict) and c.get("contributor") is True)
+    leak = [n for n in free + contrib if fn and fn(n, reg)]
+    check(bool(fn) and fn("grokbuild", reg) is True and free and contrib and not leak,
+          "keys (f) the registry: grokbuild may read key files; %d free and %d contributor channels may not"
+          % (len(free), len(contrib)), repr(leak or [ch.get("grokbuild", {}).get("cost")]))
 
 
 if __name__ == "__main__":

@@ -128,11 +128,11 @@ channel launches with its vendor's own bypass flag:
 | Channel | Kind | Flag added under bypass | Flag replaced |
 |---|---|---|---|
 | `codex` | codex-cli 0.154.0 | `--dangerously-bypass-approvals-and-sandbox` | `--sandbox read-only` |
-| `grokbuild` | grok 1.0.46 | `--permission-mode bypassPermissions`, and since v1.100.0 NO `--tools` allowlist (full toolset + MCP gateway; firecrawl MCP and credential files denied by rule) | `--permission-mode dontAsk` + the web-only allowlist |
+| `grokbuild` | grok 1.0.46 | `--permission-mode bypassPermissions`, and since v1.100.0 NO `--tools` allowlist (full toolset + MCP gateway; firecrawl MCP denied by rule; credential files readable - a paid channel, see below) | `--permission-mode dontAsk` + the web-only allowlist |
 | `nvkimik3` (and the local `kimik3free`) | kimi 2.1.1 | none: `-p` already runs every tool with no prompt (vendor default; `--auto` next to `-p` is refused, so it was dropped in v1.100.1). The safety directive rides every brief, the child env is an allowlist with no other vendor's key, and since v1.107.0 a timeout stops the agent's own commands too | — |
 | `agy31pro` / `36flash` / `38flash` | agy 1.2.2 | `--dangerously-skip-permissions` | `--sandbox` |
 | `cclopus46` | claude 2.1.270 | `--permission-mode bypassPermissions` (always on since v1.61.0) | — |
-| `ocmimo26flashfree`, `ocnemotron3ultrafree`, `ocglm53flashfree`, `ocdeepseekv41flashfree` (and `ocspark13go` when you switch it on) | opencode | (no field on purpose — `opencode run` is already YOLO by default) | — |
+| `ocmimo26flashfree`, `ocnemotron3ultrafree`, `ocglm53flashfree`, `ocdeepseekv41flashfree` (and `ocspark12go` / `ocspark13go` when you switch one on) | opencode | (no field on purpose — `opencode run` is already YOLO by default) | — |
 
 `opencode` is intentionally excluded: its `run` subcommand runs with all permissions bypassed by
 default, so the concept has no per-channel switch to toggle. The dispatcher passes `bypass=` only
@@ -146,6 +146,25 @@ in the user's config runs without a prompt too, with its credentials. On `grokbu
 in force), so bypass hands the model this machine's readable files. This is the operator's
 decision to trust the reviewer with the mechanical guard OFF, not a permission the tool grants
 itself.
+
+**Key and credential files (`.env*`, `~/.ssh`, `~/.gnupg`, `auth.json`, CLI configs).** The owner's
+rule since 2026-10-22: a channel whose registry `cost` is `free`, or that carries `contributor: true`
+(a training-data tier), may not read them; every other channel may (`channel_may_read_keys` in
+`orchestrate.py`). It is ENFORCED only where the CLI has a rule for it: on a Grok channel the
+key-file `--deny Read(...)` rules go to a free or contributor channel and to no other, so `grokbuild`
+(a subscription) can read them and is told never to copy a key into its reply. A side effect of
+those rules, from Grok's own docs: while any Read rule is set, a shell command whose files Grok
+cannot tell is refused in an unattended run. The other CLIs carry no key-file rule today, whatever
+their cost; until they do, what keeps a free voice out of these files is not a mechanism: in the
+kit, the cheap panel's two free opencode voices (`ocmimo26flashfree`, `ocnemotron3ultrafree`) are
+not kept out of key files today, and neither is a Kimi Code CLI channel you switch on. Under
+`--task` the TASK DIRECTIVE follows the same answer: a free or contributor channel is told never to
+open credential files, any other may read one the task needs and never copy a key into a file or its
+report. Environment variables are a separate path: Grok's `[shell_environment_policy]` drops
+`*KEY*` / `*SECRET*` / `*TOKEN*` names from its shell only when a config sets
+`ignore_default_excludes = false` (measured 2026-10-22 on Windows, no sandbox: with no policy its
+shell saw all 5 test names; with that one setting the three secret-pattern names were gone). With no
+such setting, every Grok channel's shell sees the variables of the shell that started the harness.
 
 **🔴 The `command(*)` shell fence disappears on agy under bypass** (R57, measured in
 `patch_agy_permissions.py:71-74`): `--dangerously-skip-permissions` makes agy ignore the

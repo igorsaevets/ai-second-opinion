@@ -192,6 +192,14 @@ ocmimo26flashfree` or "only ocmimo26flashfree". To forget the refusal, delete
 `~/.claude/model-orchestration.quota-state.json`; the next run starts the voice again (and
 writes the file again if it is refused).
 
+### "A Grok run says GROK SUBSCRIPTION LIMIT"
+
+xAI refused the turn with HTTP 402: the usage your Grok subscription includes is used up, and
+every Grok run on this machine stops the same way until it is back (on 2026-10-22 it was the
+weekly limit; buying more usage on the account restored it at once). It is not the brief and not
+this tool, and the other voices' answers stand. `LINGERED` on a Grok run is something else: Grok
+finished its turn but its process did not exit, so the tool stopped it and kept the answer.
+
 ### "It worked yesterday"
 
 Compare yesterday's `diagnostics.json` with today's. This is why the file is written on **every**

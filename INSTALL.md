@@ -497,9 +497,9 @@ export MODEL_API_KEY="<your key>"
 
 To point at a different endpoint, also set `MODEL_API_BASE`.
 
-**No Meta key?** `--ask` works without one. Its first channel is Muse Spark: `spark13cont` with
-this key, otherwise `orspark13cont` on the OpenRouter key (the same Contributor model and price;
-with the README's OpenCode Go overlay on, `ocspark13go` comes first). The free `ocspark13free` that
+**No Meta key?** `--ask` works without one. Its first channel is Muse Spark 1.2 Contributor: `spark12cont` with
+this key, otherwise `orspark12cont` on the OpenRouter key (the same Contributor model and price;
+with the README's OpenCode Go overlay on, `ocspark12go` comes first). The free `ocspark13free` that
 used to come first is switched off: its free model left opencode on 2026-10-17. The opencode CLI's free voices answer every `--ask` as
 well, key or no key. Without the opencode CLI, an OpenRouter key makes `--ask` ask Nemotron 3 Ultra
 through `ornemotron3ultra`, a free model on OpenRouter (with opencode it answers there instead): the
@@ -540,7 +540,7 @@ illustration, not a schema.**
 ### OpenRouter — `OPENROUTER_API_KEY`
 
 One key serves **every channel that routes through OpenRouter** — the largest part of the panel,
-including `orspark13cont`, the Spark voice for anyone without a `MODEL_API_KEY`. Do not count
+including `orspark12cont`, the Spark voice for anyone without a `MODEL_API_KEY`. Do not count
 those channels from this file; `python routing.py` prints the live list and spends nothing.
 
 **No account yet?** Register at **openrouter.ai** (an email address or a Google/GitHub sign-in
@@ -564,10 +564,10 @@ export OPENROUTER_API_KEY="<your key>"
 > the provider on the same account. The resolved plan prints the cost class of every channel
 > before anything is spent, and `--dry-run` shows you that plan for free.
 
-> `orspark13cont` runs Meta's *Contributor* tier through OpenRouter — discounted because the
+> `orspark12cont` runs Meta's *Contributor* tier through OpenRouter — discounted because the
 > vendor may train on what you send (see [PRIVACY.md](PRIVACY.md)) — with an automatic fallback
 > to the Standard, non-training tier if the Contributor endpoint fails for your account: Muse
-> Spark 1.3 at $1.25 / $4.25 per 1M tokens, 12.5× the Contributor input price (the channel's spend
+> Spark 1.2 at $1.25 / $4.25 per 1M tokens, 12.5× the Contributor input price (the channel's spend
 > guard stops a review at $1.00). When `MODEL_API_KEY` is absent (without the Go overlay), `--ask` starts with this channel:
 > the choice comes from `ask_default` in `channels.json` and is printed when it fires.
 
@@ -619,7 +619,7 @@ until 00:00 UTC (the README's cheap panel section says what the harness then doe
 so for that voice and what to do; `opencode models` is the live list.
 
 **Every `--ask` goes to the two free voices too.** Its first channel is Muse Spark, which since
-1.113.3 needs a key: `spark13cont` (`MODEL_API_KEY`) or `orspark13cont` (`OPENROUTER_API_KEY`),
+1.113.3 needs a key: `spark12cont` (`MODEL_API_KEY`) or `orspark12cont` (`OPENROUTER_API_KEY`),
 both paid. On a machine with neither, that line fails with «MODEL_API_KEY not set»; that is not
 fatal, and the free voices still answer.
 
@@ -673,6 +673,14 @@ this in `~/.claude/model-orchestration.local.json`:
 ```
 { "channels": { "mcwonder10cont": { "explicit_only": false } } }
 ```
+
+The registry also holds Muse Code channels for Muse Spark 1.3 (`mcspark13`, its fallback
+`mcspark12`) and Wonder Standard (`mcwonder10`). They ship switched off (the kit's Spark voice is
+an API one) and start when you name one or switch it on in your settings file; `musecode` /
+«muse code» is a group word, and like every group it runs only the members that are on. Since
+1.113.8 every Muse Code call passes `--contributor-mode` from the channel's model id: with contributor mode on in
+Muse Code's own settings, a request for the Standard `muse-spark-1.3` was answered by the
+Contributor model (measured 2026-10-22).
 
 ### Codex CLI
 

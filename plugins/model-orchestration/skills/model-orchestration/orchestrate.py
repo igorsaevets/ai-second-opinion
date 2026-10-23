@@ -1748,6 +1748,20 @@ KNOWN_FAILURES = [
      "the MCP servers your ~/.grok/config.toml (and any plugin) starts; set `enabled = false` "
      "under `[mcp_servers.<name>]` for the server the note names, or `--skip grokbuild` until "
      "then. Re-running blind repeats the 40-minute wait."),
+    (r"GROK SUBSCRIPTION LIMIT",
+     "xAI refused the turn with HTTP 402 «Grok Build usage balance exhausted»: the usage the Grok "
+     "subscription includes is used up. It stops every Grok run on the machine at the same moment "
+     "(2026-10-22 09:43:53Z: two harness runs in one second); the brief and this harness are not "
+     "the cause.",
+     "Wait until the subscription's limit is back (2026-10-22 it was the weekly limit) or buy more "
+     "usage on the Grok account - that restored it at once. Until then `--skip grokbuild`; a "
+     "re-run fails the same way."),
+    (r"Grok's own session [^\n]*turn ended: completed",
+     "Grok finished its turn, but its answer did not end with the end marker (or was empty), and "
+     "its process did not exit afterwards - so the run met its timeout.",
+     "Read the answer in Grok's own session folder named in the error (chat_history.jsonl, the "
+     "`assistant` lines); the harness keeps a finished answer only when the marker is on its last "
+     "line. A longer timeout would not help."),
     (r"Grok's own session record: none found",
      "Grok left no session record for this run where the harness looks (<GROK_HOME>/sessions/, "
      "under the session id it gave grok, then the run's folder): it stopped before it opened a "
@@ -2893,6 +2907,23 @@ def cli_bypass_active(name, args, reg):
     return bool(slot.get("bypass_permissions"))
 
 
+def channel_may_read_keys(name, reg):
+    """May this channel's CLI read key and credential files (auth.json, .env*, ~/.ssh, CLI configs) here?
+
+    Igor 2026-10-22: «Разреши ему читать ключи. Нельзя читать только моделям, которые бесплатные или
+    обучаются (contributor), остальным можно.» So NO for a channel whose registry `cost` is `free` or
+    that carries `contributor: true` (a training-data tier), YES for every other one. Read from the
+    registry on every call, so a new free or contributor channel is covered without an edit here; an
+    unknown channel is NO. Why it matters beyond the keys: while Grok has ANY Read deny rule, its own
+    checker refuses a shell command whose files it cannot tell (9 of 1,125 calls since its 1.0.62
+    auto-update, memory r165-grok-turn-ended) - a channel allowed to read keys gets no such rule.
+    """
+    slot = (reg or {}).get("channels", {}).get(name)
+    if not slot:
+        return False
+    return str(slot.get("cost") or "").strip().lower() != "free" and slot.get("contributor") is not True
+
+
 # 🔴 THE PANEL COMPARED "MODEL + HIDDEN PROMPT" WHILE CLAIMING TO COMPARE MODELS.
 # Raised independently by codex and qwen38max in the round-29 review, and both were right:
 # `_system_for` composes a DIFFERENT system prompt per channel, and diagnostics.json recorded
@@ -3592,6 +3623,32 @@ GROK_BYPASS_DENY_RULES = ("MCPTool(firecrawl__*)", "Read(**/.env*)", "Read(**/.s
                           "Read(**/.cursor/mcp.json)", "Read(**/.kimi-code/config.toml)",
                           "Read(**/.kimi/config.*)", "Read(**/mcp_credentials.json)",
                           "Read(**/.grok/sessions/**)")
+# 🔴 2026-10-22, Igor: «Разреши ему читать ключи. Нельзя читать только моделям, которые бесплатные или
+# обучаются (contributor), остальным можно.» The key-file rules below are passed ONLY when
+# channel_may_read_keys() says no (a free or contributor channel); grokbuild is a subscription and
+# gets the metered-MCP rule alone. A side effect that made this matter: with ANY Read deny rule Grok
+# refuses, in a headless run, a shell command whose files it cannot tell (its docs, user-guide
+# 22-permissions-and-safety.md, Rule Matching Reference; seen since its 1.0.62 auto-update).
+GROK_KEY_FILE_DENY_RULES = tuple(r for r in GROK_BYPASS_DENY_RULES if r.startswith("Read("))
+
+
+def _grok_deny_rules(keys_ok):
+    """The --deny rules one Grok call gets under bypass: all of them, or all but the key-file ones."""
+    if keys_ok:
+        return tuple(r for r in GROK_BYPASS_DENY_RULES if r not in GROK_KEY_FILE_DENY_RULES)
+    return GROK_BYPASS_DENY_RULES
+
+
+# What the operating context tells Grok about key files - the same branch as the --deny rules, so the
+# text cannot claim a rule the argv does not carry (the prose-is-a-claim class).
+GROK_KEYS_OPEN_NOTE = (
+    "Credential files (.env*, .ssh, .gnupg, CLI configs) are not blocked in this run; open one only "
+    "when the brief needs it, and never copy a key, token or password into your reply. ")
+GROK_KEYS_DENIED_NOTE = (
+    "Credential files (.env*, .ssh, .gnupg, CLI configs) are denied by rule - do not try to read them. "
+    "Because of that rule, a shell command whose files cannot be told from its text (a loop or a "
+    "variable as a path, $(...), a recursive search, an inline script) is refused in this unattended "
+    "run: name the files explicitly, one command per call, or use read_file / grep. ")
 # 🔴🔴 R150 (13.10.2026): GROK BUILD IMPORTS THE SETUP OF THREE OTHER VENDORS' CLIs, AND ONE IMPORTED
 # MCP SERVER HUNG EVERY RUN. By design (~/.grok/README.md §Claude Code Compatibility) it loads
 # Claude Code's MCP servers (~/.claude.json), skills, rules (~/.claude/CLAUDE.md + rules/*.md),
@@ -3758,7 +3815,7 @@ def _grok_session_note(cwd, t0, before=None, sid=None):
     _mt, ev = cands[-1]
     sid = os.path.basename(os.path.dirname(ev))
     starts, failed, decode, last, turn = collections.defaultdict(list), [], [], None, None
-    refused = 0
+    refused, nxt, after = 0, [], 0          # R165: the first call that completed after a refusal
     try:
         with open(ev, encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -3779,6 +3836,10 @@ def _grok_session_note(cwd, t0, before=None, sid=None):
                     lst = starts.get(safe(e.get("tool_name")) or "?")
                     if lst:
                         lst.pop(0)
+                    if refused:
+                        after += 1
+                        if not nxt:
+                            nxt.append((safe(e.get("tool_name")), safe(e.get("outcome"))))
                 elif t == "permission_resolved" and e.get("decision") == "deny":
                     # R150 И-4 (probe_i4f.py, grok 1.0.52): a call a deny rule refuses has
                     # tool_started and permission_resolved{decision: deny} but NO tool_completed -
@@ -3810,7 +3871,7 @@ def _grok_session_note(cwd, t0, before=None, sid=None):
             pend[0][1], hms(pend[0][0]),
             " (%d more pending)" % (len(pend) - 1) if len(pend) > 1 else ""))
     if refused:
-        parts.append("%d tool call(s) refused by a deny rule" % refused)
+        parts.append(_grok_refusal_text(refused, os.path.dirname(ev), nxt, after))
     if any(failed):
         parts.append("MCP servers that failed at start: " + ", ".join(sorted(set(filter(None, failed)))))
     if any(decode):
@@ -3823,6 +3884,229 @@ def _grok_session_note(cwd, t0, before=None, sid=None):
            "it), the newest" % len(cands)) if len(cands) > 1 else ""
     return "Grok's own session %s (%s/.../%s)%s%s: %s" % (sid[:13], where, sid, amb, via,
                                                          "; ".join(parts) or "empty record")
+
+
+# R165 (Krasinski panel, 2026-10-22): Grok's turn ended `completed` at 08:42:40Z with a 17 KB answer
+# ending in the marker, but grok.exe never reached its normal `session_end.worker_join` (~/.grok/logs/
+# unified.jsonl: 34 of the 38 processes there log it right after the prompt is done) and idled on
+# `skills_reload` events until this harness killed it at 40 min - and threw the answer away. Over
+# every grokbuild record on this machine (runs/r165-grok-turn-ended/i1/grok_timeout_census.py) that
+# is 1 run of 456; a normal run returns 2.6-4.7 s after its turn ends (6 runs matched byte-exact).
+# The cause inside Grok is not traced (4 min earlier the model had killed a background shell
+# command and a jina MCP transport had closed), so the harness watches the TURN, not the cause.
+GROK_LINGER_GRACE = 30      # s after `turn_ended` before a still-live grok is stopped (normal: < 5 s)
+GROK_POLL = 5               # s between two looks at Grok's own record while it runs
+# The two refusals a bypass run can meet, by the vendor's own words (R165 census of every Grok
+# session here: the first is Grok's gate for a command whose files it cannot tell while Read/Edit
+# deny rules exist - 9 of 1,125 shell calls, all after its 1.0.62 auto-update; the second is one of
+# our --deny rules matching). A refusal message is short and opens with its reason (105-346 chars,
+# the phrase within the first 140); a page or a file that QUOTES the phrase is not a refusal.
+GROK_REFUSED_UNCHECKABLE = "could not be checked against the permission rules"
+GROK_REFUSED_BY_RULE = "Denied by permission policy"
+
+
+def _grok_session_dir(sid):
+    """The folder Grok keeps THIS run's session in - `<GROK_HOME>/sessions/<any group>/<sid>` - or
+    None (not written yet, or never)."""
+    if not sid:
+        return None
+    base = os.path.join(_grok_home(), "sessions")
+    try:
+        for g in os.listdir(base):
+            d = os.path.join(base, g, sid)
+            if os.path.isdir(d):
+                return d
+    except OSError:
+        pass
+    return None
+
+
+def _grok_turn_end(sid, st):
+    """(outcome, ts) once Grok's own record of this run holds `turn_ended`, else None. Reads only the
+    bytes added since the last look - `st` keeps the folder and the offset (events.jsonl reaches
+    500 KB); a half-written last line is read on the next look."""
+    if not st.get("dir"):
+        st["dir"] = _grok_session_dir(sid)
+        if not st["dir"]:
+            return None
+    try:
+        with open(os.path.join(st["dir"], "events.jsonl"), "rb") as f:
+            f.seek(st.get("pos", 0))
+            chunk = f.read()
+    except OSError:
+        return None
+    cut = chunk.rfind(b"\n") + 1
+    st["pos"] = st.get("pos", 0) + cut
+    for line in chunk[:cut].splitlines():
+        if b'"turn_ended"' not in line:
+            continue
+        try:
+            e = json.loads(line.decode("utf-8", "replace"))
+        except ValueError:
+            continue
+        if isinstance(e, dict) and e.get("type") == "turn_ended":
+            return (str(e.get("outcome") or "?"), str(e.get("ts") or ""))
+    return None
+
+
+def _grok_session_answer(sid):
+    """(text, outcome) rebuilt from Grok's OWN record of this run: every `assistant` line of
+    chat_history.jsonl joined, and the `turn_ended` outcome (None while the turn has not ended).
+
+    R165 positive control (runs/r165-grok-turn-ended/i1/salvage_control2.py, 126 ok grokbuild runs
+    whose session is still on disk): the join equals the `text` the CLI printed in 113 of them, and
+    in all 126 the CLI's text ENDS with the last assistant line - the review itself (the other 13
+    open with a narration line the record keeps elsewhere). Assistant text only, never a tool's
+    output."""
+    d = _grok_session_dir(sid)
+    if not d:
+        return "", None
+    parts = []
+    try:
+        with open(os.path.join(d, "chat_history.jsonl"), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if '"assistant"' not in line:
+                    continue
+                try:
+                    o = json.loads(line)
+                except ValueError:
+                    continue
+                if (isinstance(o, dict) and o.get("type") == "assistant"
+                        and isinstance(o.get("content"), str)):
+                    parts.append(o["content"])
+    except OSError:
+        return "", None
+    te = _grok_turn_end(sid, {})
+    return "".join(parts), (te[0] if te else None)
+
+
+def _grok_refusals(sdir):
+    """(refused by Grok's own check, refused by one of our --deny rules) in this session's record,
+    told apart by the vendor's own words (GROK_REFUSED_*). Tool results only - a brief or an answer
+    that quotes the phrase is not a refusal - and only short ones that open with it."""
+    a = b = 0
+    try:
+        with open(os.path.join(sdir, "chat_history.jsonl"), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if "tool_call_id" not in line or (GROK_REFUSED_UNCHECKABLE not in line
+                                                  and GROK_REFUSED_BY_RULE not in line):
+                    continue
+                try:
+                    o = json.loads(line)
+                except ValueError:
+                    continue
+                c = o.get("content") if isinstance(o, dict) else None
+                c = c if isinstance(c, str) else json.dumps(c)
+                if len(c) > 1500:
+                    continue
+                if GROK_REFUSED_UNCHECKABLE in c[:400]:
+                    a += 1
+                elif GROK_REFUSED_BY_RULE in c[:400]:
+                    b += 1
+    except (OSError, TypeError):
+        pass
+    return a, b
+
+
+def _grok_refusal_text(n, sdir, nxt, after):
+    """R165: «N tool call(s) refused» said WHO refused and what the model did next. The operator
+    read «refused by a deny rule» in a bypass run as this harness forbidding something; in Krasinski
+    it was Grok's own gate, and the model went on and completed its turn."""
+    a, b = _grok_refusals(sdir)
+    a = min(a, n)
+    b = min(b, n - a)
+    kinds = []
+    if a:
+        kinds.append("%d by GROK'S OWN CHECK, not a harness rule (a shell command whose files it "
+                     "could not tell while Read/Edit deny rules exist; headless, nobody can approve "
+                     "it)" % a)
+    if b:
+        kinds.append("%d by a --deny rule this harness passes (credential files, the metered "
+                     "firecrawl server)" % b)
+    if n > a + b:
+        kinds.append("%d with no reason in Grok's record" % (n - a - b))
+    went = (("; the model went on: next `%s` (%s)%s" % (
+        nxt[0][0] or "?", nxt[0][1] or "?",
+        ", then %d more tool call(s)" % (after - 1) if after > 1 else ""))
+        if nxt else "; no tool call completed after it")
+    return "%d tool call(s) refused - %s%s" % (n, "; ".join(kinds), went)
+
+
+def _grok_limit_note(stderr, raw, secs):
+    """R165: xAI's HTTP 402 «Grok Build usage balance exhausted» (the R163 panel and iron P336 hit it
+    in the same second, 2026-10-22 09:43:53Z; R121 before) = the subscription's usage is used up, for
+    EVERY Grok run on the machine at once - Igor 2026-10-22: «Да, на grok недельный лимит
+    закончился, купил больше токенов.» Read from what grok PRINTED only: its session record holds
+    the brief too, and a brief may quote this very message."""
+    hay = "%s\n%s" % (stderr or "", raw or "")
+    if not (re.search(r"\b402\b", hay) and re.search(r"Payment Required|balance exhausted", hay, re.I)):
+        return None
+    what = ("Grok Build usage balance exhausted" if re.search(r"usage balance exhausted", hay, re.I)
+            else "402 Payment Required")
+    # «%.0fs», never «%.0f s»: KNOWN_FAILURES reads a bare `\b429\b` as a rate limit
+    return ("GROK SUBSCRIPTION LIMIT - xAI refused the turn with HTTP 402 «%s» after %.0fs: the "
+            "usage your Grok subscription includes is used up, so every Grok run on this machine "
+            "stops the same way until it is back (2026-10-22 it was the weekly limit; buying more "
+            "usage on the account restored it at once). Not the brief and not this harness."
+            % (what, secs))
+
+
+def _grok_cli_version(binary):
+    """`grok --version` of the binary THIS run starts. R165: the record's `environment` block is
+    read when the record is WRITTEN, and grok updates itself - 1.0.67 landed 2 min after the
+    Krasinski record was written, 1.0.62 had come in unasked on 10-17 with the shell gate.
+    None under the selftest's subprocess seam, like _grok_imports_check."""
+    if subprocess.run is not _STDLIB_SUBPROCESS_RUN:
+        return None
+    return _binary_version(binary)
+
+
+def _run_grok(cmd, timeout, env, sid):
+    """_run_tree for grok (R165): the same tree kill at `timeout`, plus a look at Grok's own record
+    every GROK_POLL s. Once the run's turn has ENDED, a grok still alive GROK_LINGER_GRACE s later is
+    stopped (whole tree) and the run goes on with what it printed - call_grokcli reads the answer
+    from the session record when grok printed nothing (`--output-format json` prints at exit).
+
+    Returns (CompletedProcess, info): `turn` = (outcome, ts) when the turn ended while grok was
+    alive, `lingered` = seconds waited after seeing it. A turn that never ends is still a
+    TimeoutExpired (with whatever was printed). Under the selftest's subprocess seam it defers to
+    subprocess.run with _run_tree's arguments - no watch there; suite R165 runs the real one."""
+    info = {}
+    if subprocess.run is not _STDLIB_SUBPROCESS_RUN:
+        return subprocess.run(cmd, timeout=timeout, capture_output=True, text=True,
+                              encoding="utf-8", env=env), info
+    kw = {} if os.name == "nt" else {"start_new_session": True}
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         encoding="utf-8", errors="replace", env=env, **kw)
+    t0, seen, st = time.time(), None, {}
+    try:
+        while True:
+            try:
+                out, err = p.communicate(timeout=GROK_POLL)
+                return subprocess.CompletedProcess(cmd, p.returncode, out, err), info
+            except subprocess.TimeoutExpired:
+                pass
+            now = time.time()
+            stop = now - t0 >= timeout
+            if seen is None and not stop:
+                te = _grok_turn_end(sid, st)
+                if te:
+                    info["turn"], info["turn_seen_at"], seen = te, round(now - t0, 1), now
+            if stop or (seen is not None and now - seen >= GROK_LINGER_GRACE):
+                _kill_tree(p)
+                try:
+                    out, err = p.communicate(timeout=15)
+                except subprocess.TimeoutExpired:
+                    out = err = None           # a process outside the tree still holds a pipe
+                if seen is None:
+                    raise subprocess.TimeoutExpired(cmd, timeout, output=out, stderr=err)
+                info["lingered"] = round(time.time() - seen, 1)
+                rc = p.returncode if p.returncode is not None else -1
+                return subprocess.CompletedProcess(cmd, rc, out or "", err or ""), info
+    except BaseException:
+        if p.poll() is None:
+            _kill_tree(p)
+        raise
 
 
 def _grok_imports_active(j):
@@ -3898,12 +4182,15 @@ def _grok_imports_check(binary, cwd, env):
     return _grok_imports_summary(j) + (_grok_imports_active(j),)
 
 
-def _grok_tools_note(bypass, file_refs):
+def _grok_tools_note(bypass, file_refs, keys_ok=False):
     """The log line's account of the toolset - written from the same branch that builds argv."""
     if bypass:
         return (", tools: FULL (no allowlist: files at any path, grep, shell, web, MCP gateway); "
-                "removed %d, denied: %s" % (len(GROK_BYPASS_REMOVED_TOOLS),
-                                            ", ".join(GROK_BYPASS_DENY_RULES)))
+                "removed %d, denied: %s; key files: %s" % (
+                    len(GROK_BYPASS_REMOVED_TOOLS), ", ".join(_grok_deny_rules(keys_ok)),
+                    "READABLE (a paid channel, not contributor - Igor 2026-10-22)" if keys_ok else
+                    "denied (a free or contributor channel); a shell command whose files Grok "
+                    "cannot tell is refused in this unattended run"))
     if file_refs:
         return (", tools: web + READ (read_file, list_dir) for the attached paths; "
                 "no shell, no grep, no MCP")
@@ -3917,7 +4204,8 @@ def grok_bin():
 
 
 def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
-                 timeout=None, system=None, name="grokbuild", file_refs=False, bypass=False):
+                 timeout=None, system=None, name="grokbuild", file_refs=False, bypass=False,
+                 keys_ok=False):
     """Grok Build - xAI's own CLI, on the SUBSCRIPTION, not the metered api.x.ai key.
 
     A different thing from the `grok420` channel despite the shared vendor: that one is
@@ -3989,7 +4277,7 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     # read_file/list_dir, and an agent told its tools will refuse does not use the tools it was
     # given. The refs variant grants reads and re-states the no-write contract.
     if getattr(_TASK, "ctx", None) is not None:
-        NO_REPO = GROK_TASK_CONTEXT          # R138 И-1: --task (bypass is required there)
+        NO_REPO = _grok_task_context(keys_ok)   # R138 И-1: --task (bypass is required there)
     elif bypass:
         NO_REPO = (
             "OPERATING CONTEXT — read this first.\n"
@@ -3998,8 +4286,8 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
             "toolset with permission prompts bypassed: read_file / list_dir / grep at any "
             "absolute path, run_terminal_command for shell commands (git, glab, gh, ssh, python - "
             "read-only use), web_search / web_fetch, and this machine's MCP servers through "
-            "search_tool / use_tool (the metered firecrawl server is denied). Credential files "
-            "(.env*, .ssh, .gnupg, CLI configs) are denied by rule - do not try to read them. "
+            "search_tool / use_tool (the metered firecrawl server is denied). "
+            + (GROK_KEYS_OPEN_NOTE if keys_ok else GROK_KEYS_DENIED_NOTE) +
             "Verify claims yourself with these tools instead of reasoning from the brief alone, "
             "and say which sources you could not open. READ ONLY: modify, create or delete "
             "nothing outside a scratch folder under the system TEMP directory, and never write to "
@@ -4117,7 +4405,7 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
             i = cmd.index(flag)
             del cmd[i:i + 2]
         cmd += ["--disallowed-tools", ",".join(GROK_BYPASS_REMOVED_TOOLS)]
-        for rule in GROK_BYPASS_DENY_RULES:
+        for rule in _grok_deny_rules(keys_ok):
             cmd += ["--deny", rule]
     if model:
         cmd += ["-m", model]
@@ -4134,7 +4422,7 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
         "brief via --prompt-file (%d chars), neutral cwd, memory off, imports from Claude Code / "
         "Cursor / Codex OFF (%d GROK_*_ENABLED=0; plugins still load)%s"
         % (name, effort or "vendor default", len(text_in), len(GROK_COMPAT_OFF),
-           _grok_tools_note(bypass, file_refs)))
+           _grok_tools_note(bypass, file_refs, keys_ok)))
     genv = _grok_child_env()
     imp_log, imp_note, imp_active = _grok_imports_check(binary, gcwd, genv)
     if imp_log or imp_note:
@@ -4152,12 +4440,16 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     sid = str(uuid.uuid4())
     cmd += ["--session-id", sid]
     before = _grok_session_files(gcwd)     # R150 И-3: what was in the folder is not this run's
+    cli_ver = _grok_cli_version(binary)    # R165: the binary THIS run starts (grok updates itself)
+    if cli_ver:
+        log("  [%s] grok CLI: %s" % (name, cli_ver))
     t0 = time.time()
+    ginfo = {}
     try:
-        # _run_tree, not subprocess.run (R150 И-2): a timeout must also stop the MCP servers grok
-        # started - subprocess.run kills grok.exe alone and leaves them running.
-        p = _run_tree(cmd, capture_output=True, text=True, encoding="utf-8",
-                      timeout=_seconds(timeout, 2400), env=genv)
+        # _run_grok (R165), not subprocess.run: _run_tree's tree kill on a timeout (R150 И-2: the
+        # MCP servers grok started die too), plus a watch on Grok's own record - a run whose turn
+        # has ENDED is stopped GROK_LINGER_GRACE s later instead of at the timeout.
+        p, ginfo = _run_grok(cmd, _seconds(timeout, 2400), genv, sid)
     except FileNotFoundError:
         # 🔴 WITHOUT THIS THE CHANNEL CRASHES ON EVERY MACHINE THAT DOES NOT HAVE THE CLI, which
         # is every machine except the author's. Measured 2026-08-16 by pointing GROK_BIN at a
@@ -4176,11 +4468,26 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
         # after - a channel that reports a failure differently from its siblings is a reporting
         # bug even when every fact in it is true.
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         sn = _grok_session_note(gcwd, t0, before, sid)
-        return {"channel": name, "ok": False, "text": "", "seconds": round(time.time() - t0, 1),
-                "error": "TIMEOUT after %s - %s" % (timeout or "40m", sn), "model": model,
-                "warnings": ["TIMEOUT"], "notes": [imp_note] if imp_note else []}
+        late = exc.output if isinstance(exc.output, str) else ""
+        stext, outcome = _grok_session_answer(sid)
+        try:
+            ltext = (json.loads(late).get("text") or "") if late.strip() else ""
+        except (ValueError, AttributeError):
+            ltext = ""
+        ltext = ltext or stext
+        if not (outcome == "completed" and ltext.strip()
+                and (not marker or _marker_on_last_line(ltext, marker))):
+            return {"channel": name, "ok": False, "text": "", "seconds": round(time.time() - t0, 1),
+                    "error": "TIMEOUT after %s - %s" % (timeout or "40m", sn), "model": model,
+                    "warnings": ["TIMEOUT"], "notes": [imp_note] if imp_note else [],
+                    "cli_version": cli_ver}
+        # R165 backstop: the watch never saw the turn end while grok ran (no record found then),
+        # but Grok's own record says it ENDED, completed, with the whole answer - the Krasinski
+        # run, reported «TIMEOUT» with the answer on disk until R165.
+        p = subprocess.CompletedProcess(cmd, -1, late, exc.stderr if isinstance(exc.stderr, str) else "")
+        ginfo = {"turn": ("completed", ""), "late": True}
     secs = time.time() - t0
     raw = (p.stdout or "").strip()
     warn, note = [], []
@@ -4194,12 +4501,46 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
         # next person to debug the model.
         warn.append("CLI DID NOT RETURN JSON (exit=%d): %s"
                     % (p.returncode, (raw or p.stderr or "")[:300]))
+    source = "stdout"
+    if not text.strip() and ginfo.get("turn"):
+        # R165: grok was stopped after its turn ended and printed nothing (`--output-format json`
+        # prints at exit) - the answer is in Grok's own record of this run.
+        stext, outcome = _grok_session_answer(sid)
+        if stext.strip() and outcome == "completed":
+            text, data, source, warn = stext, {}, "grok-session", []
+    if ginfo.get("late"):
+        note.append("TIMEOUT after %s, but Grok's own record says the turn had ENDED (completed): "
+                    "the answer is complete (end marker on its last line) and was read from %s. "
+                    "The harness did not see the turn end while grok ran, so it waited the whole "
+                    "timeout." % (timeout or "40m", "what grok printed" if source == "stdout"
+                                  else "Grok's own session record"))
+        log("  [%s] TIMEOUT, but the turn had ended (completed) - answer kept (%s)"
+            % (name, source))
+    elif ginfo.get("lingered") is not None:
+        oc, ts = ginfo["turn"]
+        hm = re.search(r"\d\d:\d\d:\d\d", ts or "")
+        note.append("LINGERED - Grok's turn ended (%s)%s, but the grok process did not exit; the "
+                    "harness stopped it %.0f s later (a normal run exits within 5 s) and kept "
+                    "what it had%s. A Grok-side hang after the turn, not a failure of the answer."
+                    % (oc, " at " + hm.group(0) + "Z" if hm else "", ginfo["lingered"],
+                       " - read from Grok's own session record (grok prints its JSON only at exit)"
+                       if source == "grok-session" else ""))
+        log("  [%s] turn ended (%s) at +%.0fs, but grok did not exit - stopped %.0fs later; %s"
+            % (name, oc, ginfo.get("turn_seen_at") or 0, ginfo["lingered"],
+               "answer kept (%s)" % source if text.strip() else "no answer in it"))
     if p.returncode != 0 and not text:
-        warn.append("EXIT %d: %s" % (p.returncode, scrub(p.stderr or raw or "")[:300]))
+        lim = _grok_limit_note(p.stderr, raw, secs)
+        if lim:
+            # R165: one line that says what happened; the «END MARKER» line below would only
+            # repeat that there is no answer
+            warn = [lim]
+        else:
+            warn.append("EXIT %d: %s" % (p.returncode, scrub(p.stderr or raw or "")[:300]))
     if text:
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
-    if marker and not _marker_on_last_line(text, marker):
+    if marker and not _marker_on_last_line(text, marker) and not (
+            warn and warn[0].startswith("GROK SUBSCRIPTION LIMIT")):
         warn.append("END MARKER NOT ON LAST LINE - output is partial, do not parse it")
     if not text.strip() and not warn:
         warn.append("EMPTY OUTPUT despite exit 0")
@@ -4233,6 +4574,9 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
             # absence.
             "usd_reported_unverified": data.get("total_cost_usd"),
             "turns": data.get("num_turns"),
+            # R165: what ran (grok updates itself) and where the answer came from
+            "cli_version": cli_ver, "answer_source": source if text.strip() else None,
+            "lingered_s": ginfo.get("lingered"),
             "warnings": warn, "notes": note}
 
 
@@ -4751,6 +5095,22 @@ def _opencode_limit(cname, reg=None):
     return None
 
 
+def _opencode_billing_line(cname, model=None, reg=None):
+    """routing.opencode_billing for one opencode channel, its `cost` (and with no model its model) read from the
+    registry like _opencode_limit. R158 И-2: the call log and the preflight said «free model, no API key» for every
+    opencode channel, a per-token wokey.ai one included."""
+    try:
+        if reg is None:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import routing
+        if reg is None:
+            reg = routing.load_registry()
+        ch = (reg.get("channels") or {}).get(cname) or {}
+        return routing.opencode_billing(model or ch.get("model"), ch.get("cost"))
+    except Exception as exc:                             # noqa: BLE001 - a log line never kills a run
+        return "billing UNKNOWN (the registry could not be read: %s)" % exc.__class__.__name__
+
+
 # R153 И-5 (G10, measured on a local stand-in provider, $0 - runs/r153-t107-kimi-mimo/i5/oc_prompt_probe.py and
 # oc_prompt_arms.py): opencode 2.0.29 put the HOME folder's `~/AGENTS.md` - found by walking up from neutral_cwd(),
 # which on Windows sits under home - into every reviewer's prompt: 57 101 chars with it, 40 536 without.
@@ -4983,9 +5343,10 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     elif oc_info["note"]:
         log("  [%s] %s" % (name, oc_info["note"]))
 
-    # R146 И-3: the opencode-go/ provider is Igor's OpenCode Go plan, not the free tier.
-    how = ("OpenCode Go plan (opencode's own login), counted against the plan's limits"
-           if base_model.startswith("opencode-go/") else "free model, no API key")
+    # R146 И-3: the opencode-go/ provider is Igor's OpenCode Go plan, not the free tier. R158 И-2: and a provider of
+    # the user's own opencode config (wokey.ai) is PAID per call - the phrase comes from the model's provider and
+    # the registry's `cost` (routing.opencode_billing), never from the kind.
+    how = _opencode_billing_line(name, base_model)
     log("  [%s] opencode CLI v2, %s; brief via stdin (%d chars), model=%s"
         % (name, how, len(text_in), base_model))
     t0 = time.time()
@@ -6821,7 +7182,15 @@ def _musecode_stderr(stderr):
 
 def call_musecode(brief, marker, outfile, model=None, effort=None, system=None, timeout=2700,
                   name="mcwonder10cont", max_steps=None):
-    """Muse Code CLI (Meta) on the user's SUBSCRIPTION - Wonder 1.0 Contributor here (R149 И-2).
+    """Muse Code CLI (Meta) on the user's SUBSCRIPTION - Wonder 1.0 Contributor (R149 И-2); Spark 1.3 / 1.2 and
+    Wonder 1.0 in Standard mode (R164: mcspark13, its fallback mcspark12, mcwonder10).
+
+    R164, measured live 2026-10-22 on 1.4.11-R6667.1 (runs/r164-muse-code-spark/i1/): Igor's plan serves
+    muse-spark-1.3, muse-spark-1.2 and muse-wonder-1.0 with contributor mode off; an invented id exits 1 «does not
+    exist or you lack access» (the status facet still echoes the id it asked for - only a completed answer proves
+    a model). Spark 1.3 effort, reasoning tokens n=2: xhigh 2855-5083, max 7709-12488 (disjoint), ultra 3909-6114
+    (accepted, below max). The posture and the named toolset still hold: 2 tools offered, a page fetched, no write
+    or shell tool, no approval request.
 
     Measured live 2026-10-13 on 1.4.7-R6101.1 (runs/r149-muse-wonder/i2/, 7 subscription prompts):
       * `exec --json --prompt-file F`: the prompt never rides argv (R137: a cmd.exe shim cuts argv at
@@ -6853,12 +7222,19 @@ def call_musecode(brief, marker, outfile, model=None, effort=None, system=None, 
         + ["--no-foreign-personal-context", "--disable-reminders", "--user-input-auto-resolve"]
     if effort:
         cmd += ["--reasoning-effort", str(effort)]
+    # 🔴 R164 (measured 2026-10-22, 1.4.11-R6667.1): Contributor mode is ON by default in Muse Code and the CLI
+    # SWAPS the model for it - `--model muse-spark-1.3` with the user's default settings was served as
+    # muse-spark-1.3-contributor, with `--contributor-mode off` as muse-spark-1.3. Meta names the mode by the
+    # model id (dev.meta.ai/docs/models.md: «muse-spark-1.3 for Standard mode or muse-spark-1.3-contributor for
+    # Contributor mode»), so the flag follows the id this run asks for - never the user's default.
+    cmode = "on" if str(model).endswith("-contributor") else "off"
+    cmd += ["--contributor-mode", cmode]
     if max_steps:
         cmd += ["--max-model-steps", str(int(max_steps))]
     cmd += ["-c", "run.toolset=" + json.dumps(list(MUSECODE_TOOLSET))]
     log("  [%s] Muse Code CLI on the subscription login (no API key in its env); prompt via file "
-        "(%d chars), model=%s, effort=%s, %s, tools: %s"
-        % (name, len(text_in), model, effort or "default", " ".join(MUSECODE_POSTURE),
+        "(%d chars), model=%s, effort=%s, contributor mode %s, %s, tools: %s"
+        % (name, len(text_in), model, effort or "default", cmode, " ".join(MUSECODE_POSTURE),
            ", ".join(MUSECODE_TOOLSET)))
     t0 = time.time()
     try:
@@ -7048,6 +7424,27 @@ OAI_PROVIDERS = {
         # fix it, and a comment is not a check. See transport_damage(), which stays on for every
         # channel either way.
         "streaming": False,
+    },
+    # R162 (2026-10-22), Igor: «nemotron 3 ultra бесплатно работает и через nvidia nim может его только через тот
+    # канал сделать и как fallback https://openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b:free». NVIDIA's own
+    # free endpoint (the key NVIDIA_NIM_API_KEY, the same one nvkimik3's CLI uses). MEASURED 2026-10-22 on
+    # nvidia/nemotron-3-ultra-550b-a55b (runs/r162-nemotron-nvidia/): top-level `reasoning_effort` bites - none
+    # 0 reasoning chars / 4 completion tokens (2/2), high 91-131 chars / 38-63 tokens (2/2), disjoint; an invented
+    # value is a 400 («unknown variant `bogus`, expected one of none ... max»), so the field is validated.
+    # 🔴 That 400 lists the PARAMETER's enum (R43): the API reference gives this model none / medium / high, and
+    # `max` / `xhigh` return 200 with the same 32 prompt tokens as `high` (medium renders 39), so high is its top.
+    # Streaming = SSE with `reasoning_content` deltas and usage in the last frame (stream_options) - streamed
+    # on purpose: the reference also documents a 202 «queued» reply that an unstreamed client cannot follow.
+    # No search on this endpoint: the voice gets the brief plus our fetch_url tool only.
+    "nvidia": {
+        "label": "NVIDIA NIM (free endpoint)",
+        "url": os.environ.get("NVIDIA_NIM_BASE", "https://integrate.api.nvidia.com/v1") + "/chat/completions",
+        "key_env": "NVIDIA_NIM_API_KEY",
+        "headers": {},
+        "depth": "effort_field",     # body["reasoning_effort"] = reasoning.effort (+ reasoning_budget if set)
+        "search": "none",
+        "usage_request": "openai",   # body["stream_options"] = {"include_usage": True}
+        "streaming": True,
     },
 }
 
@@ -7677,6 +8074,16 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         if reasoning:
             log("  [%s] note: `reasoning` in the registry is ignored on %s - this vendor has a "
                 "single on/off thinking switch and no effort ladder" % (name, prov["label"]))
+    elif prov["depth"] == "effort_field":
+        # R162: NVIDIA NIM takes the effort as a TOP-LEVEL field (`reasoning_effort`) and an optional token cap on the
+        # trace (`reasoning_budget`, NVIDIA's default 16384 when absent). Measured: see OAI_PROVIDERS["nvidia"].
+        r = reasoning if isinstance(reasoning, dict) else {}
+        body["reasoning_effort"] = r.get("effort") or "high"
+        if r.get("budget") is not None:
+            body["reasoning_budget"] = int(r["budget"])
+    if (web or {}).get("enabled") and prov.get("search") == "none":
+        log("  [%s] note: `web` is on in the registry, but %s has no search - the voice gets the brief and the "
+            "page-fetch tool only" % (name, prov["label"]))
     if prov["usage_request"] == "openrouter":
         body["usage"] = {"include": True}
     elif streaming:
@@ -7958,6 +8365,7 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                          "was not dispatched (the in-loop breaker can only arm after the first "
                          "billed round, which would already have spent money)." % usd_ceiling}
     spend_stop = False
+    time_stop, time_stop_s, round_max_s = False, 0.0, 0.0     # R163 И-3 (A8): the TIME BUDGET block below
     # 🔴 THE FORCED-ANSWER ROUND HAD NO EXIT, and that was true of the fetch-budget path too since
     # it was written. `body.pop("tools")` is what normally stops the model asking for another page,
     # so in practice the next turn is the answer and the loop ends - but "in practice" is doing all
@@ -8083,7 +8491,9 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
 
     try:
         for _round in range(max_rounds + 1):
+            _t_round = time.time()
             chunk, rch, use, calls, served, _fin = _stream_with_retry(body)
+            round_max_s = max(round_max_s, time.time() - _t_round)
             rounds_done += 1
             # The FINAL round's finish_reason is the one that ended the answer; a tool round's
             # `tool_calls` value is overwritten by whatever the last generation reports.
@@ -8138,9 +8548,22 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                     "the vendor's - raise spend_guard.max_usd_per_review in channels.json if "
                     "this review is worth more."
                     % (name, usd_tot, usd_max_round, usd_ceiling))
-            if not calls or not fetch_on or fetches >= max_rounds or spend_stop:
-                if calls and (fetches >= max_rounds or spend_stop):
-                    if not spend_stop:
+            # R163 И-3 (A8, panel r163): THE CHANNEL'S `timeout` NOW BOUNDS THE PAGE FETCHING TOO. urlopen's timeout
+            # is an IDLE limit per request, so a tool loop whose rounds each stream steadily never trips it: Step 5
+            # on NVIDIA's free endpoint ran 4,478 s under «20m» (8 fetches, 335K input tokens, ~8 min a round).
+            # Same shape and headroom rule as the spend ceiling above: stop when the NEXT round, at the slowest
+            # round's pace so far, would end past the timeout; one final no-tools turn then answers from what was
+            # read - so a review ends within its timeout plus at most one more round. Reasoning and the answer are
+            # untouched (Igor: «токенов на размышление урезать не надо»); only further page opening stops.
+            if (not time_stop and not spend_stop and calls and fetch_on and fetches < max_rounds and timeout
+                    and time.time() - start + round_max_s >= timeout):
+                time_stop, time_stop_s = True, time.time() - start
+                log("  [%s] ⏱ TIME BUDGET: %.0f s used of the channel's %d s timeout and the slowest round took "
+                    "%.0f s, so the next one would end past it. No further page fetches; asking for the answer "
+                    "as it stands." % (name, time_stop_s, timeout, round_max_s))
+            if not calls or not fetch_on or fetches >= max_rounds or spend_stop or time_stop:
+                if calls and (fetches >= max_rounds or spend_stop or time_stop):
+                    if not spend_stop and not time_stop:
                         log("  [%s] fetch budget of %d reached; asking for the answer as it stands"
                             % (name, max_rounds))
                     # Tell the model rather than silently dropping its request: an unanswered
@@ -8158,6 +8581,11 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                                 "and says nothing about the page. Answer from what you already "
                                 "have, and say plainly which questions you could not settle."
                                 if spend_stop else
+                                "REFUSED: the time budget for this review is spent, so no further "
+                                "pages may be opened. This is the harness's limit and says nothing "
+                                "about the page. Answer from what you already have, and say plainly "
+                                "which questions you could not settle."
+                                if time_stop else
                                 "REFUSED: the fetch budget for this review is spent. Answer from "
                                 "what you already have and mark anything unverified.")
                     for i, c in enumerate(calls):
@@ -8614,6 +9042,11 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # not exist yet. Assigning `[]` here would have discarded it silently.
     note = list(fallback_notes)
     record_refusal(refusal_check(text, marker), warn, note)
+    if time_stop:
+        note.append("TIME BUDGET: page fetching stopped after %.0f s of this channel's %d s timeout (R163 И-3), "
+                    "and the answer was written from the %d page(s) already read. A question it left open may "
+                    "need a longer `timeout` for this channel in your settings file."
+                    % (time_stop_s, timeout, fetches))
     # Tokens are SUMMED across tool rounds, not taken from the last response. Each round re-sends
     # the whole conversation, so the final call's prompt_tokens is only the last leg and reading
     # it as the total under-reports the round - on a fetch-heavy review, by most of the bill.
@@ -8789,6 +9222,7 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             "usd": round(usd_tot, 6) if usd_seen else None,
             "usd_rounds": rounds_done if usd_seen else None,
             "spend_stopped": True if spend_stop else None,
+            "time_stopped": True if time_stop else None,      # R163 И-3 (A8)
             "cached_in_tokens": cached_tot or None,
             # 🔴🔴 THIS KEY WAS MISSING ENTIRELY, ON SIX OF ELEVEN CHANNELS, AND THE REPORT PRINTED
             # A COLUMN FOR IT. `report.py` and the run summary both read `r.get("reasoning_tokens")`
@@ -9614,6 +10048,7 @@ def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, 
                 log("  [%s] fallback for %s: %s" % (fb, cname, ("OK - %s bytes" % _fr.get("bytes"))
                                                     if _fr.get("ok") else "FAILED too"))
         log("-" * 78)
+    # R163 И-3: no chain - a fallback that also ends with no answer ends there (routing.apply_fallback says why).
 
 
 _SNAPSHOT_MONTH_DAYS = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
@@ -9922,11 +10357,10 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
     for c in sorted(by_kind.get("opencode", [])):
         b = opencode_bin()
         if os.path.isfile(b) or shutil.which(b):
-            # R146 И-3: an opencode-go/ model runs on the OpenCode Go plan's login and limits.
+            # R146 И-3: an opencode-go/ model runs on the OpenCode Go plan's login and limits. R158 И-2: the phrase
+            # comes from the model's provider + the registry's `cost` (a wokey.ai channel is PAID, not «free»).
             _ocm = str(((plan or {}).get(c) or {}).get("model") or "")
-            yield ("%s: opencode CLI present (%s); %s"
-                   % (c, b, "OpenCode Go plan (opencode's own login), counted against its limits"
-                      if _ocm.startswith("opencode-go/") else "free model, no API key needed"))
+            yield ("%s: opencode CLI present (%s); %s" % (c, b, _opencode_billing_line(c, _ocm)))
     for c in sorted(by_kind.get("claudecli", [])):
         b = claudecli_bin()
         if os.path.isfile(b) or shutil.which(b):
@@ -10685,9 +11119,11 @@ def _run_agy(cmd, timeout=3600, cwd=None, stdout_path=None, env=None):
 
     secs = time.time() - t0
     if zombie_killed:
-        log("  [agy] stream completed (result event at +%.0fs), zombie terminated at "
-            "+%.0fs (saved ~%.0fs of idle wait)"
-            % (result_seen - t0, secs, timeout - secs))
+        # R165: «zombie terminated» read as a second failure to the session that ran the
+        # Krasinski panel - this is agy's normal ending since R80 and the answer is complete.
+        log("  [agy] answer complete (result event at +%.0fs); agy does not exit on its own after "
+            "a finished stream, so the harness stopped it at +%.0fs - normal, nothing lost (~%.0fs "
+            "of idle wait saved)" % (result_seen - t0, secs, timeout - secs))
 
     class _R:
         __slots__ = ("returncode", "stderr", "stdout")
@@ -11593,14 +12029,41 @@ GROK_TASK_CONTEXT = (
     "tool refuses credential files (.env*, .ssh, .gnupg, CLI configs); do not read them any "
     "other way either (no shell type, cat or copy). Follow the TASK DIRECTIVE on where you may "
     "write, and end with the TASK REPORT it describes.\n\n---\n\n")
+_GROK_TASK_KEYS_DENIED = ("Your read tool refuses credential files (.env*, .ssh, .gnupg, CLI configs); do not read "
+                          "them any other way either (no shell type, cat or copy). ")
+# R165 И-2: this used to add «but the TASK DIRECTIVE asks you not to open them» - the directive itself now follows
+# the same channel_may_read_keys answer (_task_directive keys_ok), so a paid Grok task is no longer told both.
+_GROK_TASK_KEYS_OPEN = ("Credential files (.env*, .ssh, .gnupg, CLI configs) are not blocked for you: open one when "
+                        "the task needs it, and never copy a key, token or password into a file or your report. ")
 
 
-def _task_directive(workdir, remote):
+def _grok_task_context(keys_ok):
+    """GROK_TASK_CONTEXT with its key-file sentence matching the --deny rules this call carries."""
+    if not keys_ok:
+        return GROK_TASK_CONTEXT
+    head, sep, tail = GROK_TASK_CONTEXT.partition(_GROK_TASK_KEYS_DENIED)
+    if not sep:                     # the text drifted: never ship a sentence claiming a rule we dropped
+        raise RuntimeError("GROK_TASK_CONTEXT no longer carries its key-file sentence")
+    return head + _GROK_TASK_KEYS_OPEN + tail
+
+
+_TASK_KEYS_SHUT = ("Never open credential files (any .env, ~/.ssh/, ~/.gnupg/, CLI configs, token stores), "
+                   "with any tool.")
+_TASK_KEYS_OPEN = ("Credential files (any .env, ~/.ssh/, ~/.gnupg/, CLI configs, token stores) are open to you: "
+                   "read one when the task needs it, and never copy a key, token or password into a file or your "
+                   "report.")
+
+
+def _task_directive(workdir, remote, keys_ok=False):
     """The rules of a --task run. They ride at the FRONT of the brief (R40: a rule in the brief
     is obeyed, the same rule in a persona slot is not), where the review safety directive sits.
     R138 И-2 (cheap panel on 1.101.0): a write is defined by its EFFECT and covers the scripts a
     CLI runs, installs and repositories; an unsent remote write is described without credentials
-    and the rest of the task still gets done; CHECK is read-only; report keywords stay English."""
+    and the rest of the task still gets done; CHECK is read-only; report keywords stay English.
+    R165 И-2 (Igor 2026-10-22: «Нельзя читать только моделям, которые бесплатные или обучаются
+    (contributor), остальным можно» - and the point is fewer bans on paid models): the credential-
+    file sentence follows channel_may_read_keys. keys_ok False (a free or contributor channel, and the
+    default) keeps «Never open credential files»; True opens them, and only copying a key is barred."""
     if remote:
         rem = ("REMOTE SYSTEMS: the operator allows remote WRITES to exactly these systems, and only "
                "for the purpose named - anything else on them stays read-only:\n"
@@ -11635,8 +12098,7 @@ def _task_directive(workdir, remote):
             "created, edited or deleted, no package installed (pip, npm -g, winget; a venv or "
             "node_modules INSIDE your workdir is fine), no git fetch, pull, checkout or commit in a "
             "repository there (clone it into your workdir instead), no environment variable, "
-            "registry key, scheduled task or service. Never open credential files (any .env, "
-            "~/.ssh/, ~/.gnupg/, CLI configs, token stores), with any tool.\n"
+            "registry key, scheduled task or service. %s\n"
             "\n"
             "%s"
             "\n"
@@ -11653,7 +12115,7 @@ def _task_directive(workdir, remote):
             "  REMOTE WRITES: none, or one line per write (system - what), or NOT SENT lines\n"
             "  CHECK: one READ-ONLY command the operator can run to verify the result (it changes "
             "nothing and sends nothing)\n"
-            % (workdir, rem))
+            % (workdir, _TASK_KEYS_OPEN if keys_ok else _TASK_KEYS_SHUT, rem))
 
 
 def _project_marker_above(path, skip_home=False):
@@ -11834,13 +12296,17 @@ def _task_job(kind, cname, p, cbrief, a, reg, system, outfile, hwork, use_refs, 
     """Run ONE channel's task with its own workdir as cwd (thread-local, see _TASK)."""
     try:
         _TASK.workdir, _TASK.ctx = wdir, {"remote": list(a.allow_remote or [])}
-        tb = _task_directive(wdir, a.allow_remote) + "\n---\n\n" + cbrief
+        # R165 И-2: the directive asks the same channel_may_read_keys as grok's --deny rules below, so the text
+        # and the rules cannot disagree (passed by position: suite_keys_read_policy (e) counts the keyword spelling
+        # at the call_grokcli sites)
+        tb = _task_directive(wdir, a.allow_remote, channel_may_read_keys(cname, reg)) + "\n---\n\n" + cbrief
         sysp = _system_for(system, p)
         if kind == "grokcli":
             return call_grokcli(tb, a.marker, hwork, outfile, model=p.get("model"),
                                 effort=p.get("effort"), timeout=p.get("timeout") or "40m",
                                 system=sysp, name=cname, file_refs=use_refs,
-                                bypass=bool(cli_bypass_active(cname, a, reg)))
+                                bypass=bool(cli_bypass_active(cname, a, reg)),
+                                keys_ok=channel_may_read_keys(cname, reg))
         if kind == "opencode":
             return call_opencode(tb, a.marker, outfile, model=p.get("model"),
                                  effort=p.get("effort"), system=sysp,
@@ -13024,7 +13490,8 @@ def main():
                                         timeout=p.get("timeout") or "40m",
                                         system=_system_for(system, p), name=cname,
                                         file_refs=use_refs,
-                                        bypass=bool(cli_bypass_active(cname, a, reg)))
+                                        bypass=bool(cli_bypass_active(cname, a, reg)),
+                                        keys_ok=channel_may_read_keys(cname, reg))
             elif kind == "hermes":
                 jobs[cname] = ex.submit(call_hermes, cbrief, a.marker, outfile,
                                         model=p.get("model"), toolsets=p.get("toolsets"),
@@ -13194,7 +13661,8 @@ def main():
                 timeout=p.get("timeout") or "40m",
                 system=_system_for(system, p), name=cname,
                 file_refs=use_refs,
-                bypass=bool(cli_bypass_active(cname, a, reg)))
+                bypass=bool(cli_bypass_active(cname, a, reg)),
+                keys_ok=channel_may_read_keys(cname, reg))
         elif kind == "hermes":
             return _rex.submit(
                 call_hermes, cbrief, a.marker, outfile,
@@ -13824,6 +14292,11 @@ def main():
     # bill was about $13, because orgpt56terrapro's $12.08 landed in the "reports no price" list
     # below and qwen38max's $0.97 was reported as $0.43. A cost report that is most wrong on the
     # round that spent the most is not a partial answer, it is a misleading one.
+    _tstopped = sorted(c for c, r in results.items() if r.get("time_stopped"))
+    if _tstopped:                                       # R163 И-3 (A8): free channels too, so not under `priced`
+        log("  TIME BUDGET fired on: %s - those channels stopped opening pages at their `timeout` and answered "
+            "from what they had. Raise that channel's `timeout` in your settings file if an answer came back "
+            "thin." % ", ".join(_tstopped))
     priced = {c: r["usd"] for c, r in results.items() if r.get("usd") is not None}
     if priced:
         unpriced = sorted(c for c in results if c not in priced)
@@ -14072,7 +14545,12 @@ def main():
         for name in order:
             r = results[name]
             body = _strip_marker_tail(r.get("text"), a.marker)
-            extra = "" if name == a.ask_channel or len(order) == 1 else "   (free second voice)"
+            # R158 И-2: the label follows that voice's `cost` - a channel named beside the first one can be PAID.
+            extra = ""
+            if name != a.ask_channel and len(order) > 1:
+                _cost = (((reg or {}).get("channels") or {}).get(name) or {}).get("cost")
+                extra = "   (%s)" % (routing.ask_voice_label(_cost) if routing is not None
+                                     and hasattr(routing, "ask_voice_label") else "second voice")
             print("\n" + "=" * 78)
             print("ANSWER  [%s]%s%s" % (name, extra,
                                         "" if r.get("ok") else "   ⚠ the channel reported a "
