@@ -408,8 +408,9 @@ disagreement this tool exists to produce. Everything else is optional.
 
 | what it needs | what that unlocks | cost |
 |---|---|---|
-| the opencode CLI v2 (`npm install -g @opencode/cli`) | two **free** voices, in the cheap panel and in every `--ask`: `ocmimo26flashfree` (MiMo v2.6 Flash) and `ocnemotron3ultrafree` (Nemotron 3 Ultra); `ocglm53flashfree` (GLM 5.3 Flash) answers once when MiMo Flash fails, `ocdeepseekv41flashfree` (DeepSeek V4.1 Flash) only when named. The free Spark 1.3 (`ocspark13free`) is gone since 2026-10-17 | **free** |
-| ~~the Kimi Code CLI + `NVIDIA_NIM_API_KEY`~~ — **not needed since 1.112.0** ([why](#kimi-code-cli-retired-free-kimi-k3-through-nvidia)) | `nvkimik3` ships switched off: NVIDIA retired its free Kimi K3 on 2026-10-15. Kimi K3 answers in the standard panel through `OPENROUTER_API_KEY` (`kimik3`) | — |
+| the opencode CLI v2 (`npm install -g @opencode/cli`) | two **free** voices, in the cheap panel and in every `--ask`: `ocmimo26flashfree` (MiMo v2.6 Flash) and `ocnemotron3ultrafree` (Nemotron 3 Ultra, when you have no NVIDIA key); with `NVIDIA_NIM_API_KEY` the cheap panel also runs `ocstep5previewnv` (Step 5 Preview) here; `ocglm53flashfree` (GLM 5.3 Flash) answers once when MiMo Flash fails, `ocdeepseekv41flashfree` (DeepSeek V4.1 Flash) only when named. The free Spark 1.3 (`ocspark13free`) is gone since 2026-10-17 | **free** |
+| `NVIDIA_NIM_API_KEY` (free, [below](#nvidia--nvidia_nim_api_key)) | since 1.114.0 two **free** voices on NVIDIA's own endpoint: Step 5 Preview (`ocstep5previewnv` through opencode, `nvstep5preview` without it) and Nemotron 3 Ultra (`nvnemotron3ultra`, before its opencode route) | **free** |
+| ~~the Kimi Code CLI~~ — **not needed since 1.112.0** ([why](#kimi-code-cli-retired-free-kimi-k3-through-nvidia)) | `nvkimik3` ships switched off: NVIDIA retired its free Kimi K3 on 2026-10-15. Kimi K3 answers in the standard panel through `OPENROUTER_API_KEY` (`kimik3`) | — |
 | `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, a Muse Spark voice and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
 | `MODEL_API_KEY` | the Muse Spark voices reached directly from Meta | metered API |
 | the Codex CLI, signed in | `codex` | your existing subscription |
@@ -537,6 +538,33 @@ what this paragraph said before 2026-08-08. Note the documentation's own example
 URLs in that field; the live endpoint does not. **A response example in vendor docs is an
 illustration, not a schema.**
 
+### NVIDIA — `NVIDIA_NIM_API_KEY`
+
+Optional and free, since 1.114.0. One key gives two voices on NVIDIA's own free endpoint: Step 5 Preview
+(StepFun) and Nemotron 3 Ultra. With the opencode CLI installed, Step 5 runs as an opencode agent
+(`ocstep5previewnv`): opencode reads the key under the name `NVIDIA_API_KEY`, and the tool sets that
+name from your `NVIDIA_NIM_API_KEY` in the opencode process only (a `NVIDIA_API_KEY` you set yourself
+is used as it is). Without opencode, Step 5 is an API call (`nvstep5preview`). Nemotron runs on NVIDIA
+first (`nvnemotron3ultra`) and through opencode only without the key. Without the key the plan names
+it («NVIDIA_NIM_API_KEY not set (a free key: build.nvidia.com)») and the Step 5 voice ends at once,
+spending nothing; `--skip ocstep5previewnv` leaves it out.
+
+Create the key at **build.nvidia.com** in **your own browser**: sign in and create an API key.
+
+**Windows (PowerShell)**
+```powershell
+setx NVIDIA_NIM_API_KEY "<your key>"
+```
+
+**macOS / Linux**
+```bash
+export NVIDIA_NIM_API_KEY="<your key>"
+```
+
+> NVIDIA's free endpoints allow about 40 requests a minute, and the queue is slow at times: on
+> 2026-10-23 the first byte took 57–110 s. A Step 5 review has 20 minutes; what it wrote by then is
+> kept.
+
 ### OpenRouter — `OPENROUTER_API_KEY`
 
 One key serves **every channel that routes through OpenRouter** — the largest part of the panel,
@@ -639,8 +667,8 @@ talking to NVIDIA's free endpoint with an `NVIDIA_NIM_API_KEY`. NVIDIA retired t
 
 Since 1.112.0 `nvkimik3` ships switched off and the cheap panel has no Kimi voice. Kimi K3 answers in
 the standard panel through OpenRouter (`kimik3`, about $1.38 a run), and «only kimi» / `--only kimi`
-starts that channel alone. If you installed the CLI and the key for the free route, nothing uses
-them any more; you may remove both. If you start `nvkimik3` by name anyway, the run ends with the
+starts that channel alone. If you installed the CLI for the free route, nothing uses it any more;
+keep the `NVIDIA_NIM_API_KEY`: since 1.114.0 Step 5 Preview and Nemotron 3 Ultra use it ([NVIDIA](#nvidia--nvidia_nim_api_key)). If you start `nvkimik3` by name anyway, the run ends with the
 410 and names the cause: the vendor has retired the model.
 
 ### Muse Code CLI (Muse Wonder on a Muse Code subscription)

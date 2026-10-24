@@ -2,6 +2,19 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.114.0 — 2026-10-24
+
+Free NVIDIA voices, a paid MiMo Flash only where opencode is missing, and timeouts that hold.
+
+- **Step 5 Preview joins the cheap panel, free on NVIDIA's endpoint.** With opencode and an `NVIDIA_NIM_API_KEY` it runs as an opencode agent (`ocstep5previewnv`), without opencode as an API call (`nvstep5preview`); one voice either way. The key is free (build.nvidia.com; INSTALL.md, «NVIDIA»). Without it the plan says «NVIDIA_NIM_API_KEY not set (a free key: build.nvidia.com)» and the voice ends at once, spending nothing.
+- **Nemotron 3 Ultra runs first on NVIDIA's free API** (`nvnemotron3ultra`) when the key is set, then through opencode (`ocnemotron3ultrafree`), then OpenRouter's free copy on the standard panel.
+- **MiMo v2.6 Flash without opencode: a PAID OpenRouter copy** (`ormimo26flash`, $0.14 / $0.28 per 1M tokens, about $0.006 a review; its first live call took 1.9 s and $0.0003). The plan marks it PAID. It is `twin_only`: where opencode is installed it never takes the voice, not when you skip the free copy, not with `--only openrouter` or "without opencode", not on a day the free allowance is spent; name it to pay for it. Until 1.113.9 a machine without opencode lost this voice.
+- **The plan names what is missing.** A group with no member that can run here lists each member's gap («opencode CLI not found», a key with its hint) instead of «its key or CLI is missing».
+- **An API voice's `timeout` bounds the whole call**, inside the read (headers within 300 s, the per-read limit re-armed to the time left, a 300 s stall limit on NVIDIA); a cut answer is kept as partial and never retried automatically. On 1.113.8 one read ran 60 minutes under a 20-minute timeout.
+- **A CLI agent's `timeout` stops its whole process tree** (opencode, mimo, Claude Code). Until 1.113.9 only the launcher (`opencode.CMD` on Windows) was stopped: in our free panel on 2026-10-24 a Step 5 agent held the round 3,980 s against its 1,200 s timeout.
+- **opencode on NVIDIA**: opencode reads `NVIDIA_API_KEY`; the tool copies your `NVIDIA_NIM_API_KEY` into that name in the opencode process only, and the plan's billing line names opencode's own `nvidia` provider and the key.
+- On a machine with every key and CLI the cheap panel is 6 models (was 5), the standard panel 11 (was 10), «CLI only» 5 (was 4); `python routing.py` prints yours. `nvglm53flash` (GLM 5.3 Flash on NVIDIA's free API) ships off, after the opencode GLM in its group.
+
 ## 1.113.9 — 2026-10-23
 
 What a six-model panel found in 1.113.8's notes and README, each claim checked against the shipped code and registry.
@@ -363,15 +376,6 @@ Where a run writes: no new folders in a drive root, and no CLI started under a p
 
 - **Kimi K3 (NVIDIA) timeout raised from 60 to 90 minutes.** P310 in iron-benchmark timed out at 60 minutes with 16 API requests done and 24K output tokens written — Kimi had captured routes and archives but had not started the review itself. The NVIDIA free endpoint's 45–56 s first-token latency on every step means a 6-question brief with SSH and dual-repo access does not fit in an hour.
 
-## 1.108.2 — 2026-10-08
-
-A garbled vendor reply is now named instead of offered for reading; REPORT shows, per model, what it was sent and what it wrote; opencode's token and cost figures come from its own store.
-
-- **A reply that is not language is marked CORRUPTED OUTPUT.** Since 6 October NVIDIA's free `moonshotai/kimi-k3` endpoint has returned, on every Kimi run that produced text (4 of 4 here, 0 of 43 before), its own control tokens (`<|close|>`, `<|reserved_token_N|>`) mixed with fragments of words in several languages. Our request, the Kimi CLI and our code were unchanged; another client reported the same output from the same endpoint (GitHub `Alishahryar1/free-claude-code#2018`). 1.108.1 graded such a reply «UNVERIFIED — text present, read it», put it first in the reading order and blamed the brackets on the transport. Now a reply with three or more control tokens glued to text, or six per cent or more of mixed-script words, is `ok: false` with a «CORRUPTED OUTPUT» warning and banner, REPORT says «🔴 CORRUPTED», HANDOFF tells the reader not to open it, it does not count as an answer, and a run-time fallback still fires. A review that only quotes or discusses these tokens is not flagged (code spans and fences are blanked first); checked on 1 575 saved answers: the 4 garbled ones, no others.
-- **REPORT: «Tokens per model».** For every channel that ran: what we SENT it (the system layer plus the brief as that channel received it, inline attachments and the bypass safety directive included) and what it WROTE, in characters and ≈ tokens (UTF-8 bytes ÷ 4, the harness's existing rule), beside the vendor's own meter, which now says `unknown` instead of `-` where the vendor reports nothing. The same `sent` / `wrote` figures are in `diagnostics.json`. A CLI agent's billed input is routinely 10-50× what was sent: it reads files on its own and re-sends the conversation at every step.
-- **opencode channels: tokens and cost from opencode's own store.** The CLI's JSON stream sometimes carries no per-step usage frame, so the harness under-counted: a live run recorded 93 output tokens and no cost where opencode's store said 2 546 and $0.0097. The harness now reads the session's totals, including sub-agent child sessions, from `opencode.db` (read-only, by the stream's session id, numbers only; never `auth.json`), also after a timeout, and notes when the stream fell short.
-- **Muse Spark on an OpenCode Go plan: the `ocspark13go` channel, off by default.** With an OpenCode Go subscription, `{ "channels": { "ocspark13go": { "enabled": true } } }` in `~/.claude/model-orchestration.local.json` runs Spark on the plan (`#xhigh`, its ceiling: `#max` is refused) and keeps the free `ocspark13free` as its run-time fallback: one Spark per round, and the free one runs only when the plan run gave no answer. A plan-limit stop arrives as `provider.quota`, the same code as the free quota's; its diagnosis now names both and the fallback.
-
 ## Older releases
 
-150 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+151 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).

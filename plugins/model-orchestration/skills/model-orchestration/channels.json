@@ -133,6 +133,7 @@
         "orgemini36flash",
         "orgemini38flash",
         "ormimopro",
+        "ormimo26flash",
         "orgrok420",
         "ornemotron3ultra",
         "ordeepseekv4pro",
@@ -174,7 +175,8 @@
         "mimov26flash",
         "ocmimo26flashfree",
         "mimo25pro",
-        "ormimopro"
+        "ormimopro",
+        "ormimo26flash"
       ],
       "_membership_updated_r142": "R142 (2026-10-04): mimov26flash added (the run-time fallback of mimov26pro), and ocmimo26flashfree, which R133 left out - so «--skip mimo» did not skip a MiMo voice and «--only mimo» did not run it. A group word never starts mimov26flash as a voice (enabled:false, see apply_explicit_only); it is here so that «--skip mimo» also forbids the fallback.",
       "aliases": [
@@ -233,6 +235,7 @@
         "ocdeepseekv41flashfree",
         "ocstep5previewgo",
         "ocminimax31flashgo",
+        "ocstep5previewnv",
         "kimik3free",
         "nvkimik3",
         "mimov26pro",
@@ -265,6 +268,7 @@
         "ocnemotron3ultrafree",
         "ocglm53flashfree",
         "ocdeepseekv41flashfree",
+        "ocstep5previewnv",
         "ocspark13go",
         "ocspark13free",
         "ocstep5previewgo",
@@ -1054,8 +1058,9 @@
       "provider": "nvidia",
       "panel": "cheap",
       "vendor": "nvidia",
-      "enabled": false,
-      "distribution": "local",
+      "enabled": true,
+      "distribution": "both",
+      "_distribution_r168": "R168 И-3 (2026-10-24): both - ships ON in the kit: first in the Nemotron cascade wherever NVIDIA_NIM_API_KEY is set (a free key), then the Zen copy, then OpenRouter :free. NVIDIA first as on the operator's machine since R162: it spares Zen's daily allowance.",
       "_distribution_r162": "R162 (2026-10-22): local - this machine holds NVIDIA_NIM_API_KEY; package.py ships the channel OFF in the kit (a user starts it by name with their own key), so the kit's Nemotron cascade is unchanged (opencode, then OpenRouter :free). Shipping it ON is the owner's kit decision, not taken here.",
       "label": "NV Nemotron 3 Ultra (NVIDIA free)",
       "cost": "free",
@@ -1098,14 +1103,101 @@
       "notes": "Direct OpenAI-protocol call (call_oai_reviewer, provider nvidia): streamed, our fetch_url tool, tokens from the stream's usage frame. 🔴 NVIDIA's free models come and go (kimi-k3 answered 410 on 2026-10-15): GET https://integrate.api.nvidia.com/v1/models is the live list - runs/r162-nemotron-nvidia/nim_nemotron_probe.py prints it and never prints an answer.",
       "_prompt_suffix": "Training-tier by the vendor's own terms, the same as nvkimik3 (NVIDIA API Trial Terms of Service §3.3(iv), read 2026-10-04). package.py strips it from the kit."
     },
+    "ocstep5previewnv": {
+      "read_order": 2,
+      "kind": "opencode",
+      "panel": "cheap",
+      "vendor": "stepfun",
+      "enabled": true,
+      "distribution": "both",
+      "_distribution_r168": "R168 И-3 (2026-10-24): both, on. the operator 2026-10-23: «Step 5 Preview давай добавим тоже в opencode, а если у пользователя в kit нет opencode cli, то срабатывает fallback на просто api». First in the Step 5 cascade; nvstep5preview (the plain API) carries the voice where opencode or the key is missing. Q2's reading: default-on in the kit after D1 (R168 И-2) and one kit-shaped run (R168 И-3's smoke).",
+      "label": "OC Step 5 Preview (opencode + NVIDIA free)",
+      "cost": "free",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "model": "nvidia/stepfun-ai/step-5-preview",
+      "effort": "max",
+      "_effort": "MEASURED 2026-10-24 (runs/r168-free-api-fallback/i3/oc_nv_variant_i3.log): opencode 2.1 takes #max (no «Variant unavailable», answers in 5-7 s), but its step_finish reports 0 reasoning and 0 output tokens on this provider for every arm, so the variant's effect is NOT measured. max = nvstep5preview's ceiling on the same endpoint.",
+      "oc_key": {
+        "env": "NVIDIA_API_KEY",
+        "from": "NVIDIA_NIM_API_KEY"
+      },
+      "_oc_key": "opencode's own nvidia/ provider reads NVIDIA_API_KEY; the harness keeps NVIDIA_NIM_API_KEY. call_opencode copies it into the CHILD env only and starts a private server (--standalone): the shared opencode service runs with its own environment. Measured 2026-10-23: without the key provider.no-route in 5 s, with it an answer in 63 s (oc_nvidia_probe_r168b.log); 2026-10-24 00:24Z: an agent review (read a file, name its bug) in 9 s, 2 steps (i3/oc_nv_review_i3.log). Every step is one request on NVIDIA's free queue (headers 57-110 s on 10-23 ~09:00Z, 0.2-11 s on 10-24 00:23Z).",
+      "timeout": "20m",
+      "_timeout": "the operator 2026-10-23 «Вариант а»: Step 5's budget is 20 min (nvstep5preview); the same voice through opencode keeps it.",
+      "fallback": "nvstep5preview",
+      "_fallback_r168": "The plain API copy on the same endpoint: it rescues an opencode failure (the CLI, a provider error), not an NVIDIA outage. One fallback, never a chain (R163 И-3).",
+      "models": {
+        "nvidia/stepfun-ai/step-5-preview": {
+          "label": "Step 5 Preview (opencode + NVIDIA free endpoint)",
+          "data_policy": "NVIDIA API Trial Terms of Service (free trial endpoint) plus the StepFun Model License 1.0. Free at point of use; NVIDIA's free endpoints allow about 40 requests a minute.",
+          "aliases": [
+            "nvidia/stepfun-ai/step-5-preview",
+            "oc step 5 nvidia"
+          ]
+        }
+      },
+      "aliases": [
+        "ocstep5previewnv",
+        "ocstep5nv",
+        "step5nv"
+      ],
+      "notes": "Step 5 Preview through the opencode CLI's own nvidia/ provider on NVIDIA's free endpoint - not Zen's daily allowance (no quota_group: NVIDIA counts its own). The CLI agent's tools; the key as in _oc_key.",
+      "_prompt_suffix_r168": "As nvstep5preview: NVIDIA API Trial Terms (training tier); package.py strips it from the kit."
+    },
+    "nvglm53flash": {
+      "read_order": 1,
+      "kind": "oai",
+      "provider": "nvidia",
+      "panel": "cheap",
+      "vendor": "zai",
+      "enabled": false,
+      "distribution": "both",
+      "_enabled_r168": "R168 И-3 (2026-10-24): off like its head ocglm53flashfree (R157: one free voice); by name, and GLM 5.3 Flash's free API copy where opencode is missing.",
+      "label": "NV GLM 5.3 Flash (NVIDIA free)",
+      "cost": "free",
+      "model": "z-ai/glm-5.3-flash",
+      "reasoning": {
+        "effort": "high"
+      },
+      "_reasoning": "Top-level reasoning_effort (OAI_PROVIDERS nvidia). F5 2026-10-23: validated (an invented value = 400 after 69 s); none 37/40 vs high 8/8 reasoning tokens on a trivial prompt - disjoint but inverse, so NO depth verdict. high = the documented top, not a measured ceiling.",
+      "max_tokens": 32768,
+      "_max_tokens": "NOT read from NVIDIA's model reference (R168 И-3): nvnemotron3ultra's value on the same endpoint.",
+      "web": {
+        "enabled": false,
+        "_none": "NVIDIA's endpoint has no search tool: the brief plus fetch_url."
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 16,
+        "_same_as": "nvnemotron3ultra / nvstep5preview"
+      },
+      "timeout": "20m",
+      "_timeout": "As nvnemotron3ultra / nvstep5preview (a free voice costs its budget, R168 D1). Measured 2026-10-24 00:23Z: headers 10.7 s, answer 12.6 s (6/6 on 10-23 after 57-110 s).",
+      "models": {
+        "z-ai/glm-5.3-flash": {
+          "label": "GLM 5.3 Flash (NVIDIA free endpoint)",
+          "data_policy": "NVIDIA API Trial Terms of Service (free trial endpoint) plus Z.ai's model license.",
+          "aliases": [
+            "z-ai/glm-5.3-flash"
+          ]
+        }
+      },
+      "aliases": [
+        "nvglm53flash",
+        "nvglm"
+      ],
+      "notes": "Direct OpenAI-protocol call (call_oai_reviewer, provider nvidia), streamed, our fetch_url; second in GLM 5.3 Flash's cascade after the Zen copy.",
+      "_prompt_suffix_r168": "NVIDIA API Trial Terms (training tier), as nvnemotron3ultra."
+    },
     "nvstep5preview": {
       "read_order": 2,
       "kind": "oai",
       "provider": "nvidia",
       "panel": "cheap",
       "vendor": "stepfun",
-      "enabled": false,
-      "distribution": "local",
+      "enabled": true,
+      "distribution": "both",
+      "_distribution_r168": "R168 И-3 (2026-10-24): both - ships ON in the kit. Second in the Step 5 cascade after its opencode copy: the plain API where opencode or the opencode route is missing (the operator 2026-10-23); Q2's reading (default-on after D1 and one kit-shaped run).",
       "_distribution_r163": "R163 (2026-10-22): local - package.py ships it OFF in the kit (a user starts it by name); whether the kit's cheap panel gets it is the owner's kit decision (R160), not taken here.",
       "label": "NV Step 5 Preview (NVIDIA free)",
       "cost": "free",
@@ -2340,6 +2432,54 @@
       "_added": "2026-09-30, the operator: «Надо добавить еще одну CLI: Qwen code cli. В панель CLI cheap. Модель в ней qwen 3.8 Max Effort: Max (Но возможно максимум XHigh). Она использует подписку: Token Plan Individual Plan Standard. Plan quota 45,000. Не забудь добавить bypass permission Скорее всего называется YOLO». Binary: qwen v0.24.7 (@qwen-ai/code, npm global, resolves to %APPDATA%\\npm\\qwen.cmd on Windows). JSON output = ARRAY of event objects; the final element with type:'result' carries the summary. Brief via stdin pipe (same pattern as claudecli). Live probe 2026-09-30: 29s on a 2+2 question (29 s was reasoning-heavy at xhigh), model_served=qwen3.8-max, tokens prompt 61K/output 473/thoughts 339/cached 16K, no error, marker verified.",
       "notes": "Qwen 3.8 Max via the Qwen Code CLI (direct Alibaba Cloud Token Plan subscription). 1M context, mandatory reasoning at xhigh ceiling, multimodal (text+image+video). ~/.qwen/settings.json loads auth + full MCP stack unconditionally; the harness points QWEN_HOME at a panel home without QWEN.md or memories (R130), switches auto-memory and sub-agents off and salvages a budget stop (R144); the reviewer role is inlined into the stdin text. YOLO/--yolo mode always on (bypass_permissions:true). First live test 2026-09-30."
     },
+    "ormimo26flash": {
+      "read_order": 1,
+      "kind": "openrouter",
+      "panel": "cheap",
+      "vendor": "xiaomi",
+      "provider": "openrouter",
+      "enabled": true,
+      "distribution": "both",
+      "twin_only": true,
+      "_twin_only_r168": "R168 И-4 (panel r168i3, measured on the built kit): on a machine WITH opencode, --only openrouter / --skip ocmimo26flashfree / --skip opencode / «не использовать opencode» started this PAID copy, on a Zen-refused day too. twin_only: it carries the MiMo Flash voice only where no free member of its cascade group can run on the machine (routing._twin_only_gate); its own name still starts it.",
+      "_enabled_r168": "the operator 2026-10-23 «для mimo вариант в» (R168 Q1): without opencode the MiMo v2.6 Flash voice goes to OpenRouter's PAID copy, printed PAID. On in the kit and last in MiMo Flash's cascade, so it runs only where opencode is missing; off in the operator's overlay (his machine never starts paying by itself). A Zen-refused day is not that case: apply_quota_skip runs after the cascade, so the voice waits for 00:00 UTC (suite_r168_i3_free_transports pins it).",
+      "label": "OR MiMo v2.6 Flash",
+      "cost": "metered",
+      "_cost": "OpenRouter /api/v1/models 2026-10-23 09:00Z: $0.14 / $0.28 per M tokens (~$0.006 a review of ~25K in + 8K out).",
+      "model": "xiaomi/mimo-v2.6-flash",
+      "role": "analysis",
+      "reasoning": {
+        "max_tokens": 85000
+      },
+      "_reasoning": "R46 rule: an enabled OpenRouter channel declares its reasoning (MiMo v2.5 Pro there: no block = 0 reasoning tokens). The budget form and value of ormimopro (same vendor, same gateway); NOT measured on Flash (R168 И-3, BACKLOG: echocheck).",
+      "max_tokens": 131072,
+      "_max_tokens": "OpenRouter catalogue 2026-10-23 09:00Z: top_provider.max_completion_tokens 131072 (R43: min(vendor cap, 131072)); supported_parameters include reasoning.",
+      "web": {
+        "enabled": false,
+        "_r168": "OpenRouter's web plugin bills per search; this voice reads pages with fetch_url."
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 5,
+        "_same_as": "ormimopro (R80: page fetches are the bill)"
+      },
+      "timeout": "20m",
+      "models": {
+        "xiaomi/mimo-v2.6-flash": {
+          "label": "MiMo v2.6 Flash (OpenRouter)",
+          "data_policy": "Metered API through OpenRouter. See _data_controls_not_wired at the end of this file.",
+          "aliases": [
+            "xiaomi/mimo-v2.6-flash",
+            "or mimo flash"
+          ]
+        }
+      },
+      "aliases": [
+        "ormimo26flash",
+        "ormimoflash"
+      ],
+      "notes": "The kit's MiMo v2.6 Flash where opencode is missing (R168 Q1). OPENROUTER_API_KEY."
+    },
     "ormimopro": {
       "read_order": 2,
       "kind": "openrouter",
@@ -2781,7 +2921,8 @@
     ],
     [
       "ocmimo26flashfree",
-      "mimov26flash"
+      "mimov26flash",
+      "ormimo26flash"
     ],
     [
       "nvnemotron3ultra",
@@ -2804,8 +2945,13 @@
       "orwonder"
     ],
     [
+      "ocstep5previewnv",
       "nvstep5preview",
       "ocstep5previewgo"
+    ],
+    [
+      "ocglm53flashfree",
+      "nvglm53flash"
     ]
   ],
   "_cascade_groups_doc": "Panel cascade: when several channels carry the SAME model through different transports, only the first READY one runs; the rest are skipped. Order matters - cheapest/free first. The panel runs independent VOICES in parallel; paying three transports for one voice is waste, not breadth. Added 2026-09-04 (the operator: 'незачем у одних и тех же моделей спрашивать'). R143 И-3 (2026-10-05): a group may span panels. kimik3 (standard, OpenRouter, paid) is the last member of nvkimik3's group; members are only the channels already in THIS run's plan, so a cheap run never pulls kimik3 in, and a standard run gets one Kimi - nvkimik3 when its CLI and key are here, else kimik3.",

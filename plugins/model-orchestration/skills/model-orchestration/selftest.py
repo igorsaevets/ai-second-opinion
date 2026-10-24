@@ -3230,7 +3230,13 @@ def suite_panels():
          "RETIRED - R160 И-4 (panel r160i2: mcspark13, codex): opencode's model list of 2026-10-23 08:59Z and its Zen "
          "page (opencode.ai/docs/zen, read 2026-10-23) list no free MiniMax; the Go copy ocminimax31flashgo moved to "
          "opencode-go/minimax-m3.1-flash (one live one-line ask answered, 2026-10-23 20:24Z). Off as a voice, never "
-         "in a panel's run.")
+         "in a panel's run."),
+        ("R168 2026-10-24", "ADD", "ocstep5previewnv",
+         "Igor 2026-10-23 («Step 5 Preview давай добавим тоже в opencode, а если у пользователя в kit нет opencode cli, то срабатывает fallback на просто api»). Step 5 Preview through opencode's nvidia/ provider (NVIDIA_API_KEY mapped from NVIDIA_NIM_API_KEY, --standalone), first in the Step 5 cascade, fallback nvstep5preview. distribution both."),
+        ("R168 2026-10-24", "ADD", "nvglm53flash",
+         "R168 И-3: GLM 5.3 Flash on NVIDIA's free endpoint, second in its cascade after ocglm53flashfree; off as its head is. distribution both."),
+        ("R168 2026-10-24", "ADD", "ormimo26flash",
+         "Igor 2026-10-23 «для mimo вариант в» (R168 Q1): the PAID OpenRouter MiMo v2.6 Flash, last in MiMo Flash's cascade - runs only where opencode is missing, printed PAID; off in his overlay. distribution both.")
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -8126,6 +8132,9 @@ def main():
                   suite_r165_grok_turn_ended,
                   suite_r165_i2_task_keys,
                   suite_r164_muse_spark, suite_r160_kit_defaults, suite_r160_i4_home_scrub,
+                  suite_r168_i2_api_read_bound,
+                  suite_r168_i3_free_transports,
+                  suite_r168_i4_panel_fixes,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -13089,9 +13098,9 @@ def suite_r142_mimo_flash_fallback():
           and fl.get("enabled") is False,
           "R142 (a) mimov26flash: mimocli, xiaomi/mimo-v2.6-flash, enabled:false (no panel seat)")
     check(ch["mimov26pro"].get("fallback") == "mimov26flash", "R142 (a) mimov26pro.fallback")
-    check(any(set(g) == {"ocmimo26flashfree", "mimov26flash"}
+    check(any(set(g) == {"ocmimo26flashfree", "mimov26flash", "ormimo26flash"}
               for g in reg.get("_cascade_groups") or []),
-          "R142 (a) one Flash voice: cascade group [ocmimo26flashfree, mimov26flash]")
+          "R142 (a) one Flash voice: cascade group [ocmimo26flashfree, mimov26flash, ormimo26flash (R168 И-3)]")
     mimo = reg["groups"]["mimo"]["channels"]
     check("mimov26flash" in mimo and "ocmimo26flashfree" in mimo,
           "R142 (a) group `mimo` holds both Flash transports, so --skip mimo also forbids the fallback")
@@ -17478,6 +17487,9 @@ def suite_r154_refs_kinds():
         "    assert callable(getattr(o, n, None)), 'stub target missing: ' + n",
         "    setattr(o, n, stub(kd))",
         "o.log = lambda *a, **k: LOG.append(' '.join(str(x) for x in a))",
+        # R168 И-3: every cascade member counts as ready - this check is about how each KIND gets the attachment, not
+        # which twin wins (in the shipped world opencode is absent, so the API twins carried every opencode voice)
+        "o._cascade_ready = lambda reg: (lambda n: True)",
         # the default panel (CLI kinds) and the standard one (API kinds too): both halves of (b) get exercised
         "for i, extra in enumerate(([], ['--panel', 'standard'])):",
         "    sys.argv = (['o', '--brief', %r, '--out', os.path.join(%r, 'o%%d' %% i), '--attach-dir', %r,"
@@ -17753,6 +17765,7 @@ def suite_r157_i2_free_fallback():
     for c in kit["channels"].values():
         if isinstance(c, dict) and c.get("distribution") == "local":
             c["enabled"] = False
+    kit["channels"]["nvnemotron3ultra"]["enabled"] = False  # R168 И-3: it ships now; this models a kit user without the NVIDIA key
     pk = rt.resolve(copy.deepcopy(kit), panel="cheap", ready=yes)
     on = sorted(n for n in names[:4] if (pk.get(n) or {}).get("enabled"))
     fbk = (pk.get("ocmimo26flashfree") or {}).get("fallback") or {}
@@ -17853,7 +17866,8 @@ def suite_r157_i2_free_fallback():
         env = dict(os.environ, MODEL_ORCH_QUOTA_STATE=sp3, PYTHONIOENCODING="utf-8")
         env[rt.OVERLAY_ENV] = os.path.join(tmpd, "no-overlay.json")
         p = subprocess.run([sys.executable, os.path.join(HERE, "orchestrate.py"), "--dry-run", "--panel", "cheap",
-                            "--brief", brief], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                            "--brief", brief, "--skip", "ormimo26flash"],  # R168 И-3: the PAID copy (no opencode here)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace",
                            env=env, timeout=180)
         out = (p.stdout or "") + (p.stderr or "")
         line = next((ln for ln in out.splitlines() if "] ocmimo26flashfree" in ln), "")
@@ -17923,13 +17937,13 @@ def suite_r163_step5_minimax_chain():
     sfx = all(((c.get("prompt_suffix") or {}).get("enabled") is True or "prompt_suffix" not in c)
               for c in (nv, ocg, ocz))
     check(nv.get("kind") == "oai" and nv.get("provider") == "nvidia" and nv.get("model") == "stepfun-ai/step-5-preview"
-          and nv.get("panel") == "cheap" and nv.get("distribution") == "local" and nv.get("cost") == "free"
+          and nv.get("panel") == "cheap" and nv.get("distribution") == "both" and nv.get("cost") == "free"
           and (nv.get("reasoning") or {}).get("effort") == "max" and nv.get("max_tokens") == 131072
           and not (nv.get("web") or {}).get("enabled") and (nv.get("fetch_tool") or {}).get("enabled") is True
           and nv.get("fallback") == "ocstep5previewgo"
           and g5.get("model") == "opencode-go/step-5-preview" and g5.get("enabled") is False
           and g5.get("cost") == "subscription" and g5.get("distribution") == "local",
-          "R163 (a) nvstep5preview: oai/nvidia, cheap, local, free, effort max, 131072, no search, fetch_url, fallback "
+          "R163 (a) nvstep5preview: oai/nvidia, cheap, both (R168 И-3), free, effort max, 131072, no search, fetch_url, fallback "
           "the Go copy (off as a voice)",
           repr({k: nv.get(k) for k in ("kind", "provider", "model", "reasoning", "max_tokens", "fallback")}))
     check(ocg.get("model") == "opencode-go/minimax-m3.1-flash" and ocg.get("enabled") is False
@@ -17992,6 +18006,8 @@ def suite_r163_step5_minimax_chain():
     reg = _r163_minimax_fixture(reg)
     regx = copy.deepcopy(reg)          # as on the owner's machine: the kit build turns these local channels off
     regx["channels"]["nvstep5preview"]["enabled"] = True
+    if "ocstep5previewnv" in regx["channels"]:  # R168 И-3: its opencode copy now leads the Step 5 group; this check is about NVIDIA + Go
+        regx["channels"]["ocstep5previewnv"]["enabled"] = False
     pk = rt.resolve(copy.deepcopy(regx), panel="cheap", ready=yes)
     f5 = (pk.get("nvstep5preview") or {}).get("fallback") or {}
     check((pk.get("nvstep5preview") or {}).get("enabled") and f5.get("channel") == "ocstep5previewgo"
@@ -18091,6 +18107,8 @@ def suite_r163_i3_hotfix():
     rx = copy.deepcopy(reg)
     for n in ("nvstep5preview", "ocminimax31flashgo"):
         rx["channels"][n]["enabled"] = True
+    if "ocstep5previewnv" in rx["channels"]:  # R168 И-3: its opencode copy now leads the Step 5 group; this check is about NVIDIA + Go
+        rx["channels"]["ocstep5previewnv"]["enabled"] = False
     rx["channels"]["ocminimax31flashgo"]["fallback_depth"] = 2
     rx["channels"]["ocminimax31flashfree"]["fallback"] = "ocglm53flashfree"
     pb = rt.resolve(copy.deepcopy(rx), panel="cheap", ready=yes)
@@ -18122,7 +18140,8 @@ def suite_r163_i3_hotfix():
 
     sv = [rt.same_voice(reg, n) for n in ("nvstep5preview", "ocstep5previewgo", "ocminimax31flashgo",
                                           "ocminimax31flashfree")]
-    check(sv == [["ocstep5previewgo"], ["nvstep5preview"], ["ocminimax31flashfree"], ["ocminimax31flashgo"]],
+    check(sv == [["ocstep5previewnv", "ocstep5previewgo"], ["ocstep5previewnv", "nvstep5preview"],  # R168 И-3
+                ["ocminimax31flashfree"], ["ocminimax31flashgo"]],
           "R163 И-3 (d) A2: Step 5 (NVIDIA + Go) and the MiniMax opencode pair are cascade groups - same_voice both "
           "ways", repr(sv))
 
@@ -18138,6 +18157,8 @@ def suite_r163_i3_hotfix():
     r2 = copy.deepcopy(reg)
     for n in ("nvstep5preview", "ocstep5previewgo"):
         r2["channels"][n]["enabled"] = True
+    if "ocstep5previewnv" in r2["channels"]:  # R168 И-3: its opencode copy now leads the Step 5 group; this check is about NVIDIA + Go
+        r2["channels"]["ocstep5previewnv"]["enabled"] = False
     p2 = rt.resolve(copy.deepcopy(r2), panel="cheap", ready=yes)
     s5, g5 = p2.get("nvstep5preview") or {}, p2.get("ocstep5previewgo") or {}
     f2 = s5.get("fallback") or {}
@@ -18313,7 +18334,7 @@ def suite_r162_nemotron_nvidia():
     check(b2.get("reasoning_budget") == 1000 and b2.get("reasoning_effort") == "high",
           "R162 (b) a registry `budget` reaches the wire as reasoning_budget", repr(len(sent)))
     groups = [g for g in (reg.get("_cascade_groups") or []) if "nvnemotron3ultra" in g]
-    check(ch.get("kind") == "oai" and ch.get("provider") == "nvidia" and ch.get("distribution") == "local"
+    check(ch.get("kind") == "oai" and ch.get("provider") == "nvidia" and ch.get("distribution") == "both"  # R168 И-3
           and str(ch.get("reading_note") or "").startswith("NEVER read") and ch.get("fallback") == "ornemotron3ultra"
           and ch.get("cost") == "free" and ch.get("panel") == "cheap" and ch.get("read_order") == 3
           and ((ch.get("prompt_suffix") or {}).get("enabled") is True or "prompt_suffix" not in ch)
@@ -18350,8 +18371,9 @@ def suite_r162_nemotron_nvidia():
             c["enabled"] = False
     pk = rt.resolve(copy.deepcopy(kit), panel="cheap", ready=ready_nv)
     on = sorted(n for n in ("nvnemotron3ultra", "ocnemotron3ultrafree", "ornemotron3ultra") if (pk.get(n) or {}).get("enabled"))
-    check(on == ["ocnemotron3ultrafree"],
-          "R162 (d) control - the kit view (local channels off): the cheap Nemotron is still the opencode one", repr(on))
+    check(on == ["nvnemotron3ultra"],
+          "R162 (d) control - the kit view (local channels off): since R168 И-3 nvnemotron3ultra ships (both), so where "
+          "its key is ready the kit's cheap Nemotron is NVIDIA's, not the opencode one", repr(on))
     keep_env = os.environ.get("NVIDIA_NIM_API_KEY")
     try:
         os.environ["NVIDIA_NIM_API_KEY"] = "nv-test-not-a-key"
@@ -18564,6 +18586,7 @@ def suite_r154_i3_free_voices():
             c["enabled"] = False
         elif isinstance(c, dict) and c.get("distribution") == "kit" and not c.get("enabled", True):
             c["enabled"] = True   # R160: package.py's other flip - a `kit` channel that is off ships ON
+    kit["channels"]["nvnemotron3ultra"]["enabled"] = False  # R168 И-3: it ships now; this models a kit user without the NVIDIA key
     pk = rt.resolve(copy.deepcopy(kit), panel="cheap", ready=yes)
     free4 = ["ocmimo26flashfree"] + list(want)
     on = [n for n in free4 if (pk.get(n) or {}).get("enabled")]
@@ -19652,6 +19675,214 @@ def suite_r160_kit_defaults():
         check(True, "R160 И-4 (f)(g) package.py is not in this tree (the kit does not ship the builder)")
 
 
+def suite_r168_i2_api_read_bound():
+    """R168 И-2 (2026-10-23), D1: the channel's `timeout` bounds an API voice's WHOLE call, inside the read.
+
+    Panel r160i2: nvstep5preview's first attempt streamed reasoning for 3,606.6 s under `timeout: 20m` (one round,
+    no fetch), ended with no text, and the AUTO-RETRY gave it 917.5 s more - urlopen's timeout is an idle limit per
+    socket read, so any byte resets it. A loopback server plays the endpoint; each case runs in a thread with a cap,
+    so the OLD code fails a check (it waits out the server's HOLD) instead of hanging the suite. Checks named
+    [bound] must FAIL on the old code, [control] ones pass on both (runs/r168-free-api-fallback/i2/nc_i2.py):
+      (a) no response headers -> given up at API_HEADER_LIMIT_S (stream_cut "headers"), not at the timeout;
+      (b) headers, then keep-alive comments only, provider stall_s -> cut "stall" (comments do not reset it);
+      (c) comments only, no stall_s -> cut at the deadline;
+      (d) a trickle of text deltas -> cut at the deadline, the partial text kept, ok False, TIME LIMIT warned;
+      (e) a trickle of reasoning deltas only (the r160i2 shape) -> cut, and retryable_stream_death() says no;
+      (f) an unstreamed provider whose body trickles past the deadline -> an error at the deadline;
+      (g) the http transport (_post, Anthropic SSE) streaming a trickle -> deadline_cut at the deadline;
+      (h) the single-shot transports (xAI / Gemini direct): _urlopen_transient_retry carries the deadline that
+          _bounded_lines honours;
+      (i) controls: a complete stream answers ok with no stream_cut; the uncut r160i2 shape is still retried.
+    """
+    import http.server
+    import threading
+    import time
+    import urllib.request
+    import orchestrate as o
+    section("R168 И-2: an API voice's timeout bounds the whole call, inside the read")
+    HOLD, BUDGET, SLACK = 6.0, 2, 1.5
+    TEXT = b'data: {"choices": [{"delta": {"content": "x"}}], "model": "selftest/echo"}\n\n'
+    REASON = b'data: {"choices": [{"delta": {"reasoning_content": "think "}}], "model": "selftest/echo"}\n\n'
+    GOOD = (b'data: {"choices": [{"delta": {"content": "Fine.\\nR168-MARK"}, "finish_reason": "stop"}], '
+            b'"model": "selftest/echo"}\n\n'
+            b'data: {"usage": {"prompt_tokens": 10, "completion_tokens": 4}}\n\n'
+            b'data: [DONE]\n\n')
+    ANTH = b'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "x"}}\n\n'
+    JSON_BODY = (b'{"choices": [{"message": {"content": "Fine.\\nR168-MARK"}, "finish_reason": "stop"}], '
+                 b'"model": "selftest/echo", "usage": {"prompt_tokens": 10, "completion_tokens": 4}}')
+    DRIP = {"comments": b": keep-alive\n\n", "trickle": TEXT, "reason": REASON, "anthropic": ANTH,
+            "plain": TEXT}
+
+    class _EP(http.server.BaseHTTPRequestHandler):
+        def _head(self, ctype="text/event-stream", length=None):
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            if length is not None:
+                self.send_header("Content-Length", str(length))
+            self.end_headers()
+            self.wfile.flush()
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            mode = self.path.strip("/").split("/")[0]
+            t0 = time.time()
+            try:
+                if mode == "silent":
+                    time.sleep(HOLD)
+                elif mode == "good":
+                    self._head(length=len(GOOD))
+                    self.wfile.write(GOOD)
+                elif mode == "slowjson":
+                    self._head("application/json", len(JSON_BODY))
+                    for i in range(len(JSON_BODY)):
+                        self.wfile.write(JSON_BODY[i:i + 1])
+                        self.wfile.flush()
+                        time.sleep(HOLD / len(JSON_BODY))
+                else:
+                    self._head()
+                    while time.time() - t0 < HOLD:
+                        self.wfile.write(DRIP.get(mode, b": ?\n\n"))
+                        self.wfile.flush()
+                        time.sleep(0.1)
+            except OSError:
+                pass              # the client closed the read: what this suite is about
+
+        def log_message(self, *args):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _EP)
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = "http://127.0.0.1:%d" % srv.server_address[1]
+    d = tempfile.mkdtemp(prefix="r168i2-")
+    added = []
+
+    def _timed(fn):
+        box = {}
+
+        def run():
+            t0 = time.time()
+            try:
+                box["r"] = fn()
+            except BaseException as e:  # noqa: BLE001 - the check prints it
+                box["e"] = e
+            box["s"] = time.time() - t0
+        th = threading.Thread(target=run, daemon=True)
+        th.start()
+        th.join(HOLD + 4)
+        return box.get("r"), box.get("e"), box.get("s", HOLD + 4)
+
+    def _rev(tag, mode, timeout, **extra):
+        pname = "_r168_" + tag
+        o.OAI_PROVIDERS[pname] = dict({"key_env": "SELFTEST_NOT_A_KEY",
+                                       "url": base + "/" + mode + "/v1/chat/completions",
+                                       "depth": "reasoning", "search": "plugin", "usage_request": None,
+                                       "label": "r168 loopback " + tag, "streaming": True}, **extra)
+        added.append(pname)
+        return o.call_oai_reviewer("Say OK.", "R168-MARK", os.path.join(d, tag + ".md"),
+                                   model="selftest/echo", name=pname, provider=pname,
+                                   fetch_tool={"enabled": False}, max_tokens=200, timeout=timeout)
+
+    def _warned(r, word):
+        return any(word in str(w) for w in ((r or {}).get("warnings") or []))
+
+    def _show(r, e, s):
+        r = r if isinstance(r, dict) else {}
+        return "s=%.1f cut=%r ok=%r text=%r reasoning=%r err=%s warn=%s" % (
+            s, r.get("stream_cut"), r.get("ok"), (r.get("text") or "")[:12], r.get("reasoning_chars"),
+            str(r.get("error") or e or "")[:100], str((r.get("warnings") or [""])[0])[:80])
+
+    had_hl = hasattr(o, "API_HEADER_LIMIT_S")
+    real_hl = getattr(o, "API_HEADER_LIMIT_S", None)
+    real_envkey, real_log = o._env_key, o.log
+    try:
+        o._env_key = lambda name: "selftest-dummy"
+        o.log = lambda *a, **k: None
+        # ---- (a) no headers at all: the header limit, not the 30 s timeout ------------------------------------
+        o.API_HEADER_LIMIT_S = 1
+        r, e, s = _timed(lambda: _rev("silent", "silent", 30))
+        check(isinstance(r, dict) and r.get("stream_cut") == "headers" and s < 1 + SLACK
+              and "NO RESPONSE HEADERS" in str(r.get("error")),
+              "[bound] R168 И-2 (a): no response headers within API_HEADER_LIMIT_S -> given up then "
+              "(stream_cut headers), not at the 30 s timeout", _show(r, e, s))
+        o.API_HEADER_LIMIT_S = real_hl if had_hl else 300
+        # ---- (b) comments only + stall_s: comments do not reset the stall clock ------------------------------
+        r, e, s = _timed(lambda: _rev("stall", "comments", 30, stall_s=1))
+        check(isinstance(r, dict) and r.get("stream_cut") == "stall" and s < 1 + SLACK and r.get("ok") is False
+              and _warned(r, "STALLED"),
+              "[bound] R168 И-2 (b): headers then keep-alive comments only, provider stall_s 1 -> cut 'stall' at "
+              "~1 s (comments do not reset it), STALLED warned", _show(r, e, s))
+        # ---- (c) comments only, no stall_s: the deadline -------------------------------------------------------
+        r, e, s = _timed(lambda: _rev("comments", "comments", BUDGET))
+        check(isinstance(r, dict) and r.get("stream_cut") == "deadline" and s < BUDGET + SLACK,
+              "[bound] R168 И-2 (c): comments only, no stall limit -> cut at the channel's timeout (%d s)" % BUDGET,
+              _show(r, e, s))
+        # ---- (d) a trickle of text: cut at the deadline, the partial text kept --------------------------------
+        r, e, s = _timed(lambda: _rev("trickle", "trickle", BUDGET))
+        check(isinstance(r, dict) and r.get("stream_cut") == "deadline" and s < BUDGET + SLACK
+              and (r.get("text") or "").startswith("xxx") and r.get("ok") is False and _warned(r, "TIME LIMIT"),
+              "[bound] R168 И-2 (d): a trickle of text deltas -> cut at the timeout, the partial text kept, ok False, "
+              "TIME LIMIT warned", _show(r, e, s))
+        # ---- (e) reasoning only (the r160i2 shape): cut, and never auto-retried ------------------------------
+        r, e, s = _timed(lambda: _rev("reason", "reason", BUDGET))
+        check(isinstance(r, dict) and r.get("stream_cut") == "deadline" and s < BUDGET + SLACK
+              and not (r.get("text") or "").strip() and (r.get("reasoning_chars") or 0) > 0
+              and o.retryable_stream_death(r) is False,
+              "[bound] R168 И-2 (e): reasoning deltas only (r160i2's 3,606 s shape) -> cut at the timeout and "
+              "retryable_stream_death() says NO", _show(r, e, s))
+        # ---- (f) an unstreamed body that trickles past the deadline ------------------------------------------
+        r, e, s = _timed(lambda: _rev("slowjson", "slowjson", BUDGET, streaming=False))
+        check(isinstance(r, dict) and r.get("stream_cut") == "deadline" and s < BUDGET + SLACK
+              and "TIME LIMIT" in str(r.get("error")),
+              "[bound] R168 И-2 (f): an unstreamed provider whose body trickles past the timeout -> an error at "
+              "the timeout", _show(r, e, s))
+        # ---- (g) the http transport (_post, Anthropic SSE) ----------------------------------------------------
+        r, e, s = _timed(lambda: o._post(base + "/anthropic/v1/messages", {"x": 1}, "selftest-dummy",
+                                         BUDGET, True))
+        data = r[0] if isinstance(r, tuple) and isinstance(r[0], dict) else {}
+        txt = ((data.get("content") or [{}])[-1] or {}).get("text") or ""
+        check(data.get("deadline_cut") == "deadline" and s < BUDGET + SLACK and txt.startswith("xxx"),
+              "[bound] R168 И-2 (g): the http transport (_post, Anthropic SSE) is cut at the timeout, the partial "
+              "text kept", "s=%.1f cut=%r text=%r err=%s" % (s, data.get("deadline_cut"), txt[:12], str(e)[:100]))
+
+        # ---- (h) the single-shot transports (xAI / Gemini direct) --------------------------------------------
+        def _single():
+            rq = urllib.request.Request(base + "/plain/v1/x", data=b"{}",
+                                        headers={"Content-Type": "application/json"})
+            n, cut = 0, {}
+            with o._urlopen_transient_retry(rq, BUDGET, "selftest") as resp:
+                for _ in o._bounded_lines(resp, getattr(resp, "_r168_at", None), None, cut):
+                    n += 1
+            return n, cut
+        r, e, s = _timed(_single)
+        check(isinstance(r, tuple) and r[1].get("kind") == "deadline" and s < BUDGET + SLACK and r[0] > 3,
+              "[bound] R168 И-2 (h): _urlopen_transient_retry carries the timeout into the read "
+              "(xAI / Gemini direct): cut at the deadline",
+              "s=%.1f result=%r err=%s" % (s, r, str(e)[:100]))
+        check(o.retryable_stream_death({"ok": False, "text": "", "finish_reason": None, "reasoning_chars": 40,
+                                        "stream_cut": "deadline"}) is False,
+              "[bound] R168 И-2 (e2): a record the harness cut (stream_cut) is never auto-retried")
+        # ---- (i) controls --------------------------------------------------------------------------------------
+        r, e, s = _timed(lambda: _rev("good", "good", 30))
+        check(isinstance(r, dict) and r.get("ok") is True and not r.get("stream_cut") and s < 3,
+              "[control] R168 И-2 (i): a complete stream answers ok, no stream_cut, at once", _show(r, e, s))
+        check(o.retryable_stream_death({"ok": False, "text": "", "finish_reason": None,
+                                        "reasoning_chars": 40}) is True,
+              "[control] R168 И-2 (i): the uncut r160i2 shape (no text, finish None, reasoning) is still "
+              "auto-retried")
+    finally:
+        o._env_key, o.log = real_envkey, real_log
+        if had_hl:
+            o.API_HEADER_LIMIT_S = real_hl
+        elif hasattr(o, "API_HEADER_LIMIT_S"):
+            delattr(o, "API_HEADER_LIMIT_S")
+        for p in added:
+            o.OAI_PROVIDERS.pop(p, None)
+        srv.shutdown()
+        srv.server_close()
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def suite_r160_i4_home_scrub():
     """R160 И-4 (2026-10-23), panel r160i2 (codex): diagnostics.json carried the home folder - the Windows user name
     40 times in 22 paths - under a README that calls the file stripped of personal data.
@@ -19807,6 +20038,304 @@ def suite_keys_read_policy():
     check(bool(fn) and fn("grokbuild", reg) is True and free and contrib and not leak,
           "keys (f) the registry: grokbuild may read key files; %d free and %d contributor channels may not"
           % (len(free), len(contrib)), repr(leak or [ch.get("grokbuild", {}).get("cost")]))
+
+
+
+def suite_r168_i3_free_transports():
+    """R168 И-3 (2026-10-24): every free voice gets the first READY transport, and the plan says what is missing.
+    Igor 2026-10-23: «Step 5 Preview давай добавим тоже в opencode, а если у пользователя в kit нет opencode cli, то
+    срабатывает fallback на просто api. И так для всех бесплатных ИИ моделей». Checks tagged [code] must FAIL on the
+    И-2 code with this registry (runs/r168-free-api-fallback/i3/nc_i3.py); [reg] ones read the registry.
+      (a) [reg] ocstep5previewnv = opencode + nvidia/ (oc_key NVIDIA_API_KEY <- NVIDIA_NIM_API_KEY), first in the Step 5
+          group, fallback nvstep5preview; nvglm53flash (off) after the Zen GLM; ormimo26flash (OpenRouter, PAID) last
+          in MiMo Flash's group; nvstep5preview + nvnemotron3ultra ship (distribution both);
+      (b) [code] _opencode_child_env copies the key into the CHILD env only and asks for a private server;
+      (c) [code] without the key it names NVIDIA_NIM_API_KEY and its hint, and call_opencode starts nothing;
+      (d) [code] with the key the opencode command carries --standalone and the child env the key;
+      (e) [code] readiness reasons: «opencode CLI not found», «NVIDIA_NIM_API_KEY not set (a free key: ...)»,
+          «OPENROUTER_API_KEY not set»;
+      (f) [reg] no opencode, keys set: Step 5 -> nvstep5preview, MiMo -> ormimo26flash printed PAID, Nemotron -> NVIDIA;
+      (g) [code] nothing ready: the MiMo voice's line names what each member lacks;
+      (h) [reg] everything ready, the Zen group refused today: the free MiMo is skipped and the PAID copy does NOT
+          start (the hard rule: never an API-key channel around an exhausted free allowance);
+      (i) [reg] everything ready: ocstep5previewnv runs, its fallback nvstep5preview armed, ormimo26flash off.
+    """
+    import copy
+    import orchestrate as o
+    import routing as rt
+    section("R168 И-3: free voices without opencode - first ready transport, the plan names what is missing")
+    reg = rt.load_registry()
+    ch = reg.get("channels") or {}
+    grp = [g for g in reg.get("_cascade_groups") or [] if isinstance(g, list)]
+    ocs, nvg, orm = (ch.get(n) or {} for n in ("ocstep5previewnv", "nvglm53flash", "ormimo26flash"))
+    groups = reg.get("groups") or {}
+    check(ocs.get("kind") == "opencode" and ocs.get("model") == "nvidia/stepfun-ai/step-5-preview"
+          and ocs.get("oc_key") == {"env": "NVIDIA_API_KEY", "from": "NVIDIA_NIM_API_KEY"} and ocs.get("cost") == "free"
+          and ocs.get("distribution") == "both" and ocs.get("panel") == "cheap" and ocs.get("timeout") == "20m"
+          and ocs.get("fallback") == "nvstep5preview" and not ocs.get("quota_group")
+          and ["ocstep5previewnv", "nvstep5preview", "ocstep5previewgo"] in grp
+          and "ocstep5previewnv" in (groups.get("cli") or {}).get("channels", [])
+          and "ocstep5previewnv" in (groups.get("opencode") or {}).get("channels", []),
+          "R168 И-3 (a) [reg] ocstep5previewnv: opencode + nvidia/, key mapped, free, both, cheap, 20m, fallback the API "
+          "copy, no Zen quota group, first in the Step 5 group, in the cli + opencode words",
+          repr({k: ocs.get(k) for k in ("kind", "model", "oc_key", "distribution", "fallback")}))
+    check(nvg.get("kind") == "oai" and nvg.get("provider") == "nvidia" and nvg.get("enabled") is False
+          and nvg.get("distribution") == "both" and ["ocglm53flashfree", "nvglm53flash"] in grp
+          and orm.get("kind") == "openrouter" and orm.get("cost") == "metered" and orm.get("distribution") == "both"
+          and orm.get("panel") == "cheap" and ["ocmimo26flashfree", "mimov26flash", "ormimo26flash"] in grp
+          and "ormimo26flash" in (groups.get("openrouter") or {}).get("channels", [])
+          and "ormimo26flash" in (groups.get("mimo") or {}).get("channels", [])
+          and (ch.get("nvstep5preview") or {}).get("distribution") == "both"
+          and (ch.get("nvnemotron3ultra") or {}).get("distribution") == "both",
+          "R168 И-3 (a) [reg] nvglm53flash off after the Zen GLM; ormimo26flash metered, last in MiMo Flash's group, in "
+          "the openrouter + mimo words; nvstep5preview and nvnemotron3ultra ship (both)",
+          repr((nvg.get("enabled"), orm.get("enabled"), orm.get("cost"))))
+
+    saved = {n: getattr(o, n) for n in ("_env_key", "opencode_bin", "_opencode_supports_standalone",
+                                        "_opencode_version")}
+    saved_run = o.subprocess.run
+    fake_env = {"NVIDIA_NIM_API_KEY": "fake-nim-value"}
+    present = sys.executable
+    calls = []
+
+    class _Stop(Exception):
+        pass
+
+    def fake_run(cmd, **kw):
+        calls.append((list(cmd), dict(kw.get("env") or {})))
+        raise _Stop()
+    # R168 И-4 (panel r168i3, Step 5 ran this suite in its own shell): (c) asserts that the child env holds no
+    # NVIDIA_API_KEY, so a real one in the environment (an opencode + NVIDIA user, or the opencode child the harness
+    # gives that key) turned a correct result red. The checks below model a machine without it.
+    _nv_own = os.environ.pop("NVIDIA_API_KEY", None)
+    try:
+        o._env_key = lambda v: fake_env.get(v)
+        o._opencode_supports_standalone = lambda b: True
+        o._opencode_version = lambda b: (2, 1, 0)
+        o.opencode_bin = lambda: present
+        o.subprocess.run = fake_run
+        before = os.environ.get("NVIDIA_API_KEY")
+        env, info = o._opencode_child_env("ocstep5previewnv", "nvidia/stepfun-ai/step-5-preview#max", present,
+                                          os.getcwd())
+        check(env.get("NVIDIA_API_KEY") == "fake-nim-value" and info.get("standalone") is True
+              and info.get("key") == "NVIDIA_API_KEY from NVIDIA_NIM_API_KEY"
+              and os.environ.get("NVIDIA_API_KEY") == before,
+              "R168 И-3 (b) [code] the key goes into the CHILD env only (os.environ untouched) and the run asks for a "
+              "private server (--standalone): the shared opencode service has its own env",
+              repr((info, env.get("NVIDIA_API_KEY") == "fake-nim-value")))
+        fake_env.clear()
+        env2, info2 = o._opencode_child_env("ocstep5previewnv", "nvidia/stepfun-ai/step-5-preview", present,
+                                            os.getcwd())
+        try:
+            r = o.call_opencode("brief", "R168I3-MARK", os.path.join(os.getcwd(), "never-written.md"),
+                                model="nvidia/stepfun-ai/step-5-preview", effort="max", name="ocstep5previewnv")
+        except _Stop:                                    # the old code starts opencode here - a failure, not a raise
+            r = {"ok": None, "error": "an opencode process was started"}
+        check(info2.get("key_missing") == "NVIDIA_NIM_API_KEY not set (a free key: build.nvidia.com)"
+              and "NVIDIA_API_KEY" not in env2 and not r.get("ok")
+              and "NVIDIA_NIM_API_KEY not set" in str(r.get("error")) and not calls,
+              "R168 И-3 (c) [code] no key: the reason names NVIDIA_NIM_API_KEY and where to get it, and call_opencode "
+              "starts no opencode process", repr((info2.get("key_missing"), r.get("error"), len(calls))))
+        fake_env["NVIDIA_NIM_API_KEY"] = "fake-nim-value"
+        try:
+            o.call_opencode("brief", "R168I3-MARK", os.path.join(os.getcwd(), "never-written.md"),
+                            model="nvidia/stepfun-ai/step-5-preview", effort="max", name="ocstep5previewnv")
+        except _Stop:
+            pass
+        cmd, cenv = calls[-1] if calls else ([], {})
+        check("--standalone" in cmd and "nvidia/stepfun-ai/step-5-preview#max" in cmd
+              and cenv.get("NVIDIA_API_KEY") == "fake-nim-value",
+              "R168 И-3 (d) [code] with the key: opencode runs --standalone on nvidia/...#max with the key in its env",
+              repr([c for c in cmd if c.startswith("-") or "/" in c][:8]))
+        ready = o._cascade_ready(reg)
+        r_key = ready("ocstep5previewnv")
+        r_or = ready("ormimo26flash")
+        o.opencode_bin = lambda: os.path.join(os.getcwd(), "no-such-opencode.exe")
+        r_cli = ready("ocstep5previewnv")
+        fake_env.clear()
+        o.opencode_bin = lambda: present
+        r_key = ready("ocstep5previewnv")
+        check(r_key == "NVIDIA_NIM_API_KEY not set (a free key: build.nvidia.com)" and r_cli == "opencode CLI not found"
+              and r_or == "OPENROUTER_API_KEY not set" and o._channel_key_ready(ocs) is False,
+              "R168 И-3 (e) [code] readiness says what is missing: the opencode CLI, the NVIDIA key with its hint, the "
+              "OpenRouter key", repr((r_key, r_cli, r_or)))
+    finally:
+        for n, v in saved.items():
+            setattr(o, n, v)
+        o.subprocess.run = saved_run
+        if _nv_own is not None:
+            os.environ["NVIDIA_API_KEY"] = _nv_own
+
+    reasons = {"opencode": "opencode CLI not found", "oai": "NVIDIA_NIM_API_KEY not set (a free key: build.nvidia.com)",
+               "openrouter": "OPENROUTER_API_KEY not set"}
+
+    def world(missing):
+        return lambda c: reasons[(ch.get(c) or {}).get("kind")] if (ch.get(c) or {}).get("kind") in missing else True
+    p1 = rt.resolve(copy.deepcopy(reg), panel="cheap", ready=world({"opencode"}))
+    on = {c for c, v in p1.items() if v.get("enabled")}
+    mw = " ".join(str(w) for w in (p1.get("ormimo26flash") or {}).get("why") or [])
+    check({"nvstep5preview", "ormimo26flash", "nvnemotron3ultra"} <= on
+          and not on & {"ocstep5previewnv", "ocmimo26flashfree", "ocnemotron3ultrafree"} and "PAID" in mw.upper(),
+          "R168 И-3 (f) [reg] no opencode, keys set: Step 5 -> the plain API, MiMo -> the OpenRouter copy printed PAID, "
+          "Nemotron -> NVIDIA", repr((sorted(on & set(ch)), mw[:160])))
+    p2 = rt.resolve(copy.deepcopy(reg), panel="cheap", ready=world({"opencode", "oai", "openrouter"}))
+    mm = " ".join(str(w) for w in (p2.get("ocmimo26flashfree") or {}).get("why") or [])
+    s5 = " ".join(str(w) for w in (p2.get("ocstep5previewnv") or {}).get("why") or [])
+    check("ocmimo26flashfree: opencode CLI not found" in mm and "ormimo26flash: OPENROUTER_API_KEY not set" in mm
+          and "nvstep5preview: NVIDIA_NIM_API_KEY not set" in s5,
+          "R168 И-3 (g) [code] nothing ready: the voice that runs names what each member of its group lacks",
+          repr((mm[:200], s5[:200])))
+    p3 = rt.resolve(copy.deepcopy(reg), panel="cheap", ready=lambda c: True)
+    p3 = rt.apply_quota_skip(p3, reg, {"opencode-free": "quota group «opencode-free» was refused earlier today"})
+    check("ormimo26flash" in ch and not (p3.get("ormimo26flash") or {}).get("enabled")
+          and not (p3.get("ocmimo26flashfree") or {}).get("enabled"),
+          "R168 И-3 (h) [reg] the Zen group refused today: the free MiMo is skipped and its PAID OpenRouter copy does "
+          "not start in its place", repr(((p3.get("ormimo26flash") or {}).get("enabled"),
+                                         (p3.get("ocmimo26flashfree") or {}).get("why"))))
+    p4 = rt.resolve(copy.deepcopy(reg), panel="cheap", ready=lambda c: True)
+    f4 = (p4.get("ocstep5previewnv") or {}).get("fallback") or {}
+    check((p4.get("ocstep5previewnv") or {}).get("enabled") and not (p4.get("nvstep5preview") or {}).get("enabled")
+          and f4.get("channel") == "nvstep5preview" and not f4.get("off")
+          and not (p4.get("ormimo26flash") or {}).get("enabled") and (p4.get("ocmimo26flashfree") or {}).get("enabled"),
+          "R168 И-3 (i) [reg] everything ready: Step 5 through opencode with the API copy as its armed fallback; the "
+          "free MiMo runs, the PAID copy does not", repr(f4))
+
+
+def suite_r168_i4_panel_fixes():
+    """R168 И-4 (2026-10-24): panel r168i3 on all R168 code - the findings that reproduced. [code] checks FAIL on the
+    И-3 code (runs/r168-free-api-fallback/i4/nc_i4.py); [guard] ones pass on both.
+      (a) [reg] ormimo26flash is twin_only;
+      (b) [code] every member ready, --skip ocmimo26flashfree: the PAID MiMo copy does not take the voice;
+      (c) [code] every member ready, --only openrouter: it does not start;  (d) [code] --skip opencode: nor here;
+      (e) [code] the Zen group refused today + --skip ocmimo26flashfree: nor here (no metered channel around it);
+      (f) [guard] no opencode on the machine: the PAID copy carries the voice, printed PAID (Igor's «вариант в»);
+      (g) [guard] named by its own name it runs;
+      (h) [code] call_opencode / call_mimocli / call_claudecli start their CLI through _run_tree (panels E-316);
+      (i) [code] a real tree whose grandchild keeps stdout open: call_opencode returns at its timeout, keeps the
+          partial text, leaves no grandchild (live: ocstep5previewnv held panel r168i3 3 980 s against 1 200);
+      (j) [code] an oc_key channel's billing line names opencode's own provider and the copied key.
+    """
+    import copy
+    import inspect
+    import json as _json
+    import subprocess as sp
+    import tempfile
+    import time as _t
+    import orchestrate as o
+    import routing as rt
+    section("R168 И-4: the PAID MiMo copy only where no free twin can run; a CLI timeout stops its whole tree")
+    fx = copy.deepcopy(rt.load_registry())
+    ch = fx.get("channels") or {}
+    for n in ("ocmimo26flashfree", "ormimo26flash"):          # a kit user's defaults, whatever the overlay says
+        ch[n]["enabled"] = True
+    check(ch["ormimo26flash"].get("twin_only") is True,
+          "R168 И-4 (a) [reg] ormimo26flash is twin_only", repr(ch["ormimo26flash"].get("twin_only")))
+
+    def _all(c):
+        return True
+
+    def _no_oc(c):
+        return "opencode CLI not found" if (ch.get(c) or {}).get("kind") == "opencode" else True
+
+    def _plan(**kw):
+        try:
+            return rt.resolve(copy.deepcopy(fx), tier="max", **kw)
+        except rt.RouteError as exc:
+            return {"_error": {"enabled": False, "why": [str(exc)]}}
+
+    def _on(p, c="ormimo26flash"):
+        return bool((p.get(c) or {}).get("enabled"))
+
+    def _why(p, c="ormimo26flash"):
+        return " ".join(str(w) for w in (p.get(c) or {}).get("why") or [])
+    pb = _plan(panel="cheap", skip=["ocmimo26flashfree"], ready=_all)
+    check(not _on(pb) and "name ormimo26flash" in _why(pb),
+          "R168 И-4 (b) [code] every member ready, --skip ocmimo26flashfree: the PAID copy does not take the voice",
+          _why(pb)[-160:])
+    pc = _plan(panel="cheap", only=["openrouter"], ready=_all)
+    check(not _on(pc), "R168 И-4 (c) [code] every member ready, --only openrouter: the PAID MiMo copy does not start",
+          _why(pc)[-160:])
+    pd = _plan(panel="cheap", skip=["opencode"], ready=_all)
+    check(not _on(pd), "R168 И-4 (d) [code] every member ready, --skip opencode: the PAID MiMo copy does not start",
+          _why(pd)[-160:])
+    pe = rt.apply_quota_skip(_plan(panel="cheap", skip=["ocmimo26flashfree"], ready=_all), fx,
+                             {"opencode-free": "quota group «opencode-free» was refused earlier today"})
+    check(not _on(pe), "R168 И-4 (e) [code] Zen refused today + --skip ocmimo26flashfree: no PAID MiMo around it",
+          _why(pe)[-160:])
+    pf = _plan(panel="cheap", ready=_no_oc)
+    check(_on(pf) and "PAID" in _why(pf).upper(),
+          "R168 И-4 (f) [guard] no opencode here: the PAID copy carries the MiMo voice, printed PAID", _why(pf)[-160:])
+    pg = _plan(only=["ormimo26flash"], ready=_all)
+    check(_on(pg), "R168 И-4 (g) [guard] named by its own name, the PAID copy runs", _why(pg)[-120:])
+    src = {f: inspect.getsource(getattr(o, f)) for f in ("call_opencode", "call_mimocli", "call_claudecli")}
+    check(all("_run_tree(cmd" in v and "subprocess.run(cmd" not in v for v in src.values()),
+          "R168 И-4 (h) [code] the opencode, MiMo and Claude CLIs start through _run_tree (the tree stops at the timeout)",
+          repr({f: ("_run_tree(cmd" in v, "subprocess.run(cmd" in v) for f, v in src.items()}))
+
+    td = tempfile.mkdtemp(prefix="r168i4-")
+    pidf, outf = os.path.join(td, "grandchild.pid"), os.path.join(td, "OUT.md")
+    body = ("import json, os, subprocess, sys, time\n"
+            "sys.stdin.read()\n"
+            "print(json.dumps({'type': 'text', 'part': {'type': 'text', 'text': 'R168I4-PARTIAL'}}), flush=True)\n"
+            "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(40)'])\n"
+            "open(os.environ['R168I4_PIDFILE'], 'w').write(str(g.pid))\n"
+            "time.sleep(40)\n")
+    if os.name == "nt":
+        open(os.path.join(td, "fake_oc.py"), "w", encoding="utf-8").write(body)
+        fake = os.path.join(td, "opencode.cmd")
+        open(fake, "w", encoding="utf-8").write('@"%s" "%s" %%*\r\n' % (sys.executable, os.path.join(td, "fake_oc.py")))
+    else:
+        fake = os.path.join(td, "opencode")
+        open(fake, "w", encoding="utf-8").write("#!%s\n%s" % (sys.executable, body))
+        os.chmod(fake, 0o755)
+    saved = {n: getattr(o, n) for n in ("opencode_bin", "_opencode_version", "_opencode_supports_standalone")}
+    pid, el, r = None, None, {}
+    try:
+        o.opencode_bin = lambda: fake
+        o._opencode_version = lambda b: (2, 1, 0)
+        o._opencode_supports_standalone = lambda b: True
+        os.environ["R168I4_PIDFILE"] = pidf
+        t0 = _t.time()
+        r = o.call_opencode("brief", "R168I4-MARK", outf, model="opencode/mimo-v2.6-flash-free", timeout=3,
+                            name="ocmimo26flashfree")
+        el = _t.time() - t0
+        _t.sleep(1)
+        pid = int(open(pidf).read().strip()) if os.path.exists(pidf) else None
+        if pid and os.name == "nt":
+            alive = str(pid) in sp.run(["tasklist", "/FI", "PID eq %d" % pid, "/NH"], capture_output=True,
+                                       text=True, errors="replace").stdout
+        elif pid:
+            try:
+                os.kill(pid, 0)
+                alive = True
+            except OSError:
+                alive = False
+        else:
+            alive = None
+        kept = "R168I4-PARTIAL" in (_json.dumps(r, default=str) + (open(outf, encoding="utf-8").read()
+                                                                   if os.path.exists(outf) else ""))
+        check(el is not None and el < 20 and not r.get("ok") and kept and alive is False,
+              "R168 И-4 (i) [code] a grandchild holding stdout: call_opencode returns at its 3 s timeout (old: ~40 s), "
+              "keeps the partial text, leaves no grandchild",
+              repr((round(el or -1, 1), r.get("ok"), kept, alive, str(r.get("error"))[:60])))
+    finally:
+        for n, v in saved.items():
+            setattr(o, n, v)
+        os.environ.pop("R168I4_PIDFILE", None)
+        if pid:
+            try:
+                if os.name == "nt":
+                    sp.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+                else:
+                    os.kill(pid, 9)
+            except OSError:
+                pass
+    bl = o._opencode_billing_line("ocstep5previewnv", reg=fx)
+    ctl = rt.opencode_billing("wokey/some-model", "metered")
+    check("opencode's own provider 'nvidia'" in bl and "NVIDIA_API_KEY" in bl and "YOUR opencode config" not in bl
+          and "YOUR opencode config" in ctl,
+          "R168 И-4 (j) [code] ocstep5previewnv's billing line names opencode's own nvidia provider and the copied key; "
+          "a provider without oc_key still reads «YOUR opencode config»", repr((bl[:150], ctl[:80])))
 
 
 if __name__ == "__main__":

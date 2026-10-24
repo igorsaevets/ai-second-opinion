@@ -273,6 +273,34 @@ with the hours to 00:00 UTC) unless the human named the channel (`--only`, a rou
 a date other than today's is ignored, and an unreadable file is an empty one.
 `MODEL_ORCH_QUOTA_STATE` points it elsewhere (`off` or empty: never read or written).
 
+### What 1.114.0 changed in a run
+
+- **An API voice's `timeout` bounds the whole call**, inside the read: streamed response headers must
+  arrive within 300 s, the per-read limit is re-armed to the time left before every read, NVIDIA's
+  channels stop after 300 s without data (`stall_s`; SSE comment lines do not reset it), and the
+  forced final answer after a page-opening stop gets one more `timeout`. A read cut this way keeps
+  its text, graded partial, and is never retried automatically. 1.113.8 named this as planned (one
+  read ran 60 minutes under a 20-minute timeout).
+- **A CLI agent's `timeout` stops its whole process tree** (opencode, mimo, Claude Code): `taskkill /T`
+  on Windows, the process group elsewhere. Until 1.113.9 only the program's launcher was stopped (on
+  Windows the `opencode.CMD` shim), the agent below it kept working, and one round waited 3,980 s for
+  a channel with a 1,200 s timeout. What the agent wrote before the stop is kept.
+- **One voice per model, the first transport that can run here** (`_cascade_groups`): Step 5 Preview =
+  `ocstep5previewnv` (opencode on NVIDIA's free endpoint), `nvstep5preview` (NVIDIA's API); Nemotron 3
+  Ultra = `nvnemotron3ultra`, `ocnemotron3ultrafree`, `ornemotron3ultra` (the last on the standard
+  panel); MiMo v2.6 Flash = `ocmimo26flashfree`, `ormimo26flash`. When no member can run, the plan names
+  what each one lacks («opencode CLI not found», «NVIDIA_NIM_API_KEY not set (a free key:
+  build.nvidia.com)», «OPENROUTER_API_KEY not set») and the first member's preflight says it again.
+- **A PAID copy that stands in for a free one is `twin_only`** (`ormimo26flash`): it takes the voice only
+  where no free or subscription member before it in its group can run on this machine, or when it is
+  named. Skipping the free copy, `--only openrouter`, "without opencode" or a day opencode's free
+  allowance is spent never moves the voice to the paid copy where opencode is installed
+  (`routing._twin_only_gate`; a route that leaves nothing else to run stops with an error).
+- **opencode on NVIDIA**: the provider reads `NVIDIA_API_KEY`; the harness copies `NVIDIA_NIM_API_KEY`
+  into that name in the opencode child's environment only (yours, if set, wins) and runs it
+  `--standalone`; without the key the channel is refused before it starts. Its billing line names
+  opencode's own provider and the key.
+
 ### What 1.113.8 changed in a run
 
 - **What an opencode channel costs, in words.** The plan, the preflight, the call log and the

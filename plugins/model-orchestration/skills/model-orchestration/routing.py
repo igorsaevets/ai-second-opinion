@@ -2563,20 +2563,27 @@ def _paid_label(c, plan, chans):
 # false for the OpenCode Go plan and for a provider of the user's own opencode config (R158 И-1: 13 wokey.ai channels,
 # per token, printed as free on the one screen read before money moves). A missing `cost` reads «billing UNKNOWN»,
 # never free (panel r158i1, codex: «Missing or contradictory metadata means billing UNKNOWN, never implicitly free»).
-def _opencode_where(model):
-    """Who serves an opencode model: opencode Zen, the OpenCode Go plan, or a provider of the user's opencode config."""
+def _opencode_where(model, oc_key=None):
+    """Who serves an opencode model: opencode Zen, the OpenCode Go plan, opencode's own provider with a key this
+    harness copies in (a channel's `oc_key`, R168), or a provider of the user's opencode config."""
     m = str(model or "")
     prov = m.split("/", 1)[0] if "/" in m else ""
     if prov == "opencode":
         return "opencode Zen (opencode's infrastructure)"
     if prov == "opencode-go":
         return "the OpenCode Go plan (opencode's infrastructure)"
+    if prov and isinstance(oc_key, dict) and oc_key.get("env") and oc_key.get("from"):
+        # R168 И-4 (open item (a) of И-3): ocstep5previewnv's preflight said «the provider 'nvidia' of YOUR opencode
+        # config (its endpoint and key are set there)»; it is opencode's own nvidia/ provider, and its key is the one
+        # call_opencode copies into the child env (_opencode_child_env) - the user's opencode config holds neither.
+        return ("opencode's own provider %r, with the key %s that this harness copies from %s into the opencode "
+                "child only" % (prov, oc_key["env"], oc_key["from"]))
     if prov:
         return "the provider %r of YOUR opencode config (its endpoint and key are set there)" % prov
     return "an opencode provider (the model has no provider prefix)"
 
 
-def opencode_billing(model, cost):
+def opencode_billing(model, cost, oc_key=None):
     """One phrase: how an opencode channel's call is paid. Shared by the plan (here) and orchestrate's lines."""
     m = str(model or "")
     prov = m.split("/", 1)[0] if "/" in m else ""
@@ -2584,7 +2591,7 @@ def opencode_billing(model, cost):
         return "OpenCode Go plan (opencode's own login), counted against the plan's limits"
     if prov == "opencode" and cost == "free":
         return "free model, no API key"
-    where = _opencode_where(model)
+    where = _opencode_where(model, oc_key)
     if cost == "free":
         return "free per the registry's cost - %s" % where
     if cost == "subscription":
@@ -2712,6 +2719,13 @@ def _apply_cascade(plan, reg, ready=None, named=None):
         winner = next((c for c in members if verdict[c] is True), members[0])
         unready = [c for c in members[:members.index(winner)] if verdict[c] is not True]
         chans = reg.get("channels") or {}
+        lacks = "; ".join("%s: %s" % (c, verdict[c] if isinstance(verdict[c], str) and verdict[c]
+                                      else "its key or CLI is missing") for c in members if verdict[c] is not True)
+        if verdict[winner] is not True:
+            # R168 И-3 (D4): nothing in this group can run here - the voice that runs says what each member lacks, so
+            # the plan names what would bring the voice back (a kit install without opencode or a key).
+            plan[winner]["why"].append("cascade: no member of this group is ready here (%s); %s runs first so that "
+                                       "its preflight says it" % (lacks, winner))
         if unready and (chans.get(winner) or {}).get("cost") not in _NON_PAID_COSTS:
             # R153 И-11: «добавь kimik3free» where it is not ready ran the paid kimik3 and no line said PAID (r153i9
             # MiMo Pro P4; old). 🔴 R153 И-12 (r153i11 agy AB): a line is not a choice - the family word already
@@ -2738,9 +2752,48 @@ def _apply_cascade(plan, reg, ready=None, named=None):
                 # R140 И-4 (MiMo Pro): «X takes priority» hid that nothing here is ready.
                 plan[c]["why"].append(
                     "cascade: no member of this group is ready here, so %s runs first and its "
-                    "preflight says what is missing (same model)" % winner)
+                    "preflight says what is missing (same model) - %s" % (winner, lacks))
             else:
                 plan[c]["why"].append("cascade: %s takes priority (same model)" % winner)
+    return plan
+
+
+def _twin_only_gate(plan, reg, ready=None, named=None):
+    """
+    🔴 R168 И-4 (panel r168i3, nvglm53flash Q2; measured on the built kit, runs/r168-free-api-fallback/i4/plan_probe_i4.py):
+    THE PAID MIMO COPY STARTED ON A MACHINE WITH OPENCODE. ormimo26flash (OpenRouter, metered) exists for a kit install
+    without the opencode CLI (Igor 2026-10-23 «для mimo вариант в»). On a machine with opencode and every key,
+    `--only openrouter`, `--skip ocmimo26flashfree`, `--skip opencode` and «не использовать opencode» all ran it - on a
+    Zen-refused day too, which is paying around an exhausted free allowance (the hard rule). R153 И-8's «a plain
+    exclusion: the next transport carries the voice, PAID line» is right for a twin that is merely another transport;
+    a channel with `twin_only: true` is a stand-in for an install that LACKS its free twin, so it runs only when no
+    free (or subscription) member before it in its cascade group can run on this machine - whatever this run selects,
+    excludes or refuses - or when it is named by its own name. Without `ready` (routing.py alone, the selftest tables)
+    every member counts as able to run, so the paid copy stays off.
+    """
+    chans = reg.get("channels") or {}
+    for group in reg.get("_cascade_groups") or []:
+        if not isinstance(group, list):
+            continue
+        for c in group:
+            if (c not in plan or not plan[c]["enabled"] or c in (named or ())
+                    or (chans.get(c) or {}).get("twin_only") is not True):
+                continue
+            free = [m for m in group[:group.index(c)] if (chans.get(m) or {}).get("cost") in _NON_PAID_COSTS]
+            can = []
+            for m in free:
+                try:
+                    v = True if ready is None else ready(m)
+                except Exception:                        # noqa: BLE001 - a bad predicate keeps the paid copy off
+                    v = True
+                if v is True:
+                    can.append(m)
+            if can:
+                plan[c]["enabled"] = False
+                plan[c]["why"].append(
+                    "twin_only: %s is the PAID copy for a machine where %s cannot run; %s can run here, so %s does not "
+                    "take this voice when that one is left out of the run (excluded, not selected or refused today) - "
+                    "name %s to pay for it" % (c, " / ".join(free), can[0], c, c))
     return plan
 
 
@@ -3021,6 +3074,12 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
         raise RouteError("everything left to run is a PAID twin of a channel this route replaces (%s). Name the one "
                          "you want, or say what runs instead." % ", ".join(was_on))
     plan = _apply_cascade(plan, reg, ready, named_directly)   # R140 И-3: `ready` from orchestrate.py
+    on_before_gate = [c for c, p in plan.items() if p["enabled"]]
+    plan = _twin_only_gate(plan, reg, ready, named_directly)  # R168 И-4: a PAID stand-in only where its twin cannot run
+    if on_before_gate and not any(p["enabled"] for p in plan.values()):
+        raise RouteError("everything left to run is a PAID copy meant for a machine where its free twin cannot run "
+                         "(%s), and that twin can run here. Run the free one, or name the paid one to pay for it."
+                         % ", ".join(on_before_gate))
     plan = apply_fallback(plan, reg, ready)          # R142: after the cascade picked the voices
 
     # 🔴 DECORATE BEFORE APPLYING THE TIER, not after. The tier now SCALES per-channel values
@@ -3072,7 +3131,8 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
                 p["_tier_note"] = ("timeout %s only - effort stays %s (--variant flag), opencode CLI: %s"
                                    % (p["timeout"], p.get("effort") or "default",
                                       opencode_billing(p.get("model"),
-                                                       ((reg.get("channels") or {}).get(cname) or {}).get("cost"))))
+                                                       ((reg.get("channels") or {}).get(cname) or {}).get("cost"),
+                                                       ((reg.get("channels") or {}).get(cname) or {}).get("oc_key"))))
             elif p.get("kind") == "grokcli":
                 # R114: clamp effort against the model's own ladder. Without this,
                 # --set grokbuild=grok-4.5 with channel effort=xhigh would pass an
@@ -3456,7 +3516,7 @@ def _added_channel_lines(cname, ch, applied):
     dest = ", ".join("%s %s" % (f, ch[f]) for f in _ADDED_DEST_FIELDS if ch.get(f) not in (None, "", [], {}))
     cost = ch.get("cost")
     if ch.get("kind") == "opencode":
-        bill = opencode_billing(ch.get("model"), cost)
+        bill = opencode_billing(ch.get("model"), cost, ch.get("oc_key"))
     elif cost:
         bill = "cost %s%s" % (cost, "" if cost in _NON_PAID_COSTS else " - PAID per call")
     else:

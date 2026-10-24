@@ -178,7 +178,8 @@ leak it into the transcript, which is the same mistake one step earlier.
 
 The channels legitimately take very different times — roughly one minute, a few minutes, and up to
 half an hour, in that order. They run in parallel, so the round takes as long as the slowest one
-you enabled.
+you enabled. Each one stops at its own `timeout`; since 1.114.0 that bounds an API read too, and a
+CLI agent is stopped with every process it started.
 
 Run with `--dry-run` first, always. It is a **complete** preflight — plan, document, preset, key,
 both binaries, permissions and the privacy gate — and it spends nothing.
@@ -192,6 +193,20 @@ wrong with your install, and nothing is billed. To try anyway, name the channel:
 ocmimo26flashfree` or "only ocmimo26flashfree". To forget the refusal, delete
 `~/.claude/model-orchestration.quota-state.json`; the next run starts the voice again (and
 writes the file again if it is refused).
+
+### "NVIDIA_NIM_API_KEY not set (a free key: build.nvidia.com)"
+
+Since 1.114.0 the cheap panel has a Step 5 Preview voice, and Nemotron 3 Ultra runs first on NVIDIA's free
+endpoint; both need a free NVIDIA key. Without it the plan says so and the Step 5 voice ends at once,
+spending nothing; Nemotron goes through opencode when it is installed. Set the key
+([INSTALL.md](INSTALL.md#nvidia--nvidia_nim_api_key)) or leave the voice out: `--skip ocstep5previewnv`.
+
+### "MiMo v2.6 Flash is PAID in the plan"
+
+The opencode CLI is not found on this machine, so the free MiMo Flash cannot run and its paid OpenRouter
+copy `ormimo26flash` carries the voice (since 1.114.0; $0.14 / $0.28 per 1M tokens, about $0.006 a
+review). Install opencode to make it free again, or leave it out: `--skip ormimo26flash`. Where opencode is
+installed the paid copy never starts unless you name it.
 
 ### "A Grok run says GROK SUBSCRIPTION LIMIT"
 

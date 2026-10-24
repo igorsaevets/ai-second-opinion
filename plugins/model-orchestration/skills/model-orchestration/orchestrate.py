@@ -24,6 +24,7 @@ import json
 import os
 import platform
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -209,8 +210,155 @@ def log(msg):
 # HTTPS reviewer (Anthropic Messages shape)
 # =============================================================================================
 
-def _post(url, payload, key, timeout, stream):
-    """One HTTP attempt. Returns (parsed_or_raw, http_status). Raises on transport failure."""
+# =============================================================================================
+# R168 И-2 (D1): a WALL-CLOCK bound on every API read
+# =============================================================================================
+# 🔴 urlopen's `timeout` is an IDLE limit per socket operation, not a limit on the call: any byte that arrives sooner
+# resets it. Panel r160i2 (2026-10-23): nvstep5preview's first attempt streamed reasoning for 3,606.6 s under
+# `timeout: 20m` - one round, no fetch, so A8's between-round budget never ran - and ended with no text and
+# finish=None; the AUTO-RETRY then gave it 917.5 s more. One free voice held a nine-channel round 75 minutes (every
+# other voice was done at ~17). Now the channel's `timeout` bounds the whole call, inside the read:
+#   - a STREAMING request whose response headers have not arrived within API_HEADER_LIMIT_S is given up (opencode's
+#     own «Timed out waiting for response headers» uses 300 s; NVIDIA's free queue sent headers after 57-110 s on
+#     2026-10-23, and DeepSeek there sent none in 180 s, 10 of 10). An unstreamed request has no such limit: its
+#     headers come with the finished answer.
+#   - before EVERY socket read the per-read limit is set to the time left until the deadline, so neither a silent
+#     socket nor a trickle of bytes outlives it. Measured on Windows 2026-10-23 (runs/r168-free-api-fallback/i2/
+#     shutdown_probe_i2.py): a timer thread's socket.shutdown() does NOT wake a recv that waits with no data (it
+#     returned only when the server closed, 5 s later) - so the bound is the per-read limit, not a watchdog thread.
+#   - a stall limit between DATA frames, opt-in per provider (`stall_s`); SSE comment lines (`: OPENROUTER
+#     PROCESSING`) do not reset it. Not global on purpose: a model whose reasoning is hidden (GPT-5.x Pro through
+#     OpenRouter) sends only comments while it thinks, for many minutes.
+# What had arrived is kept and graded partial; a cut read is never auto-retried (retryable_stream_death) - a re-run
+# gets the same budget.
+API_HEADER_LIMIT_S = 300
+
+
+class APIReadCut(Exception):
+    """A read the harness itself ended: `kind` is "headers", "deadline" or "stall"."""
+
+    def __init__(self, kind, msg):
+        Exception.__init__(self, msg)
+        self.kind = kind
+
+
+def _resp_sock(resp):
+    """The socket under a urllib / http.client response, or None for any other shape.
+
+    http.client builds `resp.fp = sock.makefile("rb")` - a BufferedReader over a SocketIO whose `_sock` is the
+    socket - on every Python this harness supports; a test double or a future layout returns None, and the read
+    then falls back to the per-line time checks alone."""
+    return getattr(getattr(getattr(resp, "fp", None), "raw", None), "_sock", None)
+
+
+def _is_timeout(e):
+    """socket.timeout is TimeoutError only since Python 3.10, and urllib wraps a connect-phase timeout in URLError;
+    all three shapes mean «the socket waited its limit»."""
+    if isinstance(e, urllib.error.URLError) and not isinstance(e, urllib.error.HTTPError):
+        e = getattr(e, "reason", e)
+    return isinstance(e, (socket.timeout, TimeoutError))
+
+
+def _arm_read(sock, *moments):
+    """Set the socket's per-read limit to the time left until the nearest of `moments` (epoch seconds; None = no
+    limit). False when that moment has already come."""
+    ms = [m for m in moments if m is not None]
+    if not ms:
+        return True
+    left = min(ms) - time.time()
+    if left <= 0:
+        return False
+    if sock is not None:
+        try:
+            sock.settimeout(max(0.05, left))
+        except OSError:
+            pass                  # a socket already closed: the read ends on its own
+    return True
+
+
+def _open_bounded(rq, at, stream):
+    """urlopen under the R168 И-2 rules: refuses a request whose deadline `at` has passed, and gives a STREAMING one
+    at most API_HEADER_LIMIT_S for its response headers. The reader then sets the per-read limit itself."""
+    left = None if at is None else at - time.time()
+    if left is not None and left <= 0:
+        raise APIReadCut("deadline", "TIME LIMIT: the channel's timeout had run out before this request was sent")
+    hl = API_HEADER_LIMIT_S if stream else None
+    waits = [w for w in (left, hl) if w is not None]
+    try:
+        return urllib.request.urlopen(rq, timeout=min(waits) if waits else 2400)
+    except Exception as e:
+        if _is_timeout(e):
+            if hl is not None and (left is None or hl < left):
+                raise APIReadCut("headers", "NO RESPONSE HEADERS within %d s - the endpoint never started answering "
+                                 "(R168 И-2; NVIDIA's free queue sent headers after 57-110 s on 2026-10-23)" % hl)
+            raise APIReadCut("deadline", "TIME LIMIT: the channel's timeout ran out while waiting for the response")
+        raise
+
+
+def _bounded_lines(resp, at, stall_s=None, cut=None):
+    """The lines of a streamed response, ending when the deadline `at` or the stall limit comes.
+
+    `cut` (a dict) gets cut["kind"] = "deadline" | "stall" when the harness ended the read; a stream that ended by
+    itself leaves it empty. Only a `data:` line resets the stall clock - comments and blank keep-alives do not."""
+    cut = {} if cut is None else cut
+    sock = _resp_sock(resp)
+    last_data = time.time()
+    it = iter(resp)
+    while True:
+        stall_at = (last_data + stall_s) if stall_s else None
+        if not _arm_read(sock, at, stall_at):
+            cut["kind"] = "deadline" if at is not None and time.time() >= at else "stall"
+            return
+        try:
+            raw = next(it)
+        except StopIteration:
+            return
+        except Exception as e:
+            if _is_timeout(e):
+                now = time.time()
+                if at is not None and now >= at - 0.25:
+                    cut["kind"] = "deadline"
+                    return
+                if stall_at is not None and now >= stall_at - 0.25:
+                    cut["kind"] = "stall"
+                    return
+            raise
+        if raw.lstrip()[:5] == b"data:":
+            last_data = time.time()
+        yield raw
+
+
+def _read_body_bounded(resp, at):
+    """The whole body of an UNSTREAMED response, read in pieces so the deadline `at` bounds it too. An unstreamed
+    answer cut short is unusable, so the cut is an error.
+
+    read1(), not read(n): with a Content-Length, read(n) loops inside BufferedReader until n bytes have come, so a
+    body trickling one byte at a time resets the per-read limit at every byte and outlives the deadline - measured
+    in suite_r168_i2_api_read_bound (f): 6.1 s against a 2 s timeout with read(65536). read1() makes at most one
+    system read per call, and the deadline is re-armed between calls."""
+    sock, parts = _resp_sock(resp), []
+    rd = getattr(resp, "read1", None) or resp.read
+    while True:
+        if not _arm_read(sock, at):
+            raise APIReadCut("deadline", "TIME LIMIT: no answer within the channel's timeout (an unstreamed request "
+                             "keeps no partial text)")
+        try:
+            b = rd(65536)
+        except Exception as e:
+            if _is_timeout(e) and at is not None and time.time() >= at - 0.25:
+                raise APIReadCut("deadline", "TIME LIMIT: no answer within the channel's timeout (an unstreamed "
+                                 "request keeps no partial text)")
+            raise
+        if not b:
+            return b"".join(parts)
+        parts.append(b)
+
+
+def _post(url, payload, key, timeout, stream, deadline=None):
+    """One HTTP attempt. Returns (parsed_or_raw, http_status). Raises on transport failure.
+
+    R168 И-2: `deadline` (epoch seconds; default now + timeout) bounds the attempt inside the read. The caller
+    passes ONE deadline for all its attempts and its fallback model, so retries cannot multiply the budget."""
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -221,13 +369,14 @@ def _post(url, payload, key, timeout, stream):
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    at = deadline if deadline is not None else time.time() + timeout
+    with _open_bounded(req, at, stream) as resp:
         if not stream:
-            return json.loads(resp.read().decode("utf-8")), resp.status
-        return _read_sse(resp), resp.status
+            return json.loads(_read_body_bounded(resp, at).decode("utf-8")), resp.status
+        return _read_sse(resp, at), resp.status
 
 
-def _read_sse(resp):
+def _read_sse(resp, at=None):
     """
     Collapse an Anthropic SSE stream into the same dict shape a non-streaming call returns.
 
@@ -236,8 +385,8 @@ def _read_sse(resp):
     """
     out = {"content": [], "usage": {}, "stop_reason": None, "sse_error": None,
            "reasoning_chars": 0}
-    text_parts, blocks = [], []
-    for raw in resp:
+    text_parts, blocks, cut = [], [], {}
+    for raw in _bounded_lines(resp, at, None, cut):          # R168 И-2: ends at the deadline
         line = raw.decode("utf-8", errors="replace").strip()
         if not line.startswith("data:"):
             continue                      # skip "event:" lines and keep-alive blanks
@@ -286,11 +435,13 @@ def _read_sse(resp):
             out["usage"].update(ev.get("usage", {}) or {})
     out["content"] = blocks
     out["content"].append({"type": "text", "text": "".join(text_parts)})
+    if cut.get("kind") and not out["stop_reason"]:
+        out["deadline_cut"] = cut["kind"]            # R168 И-2: the harness closed the read; the text is partial
     return out
 
 
 def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, name="spark",
-                       effort=None, fallback_model=None, answer_cap=None):
+                       effort=None, fallback_model=None, answer_cap=None, _deadline=None):
     """Probe, then the real call, with retries that distinguish network blips from refusals.
 
     `model` comes from the routing plan, i.e. from channels.json. 🔴 Until 2026-08-06 it did not
@@ -386,10 +537,17 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, na
         % (name, tier, effort, budget or "adaptive", stream))
 
     t0 = time.time()
+    # R168 И-2: ONE deadline for every attempt below and for the fallback model. Four transport retries of a full
+    # `timeout` each, then the fallback's four, could hold a round eight times the channel's budget.
+    deadline = _deadline if _deadline is not None else t0 + timeout
     last = None
     for attempt in range(4):
+        if time.time() >= deadline:
+            last = last or ("TIME LIMIT: the channel's timeout (%d s) ran out before attempt %d"
+                            % (timeout, attempt + 1))
+            break
         try:
-            data, _ = _post(url, payload, key, timeout, stream)
+            data, _ = _post(url, payload, key, timeout, stream, deadline=deadline)
             sse_err = data.get("sse_error") if isinstance(data, dict) else None
             if sse_err and "output_config" in payload:
                 log("  [%s] 200+SSE error (%s) - dropping output_config and retrying"
@@ -407,6 +565,11 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, na
             # so "the effort we asked for" and "the effort that survived" are not the same fact.
             res["effort"] = payload.get("output_config", {}).get("effort")
             res["model"] = model
+            if data.get("deadline_cut"):
+                res["ok"] = False
+                res["stream_cut"] = data["deadline_cut"]
+                res.setdefault("warnings", []).insert(0, "⏱ " + ("TIME LIMIT (R168 И-2): the harness closed the read at %s s - this channel's `timeout` (%d s) bounds the whole call, not each wait. What had arrived is kept as a PARTIAL answer and is not re-run (a re-run gets the same budget)."
+                                                          % (round(time.time() - t0, 1), timeout)))
             return res
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")[:400]
@@ -442,6 +605,9 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, na
                 time.sleep(wait)
                 continue
             break
+        except APIReadCut as e:
+            last = str(e)       # R168 И-2: no headers, or the budget is gone - not a blip worth another attempt
+            break
         except Exception as e:
             # gaierror / getaddrinfo failed / connection reset. A real run died here once and
             # took the whole orchestration with it, because urllib has no retry of its own.
@@ -461,7 +627,7 @@ def call_http_reviewer(brief, system, tier, marker, timeout=2400, model=None, na
             # below-floor note phrased a capped short answer as under-allocation.
             res = call_http_reviewer(brief, system, tier, marker, timeout=timeout,
                                      model=fallback_model, name=name, effort=effort,
-                                     fallback_model=None, answer_cap=answer_cap)
+                                     fallback_model=None, answer_cap=answer_cap, _deadline=deadline)
             if res.get("ok"):
                 res["fallback_used"] = True
                 res["primary_model"] = model
@@ -5124,6 +5290,37 @@ def _opencode_limit(cname, reg=None):
     return None
 
 
+def _oc_key_valid(k):
+    """R168 И-3 (D2): an `oc_key` block {"env": <the name opencode's provider reads>, "from": <the name the harness keeps
+    the key under>} with two upper-case env names, or None."""
+    if isinstance(k, dict) and all(isinstance(k.get(f), str) and re.match(r"^[A-Z][A-Z0-9_]*$", k[f])
+                                   for f in ("env", "from")):
+        return {"env": k["env"], "from": k["from"]}
+    return None
+
+
+def _oc_key(cname, reg=None):
+    """The channel's valid `oc_key` or None, read from the registry like _opencode_limit. opencode's own `nvidia/`
+    provider reads NVIDIA_API_KEY; this harness (and this machine) keep NVIDIA_NIM_API_KEY - measured 2026-10-23:
+    without it `provider.no-route` in 5 s, with it an answer in 63 s (runs/r168-free-api-fallback/oc_nvidia_probe_r168b.log)."""
+    try:
+        if reg is None:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import routing
+            reg = routing.load_registry()
+        return _oc_key_valid(((reg.get("channels") or {}).get(cname) or {}).get("oc_key"))
+    except Exception:                                     # noqa: BLE001 - a run never dies on this
+        return None
+
+
+def _key_hint_for(varname):
+    """' (<hint>)' for a key variable an OAI provider documents a hint for (OAI_PROVIDERS key_hint), else ''."""
+    for p in OAI_PROVIDERS.values():
+        if isinstance(p, dict) and p.get("key_env") == varname and p.get("key_hint"):
+            return " (%s)" % p["key_hint"]
+    return ""
+
+
 def _opencode_billing_line(cname, model=None, reg=None):
     """routing.opencode_billing for one opencode channel, its `cost` (and with no model its model) read from the
     registry like _opencode_limit. R158 И-2: the call log and the preflight said «free model, no API key» for every
@@ -5135,7 +5332,7 @@ def _opencode_billing_line(cname, model=None, reg=None):
         if reg is None:
             reg = routing.load_registry()
         ch = (reg.get("channels") or {}).get(cname) or {}
-        return routing.opencode_billing(model or ch.get("model"), ch.get("cost"))
+        return routing.opencode_billing(model or ch.get("model"), ch.get("cost"), ch.get("oc_key"))
     except Exception as exc:                             # noqa: BLE001 - a log line never kills a run
         return "billing UNKNOWN (the registry could not be read: %s)" % exc.__class__.__name__
 
@@ -5173,9 +5370,23 @@ def _opencode_child_env(name, base_model, binary, cwd):
     env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
     if getattr(_TASK, "ctx", None) is None:              # R153 И-5 G10: a review gets no walk-up AGENTS.md
         env.update(dict.fromkeys(OC_REVIEW_PROMPT_OFF, "1"))
-    info = {"standalone": False, "limit": None, "note": None}
+    info = {"standalone": False, "limit": None, "note": None, "key": None, "key_missing": None}
+    k = _oc_key(name)
+    if k:                                                # R168 И-3 (D2): the provider reads ITS name for the key
+        own = _env_key(k["env"])
+        v = own or _env_key(k["from"])
+        if v:
+            env[k["env"]] = v                            # the child's env only - os.environ is never touched
+            info["key"] = k["env"] if own else "%s from %s" % (k["env"], k["from"])
+        else:
+            info["key_missing"] = "%s not set%s" % (k["from"], _key_hint_for(k["from"]))
     lim = _opencode_limit(name)
     if not lim:
+        if info["key"] and _opencode_supports_standalone(binary):
+            info["standalone"] = True                    # the shared opencode service runs with ITS env, not this key
+        elif info["key"]:
+            info["note"] = ("%s is set for this run, but this opencode has no `run --standalone`: the shared opencode "
+                            "service does not see it" % k["env"])
         return env, info
     if not _opencode_supports_standalone(binary):
         info["note"] = ("opencode_limit (output %d) not applied: this opencode has no `run --standalone`, "
@@ -5362,13 +5573,21 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     # R153 И-2: PWD, no self-update, the channel's output limit (see _opencode_child_env).
     ncwd = neutral_cwd()
     env, oc_info = _opencode_child_env(name, base_model, binary, ncwd)
+    if oc_info.get("key_missing"):                       # R168 И-3 (D4): before opencode's own 5-s provider.no-route
+        log("  [%s] %s - not started" % (name, oc_info["key_missing"]))
+        return {"channel": name, "ok": False, "error": oc_info["key_missing"] + " - not started"}
     if oc_info["standalone"] and v1_note:                # R153 И-6: v1 has no `run --standalone` (a v1 shim
         oc_info["standalone"] = False                    # beside a v2 package passes the byte check)
         log("  [%s] opencode_limit not applied: the v1 binary has no `run --standalone`" % name)
     if oc_info["standalone"]:
         cmd.insert(2, "--standalone")
-        log("  [%s] opencode_limit context %d / output %d -> a private server (--standalone)"
-            % (name, oc_info["limit"]["context"], oc_info["limit"]["output"]))
+        why = []                                         # R168 И-3: a mapped key alone also needs the private server
+        if oc_info.get("limit"):
+            why.append("opencode_limit context %d / output %d" % (oc_info["limit"]["context"],
+                                                                 oc_info["limit"]["output"]))
+        if oc_info.get("key"):
+            why.append("%s in the child env only" % oc_info["key"])
+        log("  [%s] %s -> a private server (--standalone)" % (name, "; ".join(why)))
     elif oc_info["note"]:
         log("  [%s] %s" % (name, oc_info["note"]))
 
@@ -5380,9 +5599,13 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
         % (name, how, len(text_in), base_model))
     t0 = time.time()
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           input=text_in, cwd=ncwd, env=_task_child_env(env),
-                           timeout=_seconds(timeout, 2400))
+        # 🔴 R168 И-4 (panels E-316, live in panel r168i3): subprocess.run's timeout stops only the direct child -
+        # the `opencode.CMD` shim's cmd.exe - and then waits for the pipes, which opencode.exe and its private
+        # server keep open until the model ends: ocstep5previewnv held the round 3 980 s against its 1 200 and
+        # nothing after it ran. _run_tree stops the whole tree at the timeout and keeps what was printed.
+        p = _run_tree(cmd, capture_output=True, text=True, encoding="utf-8",
+                      input=text_in, cwd=ncwd, env=_task_child_env(env),
+                      timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
     except subprocess.TimeoutExpired as exc:
@@ -5506,9 +5729,10 @@ def call_mimocli(brief, marker, outfile, model=None, effort=None, system=None,
            else " (--task: the project's own instruction files stay)"))
     t0 = time.time()
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           input=text_in, cwd=ncwd, env=child_env,
-                           timeout=_seconds(timeout, 2400))
+        # R168 И-4 (E-316): the whole tree stops at the timeout - see call_opencode.
+        p = _run_tree(cmd, capture_output=True, text=True, encoding="utf-8",
+                      input=text_in, cwd=ncwd, env=child_env,
+                      timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
     except subprocess.TimeoutExpired as exc:
@@ -5645,9 +5869,10 @@ def call_claudecli(brief, marker, outfile, model=None, effort=None, system=None,
         % (name, len(text_in), effort or "default", fallback_model or "none", turns))
     t0 = time.time()
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           input=text_in, cwd=cwd, env=env,
-                           timeout=_seconds(timeout, 2400))
+        # R168 И-4 (E-316): the whole tree stops at the timeout - see call_opencode.
+        p = _run_tree(cmd, capture_output=True, text=True, encoding="utf-8",
+                      input=text_in, cwd=cwd, env=env,
+                      timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
     except subprocess.TimeoutExpired:
@@ -7469,11 +7694,16 @@ OAI_PROVIDERS = {
         "label": "NVIDIA NIM (free endpoint)",
         "url": os.environ.get("NVIDIA_NIM_BASE", "https://integrate.api.nvidia.com/v1") + "/chat/completions",
         "key_env": "NVIDIA_NIM_API_KEY",
+        "key_hint": "a free key: build.nvidia.com",   # R168 И-3 (D4): printed where the key is missing
         "headers": {},
         "depth": "effort_field",     # body["reasoning_effort"] = reasoning.effort (+ reasoning_budget if set)
         "search": "none",
         "usage_request": "openai",   # body["stream_options"] = {"include_usage": True}
         "streaming": True,
+        # R168 И-2 (D1): NVIDIA's queue sits BEFORE the headers (57-110 s measured 2026-10-23); once a stream has
+        # started it streams (GLM: < 3 s). 300 s with no data frame after that is a dead stream. A net: no
+        # incident of this shape is measured yet (r160i2's hour was reasoning deltas - the deadline's case).
+        "stall_s": 300,
     },
 }
 
@@ -7762,9 +7992,12 @@ def _urlopen_transient_retry(rq, timeout, log_name):
     timed out may have finished, and billed, on the vendor's side.
     """
     retries_left = 2
+    at = time.time() + timeout        # R168 И-2: one deadline for these attempts AND the caller's read of the body
     while True:
         try:
-            return urllib.request.urlopen(rq, timeout=timeout)
+            resp = _open_bounded(rq, at, False)
+            resp._r168_at = at
+            return resp
         except urllib.error.HTTPError as e:
             if retries_left <= 0 or (e.code != 429 and e.code < 500):
                 raise
@@ -7876,7 +8109,7 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
                                     headers={"x-goog-api-key": key,
                                              "Content-Type": "application/json"})
         with _urlopen_transient_retry(rq, timeout, name) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            data = json.loads(_read_body_bounded(resp, getattr(resp, "_r168_at", None)).decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:400]
         return {"channel": name, "ok": False, "seconds": round(time.time() - t0, 1),
@@ -8202,6 +8435,10 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         body["tools"] = tools
     headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
     headers.update(prov.get("headers") or {})
+    # R168 И-2 (D1): this provider's stall limit between data frames (opt-in, see API_HEADER_LIMIT_S), and the
+    # read deadline of the current round - set in the round loop below, read by _stream_once.
+    stall_s = prov.get("stall_s")
+    read_deadline = [None]
 
     def _stream_once(payload):
         """One streaming completion. Returns (text, reasoning_chars, usage, tool_calls) or raises.
@@ -8225,8 +8462,8 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             # caller below is untouched - the tool loop, the spend guard and the telemetry cannot
             # tell the difference. See the block comment on `streaming` above for why MiMo needs
             # this: its streamed text is missing characters that its unstreamed text keeps.
-            with urllib.request.urlopen(rq, timeout=timeout) as resp:
-                ev = json.loads(resp.read().decode("utf-8", "replace"))
+            with _open_bounded(rq, read_deadline[0], False) as resp:
+                ev = json.loads(_read_body_bounded(resp, read_deadline[0]).decode("utf-8", "replace"))
             if ev.get("error"):
                 stream_error.append(ev["error"])
             if ev.get("model"):
@@ -8259,8 +8496,9 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                     [{"id": v["id"], "name": v["name"], "args": "".join(v["args"])}
                      for _, v in sorted(calls.items())],
                     sorted(served), finish)
-        with urllib.request.urlopen(rq, timeout=timeout) as resp:
-            for raw in resp:
+        cut = {}
+        with _open_bounded(rq, read_deadline[0], True) as resp:
+            for raw in _bounded_lines(resp, read_deadline[0], stall_s, cut):
                 line = raw.decode("utf-8", "replace").strip()
                 if not line or line.startswith(":"):    # ": OPENROUTER PROCESSING" keep-alive
                     continue
@@ -8330,6 +8568,11 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                             slot["name"] = fn["name"]
                         if fn.get("arguments"):
                             slot["args"].append(fn["arguments"])
+        if cut.get("kind") and not finish.get("finish"):
+            # R168 И-2: the harness ended this read (deadline / stall). Half-assembled tool calls are dropped - a
+            # call cut inside its arguments is JSON that almost parses.
+            finish["cut"], finish["cut_at"] = cut["kind"], round(time.time() - start, 1)
+            calls = {}
         return ("".join(parts), rchars,  use,
                 [{"id": v["id"], "name": v["name"], "args": "".join(v["args"])}
                  for _, v in sorted(calls.items())],
@@ -8395,6 +8638,7 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                          "billed round, which would already have spent money)." % usd_ceiling}
     spend_stop = False
     time_stop, time_stop_s, round_max_s = False, 0.0, 0.0     # R163 И-3 (A8): the TIME BUDGET block below
+    stream_cut, stream_cut_s = None, None                    # R168 И-2 (D1): the harness closed a read
     # 🔴 THE FORCED-ANSWER ROUND HAD NO EXIT, and that was true of the fetch-budget path too since
     # it was written. `body.pop("tools")` is what normally stops the model asking for another page,
     # so in practice the next turn is the answer and the loop ends - but "in practice" is doing all
@@ -8521,6 +8765,13 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     try:
         for _round in range(max_rounds + 1):
             _t_round = time.time()
+            # R168 И-2 (D1): the channel's `timeout` bounds the call, inside the read. The forced answer after a
+            # fetch / spend / time stop (the INLINE call in the stop branch below, R64) gets ONE MORE `timeout` of
+            # its own: A8 stops fetching when the next FETCH round would end past the timeout, and the final
+            # answer - the review's longest generation - is slower than a fetch round (p337's Step 5 wrote its
+            # 30.9K-token answer ~40 min after A8 fired). Worst case 2 x timeout; a single-round call (r160i2's
+            # hour) stops at 1 x timeout.
+            read_deadline[0] = (start + timeout) if timeout else None
             chunk, rch, use, calls, served, _fin = _stream_with_retry(body)
             round_max_s = max(round_max_s, time.time() - _t_round)
             rounds_done += 1
@@ -8548,6 +8799,13 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             usage = use or usage
             if chunk:
                 text_parts.append(chunk)
+            if (_fin or {}).get("cut"):
+                if not chunk:
+                    text_parts.append("")    # the cut round's own text - never an earlier round's narration
+                stream_cut, stream_cut_s = _fin["cut"], _fin.get("cut_at")
+                log("  [%s] ⏱ the harness closed the read (%s) at %s s - the channel's timeout is %d s"
+                    % (name, stream_cut, stream_cut_s, timeout))
+                break
             if forced_final:
                 break     # tools were already removed and the answer demanded; this is it
             # 🔴 THE CIRCUIT BREAKER, and it is deliberately NOT a depth cap. Igor's standing rule
@@ -8661,6 +8919,10 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                     # R74: through the SAME transient retry as every other call - six of twelve
                     # R73 reviewers independently flagged that a lone 429 here discarded the
                     # whole paid review, because this call sat outside the A5 loop.
+                    # R168 И-2 (D1): this forced answer gets ONE MORE `timeout` of its own - see the round loop's
+                    # comment. Measured on suite R163 И-3 (j): with the round's own deadline it was cut at once.
+                    if timeout:
+                        read_deadline[0] = max(start + timeout, time.time() + timeout)
                     chunk_f, rch_f, use_f, _calls_f, served_f, _fin_f = _stream_with_retry(body)
                     rounds_done += 1
                     if _fin_f:
@@ -8685,6 +8947,12 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                     usage = use_f or usage
                     if chunk_f:
                         text_parts.append(chunk_f)
+                    if (_fin_f or {}).get("cut"):
+                        if not chunk_f:
+                            text_parts.append("")    # the cut answer's own text - never the narration before it
+                        stream_cut, stream_cut_s = _fin_f["cut"], _fin_f.get("cut_at")
+                        log("  [%s] ⏱ the harness closed the final answer's read (%s) at %s s - the channel's "
+                            "timeout is %d s, plus one more for this answer" % (name, stream_cut, stream_cut_s, timeout))
                     break
                 break
             body["messages"].append(
@@ -8865,6 +9133,12 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         if usd_seen and usd_tot:
             log("  [%s] ⚠ this channel had already billed $%.4f before it failed - that money is "
                 "spent and is counted in the round total below." % (name, usd_tot))
+        return out
+    except APIReadCut as e:
+        # R168 И-2: the endpoint never sent headers, or the budget was gone before a request could be sent.
+        log("  [%s] ⏱ %s" % (name, e))
+        out = {"channel": name, "ok": False, "error": str(e), "stream_cut": e.kind}
+        out.update(_telemetry())
         return out
     except Exception as e:
         out = {"channel": name, "ok": False, "error": "stream failed: %r" % (e,)}
@@ -9071,6 +9345,12 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # not exist yet. Assigning `[]` here would have discarded it silently.
     note = list(fallback_notes)
     record_refusal(refusal_check(text, marker), warn, note)
+    if stream_cut == "deadline":
+        warn.insert(0, "⏱ " + ("TIME LIMIT (R168 И-2): the harness closed the read at %s s - this channel's `timeout` (%d s) bounds the whole call, not each wait. What had arrived is kept as a PARTIAL answer and is not re-run (a re-run gets the same budget)." % (stream_cut_s, timeout)))
+    elif stream_cut == "stall":
+        warn.insert(0, "⏱ STALLED (R168 И-2): no data frame for %s s after the stream had started (keep-alive "
+                       "comments do not count); the harness closed the read at %s s. What had arrived is kept "
+                       "as a PARTIAL answer and is not re-run." % (stall_s, stream_cut_s))
     if time_stop:
         note.append("TIME BUDGET: page fetching stopped after %.0f s of this channel's %d s timeout (R163 И-3), "
                     "and the answer was written from the %d page(s) already read. A question it left open may "
@@ -9252,6 +9532,8 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             "usd_rounds": rounds_done if usd_seen else None,
             "spend_stopped": True if spend_stop else None,
             "time_stopped": True if time_stop else None,      # R163 И-3 (A8)
+            "stream_cut": stream_cut,                         # R168 И-2 (D1): "deadline" | "stall" | None
+            "stream_cut_s": stream_cut_s,
             "cached_in_tokens": cached_tot or None,
             # 🔴🔴 THIS KEY WAS MISSING ENTIRELY, ON SIX OF ELEVEN CHANNELS, AND THE REPORT PRINTED
             # A COLUMN FOR IT. `report.py` and the run summary both read `r.get("reasoning_tokens")`
@@ -9366,6 +9648,7 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
         "vendor_opened and never fetched_by_us" % (name, ", ".join(tools)))
 
     text_parts, rchars, resp_obj = [], 0, {}
+    xai_cut = {}                      # R168 И-2: set when the harness closed the read at the deadline
     start = time.time()
     try:
         rq = urllib.request.Request(XAI_RESPONSES_URL,
@@ -9373,7 +9656,7 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
         # Door-status retry only: once the stream is open, a mid-stream failure may have
         # billed partial generation and is NOT retried (same split as the OAI loop).
         with _urlopen_transient_retry(rq, timeout, name) as resp:
-            for raw in resp:
+            for raw in _bounded_lines(resp, getattr(resp, "_r168_at", None), None, xai_cut):
                 line = raw.decode("utf-8", "replace").strip()
                 if not line.startswith("data:"):
                     continue          # `event:` lines duplicate ev["type"]; keep-alives are blank
@@ -9402,6 +9685,9 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
     except Exception as e:                                   # noqa: BLE001
         return {"channel": name, "ok": False, "error": "stream failed: %r" % (e,)}
     secs = time.time() - start
+    if xai_cut.get("kind"):
+        log("  [%s] ⏱ TIME LIMIT (R168 И-2): the harness closed the read at %.0f s (the channel's timeout is %d s); "
+            "the answer is partial" % (name, secs, timeout))
 
     text = "".join(text_parts)
     usage = resp_obj.get("usage") or {}
@@ -10124,6 +10410,8 @@ def retryable_stream_death(r):
         return False
     if r.get("budget_stop"):               # R144 И-4: a re-run at the same budget stops the same way
         return False
+    if r.get("stream_cut"):                # R168 И-2: the harness closed the read at the channel's budget
+        return False                       # (a re-run gets the same budget and ends the same way)
     pe = r.get("provider_error")
     if isinstance(pe, dict):
         for k in ("code", "status"):
@@ -11638,7 +11926,10 @@ def _channel_key_ready(ch):
         return bool(_env_key("XAI_API_KEY"))
     if kind == "opencode":
         b = opencode_bin()
-        return bool(os.path.isfile(b) or shutil.which(b))
+        if not (os.path.isfile(b) or shutil.which(b)):
+            return False
+        k = _oc_key_valid(ch.get("oc_key"))              # R168 И-3: opencode + NVIDIA also needs the key
+        return not k or bool(_env_key(k["env"]) or _env_key(k["from"]))
     if kind == "claudecli":
         b = claudecli_bin()
         return bool(os.path.isfile(b) or shutil.which(b))
@@ -11726,6 +12017,24 @@ def _ask_default_channel():
     return _pick_ask_channel(reg, _channel_key_ready)
 
 
+def _not_ready_reason(ch):
+    """R168 И-3 (D4): what this channel lacks on this machine, in words a user can act on - the opencode CLI, the key
+    variable (with its provider's hint), else the old generic text."""
+    kind = ch.get("kind") or "unknown kind"
+    if kind == "opencode":
+        b = opencode_bin()
+        if not (os.path.isfile(b) or shutil.which(b)):
+            return "opencode CLI not found"
+        k = _oc_key_valid(ch.get("oc_key"))
+        if k:
+            return "%s not set%s" % (k["from"], _key_hint_for(k["from"]))
+    if kind in ("openrouter", "oai"):
+        env = (OAI_PROVIDERS.get(ch.get("provider") or "openrouter") or {}).get("key_env")
+        if env:
+            return "%s not set%s" % (env, _key_hint_for(env))
+    return "%s: its key or CLI is missing" % kind
+
+
 def _cascade_ready(reg):
     """
     routing.resolve's `ready` callback (R140 И-3): for a cascade member, True when it can run on
@@ -11750,7 +12059,7 @@ def _cascade_ready(reg):
                 return prob
             if not _env_key(em["key_env"]):
                 return "%s is not set" % em["key_env"]
-        return "%s: its key or CLI is missing" % (ch.get("kind") or "unknown kind")
+        return _not_ready_reason(ch)                     # R168 И-3 (D4)
     return ready
 
 
