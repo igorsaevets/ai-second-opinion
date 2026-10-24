@@ -4,7 +4,7 @@
 
 It sends the document you point it at, plus a system-prompt preset, to the vendors behind whichever
 channels you have enabled — the plan names them before anything is sent. Nothing else, with one
-stated exception: a version check against `api.github.com` at most once a week (the tag list; the
+stated exception: a version check against `api.github.com` at most once a day (the tag list; the
 release notes when a newer tag exists), carrying no version string and nothing about you beyond
 what any HTTP request carries. `python update_check.py --show-what-would-be-sent` prints it
 verbatim; `MODEL_ORCH_UPDATE_CHECK=0` switches it off. No telemetry, no analytics, no background
@@ -119,8 +119,8 @@ CLI bills that key instead of the claude.ai login, and this channel is subscript
 
 ## Bypass opt-in for the other CLI channels (R88, v1.63.0)
 
-Since v1.63.0 the four other CLI channels — `codex`, `grokbuild`, `agy31pro`, `agy36flash`,
-`agy38flash` — carry a `bypass_permissions` field in `channels.json`. It shipped **false** at first and
+Since v1.63.0 the other CLI channels — `codex`, `grokbuild`, `agy38flash`, since 1.115.0 `agy4argon`,
+and the off `agy31pro` / `agy36flash` — carry a `bypass_permissions` field in `channels.json`. It shipped **false** at first and
 ships **true** since R114 (2026-09-21); read the live value in `channels.json`, not here. When it is
 `true`, or you pass `--bypass-permissions <name>` / `--all-bypass` on the command line, the
 channel launches with its vendor's own bypass flag:
@@ -130,7 +130,7 @@ channel launches with its vendor's own bypass flag:
 | `codex` | codex-cli 0.154.0 | `--dangerously-bypass-approvals-and-sandbox` | `--sandbox read-only` |
 | `grokbuild` | grok 1.0.46 | `--permission-mode bypassPermissions`, and since v1.100.0 NO `--tools` allowlist (full toolset + MCP gateway; firecrawl MCP denied by rule; credential files readable - a paid channel, see below) | `--permission-mode dontAsk` + the web-only allowlist |
 | `nvkimik3` (and the local `kimik3free`) | kimi 2.1.1 | none: `-p` already runs every tool with no prompt (vendor default; `--auto` next to `-p` is refused, so it was dropped in v1.100.1). The safety directive rides every brief, the child env is an allowlist with no other vendor's key, and since v1.107.0 a timeout stops the agent's own commands too | — |
-| `agy31pro` / `36flash` / `38flash` | agy 1.2.2 | `--dangerously-skip-permissions` | `--sandbox` |
+| `agy4argon` / `agy38flash` (and the off `31pro` / `36flash`) | agy 1.2.2 (`agy4argon`: 1.4.7) | `--dangerously-skip-permissions` | `--sandbox` |
 | `cclopus46` | claude 2.1.270 | `--permission-mode bypassPermissions` (always on since v1.61.0) | — |
 | `ocmimo26flashfree`, `ocnemotron3ultrafree`, `ocglm53flashfree`, `ocdeepseekv41flashfree` (and `ocspark12go` / `ocspark13go` when you switch one on) | opencode | (no field on purpose — `opencode run` is already YOLO by default) | — |
 

@@ -91,7 +91,8 @@
       "channels": [
         "agy31pro",
         "agy36flash",
-        "agy38flash"
+        "agy38flash",
+        "agy4argon"
       ],
       "_lost_the_gemini_aliases_2026_08_07": "🔴 This group used to answer to `gemini` / `джемини` / `гемини`, and on 2026-08-07 that became a lie the moment a Gemini arrived on a different transport. «не используй gemini» would have dropped two of three Gemini channels and left the third running - the failure mode where a word keeps working, keeps printing a plan, and silently means less than it used to. The vendor words now belong to the `gemini` group below, which is the family; `agy` stays the TRANSPORT. Same disease as `_model_was_decorative` and the dispatch literals: a name that used to describe the thing and no longer does.",
       "_membership_updated_2026_08_13": "agy37flash added round 36; UPGRADED to agy38flash R80 (2026-09-03). `label` renamed from «both» to «all» because there are three now - the same rot as calling `agy` a synonym for `gemini` once a second transport arrived. A group's label has to describe its actual contents.",
@@ -108,6 +109,7 @@
         "agy31pro",
         "agy36flash",
         "agy38flash",
+        "agy4argon",
         "orgemini36flash",
         "orgemini38flash",
         "goog36flash",
@@ -139,6 +141,7 @@
         "ordeepseekv4pro",
         "orglm53",
         "orspark13cont",
+        "orspark12cont",
         "orwonder"
       ],
       "_membership_updated_r149": "R149 (2026-10-13): orwonder added - it spends the same OPENROUTER_API_KEY, so «--skip openrouter» must drop it too.",
@@ -245,6 +248,7 @@
         "agy31pro",
         "agy36flash",
         "agy38flash",
+        "agy4argon",
         "grokbuild",
         "qwen38maxcli",
         "mcwonder10cont",
@@ -1687,7 +1691,8 @@
       "explicit_only": true,
       "_explicit_only_r131": "R131 (2026-10-01), the operator: «Давай в cli панели standart отключим по дефолту agy 3.1 Pro Что бы ее можно было запустить, только если явно назовут.» With explicit_only:true, agy31pro NO LONGER runs via --panel standard, --only cli, --only agy, --only gemini — only when named directly (--only agy31pro / аджипро / agypro). The channel stays enabled and still runs on direct naming; groups and panel expansion silently drop it (visible in plan output: '🔴 agy31pro was NOT started'). 🔴 This is NOT the R47 Terra scenario (expensive-channel lock). agy31pro is cost:mid on an Antigravity subscription — zero per-call cost, no money-loss risk. The R47 'absence is the only lock' invariant on `rationed <= shipped_excl` was relaxed in selftest.py suite_publish_audit to cover ONLY `cost: expensive` channels (R47 Terra class). agy31pro STAYS in the public kit — kit users with an Antigravity subscription can still name it directly. The lock here is a UX default, not a money gate.",
       "vendor": "google",
-      "enabled": true,
+      "enabled": false,
+      "_disabled_r169i2": "R169 И-2 (2026-10-24): agy 1.4.7 (auto-updated that day) on a Google AI Pro account offers no gemini-3.1-pro: `agy models` lists Gemini 4 Argon and Gemini 3.8 Flash (plus Claude and GPT-OSS), and `agy -p /model --model gemini-3.1-pro` exits 1, «not recognized as a known model». agy fetches that list from Google per account; we saw only this account. Off for everyone; naming it still starts it, and where the model is gone agy refuses at start in seconds, spends nothing and prints the models the account has. The deep Gemini voice is agy4argon (same transport).",
       "bypass_permissions": true,
       "_bypass_permissions": "R88 (2026-09-14) opt-in. 🔴 R114 (2026-09-21): changed to true by default, the operator: «перепроверь что по дефолту все Cli запускаются с командой bypass permission». When true, _agy_once adds `--dangerously-skip-permissions` and removes `--sandbox`. CLI_BYPASS_SAFETY_PROMPT injected + workdir tripwire armed. 🔴🔴 R57 CAVEAT: under this flag `command(*)` deny is IGNORED. the operator accepted 14.09.2026.",
       "label": "agy 3.1 Pro",
@@ -1756,6 +1761,45 @@
         "аджифлеш"
       ],
       "notes": "The FAST Gemini voice - the operator's reason for adding it is that Gemini answers quickly, so a second opinion from this family costs almost no wall-clock. Unlike 3.1 Pro it does have a 'medium' effort, so the standard tier reaches it unclamped."
+    },
+    "agy4argon": {
+      "read_order": 1,
+      "_read_order_r169i2": "R169 И-2 (2026-10-24): read 1 kept on its first real review (panel r160i2's brief, 7 attachments, 1050 s, 276 tool calls): it refuted the planted Q4 from three attachment quotes like the six voices before it, opened 17 sources (GitHub tags, live vendor catalogues), found 4 of that triage's 12 accepted findings (A1, A2, A6, A10) and two that were still true in the source (orspark12cont outside the openrouter group; «once a week» in README / PRIVACY against a 24-hour update check). Its answer ran past the 20 000-char cap (43 133).",
+      "kind": "agy",
+      "panel": "standard",
+      "_panel_r169": "R169 (2026-10-24), the operator: «И добавь его в standart панель а не cheap» - `--panel standard` runs it, `--panel cheap` (the default) does not, and `--only <group>` keeps the panel (R124). SUPERSEDED the same day: the first entry made it explicit_only (by name only) on the measured quota. On a Google AI Pro plan Argon has its OWN weekly quota («For paid Pro plans, Argon quota is separate. Higher Argon quota (included as part of the larger Gemini quota bucket) is available on Ultra plans»). MEASURED 2026-10-24 06:00-06:18Z (runs/r169-gemini4-argon-agy/review_quota_r169.py): one real review - panel r160i2's brief + its 7 attachments, 1050 s, 276 tool calls, thinking 34K, out 61K - took 0.218 of the week (0.921 -> 0.703), about 4.6 reviews per FULL week; the tiny smoke took 0.006. A panel seat would empty the bucket in a few rounds and then spend credits. This machine's agy has useAiCredits / useG1Credits ON (2066 AI credits on 2026-10-24): past ~4 standard rounds a week agy goes on spending credits.",
+      "vendor": "google",
+      "enabled": true,
+      "bypass_permissions": true,
+      "_bypass_permissions": "R169: same mechanics as agy31pro._bypass_permissions (R88, R114).",
+      "label": "agy Gemini 4 Argon",
+      "cost": "mid",
+      "model": "gemini-4-argon",
+      "agent": "deep-researcher",
+      "_added_r169": "2026-10-24, the operator: «Gemini 4 Argon High давай добавим в agy cli». Measured free on agy 1.4.7 (binary of 2026-10-24 03:45Z), no agent turn and /usage unchanged before and after: `agy models` lists gemini-4-argon-{low,medium,high}; `agy -p /effort --model gemini-4-argon` -> available [low, medium, high], current medium when --effort is absent; --effort xhigh and --effort max -> rc 1 «gemini-4-argon has no \"xhigh\" effort (available: low, medium, high)», although `agy --help` lists low|medium|high|xhigh|max (the flag's enum, not the model's); a suffixed slug with a disagreeing --effort still exits 1. High is the operator's word and the vendor's ceiling. The same probe: gemini-3.1-pro (agy31pro) -> «not recognized as a known model» on this account.",
+      "_one_model_per_call": "See agy36flash._one_model_per_call.",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "models": {
+        "gemini-4-argon": {
+          "label": "Gemini 4 Argon",
+          "aliases": [
+            "gemini-4-argon",
+            "gemini 4 argon"
+          ],
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      },
+      "aliases": [
+        "agy4argon",
+        "gemini 4 cli",
+        "gemini 4 аргон"
+      ],
+      "_aliases_r169": "the operator 2026-10-24: «алиасы мне не нравятся как ты указал, многие наверное будут называть gemini 4 cli gemini 4 аргон» - his two words replace agyargon / аджиаргон; the model's slug and «gemini 4 argon» stay as model aliases.",
+      "notes": "Gemini 4 Argon through the Antigravity subscription CLI (R169) - the deep Gemini voice now that agy 1.4.7 no longer knows gemini-3.1-pro. In the standard panel; its own weekly quota on a Pro plan: see _panel_r169."
     },
     "agy38flash": {
       "read_order": 3,

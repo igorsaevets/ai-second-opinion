@@ -19,7 +19,7 @@ channels that established them. The live roster is `python routing.py`; it has c
 |---|---|---|---|---|
 | **spark** (`http`) | Muse Spark 1.1 | Messages API over HTTPS | 1–5 min | metered API key |
 | **codex** | OpenAI Codex CLI | local subprocess | **7–35 min** | your subscription's heaviest tier |
-| **agy** | Antigravity CLI (Gemini 3.1 Pro) | local subprocess | ~1 min | your Google subscription |
+| **agy** | Antigravity CLI (Gemini 3.8 Flash; Gemini 4 Argon on the standard panel) | local subprocess | ~1 min (Argon: 17.5 min on one release review) | your Google subscription |
 
 Threads, not asyncio: the CLI channels are blocking subprocesses, and on Windows asyncio
 subprocess support depends on the event-loop policy. Threads just work.
@@ -193,7 +193,7 @@ channel still works and is now the only way in**: `--only <name>`, or «вклю
 🔴 **A channel may declare `explicit_only`.** Then even naming its group is not enough — it runs
 only when something names *it*, because `enabled: false` alone was not a lock: `--only`
 overrides it by design, and `--only <group>` reached it through two different vendor words. Four
-channels ship that way: `agy31pro`, and since 1.113.0 the three Muse Wonder transports
+channels ship that way: `agy31pro` (off since 1.115.0: its model is gone from agy), and since 1.113.0 the three Muse Wonder transports
 (`mcwonder10cont`, `wonder10`, `orwonder`). One narrow exception keeps a model reachable by its own
 name: a group whose channels are exactly one cascade (one voice, several transports — today
 `wonder`) names that model, so «вондер» / "only wonder" starts ONE of its `explicit_only` members,
@@ -272,6 +272,13 @@ Every later plan on that UTC date, `--ask` included, leaves the group's channels
 with the hours to 00:00 UTC) unless the human named the channel (`--only`, a route, `--ask-channel`);
 a date other than today's is ignored, and an unreadable file is an empty one.
 `MODEL_ORCH_QUOTA_STATE` points it elsewhere (`off` or empty: never read or written).
+
+### What 1.115.0 changed in a run
+
+- `--panel standard` adds `agy4argon`: Gemini 4 Argon through the agy CLI, `--model gemini-4-argon --effort high` (agy 1.4.7 offers it low, medium and high; `xhigh` and `max` exit 1 at the start although `agy --help` lists them for the flag). agy's own log records «gemini-4-argon» resolved to «gemini-4-argon-high». The cheap panel does not run it; "gemini 4 cli", «gemini 4 аргон» and `agy4argon` start it alone. Its weekly limit and the AI credits after it: README, the standard panel.
+- `agy31pro` ships off: agy 1.4.7 does not offer `gemini-3.1-pro` on our account (`agy models`; `agy -p /model --model gemini-3.1-pro` exits 1, «not recognized as a known model»). Naming it still starts it; the standard plan no longer prints its «NOT started» line.
+- `--skip openrouter` and `--only openrouter` include `orspark12cont`: the `openrouter` group holds every channel of kind `openrouter` (a selftest derives it from the kinds).
+- agy's print-mode slash commands answer without an agent turn and spend nothing (`/usage` read before and after them was equal): `agy -p /usage --output-format json` (quota buckets: the fraction left and the reset time), `agy -p /model --model <slug>` and `agy -p /effort --model <slug>` (the efforts a model offers). The facts above were measured that way.
 
 ### What 1.114.0 changed in a run
 

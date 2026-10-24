@@ -2,6 +2,18 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.115.0 — 2026-10-24
+
+Gemini 4 Argon on the standard panel, Gemini 3.1 Pro off, and «don't use openrouter» that leaves out all of OpenRouter.
+
+- **Gemini 4 Argon joins the standard panel** (`agy4argon`): Google's Gemini 4 Argon through the agy CLI at effort `high`, the top of the low / medium / high agy 1.4.7 offers for it (`xhigh` and `max` exit 1). The cheap panel, the default, does not run it. "gemini 4 cli", «gemini 4 аргон» or `agy4argon` start it alone.
+- **What Argon costs:** no money by itself, but on a Google AI Pro plan it has its own weekly limit, and one review of ours used 22% of it (n=1: a release brief with seven attachments, 17.5 minutes) — about four standard runs a week. Past the limit agy spends AI credits if its «Use AI Credits» setting is on. `--skip agy4argon` leaves it out (README, the standard panel).
+- **`agy31pro` (Gemini 3.1 Pro) is off.** agy 1.4.7 no longer offered `gemini-3.1-pro` on our Google AI Pro account (2026-10-24, «not recognized as a known model»); naming it still starts it, and where the model is gone agy refuses at the start in seconds.
+- **"don't use openrouter" / `--skip openrouter` now leaves out the OpenRouter Spark too.** `orspark12cont` (Muse Spark 1.2 Contributor on OpenRouter, the kit's Spark without a Meta key) was outside the `openrouter` group since 1.113.8, so those words still ran it on your OpenRouter key. A selftest now checks that the group holds every OpenRouter channel.
+- **The update check is once a day:** README, PRIVACY and SECURITY said «at most once a week»; the code checks at most every 24 hours, as INSTALL says.
+- On a machine with every key and CLI the cheap panel stays 6 models, the standard panel is 12 (was 11), «CLI only» 5, «CLI only, standard panel» 7 (was 6); `python routing.py` prints yours. Without the agy CLI the standard plan still lists `agy4argon`, which fails at dispatch with «binary not found»; Argon has no other transport in the kit.
+- The two fixes above came from Gemini 4 Argon's first review (of the 1.113.8 release brief); it refuted the brief's planted false claim, as the six voices before it did.
+
 ## 1.114.0 — 2026-10-24
 
 Free NVIDIA voices, a paid MiMo Flash only where opencode is missing, and timeouts that hold.
@@ -372,10 +384,6 @@ Where a run writes: no new folders in a drive root, and no CLI started under a p
 
 - **MiMo CLI: Claude-import disabled in the child process.** `mimo.exe` scans every changed Claude transcript on startup — measured 8.65 GB peak RSS on the operator's machine (×14 per transcript byte), versus 0.75 GB with the import off. The harness now sets `MIMOCODE_DISABLE_CLAUDE_IMPORT=1` in the subprocess environment so that panels never trigger the scan, regardless of the parent session's own env. Timeouts unchanged.
 
-## 1.108.3 — 2026-10-11
-
-- **Kimi K3 (NVIDIA) timeout raised from 60 to 90 minutes.** P310 in iron-benchmark timed out at 60 minutes with 16 API requests done and 24K output tokens written — Kimi had captured routes and archives but had not started the review itself. The NVIDIA free endpoint's 45–56 s first-token latency on every step means a 6-question brief with SSH and dual-repo access does not fit in an hour.
-
 ## Older releases
 
-151 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+152 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).

@@ -216,6 +216,12 @@ weekly limit; buying more usage on the account restored it at once). It is not t
 this tool, and the other voices' answers stand. `LINGERED` on a Grok run is something else: Grok
 finished its turn but its process did not exit, so the tool stopped it and kept the answer.
 
+### "agy: model gemini-3.1-pro is not recognized as a known model"
+
+agy checks the model against the list your Google account offers before it starts anything: exit 1 in seconds, nothing spent. `agy models` prints that list (agy fetches it from Google per account). On 2026-10-24 agy 1.4.7 offered our Google AI Pro account Gemini 4 Argon and Gemini 3.8 Flash and no Gemini 3.1 Pro, so `agy31pro` ships off since 1.115.0; the deep Gemini voice is `agy4argon` (Gemini 4 Argon, on the standard panel). The same error for `gemini-4-argon` means your account does not offer Argon: `--skip agy4argon`, or switch it off in your settings file.
+
+Gemini 4 Argon has its own weekly limit on Google AI Pro; `agy -p /usage --output-format json` shows what is left without spending anything. When a limit is used up and agy's «Use AI Credits» setting is on, agy goes on with AI credits (`/credits`).
+
 ### "It worked yesterday"
 
 Compare yesterday's `diagnostics.json` with today's. This is why the file is written on **every**

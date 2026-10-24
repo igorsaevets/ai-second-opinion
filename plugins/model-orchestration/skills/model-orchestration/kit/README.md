@@ -6,7 +6,7 @@
 
 **Every AI model knows different things. Ask several at once and you get not only a check, but advice no single model would have given you — including on what you did not ask.**
 
-**One document goes to several AI models at once, and one report comes back.** Sending your document to the AI vendors behind the channels you turn on is the whole point; the tool itself has no server and collects nothing, and on its own it only checks GitHub for a new version, at most once a week ([what goes where](PRIVACY.md)).
+**One document goes to several AI models at once, and one report comes back.** Sending your document to the AI vendors behind the channels you turn on is the whole point; the tool itself has no server and collects nothing, and on its own it only checks GitHub for a new version, at most once a day ([what goes where](PRIVACY.md)).
 
 ## What a real run found
 
@@ -63,7 +63,7 @@ To start you need **one OpenRouter key and a couple of free programs**. Everythi
 | **1. OpenRouter** — the main one | Sign up at [openrouter.ai](https://openrouter.ai), add credit and create a key (*Keys → Create Key*). Put it in the `OPENROUTER_API_KEY` variable in your own terminal, not in a chat with an AI ([how — INSTALL.md](INSTALL.md#openrouter--openrouter_api_key)) | The paid voices: Muse Spark (when you have no Meta key) and, where opencode is missing, MiMo v2.6 Flash in the cheap panel; Kimi K3, Qwen, DeepSeek V4 Pro and GLM 5.3 in the standard one; MiMo v2.6 Pro only when you name it; a fallback route to Gemini 3.8 Flash and Nemotron | Pay per token on the key; prices are in the tables below. OpenRouter takes a 5.5% fee when you buy credits. Free models: 50 requests a day, or 1000 a day once you have bought at least $10 of credits |
 | **2. opencode CLI** | `npm install -g @opencode/cli` (v2; had the old `opencode-ai`? `npm uninstall -g opencode-ai` first) | Free voices: MiMo v2.6 Flash (Xiaomi), and Nemotron 3 Ultra (NVIDIA) when you have no NVIDIA key; with one (step 2b) Step 5 Preview runs here as an agent. GLM 5.3 Flash (Z.ai) answers once when MiMo Flash fails, DeepSeek V4.1 Flash only when named (one daily allowance, see below). No free Muse Spark since 2026-10-17 (see below) | Free, no key and no account: that is how it works for us (checked on 2026-10-18). OpenCode warns that its free models are available "for a limited time", and they do come and go |
 | **2b. NVIDIA key** — optional, since 1.114.0 | Sign in at [build.nvidia.com](https://build.nvidia.com) and create an API key. Put it in the `NVIDIA_NIM_API_KEY` variable in your own terminal ([how — INSTALL.md](INSTALL.md#nvidia--nvidia_nim_api_key)) | Two free voices on NVIDIA's own endpoint: Step 5 Preview (StepFun) and Nemotron 3 Ultra; with opencode, Step 5 runs as an opencode agent on the same key | Free at the point of use (NVIDIA's free endpoints allow about 40 requests a minute). Its queue is slow at times: 57–110 s before the first byte on 2026-10-23 |
-| **3. Antigravity CLI (`agy`)** | Install it, sign in with a Google account and run `patch_agy_permissions.py` **once**. Without that step the answers come back empty ([INSTALL.md](INSTALL.md#antigravity-cli-gemini)) | Gemini 3.8 Flash, and Gemini 3.1 Pro by name | Free on a personal Google account, with weekly limits. Google AI Pro ($19.99/month) and Ultra ($99.99 or $199.99/month) raise them |
+| **3. Antigravity CLI (`agy`)** | Install it, sign in with a Google account and run `patch_agy_permissions.py` **once**. Without that step the answers come back empty ([INSTALL.md](INSTALL.md#antigravity-cli-gemini)) | Gemini 3.8 Flash; Gemini 4 Argon on the standard panel | Free on a personal Google account, with weekly limits. Google AI Pro ($19.99/month) and Ultra ($99.99 or $199.99/month) raise them |
 | **4. Grok Build CLI** | Install it and run `grok login` ([INSTALL.md](INSTALL.md#grok-build-cli)) | Grok 4.6 with live web search | An xAI account. xAI says Grok Build is now available to everyone; SuperGrok ($30/month) and SuperGrok Plus ($100/month) raise the limits. Whether the CLI works on a free account we have not checked |
 | **5. Codex CLI** — for the standard panel | Install it and sign in with a ChatGPT account ([INSTALL.md](INSTALL.md#codex-cli)) | GPT-6.1 Sol | A ChatGPT plan: Plus $20/month, Pro $200/month. OpenAI says Codex is also in Free and Go ($8/month); whether GPT-6.1 Sol is available there we have not checked. Limits are counted in 5-hour and weekly windows |
 | optional | Claude Code with a subscription ([INSTALL.md](INSTALL.md#claude-code-cli-claude-opus--off-by-default)) | Claude Opus 4.6. Off by default | Claude Pro $20/month, Max from $100/month. Claude Code is in every paid plan |
@@ -81,18 +81,18 @@ To check what was found: `python doctor.py`. It prints which keys and programs i
 
 In Claude Code with the plugin (and in any agent you gave the line from the top of this page) just say it in plain words:
 
-| You say | What runs (version 1.114.0) |
+| You say | What runs (version 1.115.0) |
 |---|---|
 | **"second opinion"** (for example, "give me a second opinion on this file") | **The cheap panel**, the default: 6 models |
 | **"second opinion, CLI only"** | Only the CLI agents of the cheap panel: 5 models — MiMo v2.6 Flash, Nemotron 3 Ultra, Step 5 Preview (an opencode agent on your NVIDIA key), Gemini 3.8 Flash and Grok 4.6. Not one paid request on your OpenRouter key. Muse Spark is not among them since 1.113.3: without an OpenCode Go plan it is an API call |
-| "standard panel" or "all models" | 11 models: the cheap panel plus GPT-6.1 Sol, Kimi K3 (through OpenRouter, paid), Qwen 3.8 Max, DeepSeek V4 Pro and GLM 5.3. No Muse Wonder: since 1.113.0 it starts only when named; no MiMo v2.6 Pro: since 1.113.8 it too starts only when named |
-| "CLI only, standard panel" | 6 models: the five CLI agents plus Codex (GPT-6.1 Sol) |
+| "standard panel" or "all models" | 12 models: the cheap panel plus GPT-6.1 Sol, Gemini 4 Argon, Kimi K3 (through OpenRouter, paid), Qwen 3.8 Max, DeepSeek V4 Pro and GLM 5.3. No Muse Wonder: since 1.113.0 it starts only when named; no MiMo v2.6 Pro: since 1.113.8 it too starts only when named |
+| "CLI only, standard panel" | 7 models: the five CLI agents plus Codex (GPT-6.1 Sol) and Gemini 4 Argon |
 | "ask only codex", "only grok" | The one named channel |
 | "only opencode", «только opencode» | The opencode voices that are on: in the kit MiMo v2.6 Flash and Nemotron 3 Ultra (free) and Step 5 Preview (free, on your NVIDIA key); GLM 5.3 Flash runs only as MiMo Flash's fallback or when named, DeepSeek V4.1 Flash only when named. "without opencode" runs everything else. Before 1.113.5 the word named only the free Spark that is gone since 2026-10-17 |
 | "only ocglm53flashfree", "only ocmimo26flashfree" | That one free voice, also on a day its allowance was refused (otherwise the plan shows `[skip]` for it, see the cheap panel below) |
 | "only wonder", "muse wonder", «вондер»; "add wonder" | One Muse Wonder, on your Muse Code subscription where the Muse Code CLI is installed. Without it the run stops before paying and names the paid ones: "only wonder10" (Meta key) or "only orwonder" (OpenRouter) runs that one |
 | "only kimi" | The run stops and says why: since 1.112.0 the cheap panel has no free Kimi, and the only Kimi it could start is `kimik3` (OpenRouter, paid). "only kimik3" runs it; on the standard panel "only kimi" runs it too |
-| "only agy31pro" or "only agypro" | Gemini 3.1 Pro: it starts only when named |
+| "only gemini 4 cli", «только gemini 4 аргон» | Gemini 4 Argon alone (it is on the standard panel, not the cheap one). "only agy31pro" still starts Gemini 3.1 Pro, off since 1.115.0 (below, «By name only») |
 | "don't use openrouter" | Everything except the OpenRouter channels |
 
 From a terminal the same is done with flags: `--panel cheap` (the default), `--panel standard`, `--route "only CLI"`, `--only codex`, `--skip openrouter`. You can see the plan before anything is spent, for free: `python routing.py` or `--dry-run`.
@@ -150,7 +150,7 @@ On the plan, Spark costs $0.10 / $0.20 per 1M tokens out of the plan's limits (o
 **If an answer is «word salad».** A model sometimes returns its own control tokens mixed with fragments of words in several languages instead of text: NVIDIA's free Kimi K3 did so from 6 October until it was retired, and users of other programs reported the same. The run marks such an answer **CORRUPTED OUTPUT**: `REPORT.md` says «🔴 CORRUPTED», `HANDOFF.md` tells you not to open it, and it does not count as an answer.
 
 
-### The standard panel — 11 models: the cheap one + 5
+### The standard panel — 12 models: the cheap one + 6
 
 | Model | Channel | Transport | Effort | Payment | Price per 1M (in / out) | Per run |
 |---|---|---|---|---|---|---|
@@ -159,6 +159,9 @@ On the plan, Spark costs $0.10 / $0.20 per 1M tokens out of the plan's limits (o
 | Qwen 3.8 Max (Alibaba) | `qwen38max` | OpenRouter | xhigh (the ceiling) | per key | $2.00 / $6.00 | ≈ $0.59 (n=3), see below |
 | DeepSeek V4 Pro | `ordeepseekv4pro` | OpenRouter | xhigh (the ceiling) | per key | $0.209 / $0.418 | ≈ $0.18 (n=3) |
 | GLM 5.3 (Z.ai) | `orglm53` | OpenRouter | max | per key | $0.05 / $7.00 | ≈ $0.19 (n=3) |
+| Gemini 4 Argon (Google) — new in 1.115.0 | `agy4argon` | agy CLI agent | high (the ceiling: agy offers low, medium, high) | your Google subscription: its own weekly limit on Google AI Pro | — | one review: 22% of that week's limit (n=1) |
+
+**Gemini 4 Argon** costs no money by itself: agy runs it on your Google subscription. On a Google AI Pro plan it has its own weekly limit, apart from the Gemini quota (agy's `/usage` lists it separately; agy says a higher Argon quota comes inside the larger Gemini quota on Ultra plans). One review of ours (a release brief with seven attachments: 17.5 minutes, 276 tool calls) used 22% of that week (n=1), so about four standard runs fill it. What agy does next is its own «Use AI Credits» setting (`agy`, then `/config`): when it is on, agy goes on and spends AI credits (`/credits` shows the balance); with it off we have not measured what happens. Where the account does not offer Argon, agy refuses at the start, as it does for Gemini 3.1 Pro here (exit 1 in seconds, nothing spent); without the agy CLI the plan still lists `agy4argon` and it fails at dispatch with «binary not found», while Gemini 3.8 Flash falls back to its OpenRouter copy; Argon has no other transport in the kit. `--skip agy4argon` leaves it out of one run, `{"channels": {"agy4argon": {"enabled": false}}}` in your settings file out of every run.
 
 Nemotron 3 Ultra moved to the cheap panel in 1.113.3, free through opencode, and since 1.114.0 it runs first on NVIDIA's free API when you have an NVIDIA key; its OpenRouter route, `ornemotron3ultra`, runs here only where both are missing.
 
@@ -173,7 +176,7 @@ Muse Wonder left this panel in 1.113.0: it starts only when named (below, «By n
 | Model | Channel | Transport | Effort | Payment |
 |---|---|---|---|---|
 | Muse Wonder 1.0 (Meta) — new in 1.110.0, Muse Code in 1.111.0, by name only since 1.113.0 | `mcwonder10cont` where the Muse Code CLI is installed; `wonder10` and `orwonder` only by their own names | Muse Code subscription / Meta Model API (`MODEL_API_KEY`) / OpenRouter | xhigh on the subscription (its ceiling), max on the API | your plan; per key $4.00 / $20.00 per 1M (in / out) |
-| Gemini 3.1 Pro (Google) | `agy31pro` | agy CLI agent | not set | as for agy above. Starts only when named: "only agy31pro" |
+| Gemini 3.1 Pro (Google) — off since 1.115.0 | `agy31pro` | agy CLI agent | — | agy 1.4.7 no longer offered `gemini-3.1-pro` on our Google AI Pro account on 2026-10-24 («not recognized as a known model»; `agy models` lists what yours has). Naming it still starts it; where the model is gone agy refuses at the start |
 | Claude Opus 4.6 [1M] (Anthropic) | `cclopus46` | Claude Code CLI agent | max | a Claude plan (Pro $20/month). Off by default; when on, it runs with permission prompts bypassed ([SECURITY.md](SECURITY.md)) |
 
 **Muse Wonder** is Meta's most capable model (preview) and the most expensive voice here per token: 40× the input and 100× the output price of Spark Contributor. **Since 1.113.0 no panel runs it: it starts only when you name it** — "only wonder", "add wonder", "muse wonder", "wonder 1.0", «вондер», or a channel's own name. A broader word never does: not "standard panel", "all models", "only muse", "only openrouter", "CLI only". The model's word starts ONE Wonder, `mcwonder10cont`: the Contributor variant only Muse Code subscriptions offer (Meta may use that content for training), at `xhigh` (the plan's measured ceiling), counted against your plan and never against a key (setup: INSTALL.md, «Muse Code CLI»). Where the Muse Code CLI is not installed, the run stops before paying anything and names the paid Wonders it could start; name one to pay for it: `wonder10`, the Meta Model API on `MODEL_API_KEY` (Standard mode only: what you send is not used for training), with no per-run ceiling, because Meta runs the whole search loop inside one request (a two-line check cost $0.016; no reviews counted yet), or `orwonder` on OpenRouter, which stops at $5 a run. Until 1.112.6 the standard panel ran Wonder in every round: on the subscription where Muse Code was installed, otherwise the paid `wonder10` or `orwonder`. To seat it there again, on your subscription only, put `{"channels": {"mcwonder10cont": {"explicit_only": false}}}` in `~/.claude/model-orchestration.local.json`.
@@ -231,7 +234,7 @@ yet run a paid round. Smoke first.
 ### Targeting specific channels
 
 ```
---only codex agy31pro grokbuild     # just the ones named
+--only codex agy4argon grokbuild    # just the ones named
 --skip ornemotron3ultra              # everyone except this one
 ```
 
@@ -443,7 +446,7 @@ Run it from the copy you have: it finds the newest release on GitHub, downloads 
 backs up the old folder, carries your settings across, prints what changed between the two versions
 and runs the checks (`--dry-run` shows all of that without changing anything). A plugin install is
 updated through Claude Code by the same command. You will not have to remember it, either: once a
-week the kit checks for a release — at session start and after a real round — and prints that
+day the kit checks for a release — at session start and after a real round — and prints that
 command when there is one. The same machinery is what `install.ps1` / `install.sh` call when an
 install already exists, so "install again" and "update" are the same safe operation.
 

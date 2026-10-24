@@ -133,7 +133,7 @@ Re-measured end to end 2026-07-31; the full study with raw event logs is in
 Ask `doctor.py` for the installed version — this file used to pin one and it went stale in a week.
 
 ```powershell
-& "$env:LOCALAPPDATA\agy\bin\agy.exe" -p $brief --model "gemini-3.1-pro" --effort high `
+& "$env:LOCALAPPDATA\agy\bin\agy.exe" -p $brief --model "gemini-4-argon" --effort high `
    --agent deep-researcher --mode plan --sandbox `
    --output-format stream-json --print-timeout 25m
 ```
@@ -232,6 +232,7 @@ The literal end marker in the text is the only honest completion signal.
 Effort levels are **per model**: `gemini-3.1-pro` has only `low` and `high` — asking it for
 `medium` is another exit-1 launch failure. `gemini-3.6-flash` has all three. `channels.json`
 records this and `routing.py` clamps, breaking ties upward.
+`gemini-4-argon` (agy 1.4.7, 2026-10-24) has `low`, `medium` and `high`; `xhigh` / `max` exit 1 at the start although `agy --help` lists them - the flag's enum, not the model's. agy 1.4.7 no longer offers `gemini-3.1-pro` on our account (channel `agy31pro` off). `agy -p /model --model <slug>` and `agy -p /effort --model <slug>` answer without an agent turn and spend nothing: measure a new model there first.
 
 ### 6.4 The schema trap that costs an hour
 
@@ -322,6 +323,8 @@ grant arbitrary code execution to an unattended agent. Neither is worth one revi
 "Fix it once by running `patch_agy_permissions.py`". That script was already applied and reports
 `nothing to do - already patched`; it addresses a *different* failure (the free read-only web
 tools), not this one. Do not spend a round re-running it.
+
+**SUPERSEDED (2026-10-24):** `agy31pro` later ran headless for months; since agy 1.4.7 its model is gone and the channel ships off - the deep Gemini voice is `agy4argon` (Gemini 4 Argon).
 
 **Practical rule: use `agy36flash` for the Gemini-via-subscription voice.** It completed the same
 brief normally (23 KB, 10 citations, 9 live). `agy31pro` is the stronger model and is currently

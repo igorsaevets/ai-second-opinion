@@ -8135,6 +8135,8 @@ def main():
                   suite_r168_i2_api_read_bound,
                   suite_r168_i3_free_transports,
                   suite_r168_i4_panel_fixes,
+                  suite_r169_agy_argon,
+        suite_r169_i2_kit_release,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -20336,6 +20338,122 @@ def suite_r168_i4_panel_fixes():
           and "YOUR opencode config" in ctl,
           "R168 И-4 (j) [code] ocstep5previewnv's billing line names opencode's own nvidia provider and the copied key; "
           "a provider without oc_key still reads «YOUR opencode config»", repr((bl[:150], ctl[:80])))
+
+def suite_r169_agy_argon():
+    """R169 (2026-10-24). Igor: «Gemini 4 Argon High давай добавим в agy cli», then «И добавь его в standart панель а не
+    cheap» and «многие наверное будут называть gemini 4 cli gemini 4 аргон». agy 1.4.7 measured free (no agent turn,
+    /usage unchanged): `agy models` lists gemini-4-argon-{low,medium,high}; `agy -p /effort --model gemini-4-argon`
+    -> available [low, medium, high], current medium without --effort; --effort xhigh / max -> rc 1; the live smoke
+    resolved gemini-4-argon to gemini-4-argon-high (agy's own log). One real review took 0.218 of Argon's own weekly
+    quota on a Pro plan - hence the standard panel, never cheap.
+    (a) agy4argon: kind agy, base slug gemini-4-argon (no -low/-medium/-high suffix), efforts [low, medium, high] as
+        measured, enabled, NOT explicit_only, panel standard, ships (distribution not local), aliases = agy4argon +
+        Igor's «gemini 4 cli» / «gemini 4 аргон»;
+    (b) by name (--only agy4argon) the plan runs it alone on gemini-4-argon at effort high - the ceiling, not agy's
+        default medium;
+    (c) it is in the groups agy / gemini / cli; --panel standard starts it; --panel cheap does not, nor do --only agy /
+        gemini / cli under the cheap default (a group keeps the panel, R124);
+    (d) Igor's words start it alone: --only and the route «только ...» for «gemini 4 cli» and «gemini 4 аргон».
+    """
+    import copy
+    import routing as rt
+    section("R169: Gemini 4 Argon through the agy CLI - standard panel, at its measured ceiling (high)")
+    reg = rt.load_registry(overlay=False)
+    a = reg["channels"].get("agy4argon") or {}
+    m = (a.get("models") or {}).get("gemini-4-argon") or {}
+    check(a.get("kind") == "agy" and a.get("model") == "gemini-4-argon"
+          and not re.search(r"-(low|medium|high)$", str(a.get("model", "")))
+          and m.get("efforts") == ["low", "medium", "high"] and a.get("enabled") is True
+          and not a.get("explicit_only") and a.get("panel") == "standard"
+          and a.get("distribution", "both") != "local"
+          and a.get("aliases") == ["agy4argon", "gemini 4 cli", "gemini 4 аргон"],
+          "R169 (a) agy4argon: kind agy, base slug gemini-4-argon, efforts [low, medium, high] as measured, enabled, "
+          "not explicit_only, panel standard, ships, aliases agy4argon + «gemini 4 cli» / «gemini 4 аргон»",
+          repr((a.get("kind"), a.get("model"), m.get("efforts"), a.get("enabled"), a.get("explicit_only"),
+                a.get("panel"), a.get("distribution"), a.get("aliases"))))
+
+    def plan(**kw):
+        res = rt.resolve(copy.deepcopy(reg), tier="max", ready=lambda _n: True, **kw)
+        return res[0] if isinstance(res, tuple) else res
+
+    def on(**kw):
+        try:
+            return sorted(n for n, v in plan(**kw).items() if v.get("enabled"))
+        except Exception as exc:  # noqa: BLE001
+            return "RAISED %r" % exc
+
+    try:
+        p = plan(only=["agy4argon"])
+        pa = p.get("agy4argon") or {}
+        got = (sorted(n for n, v in p.items() if v.get("enabled")), pa.get("model"), pa.get("effort"))
+    except Exception as exc:  # noqa: BLE001
+        got = ("RAISED %r" % exc,)
+    check(got == (["agy4argon"], "gemini-4-argon", "high"),
+          "R169 (b) --only agy4argon runs it alone on gemini-4-argon at effort high (the ceiling, not agy's default "
+          "medium)", repr(got))
+    groups = reg.get("groups") or {}
+    mem = [g for g in ("agy", "gemini", "cli") if "agy4argon" in ((groups.get(g) or {}).get("channels") or [])]
+    std, cheap = on(panel="standard"), on(panel="cheap")
+    grp = {g: on(only=[g]) for g in ("agy", "gemini", "cli")}
+    check(mem == ["agy", "gemini", "cli"] and isinstance(std, list) and "agy4argon" in std
+          and isinstance(cheap, list) and "agy4argon" not in cheap
+          and all(isinstance(v, list) and "agy4argon" not in v for v in grp.values()),
+          "R169 (c) agy4argon is in the groups agy / gemini / cli; --panel standard starts it, --panel cheap and the "
+          "groups under the cheap default do not", "members=%s standard=%s cheap=%s groups=%s" % (
+              mem, "agy4argon" in std if isinstance(std, list) else std,
+              "agy4argon" in cheap if isinstance(cheap, list) else cheap,
+              {g: ("agy4argon" in v) if isinstance(v, list) else v for g, v in grp.items()}))
+    words = [(w, on(only=[w]), on(route="только " + w)) for w in ("gemini 4 cli", "gemini 4 аргон")]
+    check(all(o == ["agy4argon"] and r == ["agy4argon"] for _w, o, r in words),
+          "R169 (d) Igor's words start it alone: --only and the route «только ...» for «gemini 4 cli» and "
+          "«gemini 4 аргон»", repr(words))
+
+
+def suite_r169_i2_kit_release():
+    """R169 И-2 (2026-10-24), the kit release that ships agy4argon.
+    (a) agy31pro is off: agy 1.4.7 on a Google AI Pro account offers no gemini-3.1-pro (`agy -p /model --model
+        gemini-3.1-pro` -> rc 1 «not recognized as a known model»; `agy models` = Gemini 4 Argon + 3.8 Flash). It stays
+        explicit_only with the reason in `_disabled_r169i2`; --panel standard does not run it, and naming it still
+        starts it alone (a channel that ships off starts when named - the kit docs say so);
+    (b) every openrouter-kind channel is a member of the openrouter group, derived from the registry: orspark12cont
+        (the kit's Spark voice without a Meta key) was outside it, so `--skip openrouter` still ran and billed it
+        (found by agy4argon's first review, Q1.2); with it named beside agy38flash, --skip openrouter keeps agy38flash
+        alone;
+    (c) agy4argon keeps read 1, with the reason from that review in `_read_order_r169i2`.
+    """
+    import copy
+    import routing as rt
+    section("R169 И-2: agy31pro off (model gone from agy 1.4.7), the openrouter group complete, agy4argon read 1")
+    reg = rt.load_registry(overlay=False)
+    ch = reg["channels"]
+    p31 = ch.get("agy31pro") or {}
+
+    def on(**kw):
+        try:
+            res = rt.resolve(copy.deepcopy(reg), tier="max", ready=lambda _n: True, **kw)
+            plan = res[0] if isinstance(res, tuple) else res
+            return sorted(n for n, v in plan.items() if v.get("enabled"))
+        except Exception as exc:  # noqa: BLE001
+            return "RAISED %r" % exc
+
+    std, named = on(panel="standard"), on(only=["agy31pro"])
+    check(p31.get("enabled") is False and p31.get("explicit_only") is True
+          and "not recognized" in str(p31.get("_disabled_r169i2", ""))
+          and isinstance(std, list) and "agy31pro" not in std and named == ["agy31pro"],
+          "R169 И-2 (a) agy31pro is off with the measured reason, --panel standard does not run it, naming it starts "
+          "it alone", repr((p31.get("enabled"), p31.get("explicit_only"), "agy31pro" in std if isinstance(std, list)
+                            else std, named)))
+    groups = reg.get("groups") or {}
+    members = set((groups.get("openrouter") or {}).get("channels") or [])
+    outside = sorted(n for n, v in ch.items() if v.get("kind") == "openrouter" and n not in members)
+    skipped = on(only=["orspark12cont", "agy38flash"], skip=["openrouter"])
+    check(not outside and skipped == ["agy38flash"],
+          "R169 И-2 (b) every openrouter-kind channel is in the openrouter group; --skip openrouter drops "
+          "orspark12cont (agy38flash named beside it stays)", "outside=%s skipped=%s" % (outside, skipped))
+    a = ch.get("agy4argon") or {}
+    check(a.get("read_order") == 1 and "Q4" in str(a.get("_read_order_r169i2", "")),
+          "R169 И-2 (c) agy4argon keeps read 1 with the reason from its first review",
+          repr((a.get("read_order"), str(a.get("_read_order_r169i2", ""))[:60])))
 
 
 if __name__ == "__main__":
