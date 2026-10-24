@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.115.1 — 2026-10-24
+
+The free voices' daily-allowance memory, fixed at its edges, and `--ask` without Nemotron's answer in your session.
+
+- **A run that crosses 00:00 UTC no longer costs the free voice the next day.** A refusal of opencode's free allowance is now stamped with the start of the part of the run it came in (the round, its retry or its fallback), never later than the refusal; one from a part that began before 00:00 UTC is not kept, since the allowance has reset by then. Until 1.115.0 a refusal at 23:58 UTC written at 00:04 kept MiMo v2.6 Flash out the whole next day.
+- **One run no longer clears another run's newer refusal.** The state file now records when each refusal was written (`recorded`), and an answer from the group clears only a refusal written before its own run began.
+- **The messages say what really happened.** The state file's folder is created when missing, and every `QUOTA:` line and note says whether the refusal was remembered, cleared or could not be cleared (naming the file to delete); until 1.115.0 they promised a skip the run had not written. Every refused voice gets the note, not only the first; the last minute before 00:00 UTC reads «under 1 min», not «0 h 00 min».
+- **No other channel falls back into a group refused in the same run, and a refused call is not auto-retried.**
+- **`python routing.py` shows today's `[skip]` too**, as a run does.
+- **`--ask` names whom it really asks.** The line «--ask goes to N channel(s)» is read off the final plan: on a refused day it no longer counts the skipped MiMo Flash or a twin that does not start, and «not started:» says why.
+- **`--ask` no longer prints Nemotron's answer into your session.** `channels.json` marks every Nemotron channel `never_read` (run it, never read its answer); `--ask` still runs it and prints one line with its answer file instead.
+- Docs: naming a channel on a refused day means its name, an alias, its model id or a `--set` pin (a group word such as "only opencode" does not); PRIVACY describes the state file as it is now; TROUBLESHOOTING says the allowance is counted per network address. On a refused day the cheap panel runs 5 models, the standard one 11, «CLI only» 4 (on a machine with every key and CLI); the README names StepFun's Step among the models.
+
 ## 1.115.0 — 2026-10-24
 
 Gemini 4 Argon on the standard panel, Gemini 3.1 Pro off, and «don't use openrouter» that leaves out all of OpenRouter.

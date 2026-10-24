@@ -2,6 +2,19 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.115.1 — 2026-10-24
+
+The free voices' daily-allowance memory, fixed at its edges, and `--ask` without Nemotron's answer in your session.
+
+- **A run that crosses 00:00 UTC no longer costs the free voice the next day.** A refusal of opencode's free allowance is now stamped with the start of the part of the run it came in (the round, its retry or its fallback), never later than the refusal; one from a part that began before 00:00 UTC is not kept, since the allowance has reset by then. Until 1.115.0 a refusal at 23:58 UTC written at 00:04 kept MiMo v2.6 Flash out the whole next day.
+- **One run no longer clears another run's newer refusal.** The state file now records when each refusal was written (`recorded`), and an answer from the group clears only a refusal written before its own run began.
+- **The messages say what really happened.** The state file's folder is created when missing, and every `QUOTA:` line and note says whether the refusal was remembered, cleared or could not be cleared (naming the file to delete); until 1.115.0 they promised a skip the run had not written. Every refused voice gets the note, not only the first; the last minute before 00:00 UTC reads «under 1 min», not «0 h 00 min».
+- **No other channel falls back into a group refused in the same run, and a refused call is not auto-retried.**
+- **`python routing.py` shows today's `[skip]` too**, as a run does.
+- **`--ask` names whom it really asks.** The line «--ask goes to N channel(s)» is read off the final plan: on a refused day it no longer counts the skipped MiMo Flash or a twin that does not start, and «not started:» says why.
+- **`--ask` no longer prints Nemotron's answer into your session.** `channels.json` marks every Nemotron channel `never_read` (run it, never read its answer); `--ask` still runs it and prints one line with its answer file instead.
+- Docs: naming a channel on a refused day means its name, an alias, its model id or a `--set` pin (a group word such as "only opencode" does not); PRIVACY describes the state file as it is now; TROUBLESHOOTING says the allowance is counted per network address. On a refused day the cheap panel runs 5 models, the standard one 11, «CLI only» 4 (on a machine with every key and CLI); the README names StepFun's Step among the models.
+
 ## 1.115.0 — 2026-10-24
 
 Gemini 4 Argon on the standard panel, Gemini 3.1 Pro off, and «don't use openrouter» that leaves out all of OpenRouter.
@@ -372,18 +385,6 @@ Muse Wonder, Meta's most capable model, joins the standard panel.
 - **An http channel's own `effort` is no longer overwritten by the tier.** The tier set Spark's ceiling (xhigh) on every model behind the Meta endpoint, so Wonder's `max` would have gone out as `xhigh`. The Spark channels declare no effort of their own and are unchanged. `echocheck.py` now varies such a channel's own effort.
 - Measured on 2026-10-13: through the Meta API, `max` vs `xhigh` gave 988–1019 vs 697–792 output tokens (n=2 each, disjoint). Through OpenRouter, `max` is accepted: reasoning 1151–1431 vs 1019–1197 tokens (overlap at n=2). All 8 answers were correct.
 
-## 1.109.0 — 2026-10-12
-
-Where a run writes: no new folders in a drive root, and no CLI started under a project's instruction files.
-
-- **A new folder directly in a drive root is refused.** `--out D:\r149-panel` (or `--workdir` with `--task`, or the default `./reviews` started from `D:\`) stops with exit code 2 before anything is created, and the message names a place made for scratch: the per-user folder (`%LOCALAPPDATA%\ai-second-opinion\runs`, `~/Library/Application Support/...`, `~/.local/state/...`), or a top-level `AI_Scratch` folder when the drive already has one. 1.108.4 created the folder and its `run.log` even on `--dry-run`. A top-level folder that already exists is not new, so a panels folder kept there for months keeps working. Why: one project's sessions left 60 folders in the root of one drive, a fresh `<round>-panel` / `-tmp` / `-out` each time, because every instruction said only where NOT to write.
-- **`--out` inside a project: the answers stay, the CLI working folders leave.** codex (`-C`) and agy (cwd) run inside their `<channel>-ws` folder, which sat inside `--out`; with `--out` below a `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.git`, a CLI started there loads that project's instruction files and sends them to its vendor (the leak `neutral_cwd()` already closed for every other kind). Now the `-ws` folders go to a fresh folder under TEMP (swept after 3 days) and the plan and `run.log` say so; the answers, `REPORT.md` and `run.log` stay where you asked. Refusing such an `--out` was not an option: of 463 runs on one machine, 212 had it, in 8 projects. A marker in the home folder itself is user-level and does not count (TEMP sits below it on Windows, so moving could not help).
-- `--help` explains both rules; SKILL.md's example no longer puts the brief and the run in TEMP.
-
-## 1.108.4 — 2026-10-11
-
-- **MiMo CLI: Claude-import disabled in the child process.** `mimo.exe` scans every changed Claude transcript on startup — measured 8.65 GB peak RSS on the operator's machine (×14 per transcript byte), versus 0.75 GB with the import off. The harness now sets `MIMOCODE_DISABLE_CLAUDE_IMPORT=1` in the subprocess environment so that panels never trigger the scan, regardless of the parent session's own env. Timeouts unchanged.
-
 ## Older releases
 
-152 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+154 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).

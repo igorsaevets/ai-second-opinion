@@ -1030,6 +1030,8 @@
       "distribution": "both",
       "label": "OC Nemotron 3 Ultra Free",
       "reading_note": "NEVER read this channel's answer. the operator, 2026-08-31: «никогда не читать ответ от Nemotron» - the rule names the MODEL, so it holds on every channel that serves Nemotron; this one is the same Nemotron 3 Ultra through opencode. The channel runs because it is free, not because its answer is consulted.",
+      "never_read": true,
+      "_quota_group_exempt_r157i5": "No quota_group on purpose: measured outside opencode's shared free allowance in R157 (suite_r157_i2 (a): «Nemotron (measured outside) has none») - one measurement, re-measure on the next refusal day (triage-i4 P13). suite_r157_i5_quota_edges (n) wants a quota_group or this note on every free Zen channel.",
       "_reading_note_r154_i11pre": "R154 И-3 (2026-10-18) added this channel without the note: HANDOFF listed its answer at read 1 with nothing under the table, and it was read in four rounds (И-3, И-5, И-7, И-10). read_order 1 -> 3, its OpenRouter twin's tier. selftest suite_r154_i11pre_never_read_model derives the rule from the model family.",
       "cost": "free",
       "fetch_fallback_hint_ref": "mcp_fallback",
@@ -1070,6 +1072,7 @@
       "cost": "free",
       "model": "nvidia/nemotron-3-ultra-550b-a55b",
       "reading_note": "NEVER read this channel's answer. the operator, 2026-08-31: «никогда не читать ответ от Nemotron» - the rule names the MODEL, so it holds on every channel that serves Nemotron; this one is the same Nemotron 3 Ultra through NVIDIA's own endpoint. The channel runs because it is free, not because its answer is consulted.",
+      "never_read": true,
       "_added_r162": "the operator 2026-10-22: «Смотри я сейчас по логам вижу что Nemotron идет через подписку opencode. Но мы так же в прошлых сессиях выяснили, что если включать бесплатные модели через opencode то они тратят лимиты. Что желательно 1 модель бесплатную или максимум 2, но следить, если перестанут отвечать, значит лучше отключить вторую. Но вель nemotron 3 ultra бесплатно работает и через nvidia nim может его только через тот канал сделать и как fallback https://openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b:free ?» Measured the same day (runs/r162-nemotron-nvidia/): the model is in NVIDIA's public list (83 models) and answered 16 of 16 tiny probes in 0.5-24 s; the opencode route (ocnemotron3ultrafree) bills $0 under opencode's FREE provider (`opencode`), not the Go plan (`opencode-go`, Spark only), and was measured OUTSIDE the free counter MiMo Flash draws on (R157, 2026-10-18). This channel takes Nemotron off opencode altogether; on the operator's machine his overlay turns ocnemotron3ultrafree off.",
       "reasoning": {
         "effort": "high"
@@ -2652,6 +2655,7 @@
       "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
       "role": "code",
       "reading_note": "NEVER read this channel's answer. the operator, 2026-08-31: «никогда не читать ответ от Nemotron» - the channel runs because it is free, not because its answer is consulted. This supersedes the earlier conditional note (read it on code briefs), which is retired.",
+      "never_read": true,
       "_added": "2026-08-08, the operator gave the URL: openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b:free. Seventh vendor family (NVIDIA) and the first FREE voice in the panel - which changes what a marginal reviewer costs from a few cents to nothing, so the argument for including it in every round is different in kind from the argument for any other channel.",
       "_catalogue": "READ LIVE 2026-08-08. The :free variant is not merely the paid one with the meter off: context_length 1 000 000 against the paid variant's 512 288, max_completion_tokens 65 536, $0/$0. supported_parameters: include_reasoning, max_tokens, reasoning, reasoning_effort, seed, temperature, tool_choice, tools, top_p - so it takes an effort value and our fetch_url tool. reasoning_config is null, i.e. no declared ladder, so `effort` is passed but not proven to bite: judge it by reasoning tokens in the first real round, not by the 200.",
       "🟢_MEASURED_2026_08_17_R47_the_knob_bites_and_the_26_was_a_read_bug": "Three arms on the live :free endpoint, judged by completion_tokens_details.reasoning_tokens: no reasoning block = 102, effort medium = 101, effort HIGH = 181 - the knob MOVES the meter (~1.8x over the other arms) and the DEFAULT already thinks, unlike grok-4.20's default-off. All three arms answered the arithmetic control correctly, finish_reason=stop. The AOS round-40 record's reasoning_tokens=26 beside reasoning_chars=4948 was NOT an inert knob: the record read the LAST tool round's usage while chars summed every round - the R41 two-counters class one field over, fixed in the same commit as this note (reas_tot). That review's real failure was the missing end marker on a mid-heading stop, which the new finish_reason capture will name next time.",

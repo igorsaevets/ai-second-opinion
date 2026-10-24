@@ -187,12 +187,26 @@ both binaries, permissions and the privacy gate — and it spends nothing.
 ### "A free opencode voice shows `[skip]` ... refused earlier today"
 
 The free allowance that MiMo v2.6 Flash, GLM 5.3 Flash and DeepSeek V4.1 Flash share was used up
-earlier this UTC day on your machine (`provider.quota`), and every run until 00:00 UTC would be
-refused in seconds, so the plan leaves them out and says how many hours are left. Nothing is
-wrong with your install, and nothing is billed. To try anyway, name the channel: `--only
-ocmimo26flashfree` or "only ocmimo26flashfree". To forget the refusal, delete
+earlier this UTC day: a run on this machine got `provider.quota`. The allowance is counted per
+network address, so runs from other machines on your network spend it too. Every run until 00:00
+UTC would be refused in seconds, so the plan leaves them out and says how long is left. Nothing is
+wrong with your install, and nothing is billed. To try anyway, name the channel - its name, an
+alias, its model id or a `--set` pin: `--only ocmimo26flashfree` or "only ocmimo26flashfree"; a
+group word such as "only opencode" does not count. To forget the refusal, delete
 `~/.claude/model-orchestration.quota-state.json`; the next run starts the voice again (and
 writes the file again if it is refused).
+
+A `QUOTA:` line at the end of a run says what happened to that record: «NOT remembered» (the file
+could not be written, so the next run starts the group again), «could NOT be cleared … delete
+<path>» (an answer came, but the old refusal stays until you delete the file), «… is kept» (this
+run's answer began before another run's refusal, which therefore stands), or «before 00:00 UTC -
+not remembered» (the allowance has reset since).
+
+### "ANSWER [nvnemotron3ultra] ... NOT PRINTED" after `--ask`
+
+Since 1.115.1 `--ask` does not print the answer of a channel that `channels.json` marks
+`never_read`: every Nemotron channel, by the rule «run it, never read its answer». The channel ran;
+the line gives the path of its answer file. Nothing failed.
 
 ### "NVIDIA_NIM_API_KEY not set (a free key: build.nvidia.com)"
 

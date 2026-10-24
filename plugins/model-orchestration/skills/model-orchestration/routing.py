@@ -2936,20 +2936,30 @@ def load_quota_state(path):
     return {g: v for g, v in groups.items() if isinstance(g, str) and isinstance(v, dict)}
 
 
+def quota_time_left(now):
+    """R157 И-5 (F7): the time from `now` (an aware datetime) to the next 00:00 UTC as «N h MM min», or «under 1 min» -
+    the old «0 h 00 min» read as «no wait left» while the skip still held. One formatter for the plan's reason and the
+    refused record's note (orchestrate.record_quota_refusals)."""
+    now = now.astimezone(datetime.timezone.utc)
+    nxt = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    left = int((nxt - now).total_seconds()) // 60
+    return "under 1 min" if left < 1 else "%d h %02d min" % (left // 60, left % 60)
+
+
 def quota_skips(state, now):
     """{group: reason} for every group refused earlier on the UTC date of `now` (an aware datetime). A date other than
     today's is ignored, so a skip never outlives 00:00 UTC whatever the file holds."""
     now = now.astimezone(datetime.timezone.utc)
     today = now.strftime("%Y%m%d")
-    nxt = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    left = max(0, int((nxt - now).total_seconds()) // 60)
+    left = quota_time_left(now)
     out = {}
     for g, v in sorted(state.items()):
         if v.get("date") != today:
             continue
-        out[g] = ("quota group «%s» was refused earlier today: %s got provider.quota at %s on this machine, and every "
-                  "channel of the group is refused until 00:00 UTC (in %d h %02d min), so it is not started; name it "
-                  "to run it anyway" % (g, v.get("channel") or "a member", v.get("at") or "?", left // 60, left % 60))
+        # R157 И-5 (F1): `at` is the start of the run phase the refused call ran in - never after the refusal
+        out[g] = ("quota group «%s» was refused earlier today: %s got provider.quota in a run started at %s on this "
+                  "machine, and every channel of the group is refused until 00:00 UTC (in %s), so it is not started; "
+                  "name it to run it anyway" % (g, v.get("channel") or "a member", v.get("at") or "?", left))
     return out
 
 
@@ -3948,6 +3958,11 @@ def main():
         reg = load_registry(a.registry)
         plan = resolve(reg, route=a.route, only=a.only, skip=a.skip, sets=a.sets, tier=a.tier,
                        panel=a.panel)
+        # R157 И-5 (F8): today's quota skip, as orchestrate.py's main applies it - sessions read this printout as the
+        # live plan, and it printed [RUN ] for a voice that would not start.
+        plan = apply_quota_skip(plan, reg, quota_skips(load_quota_state(quota_state_path()),
+                                                       datetime.datetime.now(datetime.timezone.utc)),
+                                explicitly_named(reg, route=a.route, only=a.only, sets=a.sets))
     except RouteError as e:
         print("ROUTE ERROR: %s" % e)
         return 2

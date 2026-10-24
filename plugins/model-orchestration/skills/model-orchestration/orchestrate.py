@@ -10210,12 +10210,47 @@ def _quota_refused(r):
     return "provider.quota" in " ".join([str(r.get("error") or "")] + [str(w) for w in (r.get("warnings") or [])])
 
 
-def record_quota_refusals(results, reg, path, now):
+def _never_read(reg, name):
+    """R157 И-5 (F10): True when the registry marks this channel's answer as never to be read (`never_read`: the
+    operator's rule for every channel serving Nemotron, «никогда не читать ответ от Nemotron», 2026-08-31). Keyed on
+    that FIELD, never on the words of `reading_note`, which also carries the CORRUPTED advice."""
+    return (((reg or {}).get("channels") or {}).get(name) or {}).get("never_read") is True
+
+
+def _quota_recorded(v):
+    """R157 И-5 (F12): when a quota-state entry was written, in epoch seconds - its `recorded`, or for an entry of an
+    older version its `date` + `at` (then the record time); None when neither parses."""
+    v = v if isinstance(v, dict) else {}
+    for s, fmt in ((v.get("recorded"), "%Y-%m-%dT%H:%M:%SZ"),
+                   ("%s %s" % (v.get("date"), v.get("at")), "%Y%m%d %H:%M:%SZ")):
+        try:
+            return datetime.datetime.strptime(str(s), fmt).replace(tzinfo=datetime.timezone.utc).timestamp()
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def record_quota_refusals(results, reg, path, now, round_start=None, phase_starts=None):
     """R157 И-2: after the round and its fallbacks, write to the state file (routing.quota_state_path) the UTC date on
     which a member's `provider.quota` refused its quota group, so later rounds that day leave the group out
-    (routing.apply_quota_skip); a member that answered, with no member refused, clears the group's date. The refused
-    record gets a note with the hours left. Returns the log lines. Never raises: a state file that cannot be written
-    loses one day's skip, never a round."""
+    (routing.apply_quota_skip); a member's answer clears the date. Returns the log lines. Never raises: a state file
+    that cannot be written loses one day's skip, never a round.
+
+    R157 И-5 (panel r157i3, runs/r157-free-quota/i4/triage-i4.md):
+    (F1) the stored date and `at` are those of a moment never AFTER the refusal - the start of the phase the refused
+         call ran in (`round_start`; `phase_starts["retry"]` / `["fallback"]` for an auto-retried record / a fallback;
+         epoch seconds). A round that crosses 00:00 UTC so never arms the new day for a refusal of the old one (it
+         did: refused 23:58Z, recorded 00:04Z, the next whole day skipped); the error left is one dead start the next
+         day, never a lost day. `recorded` = when this round wrote it.
+    (F12) an answer clears a refusal only when that refusal was recorded before this round started - one that another
+         round recorded meanwhile is newer than this answer and stays.
+    (F4) an answer is _has_answer (ok, or SUBSTANTIAL_BYTES of text); a refusal in the same round still wins.
+    (F6) every refused record gets the note, not only the first of its group.
+    (F2, F5) the state folder is created, and every note and line says what the write DID (remembered / NOT
+         remembered / cleared / could NOT be cleared) - they used to promise the skip before the write.
+    Without `round_start` (older callers, the R157 И-2 selftest) the record time stands in for it."""
+    if not path:
+        return []
     refused, answered = {}, set()
     for name in sorted(results):
         r = results.get(name)
@@ -10223,14 +10258,26 @@ def record_quota_refusals(results, reg, path, now):
         if not g or not isinstance(r, dict):
             continue
         if _quota_refused(r):
-            refused.setdefault(g, name)
-        elif r.get("ok"):
+            refused.setdefault(g, []).append(name)
+        elif _has_answer(r):
             answered.add(g)
-    if not path or not (refused or answered):
+    if not (refused or answered):
         return []
-    now = now.astimezone(datetime.timezone.utc)
-    nxt = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    left = max(0, int((nxt - now).total_seconds()) // 60)
+    utc = datetime.timezone.utc
+    now = now.astimezone(utc)
+    t_now = now.timestamp()
+    t_round = t_now if round_start is None else min(float(round_start), t_now)
+    ps = phase_starts or {}
+
+    def _start(r):                       # a moment never after the start of this record's call
+        t = ps.get("fallback") if r.get("fallback_for") else ps.get("retry") if r.get("panel_retry") else None
+        return min(t_now, t_round if t is None else max(float(t), t_round))
+    try:
+        import routing as _rt            # loaded by main already; one formatter for the plan and this note (F7)
+        left = _rt.quota_time_left(now)
+    except Exception:                    # noqa: BLE001 - never raises
+        left = "the rest of the UTC day"
+    today = now.strftime("%Y%m%d")
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
@@ -10239,37 +10286,79 @@ def record_quota_refusals(results, reg, path, now):
     if not isinstance(data, dict):
         data = {}
     groups = data.get("groups") if isinstance(data.get("groups"), dict) else {}
-    lines, changed = [], False
-    for g, name in sorted(refused.items()):
-        groups[g] = {"date": now.strftime("%Y%m%d"), "at": now.strftime("%H:%M:%SZ"), "channel": name,
-                     "why": "provider.quota"}
-        changed = True
-        results[name].setdefault("notes", []).append(
-            "QUOTA: refused on quota group «%s» - every channel of it is refused until 00:00 UTC (in %d h %02d min); "
-            "later rounds on this machine leave the group out until then (name a channel to run it anyway)."
-            % (g, left // 60, left % 60))
-        lines.append("QUOTA: %s was refused (provider.quota) - later runs on this machine leave quota group «%s» "
-                     "out until 00:00 UTC; name a channel to run it anyway (state: %s)" % (name, g, path))
+    adds, stale, clears, kept = {}, set(), [], []
+    for g, names in sorted(refused.items()):
+        stamp = datetime.datetime.fromtimestamp(max(_start(results[n]) for n in names), utc)
+        if stamp.strftime("%Y%m%d") != today:
+            stale.add(g)                 # refused before 00:00 UTC: the allowance has reset since
+            continue
+        adds[g] = {"date": today, "at": stamp.strftime("%H:%M:%SZ"), "channel": names[0], "why": "provider.quota",
+                   "recorded": now.strftime("%Y-%m-%dT%H:%M:%SZ")}
+        if len(names) > 1:
+            adds[g]["channels"] = list(names)
     for g in sorted(answered - set(refused)):
-        if g in groups:
+        if g not in groups:
+            continue
+        rec = _quota_recorded(groups[g])
+        if rec is not None and rec + 1 > t_round:      # written after this round began: newer than this answer
+            kept.append((g, groups[g]))
+        else:
+            clears.append(g)
+    err = None
+    if adds or clears:
+        groups.update(adds)
+        for g in clears:
             del groups[g]
-            changed = True
-            lines.append("QUOTA: quota group «%s» answered again - its refusal date is cleared (state: %s)" % (g, path))
-    if not changed:
-        return lines
-    data["groups"] = groups
-    data["_about"] = ("model-orchestration (R157 И-2): the UTC date on which a quota group was refused on this "
-                      "machine; later rounds that day leave the group out. Safe to delete.")
-    try:
-        d = os.path.dirname(path)
-        if d and not os.path.isdir(d):
-            return lines + ["QUOTA: not remembered - %s does not exist" % d]
+        data["groups"] = groups
+        data["_about"] = ("model-orchestration (R157 И-2, И-5): per quota group, the UTC date and time (`at`: the start "
+                          "of the run phase the refused call ran in, never after the refusal) of a refusal on this "
+                          "machine, and when it was `recorded`; later rounds that day leave the group out. Safe to "
+                          "delete.")
         tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, path)
-    except OSError as exc:
-        lines.append("QUOTA: could not write %s (%s) - the next round will try the group again" % (path, exc))
+        try:
+            d = os.path.dirname(path)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, path)
+        except OSError as exc:
+            err = "could not write %s: %s" % (path, exc)
+            try:
+                if os.path.isfile(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+    lines = []
+    for g, names in sorted(refused.items()):
+        who = ", ".join(names)
+        if g in stale:
+            note = ("QUOTA: refused on quota group «%s» before 00:00 UTC - the allowance has reset since, so later "
+                    "rounds start the group again." % g)
+            line = ("QUOTA: %s refused (provider.quota) before 00:00 UTC - not remembered: the allowance has reset "
+                    "since, so later runs start quota group «%s» again" % (who, g))
+        elif err:
+            note = ("QUOTA: refused on quota group «%s» - every channel of it is refused until 00:00 UTC (in %s); "
+                    "this was NOT remembered (%s), so the next round starts the group again." % (g, left, err))
+            line = ("QUOTA: %s refused (provider.quota) - NOT remembered (%s): the next run starts quota group «%s» "
+                    "again" % (who, err, g))
+        else:
+            note = ("QUOTA: refused on quota group «%s» - every channel of it is refused until 00:00 UTC (in %s); "
+                    "later rounds on this machine leave the group out until then (name a channel to run it anyway)."
+                    % (g, left))
+            line = ("QUOTA: %s refused (provider.quota) - later runs on this machine leave quota group «%s» out until "
+                    "00:00 UTC; name a channel to run it anyway (state: %s)" % (who, g, path))
+        for n in names:
+            results[n].setdefault("notes", []).append(note)
+        lines.append(line)
+    for g in clears:
+        lines.append(("QUOTA: quota group «%s» answered again, but its refusal date could NOT be cleared (%s) - runs "
+                      "today still leave the group out; delete %s to start it" % (g, err, path)) if err else
+                     ("QUOTA: quota group «%s» answered again - its refusal date is cleared (state: %s)" % (g, path)))
+    for g, v in kept:
+        lines.append("QUOTA: quota group «%s» answered in this run, but its refusal recorded at %s by a run that ended "
+                     "after this one began is kept - runs today still leave the group out (state: %s)"
+                     % (g, v.get("recorded") or v.get("at") or "?", path))
     return lines
 
 
@@ -10286,13 +10375,19 @@ def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, 
     not for a substantial partial answer (E-73: the
     end-marker check flags whole answers too - the reader judges those); after the auto-retry,
     so a transient death is retried on the primary first; never in --task mode; never into a fallback of the same
-    `quota_group` after a `provider.quota` (R157 И-2: one allowance, so it would be refused too).
+    `quota_group` after a `provider.quota` (R157 И-2: one allowance, so it would be refused too) - R157 И-5 (F9): nor
+    into a quota group that ANY record of this round was refused on, whoever's fallback it is.
 
     `submit(executor, name)` dispatches one channel (main passes _submit_again); `same_voice(reg,
     name)` is routing.same_voice. The fallback's record carries `fallback_for`; both records get
     a note, so HANDOFF and REPORT say which model answered and why.
     """
     _fb_jobs = {}
+    _refused_by = {}                     # R157 И-5 (F9): quota group -> the first record of this round refused on it
+    for _qn, _qr in sorted((results or {}).items()):
+        _qg = _quota_group(reg, _qn)
+        if _qg and _quota_refused(_qr):
+            _refused_by.setdefault(_qg, _qn)
     if not task_mode:
         for cname in sorted(want):
             r = results.get(cname) or {}
@@ -10308,11 +10403,10 @@ def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, 
                 why_not = "OFF in this run - %s" % fbk["off"]
             elif no_fallback:
                 why_not = "--no-fallback"
-            elif (_quota_refused(r) and _quota_group(reg, fb)
-                  and _quota_group(reg, fb) == _quota_group(reg, cname)):
+            elif _quota_group(reg, fb) in _refused_by:
                 why_not = ("it draws on the same daily allowance (quota group «%s») that refused %s with "
                            "provider.quota - it would be refused too, until 00:00 UTC"
-                           % (_quota_group(reg, cname), cname))
+                           % (_quota_group(reg, fb), _refused_by[_quota_group(reg, fb)]))
             elif fb in results:
                 why_not = "%s already ran in this round" % fb
             elif fb in _fb_jobs.values():
@@ -10408,6 +10502,8 @@ def retryable_stream_death(r):
     """
     if r.get("ok") or r.get("text"):
         return False
+    if _quota_refused(r):                  # R157 И-5 (F11): the allowance said no - a re-send in the same round is
+        return False                       # refused too and spends one more of its requests
     if r.get("budget_stop"):               # R144 И-4: a re-run at the same budget stops the same way
         return False
     if r.get("stream_cut"):                # R168 И-2: the harness closed the read at the channel's budget
@@ -11885,24 +11981,80 @@ def _free_extras(primary):
             if c != primary and ch.get("enabled", True) and ch.get("cost") == "free"]
 
 
-def _ask_twins_note(names):
+def _ask_plan_line(plan, reg, names, skips, same_voice):
     """
-    R154 И-3: the --ask list is printed BEFORE the plan, and the plan keeps one member of each cascade group
-    (two transports to one model are one voice). With ocnemotron3ultrafree beside ornemotron3ultra the line said
-    «goes to 6 channels» over a plan that ran 5. Both stay in the list - the cascade picks the one that is ready
-    HERE (no opencode -> the OpenRouter twin) - and this sentence says so. Never raises, like _free_extras.
+    R157 И-5 (F3, panel r157i3): the «--ask goes to N channels» line, built from the FINAL plan - after the cascade
+    and today's quota skip - and printed just before it: who starts, whose answer is not printed (`never_read`), and
+    who does not start and why. Printed from the --ask list before the plan (R154 И-3's twin sentence was a patch on
+    that), it named on a refused day the skipped MiMo and a cascade twin the plan never ran («goes to 4», 2 ran).
+    Never raises, like _free_extras.
     """
     try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import routing
-        groups = routing.load_registry().get("_cascade_groups") or []
-    except Exception:                                    # noqa: BLE001 - see the docstring
-        return ""
-    pairs = [[c for c in g if c in names] for g in groups if isinstance(g, list)]
-    pairs = [p for p in pairs if len(p) > 1]
-    if not pairs:
-        return ""
-    return " One voice each, the first that is ready here runs: %s." % "; ".join(" / ".join(p) for p in pairs)
+        run = [n for n in names if (plan.get(n) or {}).get("enabled")]
+        out = []
+        for n in names:
+            if n in run:
+                continue
+            g = _quota_group(reg, n)
+            twin = [s for s in (same_voice(reg, n) if same_voice else []) if s in run]
+            out.append("%s (%s)" % (n, ("one voice with %s" % twin[0]) if twin else
+                                    ("quota group «%s» refused earlier today" % g) if g and g in (skips or {}) else
+                                    "not in this run's plan"))
+        hidden = [n for n in run if _never_read(reg, n)]
+        paid = _ask_paid_search(run[1:])
+        return ("--ask goes to %d channel(s): %s%s.%s Everything after the first is priced `free` in channels.json%s. "
+                "🔴 Free and near-free tiers are usually paid for with your text - the plan below prints each "
+                "channel's data policy. --only <channel> or --skip <channel> narrows it."
+                % (len(run), ", ".join(run), ("; not started: %s" % ", ".join(out)) if out else "",
+                   (" Its answer is not printed (`never_read` in channels.json, the operator's rule): %s."
+                    % ", ".join(hidden)) if hidden else "",
+                   ("; the model is free, but %s search%s the web on your OpenRouter key and each search is billed "
+                    "(R154 И-6)" % (", ".join(paid), "es" if len(paid) == 1 else "")) if paid
+                   else ", so a second opinion on a lookup costs nothing but the seconds"))
+    except Exception as exc:                             # noqa: BLE001 - see the docstring
+        return "--ask goes to: %s (the list could not be read off the plan: %r)" % (", ".join(names), exc)
+
+
+def _print_ask_answers(results, reg, ask_channel, marker, outdir, voice_label=None):
+    """
+    In --ask mode the ANSWER is the product: each channel's answer goes to stdout (moved here from main, R157 И-5).
+    The channel the user chose comes first, then the others by name - dict order follows the registry, an arbitrary
+    fact about a config file. R158 И-2: a voice's label follows its `cost` (`voice_label` = routing.ask_voice_label),
+    since a channel named beside the first one can be PAID.
+
+    🔴 R157 И-5 (F10, panel r157i3 P14): a channel the registry marks `never_read` - the operator's rule for every
+    Nemotron channel, «никогда не читать ответ от Nemotron» (2026-08-31) - still runs («RUN, NEVER READ»), but its
+    body is NOT printed into the session: one line names it and its answer file. Until 1.115.0 every --ask printed
+    Nemotron's answer (a free extra), so the rule held for panel handoffs only. Returns the number of answers printed.
+    """
+    order = sorted(results, key=lambda n: (n != ask_channel, n))
+    shown, hidden = 0, []
+    for name in order:
+        r = results[name] if isinstance(results.get(name), dict) else {}
+        extra = ""
+        if name != ask_channel and len(order) > 1:
+            _cost = (((reg or {}).get("channels") or {}).get(name) or {}).get("cost")
+            extra = "   (%s)" % (voice_label(_cost) if voice_label else "second voice")
+        print("\n" + "=" * 78)
+        if _never_read(reg, name):
+            hidden.append(name)
+            print("ANSWER  [%s]%s   NOT PRINTED - channels.json marks this voice `never_read` (the operator's rule: "
+                  "its answer is never read); it ran, its file: %s"
+                  % (name, extra, os.path.join(outdir or ".", r.get("answer_file") or name.upper() + ".md")))
+            print("=" * 78)
+            continue
+        body = _strip_marker_tail(r.get("text"), marker)
+        print("ANSWER  [%s]%s%s" % (name, extra, "" if r.get("ok") else "   ⚠ the channel reported a "
+                                                                      "problem - read the log above"))
+        print("=" * 78)
+        print(body if body else "(empty answer - see the warnings above)")
+        shown += 1
+    if len(order) > 1:
+        print("\n" + "-" * 78)
+        print("%d channels answered%s. Where they DISAGREE is the signal - a lookup both of them get right needed "
+              "neither of them." % (shown, (" (and %s ran, not printed: never_read)" % ", ".join(hidden))
+                                    if hidden else ""))
+    return shown
 
 
 def _channel_key_ready(ch):
@@ -13153,18 +13305,9 @@ def main():
             # R157 И-3: these names are the harness's, not the human's: a quota group refused earlier today is left
             # out of an --ask too (apply_quota_skip below); --ask-channel or --only, typed by the human, still runs it.
             a.ask_named = [_ask_typed] if _ask_typed else []
-            if len(a.only) > 1:
-                _paid = _ask_paid_search(a.only[1:])
-                log("--ask goes to %d channels: %s. Everything after the first is priced `free` "
-                    "in channels.json%s. 🔴 Free and near-free tiers are usually paid for with your "
-                    "text - the plan below prints each channel's data policy. --only <channel> or "
-                    "--skip <channel> narrows it.%s"
-                    % (len(a.only), ", ".join(a.only),
-                       ("; the model is free, but %s search%s the web on your OpenRouter key and "
-                        "each search is billed (R154 И-6)"
-                        % (", ".join(_paid), "es" if len(_paid) == 1 else "")) if _paid
-                       else ", so a second opinion on a lookup costs nothing but the seconds",
-                       _ask_twins_note(a.only)))
+            # R157 И-5 (F3): the «--ask goes to N channels» line is printed from the FINAL plan, just before it
+            # (_ask_plan_line) - printed from this list it named a skipped MiMo and a cascade twin that never ran.
+            a.ask_extras = len(a.only) > 1
         a.no_citecheck = True        # a lookup is not a review; the audit is for cited briefs
         global _citecheck_reason
         _citecheck_reason = ("--ask is a lookup, not a review - the citation audit is for briefs "
@@ -13259,15 +13402,18 @@ def main():
                                    sets=a.sets, tier=a.tier, panel=a.panel,
                                    ready=_cascade_ready(reg))
             # R157 И-2: a quota group refused earlier this UTC day is left out (routing.apply_quota_skip).
+            _qskips = routing.quota_skips(routing.load_quota_state(routing.quota_state_path()),
+                                          datetime.datetime.now(datetime.timezone.utc))
             plan = routing.apply_quota_skip(
-                plan, reg, routing.quota_skips(routing.load_quota_state(routing.quota_state_path()),
-                                               datetime.datetime.now(datetime.timezone.utc)),
+                plan, reg, _qskips,
                 routing.explicitly_named(reg, route=a.route, only=getattr(a, "ask_named", a.only), sets=a.sets))
             # R142 И-2: a fallback this invocation will never run is printed OFF, not "runs".
             for _fp in plan.values():
                 _fbk = _fp.get("fallback")
                 if _fbk and not _fbk.get("off") and (a.no_fallback or task_mode):
                     _fbk["off"] = "--no-fallback" if a.no_fallback else "--task runs no fallback"
+            if ask_mode and getattr(a, "ask_extras", False):        # R157 И-5 (F3)
+                log(_ask_plan_line(plan, reg, a.only, _qskips, routing.same_voice))
             log(routing.format_plan(plan, reg))
         except routing.RouteError as e:          # ambiguity must stop the run, never guess
             log("ROUTE ERROR: %s" % e)
@@ -13946,6 +14092,7 @@ def main():
         _task_finish(results, task_dirs, task_before, a.out, copy_out=not a.workdir)
         _task_tripwire(task_trip)
 
+    _phase_t0 = {}          # R157 И-5 (F1): when the auto-retry / fallback phase began (record_quota_refusals)
     # ---- Б-36: auto-retry transient stream deaths --------------------------------
     # A transient stream death leaves ok=False, no answer text, and either a transient
     # provider error (502/503/429), finish_reason="error", or a silent death (reasoning
@@ -14119,6 +14266,7 @@ def main():
                 % (_rcn, _rr.get("finish_reason"),
                    _pe.get("code") if isinstance(_pe, dict) else None,
                    ("$%.4f" % _pu) if isinstance(_pu, (int, float)) else "unknown (no price reported)"))
+        _phase_t0["retry"] = time.time()
         with ThreadPoolExecutor(max_workers=max(4, len(_retryable))) as _rex:
             _rjobs = {}
             for cname in sorted(_retryable):
@@ -14165,11 +14313,14 @@ def main():
 
     # ---- R142: run-time fallback (run_fallbacks: the rules are in its docstring) ----------------
     if plan and routing is not None:
+        _phase_t0["fallback"] = time.time()
         run_fallbacks(results, plan, reg, want, no_fallback=getattr(a, "no_fallback", False),
                       task_mode=task_mode, submit=_submit_again, same_voice=routing.same_voice)
-        # R157 И-2: remember a quota group's refusal until 00:00 UTC (record_quota_refusals).
+        # R157 И-2: remember a quota group's refusal until 00:00 UTC (record_quota_refusals); И-5 (F1, F12): stamped
+        # with the start of the phase the refused call ran in - never later than the refusal.
         for _ql in record_quota_refusals(results, reg, routing.quota_state_path(),
-                                         datetime.datetime.now(datetime.timezone.utc)):
+                                         datetime.datetime.now(datetime.timezone.utc), round_start=started,
+                                         phase_starts=_phase_t0):
             log("  " + _ql)
 
     # One authoritative assignment beats twenty literals scattered through the return statements
@@ -14876,29 +15027,9 @@ def main():
     # and stopping there is what makes a cheap channel expensive to consult: the cost that decides
     # whether a lookup happens is the number of steps, not the number of cents.
     if ask_mode:
-        # The channel the user actually chose comes first, then the free extras in registry order.
-        # Dict order here follows the registry, which is an arbitrary fact about a config file -
-        # and the answer someone reads first should be the one they asked for.
-        order = sorted(results, key=lambda n: (n != a.ask_channel, n))
-        for name in order:
-            r = results[name]
-            body = _strip_marker_tail(r.get("text"), a.marker)
-            # R158 И-2: the label follows that voice's `cost` - a channel named beside the first one can be PAID.
-            extra = ""
-            if name != a.ask_channel and len(order) > 1:
-                _cost = (((reg or {}).get("channels") or {}).get(name) or {}).get("cost")
-                extra = "   (%s)" % (routing.ask_voice_label(_cost) if routing is not None
-                                     and hasattr(routing, "ask_voice_label") else "second voice")
-            print("\n" + "=" * 78)
-            print("ANSWER  [%s]%s%s" % (name, extra,
-                                        "" if r.get("ok") else "   ⚠ the channel reported a "
-                                                               "problem - read the log above"))
-            print("=" * 78)
-            print(body if body else "(empty answer - see the warnings above)")
-        if len(order) > 1:
-            print("\n" + "-" * 78)
-            print("%d channels answered. Where they DISAGREE is the signal - a lookup both of "
-                  "them get right needed neither of them." % len(order))
+        # R157 И-5 (F10): the loop moved to _print_ask_answers, which never prints a `never_read` voice's body.
+        _print_ask_answers(results, reg, a.ask_channel, a.marker, a.out,
+                           voice_label=getattr(routing, "ask_voice_label", None) if routing is not None else None)
         _release_notice()
         return 0 if ok_count else 1
 

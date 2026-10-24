@@ -257,21 +257,40 @@ the same record.
 
 ---
 
-### A refused free allowance is skipped until 00:00 UTC (1.113.7)
+### A refused free allowance is skipped until 00:00 UTC (1.113.7; edges fixed in 1.115.1)
 
 opencode's free MiMo v2.6 Flash, GLM 5.3 Flash and DeepSeek V4.1 Flash (and the retired free Spark)
 carry one `quota_group` in `channels.json`, `opencode-free`: they behave as one daily allowance of
 requests per network address (measured 2026-10-18/19; the vendor's limiter is not public). The kit
 starts one of them, MiMo Flash. Its `fallback` is GLM 5.3 Flash: run once after the round when
-MiMo ends without an answer, never into a chain, and never after `provider.quota`, because a
-member of the same group would be refused too. After the round `record_quota_refusals` writes a
-member's `provider.quota` to `~/.claude/model-orchestration.quota-state.json`
-(`{"groups": {"opencode-free": {"date": "YYYYMMDD", "at": "HH:MM:SSZ", "channel": ...,
-"why": "provider.quota"}}}`); a member's answer in a round with no refusal removes the group.
-Every later plan on that UTC date, `--ask` included, leaves the group's channels out (`[skip]`,
-with the hours to 00:00 UTC) unless the human named the channel (`--only`, a route, `--ask-channel`);
-a date other than today's is ignored, and an unreadable file is an empty one.
-`MODEL_ORCH_QUOTA_STATE` points it elsewhere (`off` or empty: never read or written).
+MiMo ends without an answer, never into a chain, never after `provider.quota`, because a member of
+the same group would be refused too, and since 1.115.1 never into a group that any record of the
+round was refused on; `retryable_stream_death` does not auto-retry a `provider.quota` either. After
+the round `record_quota_refusals` writes a member's `provider.quota` to
+`~/.claude/model-orchestration.quota-state.json` (`{"groups": {"opencode-free": {"date":
+"YYYYMMDD", "at": "HH:MM:SSZ", "channel": ..., "why": "provider.quota", "recorded":
+"YYYY-MM-DDTHH:MM:SSZ"}}}`). `date` and `at` are the start of the run phase the refused call ran in
+(the round, the auto-retry or the fallback phase): never later than the refusal, so a round that
+crosses 00:00 UTC cannot arm the new day, and a stamp that falls on the previous UTC day is not
+written at all - the worst error left is one start that is refused again, never a lost day.
+`recorded` is when the round wrote the entry: a member's answer clears the group only if its
+refusal was recorded before that round began, so a round that answered earlier cannot undo a newer
+refusal (an entry written before 1.115.1 has no `recorded` and is read by date + at). The folder
+is created when missing, and every note and `QUOTA:` line is written from the write's result («NOT
+remembered», «could NOT be cleared … delete <path>», «… is kept»). Every later plan on that UTC
+date, `--ask` and `python routing.py` included, leaves the group's channels out (`[skip]`, with the
+time to 00:00 UTC, «under 1 min» in the last minute) unless the human named the channel: its name,
+an alias, its model id or a `--set` pin, in `--only`, a route or `--ask-channel`
+(`routing.explicitly_named`); a group word ("opencode") never counts. A date other than today's is
+ignored, and an unreadable file is an empty one. `MODEL_ORCH_QUOTA_STATE` points it elsewhere (`off`
+or empty: never read or written). There is no lock: two rounds writing at the same moment can lose
+one update (one extra start at worst).
+
+### What 1.115.1 changed in a run
+
+- The free-allowance memory, as the section above describes: the stamp is the start of the refused call's run phase, a stamp on the previous UTC day is not written, the new field `recorded`, an answer clears only a refusal recorded before its round began, the folder is created, every `QUOTA:` line says what the write did, a note on every refused record, «under 1 min»; no fallback into a group refused in the round; no auto-retry of `provider.quota`; `python routing.py` applies today's skip.
+- `--ask`: the line «--ask goes to N channel(s)» is built from the final plan (`_ask_plan_line`, after the cascade and the quota skip), with «not started: <channel> (<why>)» and the voices whose answer is not printed. A channel with `never_read: true` in `channels.json` (`nvnemotron3ultra`, `ocnemotron3ultrafree`, `ornemotron3ultra`: the rule for every Nemotron channel, run it, never read its answer) still runs, but `--ask` prints one line with its answer file instead of the body (`_print_ask_answers`); `reading_note` stays the human text.
+- `channels.json`: `ocnemotron3ultrafree` carries a stated exemption from «every free opencode channel has a `quota_group`» (it was measured outside the group); a selftest holds that invariant.
 
 ### What 1.115.0 changed in a run
 
