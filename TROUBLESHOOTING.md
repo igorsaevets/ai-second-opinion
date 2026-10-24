@@ -198,9 +198,9 @@ writes the file again if it is refused).
 
 A `QUOTA:` line at the end of a run says what happened to that record: «NOT remembered» (the file
 could not be written, so the next run starts the group again), «could NOT be cleared … delete
-<path>» (an answer came, but the old refusal stays until you delete the file), «… is kept» (this
-run's answer began before another run's refusal, which therefore stands), or «before 00:00 UTC -
-not remembered» (the allowance has reset since).
+<path>» (an answer came, but the old refusal stays until you delete the file), «… is kept» (another
+run recorded its refusal after this run began, so it is newer than this run's answer and stands), or
+«before 00:00 UTC - not remembered» (the allowance has reset since).
 
 ### "ANSWER [nvnemotron3ultra] ... NOT PRINTED" after `--ask`
 

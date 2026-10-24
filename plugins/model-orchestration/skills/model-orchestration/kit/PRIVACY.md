@@ -154,7 +154,7 @@ One file outside the run folders is the harness's own: `~/.claude/model-orchestr
 (since 1.113.7). A run writes it when opencode's free allowance refused a voice (`provider.quota`),
 and rewrites it when a later answer from that group clears the refusal (the group's entry is then
 removed). Per group it holds the UTC date and time the refused part of the run began (the round,
-its retry or its fallback; never later than the refusal), when the run wrote the entry, the
+its retry or its fallback; never later than the refusal of the channel it names), when the run wrote the entry, the
 channel's name and the error type, plus one line saying what the file is - nothing from a brief or
 an answer. A refusal from a part of a run that began before 00:00 UTC is not kept. The run creates
 the file's folder if it is missing. It never leaves your machine and is not in the kit's folder, so

@@ -2956,10 +2956,12 @@ def quota_skips(state, now):
     for g, v in sorted(state.items()):
         if v.get("date") != today:
             continue
-        # R157 И-5 (F1): `at` is the start of the run phase the refused call ran in - never after the refusal
-        out[g] = ("quota group «%s» was refused earlier today: %s got provider.quota in a run started at %s on this "
-                  "machine, and every channel of the group is refused until 00:00 UTC (in %s), so it is not started; "
-                  "name it to run it anyway" % (g, v.get("channel") or "a member", v.get("at") or "?", left))
+        # R157 И-5 (F1): `at` is the start of the run phase the refused call ran in - never after the refusal;
+        # R157 И-8 (F4, panel r157i6 A3): of the member `channel` names, and the reason says «a part of a run»
+        out[g] = ("quota group «%s» was refused earlier today: %s got provider.quota in a part of a run (the round, "
+                  "its retry or its fallback) that began at %s on this machine, and every channel of the group is "
+                  "refused until 00:00 UTC (in %s), so it is not started; name it to run it anyway"
+                  % (g, v.get("channel") or "a member", v.get("at") or "?", left))
     return out
 
 

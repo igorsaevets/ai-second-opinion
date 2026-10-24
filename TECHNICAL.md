@@ -269,13 +269,17 @@ round was refused on; `retryable_stream_death` does not auto-retry a `provider.q
 the round `record_quota_refusals` writes a member's `provider.quota` to
 `~/.claude/model-orchestration.quota-state.json` (`{"groups": {"opencode-free": {"date":
 "YYYYMMDD", "at": "HH:MM:SSZ", "channel": ..., "why": "provider.quota", "recorded":
-"YYYY-MM-DDTHH:MM:SSZ"}}}`). `date` and `at` are the start of the run phase the refused call ran in
-(the round, the auto-retry or the fallback phase): never later than the refusal, so a round that
-crosses 00:00 UTC cannot arm the new day, and a stamp that falls on the previous UTC day is not
-written at all - the worst error left is one start that is refused again, never a lost day.
-`recorded` is when the round wrote the entry: a member's answer clears the group only if its
-refusal was recorded before that round began, so a round that answered earlier cannot undo a newer
-refusal (an entry written before 1.115.1 has no `recorded` and is read by date + at). The folder
+"YYYY-MM-DDTHH:MM:SSZ"}}}`). `date` and `at` are the start of the run phase in which `channel` was
+refused (the round, the auto-retry or the fallback phase; with several members refused, the latest
+such start and its member - `channels` lists them all): never later than that refusal. A refusal in
+a phase that began before 00:00 UTC is not written at all (the allowance has reset since), while a
+phase that began after 00:00 UTC arms the new day - the worst error left is one start that is
+refused again, never a lost day. `recorded` is when the round wrote the entry, in whole seconds: a
+member's answer clears the group unless the same round was refused too, or the refusal was recorded
+in a second that began at or after that round's start (then it is newer than the answer and is
+kept). Within the second the round began, `recorded` cannot tell before from after, and the entry
+clears - one more start is the cheap error (an entry written before 1.115.1 has no `recorded` and
+is read by date + at). The folder
 is created when missing, and every note and `QUOTA:` line is written from the write's result («NOT
 remembered», «could NOT be cleared … delete <path>», «… is kept»). Every later plan on that UTC
 date, `--ask` and `python routing.py` included, leaves the group's channels out (`[skip]`, with the
@@ -283,8 +287,17 @@ time to 00:00 UTC, «under 1 min» in the last minute) unless the human named th
 an alias, its model id or a `--set` pin, in `--only`, a route or `--ask-channel`
 (`routing.explicitly_named`); a group word ("opencode") never counts. A date other than today's is
 ignored, and an unreadable file is an empty one. `MODEL_ORCH_QUOTA_STATE` points it elsewhere (`off`
-or empty: never read or written). There is no lock: two rounds writing at the same moment can lose
-one update (one extra start at worst).
+or empty: never read or written). Every write goes through its own temporary file beside the state
+file and `os.replace`. There is no lock: two rounds writing at the same moment can lose one update -
+with one quota group, as in this registry, that is one extra start at worst; with two groups a
+stale write can also bring back a refusal another round had just cleared, and that group then
+skips until 00:00 UTC.
+
+### What 1.115.2 changed in a run
+
+- `HANDOFF.md` lists a `never_read` answer (every Nemotron channel) with `never` in its `read` column and counts it nowhere: not in the totals line, the resume block («прочитай каждый файл … КРОМЕ …»), the launch log's `Handoff:` line, the answer-cap lists or `read_order_files`, and the fallback line marks a `never_read` fallback's file (Nemotron's own fallback); `stamp_reading_fields` (moved out of `main`) stamps `never_read` beside `read_order`, `reading_note` and `must_read`.
+- The free-allowance memory: an answer clears a refusal recorded in the second its run began (1.115.1 kept it all day); `channel` names the member whose run phase set `at`, and the plan reason says «in a part of a run (the round, its retry or its fallback) that began at»; every write uses its own temporary file (`tempfile.mkstemp`), not a shared `<file>.tmp`.
+- The `provider.quota` hint no longer quotes opencode's FAQ figure, which opencode removed on 2026-10-21.
 
 ### What 1.115.1 changed in a run
 

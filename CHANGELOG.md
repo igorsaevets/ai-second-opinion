@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.115.2 — 2026-10-24
+
+What the cheap panel found in 1.115.1: the reading list still sent you to Nemotron's answer, and the free-allowance memory kept the wrong second.
+
+- **`HANDOFF.md` no longer counts Nemotron's answer among the files to read.** 1.115.1 marked every Nemotron channel `never_read` for `--ask`, but a panel's reading list still counted that file in its totals, and its ready-to-paste resume block said «read every file». The file is still listed (it is on disk), with `never` in the `read` column, and is left out of every count, the resume block and the launch log's `Handoff:` line; when Nemotron's own fallback answers for it, the fallback line says not to open that file either.
+- **An answer clears a refusal recorded in the second its run began.** The state file keeps `recorded` in whole seconds, and 1.115.1 kept a refusal written up to a second before the answering run began for the rest of the UTC day; within that second it now clears (one more start at worst).
+- **The skip reason names the right voice and time.** With two voices of the group refused in different parts of a run, the state file named the first by name with the later time; it now names the voice whose part of the run set the time, and the reason says «in a part of a run (the round, its retry or its fallback) that began at». 1.115.1's «never later than the refusal» held for that voice only.
+- **Each write of the state file uses its own temporary file**, so two runs ending at the same moment no longer write through one shared `<file>.tmp` (there is still no lock).
+- **The `provider.quota` hint and the README no longer quote opencode's FAQ figure** («200 requests/day»): opencode removed it on 2026-10-21. Our own measurement stands, and the allowance can change.
+
 ## 1.115.1 — 2026-10-24
 
 The free voices' daily-allowance memory, fixed at its edges, and `--ask` without Nemotron's answer in your session.

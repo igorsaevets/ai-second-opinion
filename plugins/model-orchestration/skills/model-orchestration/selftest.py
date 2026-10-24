@@ -8138,6 +8138,7 @@ def main():
                   suite_r169_agy_argon,
         suite_r169_i2_kit_release,
         suite_r157_i5_quota_edges,
+        suite_r157_i8_panel_fixes,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -17881,10 +17882,11 @@ def suite_r157_i2_free_fallback():
         shutil.rmtree(tmpd, ignore_errors=True)
     cause, fix = o.diagnose("EXIT 1: provider.quota (HTTP 429): Rate limit exceeded. Please try again later.")
     cause, fix = cause or "", fix or ""
-    check("200 requests/day" in cause and "behaves as" in cause and "longcat-2.5-preview-free" in cause
+    check("2026-10-21" in cause and "200 requests/day" not in cause and "behaves as" in cause
+          and "longcat-2.5-preview-free" in cause
           and "shared by every free user" not in cause and "every tool step" not in cause
           and "[skip]" in fix and "not started" in fix,
-          "R157 И-2 (m) the provider.quota hint: «behaves as», the FAQ's 200 requests/day, the models outside it, the "
+          "R157 И-2 (m) the provider.quota hint: «behaves as», no FAQ figure since 2026-10-21 (R157 И-8), the models outside it, the "
           "[skip] state, no fallback into the same allowance", cause[:160])
     src = inspect.getsource(o.main)
     ia, ip_, ir, ifb = (src.find(x) for x in ("apply_quota_skip(", "format_plan(", "record_quota_refusals(",
@@ -18785,6 +18787,206 @@ def suite_r157_i5_quota_edges():
         check("round_start=started" in src and '_phase_t0["fallback"]' in src and '_phase_t0["retry"]' in src,
               "R157 И-5 (o) F1, F12: main passes the round's start and the retry / fallback phase starts to "
               "record_quota_refusals")
+    finally:
+        shutil.rmtree(tmpd, ignore_errors=True)
+
+
+def suite_r157_i8_panel_fixes():
+    """R157 И-8 (2026-10-24): what panel r157i6 found in kit 1.115.1 (runs/r157-free-quota/i7/triage-i7.md A1-A5, each
+    reproduced there by i7/verify_quota_i7.py). Behavioural: HANDOFF.md built from records stamped by the code main
+    runs, the provider.quota hint as diagnose() returns it, record_quota_refusals on a private state file, two writers
+    interleaved inside os.replace. Every check fails on 1.115.1 except the five labelled «control:».
+    """
+    import datetime as dt
+    import inspect
+    import time
+    import routing as rt
+    import orchestrate as o
+    section("R157 И-8 panel r157i6: HANDOFF never counts never_read, no FAQ figure, same-second clear, channel, tmp")
+    U = dt.timezone.utc
+    G = "opencode-free"
+    kit = rt.load_registry(overlay=False)
+    rq, lq, qs = o.record_quota_refusals, rt.load_quota_state, rt.quota_skips
+    quota = {"ok": False, "error": None, "text": "",
+             "warnings": ["EXIT 1: provider.quota (HTTP 429): Rate limit exceeded. Please try again later."]}
+    answer = {"ok": True, "text": "x" * 100}
+    M = "R157I8-DONE"
+
+    def ts(*a):
+        return dt.datetime(*a, tzinfo=U)
+
+    def notes(r):
+        return " ".join(r.get("notes") or [])
+
+    def put(path, entry):                       # a state file holding one refusal of the group
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"groups": {G: entry}}, f)
+
+    def round_dir(name, files):                 # a run folder with answer files ending in the marker
+        d = os.path.join(tmpd, name)
+        os.makedirs(d)
+        for fn, n in files.items():
+            with open(os.path.join(d, fn), "w", encoding="utf-8") as f:
+                f.write(fn[0] * n + "\n" + M + "\n")
+        return d, {fn: os.path.getsize(os.path.join(d, fn)) for fn in files}
+
+    def handoff(d, res):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            h = o.write_handoff(d, res, marker=M, started=time.time() - 60) or {}
+        with open(os.path.join(d, "HANDOFF.md"), encoding="utf-8") as f:
+            return h, f.read(), buf.getvalue()
+
+    def kb(n):
+        return f"{n:,}".replace(",", " ")
+    stamp = getattr(o, "stamp_reading_fields", None)
+    tmpd = tempfile.mkdtemp(prefix="r157i8-")
+    try:
+        three = {"GROKBUILD.md": 400, "NVNEMOTRON3ULTRA.md": 900, "MCSPARK13.md": 200}
+        d1, sz = round_dir("r1", three)
+        res = {fn[:-3].lower(): {"answer_file": fn, "ok": True, "seconds": 5, "text": "x"} for fn in three}
+        if stamp:
+            stamp(res)
+        h, hand, logged = handoff(d1, res)
+        want = sz["GROKBUILD.md"] + sz["MCSPARK13.md"]
+        row = next((ln for ln in hand.splitlines() if ln.startswith("|") and "`NVNEMOTRON3ULTRA.md`" in ln), "")
+        check(stamp is not None and ("**2 answer file(s), %s bytes" % kb(want)) in hand and "их 3" not in hand
+              and "КРОМЕ `NVNEMOTRON3ULTRA.md`, — их 2" in hand and row.startswith("| never |")
+              and h.get("never_read") == ["NVNEMOTRON3ULTRA.md"] and h.get("est_tokens") == want // o.CHARS_PER_TOKEN
+              and "NVNEMOTRON3ULTRA.md" not in (h.get("read_order_files") or ["NVNEMOTRON3ULTRA.md"]),
+              "R157 И-8 (a) F1 (A2): a round with Nemotron's answer, records stamped by stamp_reading_fields (the code "
+              "main runs) - HANDOFF counts 2 files and their bytes, the resume block says «КРОМЕ NVNEMOTRON3ULTRA.md, — "
+              "их 2», its table row reads «never»", repr((stamp is not None, row[:30], h.get("never_read"))))
+        check("Handoff: 2 answer file(s)" in logged and "never_read" in logged,
+              "R157 И-8 (a2) F1: the launch log's Handoff line counts 2 and names the never_read file",
+              logged[:200])
+        d3, _ = round_dir("r3", three)
+        res3 = {fn[:-3].lower(): {"answer_file": fn, "ok": True, "seconds": 5, "text": "x",
+                                  "never_read": fn.startswith("NV")} for fn in three}
+        h3, hand3, _ = handoff(d3, res3)
+        check(("**2 answer file(s), %s bytes" % kb(want)) in hand3 and "их 3" not in hand3
+              and h3.get("est_tokens") == want // o.CHARS_PER_TOKEN,
+              "R157 И-8 (a3) F1: write_handoff itself, given a record with never_read true, counts it nowhere",
+              repr((h3.get("est_tokens"), want // o.CHARS_PER_TOKEN)))
+        d4, _ = round_dir("r4", {"GROKBUILD.md": 400, "ORNEMOTRON3ULTRA.md": 300})
+        res4 = {"grokbuild": {"answer_file": "GROKBUILD.md", "ok": True, "seconds": 5, "text": "x"},
+                "nvnemotron3ultra": {"ok": False, "seconds": 5, "text": ""},
+                "ornemotron3ultra": {"answer_file": "ORNEMOTRON3ULTRA.md", "ok": True, "seconds": 5, "text": "x",
+                                     "fallback_for": "nvnemotron3ultra"}}
+        if stamp:
+            stamp(res4)
+        _, hand4, _ = handoff(d4, res4)
+        fb = next((ln for ln in hand4.splitlines() if ln.startswith("🔁")), "")
+        check("`ORNEMOTRON3ULTRA.md`, never_read - do not open it" in fb and "**1 answer file(s)" in hand4,
+              "R157 И-8 (a4) F1: Nemotron's fallback answered for Nemotron - the fallback line marks its file never_read "
+              "and the totals count 1", fb[:200])
+        two = {"GROKBUILD.md": 400, "MCSPARK13.md": 200}
+        d2, sz2 = round_dir("r2", two)
+        res2 = {fn[:-3].lower(): {"answer_file": fn, "ok": True, "seconds": 5, "text": "x"} for fn in two}
+        if stamp:
+            stamp(res2)
+        _, hand2, _ = handoff(d2, res2)
+        check("КАЖДЫЙ файл из манифеста — их 2" in hand2
+              and ("**2 answer file(s), %s bytes" % kb(sum(sz2.values()))) in hand2 and "| never |" not in hand2,
+              "R157 И-8 (b) control: a round without a never_read answer - the resume block and the totals as before")
+        names = sorted(n for n, c in kit["channels"].items() if isinstance(c, dict))
+        st = {n: {} for n in names}
+        if stamp:
+            stamp(st)
+        flagged = sorted(n for n in names if kit["channels"][n].get("never_read") is True)
+        check(stamp is not None and len(flagged) >= 1
+              and sorted(n for n in names if st[n].get("never_read") is True) == flagged
+              and all(st[n].get("never_read") is False for n in names if n not in flagged),
+              "R157 И-8 (c) F1: stamp_reading_fields gives every registry channel its own never_read (true on "
+              "exactly the %d flagged ones)" % len(flagged), repr(flagged))
+        src = inspect.getsource(o.main)
+        check("stamp_reading_fields(results)" in src and "write_handoff(a.out" in src
+              and src.index("stamp_reading_fields(results)") < src.index("write_handoff(a.out"),
+              "R157 И-8 (d) F1 wiring: main stamps the records with stamp_reading_fields before write_handoff")
+
+        cause, fix = o.diagnose(quota["warnings"][0])
+        cause = cause or ""
+        check("200 requests/day" not in cause and "2026-10-21" in cause and "behaves as" in cause,
+              "R157 И-8 (e) F2 (A1): the provider.quota hint cites no FAQ figure (opencode removed it on 2026-10-21)",
+              cause[:200])
+
+        sg = os.path.join(tmpd, "g.json")
+        put(sg, {"date": "20261021", "at": "09:59:30Z", "channel": "ocmimo26flashfree", "why": "provider.quota",
+                 "recorded": "2026-10-21T09:59:59Z"})
+        lg = rq({"ocglm53flashfree": dict(answer)}, kit, sg, ts(2026, 10, 21, 10, 5),
+                round_start=ts(2026, 10, 21, 9, 59, 59, 995000).timestamp())
+        check(G not in lq(sg) and "is cleared" in " ".join(lg),
+              "R157 И-8 (g) F3 (A4): a refusal recorded in the second the answering round began (stored 09:59:59Z, "
+              "round 09:59:59.995) is cleared by its answer - the second cannot tell before from after", repr(lg)[:200])
+        sh = os.path.join(tmpd, "h.json")
+        put(sh, {"date": "20261021", "at": "09:58:00Z", "channel": "ocmimo26flashfree", "why": "provider.quota",
+                 "recorded": "2026-10-21T10:00:02Z"})
+        lh = rq({"ocglm53flashfree": dict(answer)}, kit, sh, ts(2026, 10, 21, 10, 5),
+                round_start=ts(2026, 10, 21, 10, 0, 0, 500000).timestamp())
+        check(G in lq(sh) and "is kept" in " ".join(lh),
+              "R157 И-8 (h) control: a refusal recorded 2 s after the round began is kept", repr(lh)[:200])
+        sh2 = os.path.join(tmpd, "h2.json")
+        put(sh2, {"date": "20261021", "at": "09:58:00Z", "channel": "ocmimo26flashfree", "why": "provider.quota",
+                  "recorded": "2026-10-21T10:00:00Z"})
+        lh2 = rq({"ocglm53flashfree": dict(answer)}, kit, sh2, ts(2026, 10, 21, 10, 5),
+                 round_start=ts(2026, 10, 21, 10, 0, 0).timestamp())
+        check(G in lq(sh2),
+              "R157 И-8 (h2) control: recorded in the very second a round that began on the second mark - kept (it "
+              "cannot be earlier than the start)", repr(lh2)[:200])
+        kept = next((ln for ln in lh if "is kept" in ln), "")
+        check("after this run began" in kept and "ended after this one began" not in kept,
+              "R157 И-8 (h3) F3: the kept line says the refusal was recorded after this run began", kept[:220])
+
+        si = os.path.join(tmpd, "i.json")
+        rq({"ocglm53flashfree": dict(quota), "ocmimo26flashfree": dict(quota, panel_retry=True)}, kit, si,
+           ts(2026, 10, 21, 10, 25), round_start=ts(2026, 10, 21, 10, 0).timestamp(),
+           phase_starts={"retry": ts(2026, 10, 21, 10, 20).timestamp()})
+        ei = lq(si).get(G) or {}
+        check(ei.get("at") == "10:20:00Z" and ei.get("channel") == "ocmimo26flashfree"
+              and sorted(ei.get("channels") or []) == ["ocglm53flashfree", "ocmimo26flashfree"],
+              "R157 И-8 (i) F4 (A3): refused in the round (10:00) and on the auto-retry (10:20) - `at` 10:20 names the "
+              "member whose phase set it (ocmimo26flashfree), not the first by name", repr(ei))
+        sj = os.path.join(tmpd, "j.json")
+        rq({"ocmimo26flashfree": dict(quota)}, kit, sj, ts(2026, 10, 21, 10, 5),
+           round_start=ts(2026, 10, 21, 10, 0).timestamp())
+        ej = lq(sj).get(G) or {}
+        check(ej.get("at") == "10:00:00Z" and ej.get("channel") == "ocmimo26flashfree",
+              "R157 И-8 (j) control: one refusal in the round - `at` the round start, `channel` that member", repr(ej))
+        why = qs(lq(si), ts(2026, 10, 21, 11, 0)).get(G) or ""
+        check("ocmimo26flashfree got provider.quota in a part of a run" in why and "began at 10:20:00Z" in why
+              and "in a run started at" not in why,
+              "R157 И-8 (k) F4: the plan reason names that member and «a part of a run (the round, its retry or its "
+              "fallback) that began at 10:20:00Z»", why[:220])
+
+        sl = os.path.join(tmpd, "l", "state.json")
+        os.makedirs(os.path.dirname(sl))
+        real = o.os.replace
+        seen = []
+
+        def nested(src_, dst_, *a, **k):        # writer A is between its dump and its replace: writer B runs whole
+            seen.append(os.path.basename(src_))
+            if len(seen) == 1:
+                rq({"ocglm53flashfree": dict(quota)}, kit, sl, ts(2026, 10, 21, 10, 6),
+                   round_start=ts(2026, 10, 21, 10, 1).timestamp())
+            return real(src_, dst_, *a, **k)
+        ra = {"ocmimo26flashfree": dict(quota)}
+        o.os.replace = nested
+        try:
+            la = rq(ra, kit, sl, ts(2026, 10, 21, 10, 5), round_start=ts(2026, 10, 21, 10, 0).timestamp())
+        finally:
+            o.os.replace = real
+        left = [fn for fn in os.listdir(os.path.dirname(sl)) if fn.endswith(".tmp")]
+        ea = lq(sl).get(G) or {}
+        check("NOT remembered" not in " ".join(la) + notes(ra["ocmimo26flashfree"])
+              and ea.get("channel") == "ocmimo26flashfree" and len(seen) == 2 and seen[0] != seen[1]
+              and "state.json.tmp" not in seen and not left,
+              "R157 И-8 (l) F5 (A5): a second writer runs whole while the first is between its dump and its replace - "
+              "each has its own temp file, both replaces succeed, none is left behind", repr((la, seen, left))[:260])
+        sm = os.path.join(tmpd, "m", "state.json")
+        rq({"ocmimo26flashfree": dict(quota)}, kit, sm, ts(2026, 10, 21, 10, 5),
+           round_start=ts(2026, 10, 21, 10, 0).timestamp())
+        check(G in lq(sm) and not [fn for fn in os.listdir(os.path.dirname(sm)) if fn.endswith(".tmp")],
+              "R157 И-8 (m) control: one writer - the refusal is remembered and no temp file is left")
     finally:
         shutil.rmtree(tmpd, ignore_errors=True)
 

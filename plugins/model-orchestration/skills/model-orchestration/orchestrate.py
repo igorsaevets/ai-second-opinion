@@ -1624,13 +1624,14 @@ KNOWN_FAILURES = [
     # `provider.quota`), at 1 s and mid-run. The mimo CLI writes the same NDJSON, hence «paid».
     # R157 И-2 (2026-10-19), panel r157: «behaves as» - Zen's published limiter left the repository on 2026-10-11, and
     # its handler proxied keyless free models to the private «new inference» BEFORE that limiter (handler.ts @d21b0790
-    # lines 112-119 vs 144-147); opencode's FAQ (console i18n en.ts line 301) says «200 requests/day». A fallback of
-    # the same quota_group is not started after it, and main remembers the refusal until 00:00 UTC.
+    # lines 112-119 vs 144-147). opencode's FAQ (console i18n en.ts) said «200 requests/day» until 2026-10-21, when
+    # #57663 removed it (R157 И-8, panel r157i6 A1: the hint cites no vendor figure since). A fallback of the same
+    # quota_group is not started after it, and main remembers the refusal until 00:00 UTC.
     ("provider\\.quota",
      "The provider's usage quota for this model is used up. On opencode's free models "
      "(opencode/...-free) it behaves as a daily allowance of requests per network address - "
-     "measured 2026-10-18/19; opencode's FAQ gives free models «a quota of 200 requests/day», and "
-     "the code behind it is not public since 2026-10-11, so the vendor can change it. Most free "
+     "measured 2026-10-18/19; opencode's FAQ dropped its daily request figure for free models on "
+     "2026-10-21, and the code behind it is not public since 2026-10-11, so the vendor can change it. Most free "
      "models draw on one allowance: every model request (agent step) of every free voice, and every "
      "earlier run of the day from any machine on your network, spends it. Measured outside it: "
      "nemotron-3-ultra-free, beam-free, longcat-2.5-preview-free; which models share it can change. "
@@ -2087,6 +2088,40 @@ def _declares_truncation(body):
     return False
 
 
+def stamp_reading_fields(results):
+    """R157 И-8 (F1, panel r157i6 A2): stamp into every channel record the registry fields the reading list needs -
+    `read_order`, `reading_note`, `must_read` and `never_read` - before write_handoff, which deliberately has no
+    registry dependency. Moved out of main (where it ran inline since R73) so the selftest drives the code a real round
+    runs: R73's first live round printed «?» in every row because the R72 selftest fed write_handoff hand-built
+    records, and 1.115.1 counted a `never_read` answer among the files to read because the field was never stamped.
+    Returns `results`."""
+    for _cn, _r in results.items():
+        # 🔴 _registry_default, NOT plan.get(): routing's plan carries selected fields and
+        # read_order is not one of them, so the first live round (R73) printed «?» in every
+        # row of the reading table - the knob was stamped from a dict that never held it.
+        # The R72 selftest missed it because it fed write_handoff hand-built results; the
+        # stamping path only runs in a real round. Same lesson, same fix as reading_note below.
+        if isinstance(_r, dict) and "read_order" not in _r:
+            _r["read_order"] = _registry_default(_cn, "read_order", None)
+        # reading_note travels the same road: the registry may carry standing advice about a
+        # channel's answer («NEVER read Nemotron» - Igor, 2026-08-31), and advice that only
+        # prints in the run tail while the READING LIST stays silent is advice that reaches
+        # nobody at the moment it matters.
+        if isinstance(_r, dict) and "reading_note" not in _r:
+            _r["reading_note"] = _registry_default(_cn, "reading_note", None)
+        # ★ Idea 3 (Igor, 2026-09-01): the mandatory self-read flag rides the same registry
+        # road as the two above - one home, stamped at the same site the R73 live round
+        # proved is the only one that runs in production.
+        if isinstance(_r, dict) and "must_read" not in _r:
+            _r["must_read"] = bool(_registry_default(_cn, "must_read", False))
+        # R157 И-8 (F1): `never_read` (R157 И-5: the operator's «run it, never read its answer», every Nemotron
+        # channel) rides the same road - 1.115.1's HANDOFF counted that file among the ones to read and its resume
+        # block said «read EVERY file».
+        if isinstance(_r, dict) and "never_read" not in _r:
+            _r["never_read"] = _registry_default(_cn, "never_read", None) is True
+    return results
+
+
 def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=None,
                   answer_cap=None):
     """
@@ -2140,7 +2175,7 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             _af = (_r.get("answer_file") or "").lower() if isinstance(_r, dict) else ""
             if _af:
                 by_file[_af] = (_cn, _r.get("read_order"), _r.get("reading_note"),
-                                bool(_r.get("must_read")))
+                                bool(_r.get("must_read")), _r.get("never_read") is True)
         # R154 И-6: a channel that re-ran once keeps its other attempt(s) beside its answer (agy:
         # `<CH>.first.md`, `<CH>.retry.md`); its record names them, so they are neither answers to
         # count nor orphans.
@@ -2184,7 +2219,7 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             except OSError:
                 body = ""
             tail = [ln for ln in body.splitlines() if ln.strip()]
-            cname, r_order, r_note, r_must = by_file.get(fn.lower(), (None, None, None, False))
+            cname, r_order, r_note, r_must, r_never = by_file.get(fn.lower(), (None, None, None, False, False))
             files.append({
                 "file": fn,
                 "channel": cname,
@@ -2192,7 +2227,10 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
                 "read_order": r_order if r_order in (1, 2, 3) else 9,
                 # ★ Idea 3 (Igor, 2026-09-01): the one answer the ordering session must read
                 # ITSELF whatever the context pressure - `must_read` in channels.json.
-                "must_read": bool(r_must),
+                "must_read": bool(r_must) and not r_never,
+                # R157 И-8 (F1, panel r157i6 A2): the operator's «run it, never read its answer» (`never_read` in
+                # channels.json) - listed, because it is on disk, and counted nowhere.
+                "never_read": r_never,
                 # chars, not bytes, for the cap compare: the cap was asked in CHARACTERS and a
                 # Cyrillic answer is ~2 bytes/char in UTF-8, so a byte compare would flag it at
                 # half the promised length.
@@ -2213,9 +2251,13 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
         # the table top-down, so the order the table is printed in IS the reading order.
         # Within a tier the ★ mandatory-read row leads (R74, Idea 3) - it is the row the
         # reader must reach even if nothing after it is read.
-        fresh.sort(key=lambda f: (f["read_order"], not f["must_read"], f["file"]))
+        fresh.sort(key=lambda f: (f["never_read"], f["read_order"], not f["must_read"], f["file"]))
         stale_files = [f for f in files if f["stale"]]
-        total = sum(f["bytes"] for f in fresh)
+        # R157 И-8 (F1): what is TO READ. A `never_read` file sorts last and shows «never» in the table; it is not in
+        # the totals, the cap lists, the resume block, the log line or `read_order_files`.
+        readable = [f for f in fresh if not f["never_read"]]
+        unread = [f for f in fresh if f["never_read"]]
+        total = sum(f["bytes"] for f in readable)
         est = total // CHARS_PER_TOKEN
 
         # Channels that ran and left NO file. Named, because "absent from the manifest" is the
@@ -2245,7 +2287,8 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
              "|---:|---|---|---:|---:|---|"]
         for f in fresh:
             L.append("| %s | %s | `%s` | %s | ~%s | %s |"
-                     % (("%s★" % f["read_order"] if f["must_read"] else f["read_order"])
+                     % ("never" if f["never_read"] else
+                        ("%s★" % f["read_order"] if f["must_read"] else f["read_order"])
                         if f["read_order"] != 9 else ("★" if f["must_read"] else "?"),
                         f["channel"] or "-",
                         f["file"], f"{f['bytes']:,}".replace(",", " "),
@@ -2261,9 +2304,12 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
                 L.append("⚠ `%s` (%s): %s" % (f["file"], f["channel"] or "-", f["note"]))
         L += ["",
               "**%d answer file(s), %s bytes, ~%s tokens to read all of them** (%d bytes/token, "
-              "%s)."
-              % (len(fresh), f"{total:,}".replace(",", " "),
-                 f"{est:,}".replace(",", " "), CHARS_PER_TOKEN, EST_BAND), ""]
+              "%s).%s"
+              % (len(readable), f"{total:,}".replace(",", " "),
+                 f"{est:,}".replace(",", " "), CHARS_PER_TOKEN, EST_BAND,
+                 (" **Not counted, never to be opened:** %s - `never_read` in channels.json (the operator's rule: "
+                  "run it, never read its answer)." % ", ".join("`%s` (%s)" % (f["file"], f["channel"] or "-")
+                                                                for f in unread)) if unread else ""), ""]
         if stale_files:
             L += ["⚠ **Older than this run and NOT counted above** — almost certainly a previous "
                   "panel written into the same `--out` folder: %s. They are still on disk; if "
@@ -2304,7 +2350,10 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             L += ["🔁 **Fallback:** %s. A channel that ended with no answer had its declared "
                   "`fallback` (another model, channels.json) run the same brief once after the "
                   "round; weigh that file as the fallback's model, not the original's."
-                  % "; ".join(("`%s` answered for `%s` (`%s`)" % (n, fr, n.upper() + ".md"))
+                  % "; ".join(("`%s` answered for `%s` (`%s`%s)"
+                               % (n, fr, n.upper() + ".md",
+                                  # R157 И-8 (F1): a never_read fallback (Nemotron's own) is not a file to weigh
+                                  ", never_read - do not open it" if results[n].get("never_read") is True else ""))
                               if results[n].get("ok") else ("`%s` ran for `%s` and failed too" % (n, fr))
                               for n, fr in _fbs), ""]
         # R144 И-7 (H2): three different things, three lines. v1.108.0 printed «resumed once with
@@ -2347,6 +2396,11 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
               "findings the brief did not ask about. Do NOT read only the answers to your "
               "questions — the UNASKED section and unsolicited observations are where the "
               "highest-value findings arrive in practice.", ""]
+        if unread:
+            L += ["🚫 **`never` in the `read` column** = `never_read` in `channels.json` (the operator's rule: run "
+                  "it, never read its answer): %s. The file is listed because it is on disk; do not open it, do not "
+                  "hand it to a sub-agent, and do not count it in any tally of who refuted or agreed."
+                  % ", ".join("`%s`" % f["file"] for f in unread), ""]
         if any(f["must_read"] for f in fresh):
             L += ["**★ is the mandatory minimum.** Whatever the context pressure, the ★ "
                   "row(s) are read by the ordering session ITSELF — never delegated, never "
@@ -2354,8 +2408,8 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
                   "yourself; in the cheap panel that is Spark). The flag is `must_read` in "
                   "`channels.json`; move it there as models rotate.", ""]
         if answer_cap:
-            over = [f for f in fresh if f["over_cap"]]
-            trunc = [f for f in fresh if f["truncated_note"]]
+            over = [f for f in readable if f["over_cap"]]
+            trunc = [f for f in readable if f["truncated_note"]]
             L += ["Answer cap this run: **%d chars** (asked in the brief; advisory, never "
                   "enforced by max_tokens). %s"
                   % (answer_cap,
@@ -2386,8 +2440,12 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
               else ("Прочитай ответы панели в %s" % os.path.abspath(outdir)),
               "Начни с HANDOFF.md (манифест с диска) и REPORT.md (телеметрия: кто отвечал, "
               "чем, сколько ссылок живых).",
-              "Потом прочитай КАЖДЫЙ файл из манифеста — их %d, ~%s токенов. Не собирай список "
-              "руками: он в HANDOFF.md." % (len(fresh), f"{est:,}".replace(",", " ")),
+              ("Потом прочитай КАЖДЫЙ файл из манифеста — их %d, ~%s токенов. Не собирай список "
+               "руками: он в HANDOFF.md." % (len(readable), f"{est:,}".replace(",", " "))) if not unread else
+              ("Потом прочитай каждый файл из манифеста, КРОМЕ %s, — их %d, ~%s токенов. Файл с `never` в "
+               "колонке `read` не открывай, не отдавай суб-агенту и не учитывай ни в одном подсчёте "
+               "(`never_read` в channels.json, правило оператора). Не собирай список руками: он в HANDOFF.md."
+               % (", ".join("`%s`" % f["file"] for f in unread), len(readable), f"{est:,}".replace(",", " "))),
               "Порядок — колонка `read` в таблице HANDOFF.md: сначала 1 (умные), потом 2; "
               "тройки (flash-класс) — только если остался бюджет контекста. Читай сам, "
               "суб-агентам чтение не отдавай.",
@@ -2406,8 +2464,10 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
         _atomic_write(os.path.join(outdir, "HANDOFF.md"),
                       "\n".join(x for x in L if x is not None) + "\n")
 
-        log("Handoff: %d answer file(s) on disk, %s bytes, ~%s tokens to read all of them."
-            % (len(fresh), f"{total:,}".replace(",", " "), f"{est:,}".replace(",", " ")))
+        log("Handoff: %d answer file(s) to read, %s bytes, ~%s tokens.%s"
+            % (len(readable), f"{total:,}".replace(",", " "), f"{est:,}".replace(",", " "),
+               (" Not counted, never to be read (never_read): %s." % ", ".join(f["file"] for f in unread))
+               if unread else ""))
         if stale_files:
             log("  older than this run, NOT counted (previous panel in the same folder?): %s"
                 % ", ".join(f["file"] for f in stale_files))
@@ -2418,10 +2478,10 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
         if claimed_absent:
             log("  named by a record but NOT on disk: %s" % ", ".join(claimed_absent))
         if answer_cap:
-            _over = [f["file"] for f in fresh if f["over_cap"]]
-            _trunc = [f["file"] for f in fresh if f["truncated_note"]]
+            _over = [f["file"] for f in readable if f["over_cap"]]
+            _trunc = [f["file"] for f in readable if f["truncated_note"]]
             log("  answer cap %d chars: %d of %d over it%s%s"
-                % (answer_cap, len(_over), len(fresh),
+                % (answer_cap, len(_over), len(readable),
                    (" (%s)" % ", ".join(_over)) if _over else "",
                    ("; declared TRUNCATED-BY-LIMIT: " + ", ".join(_trunc)) if _trunc else ""))
         log("  Reading order: the HANDOFF.md table is sorted smart-first (read 1 -> 3); read "
@@ -2433,9 +2493,10 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
                 "orphans": orphans, "ran_without_file": missing, "attempts": attempts,
                 "claimed_absent": claimed_absent,
                 "stale_files": [f["file"] for f in stale_files],
-                "read_order_files": [f["file"] for f in fresh],
-                "over_cap": [f["file"] for f in fresh if f["over_cap"]],
-                "truncated": [f["file"] for f in fresh if f["truncated_note"]]}
+                "read_order_files": [f["file"] for f in readable],
+                "never_read": [f["file"] for f in unread],
+                "over_cap": [f["file"] for f in readable if f["over_cap"]],
+                "truncated": [f["file"] for f in readable if f["truncated_note"]]}
     except Exception as exc:                                       # noqa: BLE001
         log("  note: the handoff manifest could not be written (%r). The answers are unaffected; "
             "list %s by hand." % (exc, outdir))
@@ -10243,7 +10304,13 @@ def record_quota_refusals(results, reg, path, now, round_start=None, phase_start
          did: refused 23:58Z, recorded 00:04Z, the next whole day skipped); the error left is one dead start the next
          day, never a lost day. `recorded` = when this round wrote it.
     (F12) an answer clears a refusal only when that refusal was recorded before this round started - one that another
-         round recorded meanwhile is newer than this answer and stays.
+         round recorded meanwhile is newer than this answer and stays. R157 И-8 (F3, panel r157i6 A4): `recorded` is
+         whole seconds, so it is kept only when its second is not before the round's start (`rec >= t_round`); the
+         ambiguous second clears - one dead start at worst, never a lost day (1.115.1 kept it: `rec + 1 > t_round`).
+    R157 И-8 (F4, A3) `channel` names the member whose phase start set `at` (the latest; on a tie the first by name),
+         so `at` is never after THAT member's refusal - 1.115.1 named the first by name, whatever its phase.
+    R157 И-8 (F5, A5) every write goes through its own temporary file (tempfile.mkstemp beside the state file), never
+         a shared `<path>.tmp`; there is still no lock (two writers at once: the later replace wins).
     (F4) an answer is _has_answer (ok, or SUBSTANTIAL_BYTES of text); a refusal in the same round still wins.
     (F6) every refused record gets the note, not only the first of its group.
     (F2, F5) the state folder is created, and every note and line says what the write DID (remembered / NOT
@@ -10288,11 +10355,12 @@ def record_quota_refusals(results, reg, path, now, round_start=None, phase_start
     groups = data.get("groups") if isinstance(data.get("groups"), dict) else {}
     adds, stale, clears, kept = {}, set(), [], []
     for g, names in sorted(refused.items()):
-        stamp = datetime.datetime.fromtimestamp(max(_start(results[n]) for n in names), utc)
+        last = max(names, key=lambda n: _start(results[n]))       # R157 И-8 (F4): the member that set `at`
+        stamp = datetime.datetime.fromtimestamp(_start(results[last]), utc)
         if stamp.strftime("%Y%m%d") != today:
             stale.add(g)                 # refused before 00:00 UTC: the allowance has reset since
             continue
-        adds[g] = {"date": today, "at": stamp.strftime("%H:%M:%SZ"), "channel": names[0], "why": "provider.quota",
+        adds[g] = {"date": today, "at": stamp.strftime("%H:%M:%SZ"), "channel": last, "why": "provider.quota",
                    "recorded": now.strftime("%Y-%m-%dT%H:%M:%SZ")}
         if len(names) > 1:
             adds[g]["channels"] = list(names)
@@ -10300,7 +10368,7 @@ def record_quota_refusals(results, reg, path, now, round_start=None, phase_start
         if g not in groups:
             continue
         rec = _quota_recorded(groups[g])
-        if rec is not None and rec + 1 > t_round:      # written after this round began: newer than this answer
+        if rec is not None and rec >= t_round:         # R157 И-8 (F3): recorded at or after this round began
             kept.append((g, groups[g]))
         else:
             clears.append(g)
@@ -10310,22 +10378,23 @@ def record_quota_refusals(results, reg, path, now, round_start=None, phase_start
         for g in clears:
             del groups[g]
         data["groups"] = groups
-        data["_about"] = ("model-orchestration (R157 И-2, И-5): per quota group, the UTC date and time (`at`: the start "
-                          "of the run phase the refused call ran in, never after the refusal) of a refusal on this "
-                          "machine, and when it was `recorded`; later rounds that day leave the group out. Safe to "
-                          "delete.")
-        tmp = path + ".tmp"
+        data["_about"] = ("model-orchestration (R157 И-2, И-5, И-8): per quota group, the UTC date and time (`at`: the "
+                          "start of the run phase in which `channel` was refused, never after that refusal) of a "
+                          "refusal on this machine, and when it was `recorded`; later rounds that day leave the group "
+                          "out. Safe to delete.")
+        tmp = None                       # R157 И-8 (F5, panel r157i6 A5): this write's own temp file, never a shared one
         try:
             d = os.path.dirname(path)
             if d:
                 os.makedirs(d, exist_ok=True)
-            with open(tmp, "w", encoding="utf-8") as f:
+            fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=d or os.curdir)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=1)
             os.replace(tmp, path)
         except OSError as exc:
             err = "could not write %s: %s" % (path, exc)
             try:
-                if os.path.isfile(tmp):
+                if tmp and os.path.isfile(tmp):
                     os.remove(tmp)
             except OSError:
                 pass
@@ -10356,8 +10425,9 @@ def record_quota_refusals(results, reg, path, now, round_start=None, phase_start
                       "today still leave the group out; delete %s to start it" % (g, err, path)) if err else
                      ("QUOTA: quota group «%s» answered again - its refusal date is cleared (state: %s)" % (g, path)))
     for g, v in kept:
-        lines.append("QUOTA: quota group «%s» answered in this run, but its refusal recorded at %s by a run that ended "
-                     "after this one began is kept - runs today still leave the group out (state: %s)"
+        lines.append("QUOTA: quota group «%s» answered in this run, but its refusal recorded at %s - after this run "
+                     "began, by a run going on at the same time - is kept: runs today still leave the group out "
+                     "(state: %s)"
                      % (g, v.get("recorded") or v.get("at") or "?", path))
     return lines
 
@@ -14738,25 +14808,7 @@ def main():
     # to a channel. Stamped, not looked up inside write_handoff: that function deliberately has
     # no registry dependency, and a manifest writer that could fail on a broken registry would
     # break the round it describes.
-    for _cn, _r in results.items():
-        # 🔴 _registry_default, NOT plan.get(): routing's plan carries selected fields and
-        # read_order is not one of them, so the first live round (R73) printed «?» in every
-        # row of the reading table - the knob was stamped from a dict that never held it.
-        # The R72 selftest missed it because it fed write_handoff hand-built results; the
-        # stamping path only runs in a real round. Same lesson, same fix as reading_note below.
-        if isinstance(_r, dict) and "read_order" not in _r:
-            _r["read_order"] = _registry_default(_cn, "read_order", None)
-        # reading_note travels the same road: the registry may carry standing advice about a
-        # channel's answer («NEVER read Nemotron» - Igor, 2026-08-31), and advice that only
-        # prints in the run tail while the READING LIST stays silent is advice that reaches
-        # nobody at the moment it matters.
-        if isinstance(_r, dict) and "reading_note" not in _r:
-            _r["reading_note"] = _registry_default(_cn, "reading_note", None)
-        # ★ Idea 3 (Igor, 2026-09-01): the mandatory self-read flag rides the same registry
-        # road as the two above - one home, stamped at the same site the R73 live round
-        # proved is the only one that runs in production.
-        if isinstance(_r, dict) and "must_read" not in _r:
-            _r["must_read"] = bool(_registry_default(_cn, "must_read", False))
+    stamp_reading_fields(results)
     handoff = write_handoff(a.out, results, marker=a.marker, brief=a.brief,
                             panel=getattr(a, "panel", None), started=started,
                             answer_cap=a.answer_cap if a.answer_cap and a.answer_cap > 0

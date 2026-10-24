@@ -2,6 +2,16 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.115.2 — 2026-10-24
+
+What the cheap panel found in 1.115.1: the reading list still sent you to Nemotron's answer, and the free-allowance memory kept the wrong second.
+
+- **`HANDOFF.md` no longer counts Nemotron's answer among the files to read.** 1.115.1 marked every Nemotron channel `never_read` for `--ask`, but a panel's reading list still counted that file in its totals, and its ready-to-paste resume block said «read every file». The file is still listed (it is on disk), with `never` in the `read` column, and is left out of every count, the resume block and the launch log's `Handoff:` line; when Nemotron's own fallback answers for it, the fallback line says not to open that file either.
+- **An answer clears a refusal recorded in the second its run began.** The state file keeps `recorded` in whole seconds, and 1.115.1 kept a refusal written up to a second before the answering run began for the rest of the UTC day; within that second it now clears (one more start at worst).
+- **The skip reason names the right voice and time.** With two voices of the group refused in different parts of a run, the state file named the first by name with the later time; it now names the voice whose part of the run set the time, and the reason says «in a part of a run (the round, its retry or its fallback) that began at». 1.115.1's «never later than the refusal» held for that voice only.
+- **Each write of the state file uses its own temporary file**, so two runs ending at the same moment no longer write through one shared `<file>.tmp` (there is still no lock).
+- **The `provider.quota` hint and the README no longer quote opencode's FAQ figure** («200 requests/day»): opencode removed it on 2026-10-21. Our own measurement stands, and the allowance can change.
+
 ## 1.115.1 — 2026-10-24
 
 The free voices' daily-allowance memory, fixed at its edges, and `--ask` without Nemotron's answer in your session.
@@ -363,28 +373,6 @@ The Muse Code channel (`mcwonder10cont`) after its first review panel and a look
 - **A run is OK only when it says so.** A crash after part of the answer had streamed (no final record, exit 1) used to be graded OK. Now the run must end with a completed record and exit 0; anything else is a warning, and the partial text is still saved.
 - When `muse export` gives no token counts for a session, the report says so instead of leaving the columns silently empty. A toolset that names a tool the machine lacks (Muse Code then refuses the whole run) has its own diagnosis.
 
-## 1.111.0 — 2026-10-13
-
-Muse Wonder through the Muse Code CLI, on your Muse Code subscription.
-
-- **New channel `mcwonder10cont` (kind `musecode`).** Meta's Muse Code CLI running `muse-wonder-1.0-contributor`, the Contributor variant of Wonder that only Muse Code subscriptions offer (the Model API answers 404 for that id). Standard panel only. It is first in the Wonder cascade: a round runs it wherever the Muse Code binary is installed, and `wonder10` / `orwonder` only where it is not. Nothing is billed per token; the run counts against your plan.
-- **No API key reaches it.** Muse Code prefers `META_API_KEY` over your login and would bill that key instead of the plan, so the CLI gets an allowlisted environment: no `META_API_KEY`, no `MODEL_API_KEY`, no other vendor's key. Not signed in: the run stops at once with `missing meta credentials`, and the report says to run `muse login`.
-- **No writes, no shell, no approval prompts.** The CLI runs with `--disable-approval --disable-write --disable-shell`: it reads and searches, writes no file and has no shell; its OS sandbox stays on. The built-in read-only permission profile was tried first and hung: the first web fetch asked for a network approval that a headless run cannot give. Approvals off means the safety directive rides the brief, as on the other CLI channels without prompts. The prompt goes in through a file, never the command line; on Windows the harness runs the Muse Code binary itself, not the `muse.cmd` launcher.
-- **Effort `xhigh`.** Measured on 2026-10-13 on a subscription: the CLI accepts `max`, but `max` thought no more than `xhigh` (reasoning 397–428 vs 441–455 tokens, n=2 each, all answers correct). The channel's ladder stops at `xhigh`; a tier or an overlay asking for `max` is clamped to it.
-- **The prompts of a Contributor CLI seat:** the MCP page-reader hint and the standing training-tier note, as on the other Contributor CLI channels.
-- Tokens come from the session's own log (`muse export`), the served model from the server's stream record. No automatic fallback to the per-token `wonder10` when the plan's limit is spent; name it yourself (`--only wonder10`).
-- `wonder` / `вондер` and `muse` / `муза` now include the new channel.
-
-## 1.110.0 — 2026-10-13
-
-Muse Wonder, Meta's most capable model, joins the standard panel.
-
-- **New channels `wonder10` and `orwonder`.** `wonder10` is Meta's Model API `muse-wonder-1.0` on your `MODEL_API_KEY`; `orwonder` is OpenRouter's `meta/muse-wonder` for an install with only an OpenRouter key (spend guard $5 per run). Both at effort `max`. They form one cascade, so a round runs one Wonder, the Meta key first. Standard panel only: $4 in / $20 out per 1M tokens, 40× / 100× Spark Contributor. On the API Wonder exists in Standard mode only (Contributor mode is not offered for it).
-- **Words.** `wonder` / `вондер` start Wonder. `muse` / `муза` / `meta` now mean both Meta lines (Spark and Wonder). `spark` / `спарк` still mean Spark alone.
-- **`--only wonder` under the default cheap panel no longer runs an empty round.** When the chosen panel holds no voice of a named group, that group's channels count as named. A group that has a voice in the panel still cannot pull in its other members.
-- **An http channel's own `effort` is no longer overwritten by the tier.** The tier set Spark's ceiling (xhigh) on every model behind the Meta endpoint, so Wonder's `max` would have gone out as `xhigh`. The Spark channels declare no effort of their own and are unchanged. `echocheck.py` now varies such a channel's own effort.
-- Measured on 2026-10-13: through the Meta API, `max` vs `xhigh` gave 988–1019 vs 697–792 output tokens (n=2 each, disjoint). Through OpenRouter, `max` is accepted: reasoning 1151–1431 vs 1019–1197 tokens (overlap at n=2). All 8 answers were correct.
-
 ## Older releases
 
-154 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+156 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
