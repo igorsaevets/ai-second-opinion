@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.117.2 — 2026-10-29
+
+`upgrade.py` guard refinement: refuse only author-form targets (no run-behaviour change).
+
+- 1.117.1 refused any `--to` carrying `.git` — too broad: this machine's `.config/opencode` install itself lives in a git clone (kit-form content from past upgrades) and needs upgrades. The guard now reads the target's `channels.json` and refuses only author-form content (any `prompt_suffix`, or an enabled `distribution: local` channel — the kit ships neither), still naming the `.agents` / `.codex` junctions. Kit-form checkouts upgrade as before.
+
 ## 1.117.1 — 2026-10-29
 
 `upgrade.py` refuses a target that resolves to a source checkout (R166 follow-up, no run-behaviour change).

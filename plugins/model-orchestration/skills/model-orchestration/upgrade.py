@@ -422,20 +422,36 @@ def main():
     # 🔴 R166 (2026-10-29): a junction-deaf same-folder check kit-ified the author's source TWICE.
     # `.agents/skills/model-orchestration` and `.codex/...` are NTFS junctions to the source tree
     # (since 2026-09-30), so their TEXT differs while `copy_tree` writes through them into the
-    # working copy: channels.json with kit flips, stripped suffixes, a stamped VERSION. An install
-    # never carries `.git`; a source checkout always does - refuse the write, loudly, before it.
-    if not a.migrate and os.path.isdir(os.path.realpath(dst)) and os.path.isdir(
-            os.path.join(os.path.realpath(dst), ".git")) and os.path.isfile(
-            os.path.join(os.path.realpath(dst), "channels.json")):
-        print("REFUSING TO INSTALL into what looks like a SOURCE checkout, not an install:\n"
-              "  %s\n  real path: %s (carries .git + channels.json)\n\n"
-              "Installs are plain copies without .git; this target resolves (possibly through a "
-              "junction) to a working copy, and copying kit files over it would kit-ify the "
-              "source (local channels off, prompt suffixes stripped, a stamped VERSION). "
-              "On this machine `.agents/...` and `.codex/...` are junctions to the source and "
-              "need no install at all. Pass a real install folder to --to, or nothing to change."
-              % (dst, os.path.realpath(dst)))
-        return 2
+    # working copy: channels.json with kit flips, stripped suffixes, a stamped VERSION. A source
+    # checkout is recognised by its CONTENT, not by `.git` alone (an install dir can itself be a
+    # clone, e.g. this machine's `.config/opencode/...` install): the kit never ships a
+    # `prompt_suffix` (local ones are stripped at build) and never ships a local channel ON, so
+    # either in the target's channels.json means author-form content that a copy would destroy.
+    # Refuse the write, loudly, before it. The two junctions need no install at all - they read
+    # the live source.
+    if not a.migrate:
+        _rdst = os.path.realpath(dst)
+        _rreg = os.path.join(_rdst, "channels.json")
+        if os.path.isdir(_rdst) and os.path.isfile(_rreg):
+            try:
+                _treg = json.load(open(_rreg, encoding="utf-8")).get("channels") or {}
+            except (OSError, ValueError):
+                _treg = {}
+            _source_form = any(
+                isinstance(_c, dict) and ("prompt_suffix" in _c or (
+                    _c.get("distribution") == "local" and _c.get("enabled", True)))
+                for _c in _treg.values())
+            if _source_form and os.path.isdir(os.path.join(_rdst, ".git")):
+                print("REFUSING TO INSTALL into what looks like a SOURCE checkout, not an install:\n"
+                      "  %s\n  real path: %s (carries .git + author-form channels.json: a prompt_suffix "
+                      "or an enabled local channel)\n\n"
+                      "The kit never ships those (local suffixes are stripped at build, local channels "
+                      "ship off), so copying kit files over this target would kit-ify the source "
+                      "(local channels off, prompt suffixes stripped, a stamped VERSION). "
+                      "On this machine `.agents/...` and `.codex/...` are junctions to the source and "
+                      "need no install at all. Pass a real install folder to --to, or nothing to change."
+                      % (dst, _rdst))
+                return 2
     if not os.path.isfile(os.path.join(src, "channels.json")):
         print("not a skill folder: %s (no channels.json). Run this from the unpacked repository, "
               "at plugins/model-orchestration/skills/model-orchestration/upgrade.py" % src)

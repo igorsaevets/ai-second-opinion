@@ -2,6 +2,12 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.117.2 — 2026-10-29
+
+`upgrade.py` guard refinement: refuse only author-form targets (no run-behaviour change).
+
+- 1.117.1 refused any `--to` carrying `.git` — too broad: this machine's `.config/opencode` install itself lives in a git clone (kit-form content from past upgrades) and needs upgrades. The guard now reads the target's `channels.json` and refuses only author-form content (any `prompt_suffix`, or an enabled `distribution: local` channel — the kit ships neither), still naming the `.agents` / `.codex` junctions. Kit-form checkouts upgrade as before.
+
 ## 1.117.1 — 2026-10-29
 
 `upgrade.py` refuses a target that resolves to a source checkout (R166 follow-up, no run-behaviour change).
