@@ -1979,6 +1979,16 @@ KNOWN_FAILURES = [
      "A longer timeout will not help. Run `grok inspect --json` and a one-line `grok -p \"say "
      "ok\"` by hand: a hang there is the cause. If both answer, `--skip grokbuild` and report the "
      "grok version and the folder names under ~/.grok/sessions."),
+    (r"WATCHDOG after",
+     "Grok stalled inside one of its own tools: the tool it started never returned, and the "
+     "harness stopped the run after ~90 s of silence (the inner watchdog, R166) instead of "
+     "waiting out the channel timeout. On 2026-10-26 this was `run_terminal_command` on a "
+     "97 KB pipe no parent drained - 40 min of silence with zero bytes on stdout.",
+     "Read the stuck tool named in the error and Grok's session folder beside it. A re-run of "
+     "the same brief stalls the same way when the brief asks for the same command: narrow the "
+     "shell work (pdftotext -layout first, a temp .py file instead of multiline python -c, no "
+     "large prints) or leave the seat out with --skip grokbuild for this brief. A longer "
+     "timeout would not help - the watchdog, not the timeout, stopped it."),
     ("timed out|timeout",
      "The channel took longer than its allotted time.",
      "Raise that channel's timeout in the tier block, or split the brief into smaller questions. "
@@ -4234,6 +4244,15 @@ def _grok_session_note(cwd, t0, before=None, sid=None):
 # command and a jina MCP transport had closed), so the harness watches the TURN, not the cause.
 GROK_LINGER_GRACE = 30      # s after `turn_ended` before a still-live grok is stopped (normal: < 5 s)
 GROK_POLL = 5               # s between two looks at Grok's own record while it runs
+# R166 (2026-10-29, the 2026-10-26 grok hang): the inner watchdog. A grok whose turn has NOT
+# ended but one of whose tools stays pending longer than this is stopped at once - 97 KB into
+# an unread pipe deadlocks parent and child with zero bytes on stdout (the cp1251 `é` trigger,
+# removed by utf-8 in 1.116.0) and the class survives the trigger (wait-then-read, pwsh stalls,
+# upstream CLI bugs). 90 s: shell probes in review briefs finish in seconds; a legit minute-long
+# shell is cheaper lost (failed-with-partial, the round goes on) than 40 min of subscription.
+# Overridable for probes via ORCH_GROK_TOOL_SILENCE (seconds); the selftest sets the module
+# constant instead - both are read live, every poll.
+GROK_TOOL_SILENCE = 90      # s a started-but-unfinished tool may stay pending before grok is stopped
 # The two refusals a bypass run can meet, by the vendor's own words (R165 census of every Grok
 # session here: the first is Grok's gate for a command whose files it cannot tell while Read/Edit
 # deny rules exist - 9 of 1,125 shell calls, all after its 1.0.62 auto-update; the second is one of
@@ -4285,6 +4304,75 @@ def _grok_turn_end(sid, st):
         if isinstance(e, dict) and e.get("type") == "turn_ended":
             return (str(e.get("outcome") or "?"), str(e.get("ts") or ""))
     return None
+
+
+def _grok_tool_silence():
+    """Seconds a pending tool may live before the R166 watchdog fires. Env override for probes;
+    the module constant for the selftest seam - both read live, every poll."""
+    try:
+        v = int(float(os.environ.get("ORCH_GROK_TOOL_SILENCE", "") or 0))
+    except (TypeError, ValueError):
+        v = 0
+    return v or GROK_TOOL_SILENCE
+
+
+def _grok_stuck_tool(sid, st, now=None):
+    """(tool_name, age_s) of the OLDEST tool Grok started and never finished, else None.
+
+    R166 inner watchdog: incremental over events.jsonl, the same record _grok_turn_end reads -
+    `st` keeps the folder, the byte offset and the pending list (each entry: [name, first_seen]).
+    `permission_resolved{decision: deny}` resolves its call like a completion (R150 И-3: refused,
+    not stuck). Observation time, not the event's `ts`, stamps first_seen: one poll interval of
+    blur (GROK_POLL s), no wall-clock parsing, no skew. A half-written last line waits for the
+    next look; an unreadable record returns None (no watch, never a kill)."""
+    now = time.time() if now is None else now
+    if not st.get("dir"):
+        st["dir"] = _grok_session_dir(sid)
+        if not st["dir"]:
+            return None
+    st.setdefault("pend", [])
+    st.setdefault("pos", 0)
+
+    def _name(e):
+        n = e.get("tool_name")
+        return re.sub(r"[^A-Za-z0-9._:-]", "", n)[:40] if isinstance(n, str) else "?"
+
+    try:
+        with open(os.path.join(st["dir"], "events.jsonl"), "rb") as f:
+            f.seek(st["pos"])
+            chunk = f.read()
+    except OSError:
+        return None
+    cut = chunk.rfind(b"\n") + 1
+    st["pos"] += cut
+    for line in chunk[:cut].splitlines():
+        if len(line) > (1 << 20):       # a raw server `sample`; step events are small
+            continue
+        try:
+            e = json.loads(line.decode("utf-8", "replace"))
+        except ValueError:
+            continue
+        if not isinstance(e, dict):
+            continue
+        t = e.get("type")
+        if t == "tool_started":
+            st["pend"].append([_name(e), now])
+        elif t == "tool_completed":
+            n = _name(e)
+            for i, (pn, _ts) in enumerate(st["pend"]):
+                if pn == n:             # FIFO, like _grok_session_note: the oldest call of that name
+                    del st["pend"][i]
+                    break
+        elif t == "permission_resolved" and e.get("decision") == "deny":
+            n = _name(e)                # refused, not stuck (R150 И-3): drop the newest of that name
+            for i in range(len(st["pend"]) - 1, -1, -1):
+                if st["pend"][i][0] == n:
+                    del st["pend"][i]
+                    break
+    if not st["pend"]:
+        return None
+    name, first = min(st["pend"], key=lambda p: p[1])
+    return (name, now - first)
 
 
 def _grok_session_answer(sid):
@@ -4404,11 +4492,14 @@ def _run_grok(cmd, timeout, env, sid):
     every GROK_POLL s. Once the run's turn has ENDED, a grok still alive GROK_LINGER_GRACE s later is
     stopped (whole tree) and the run goes on with what it printed - call_grokcli reads the answer
     from the session record when grok printed nothing (`--output-format json` prints at exit).
+    R166 adds the inner watchdog on the same record: a tool pending longer than
+    GROK_TOOL_SILENCE s stops the run at once, with info["watchdog"] naming it.
 
     Returns (CompletedProcess, info): `turn` = (outcome, ts) when the turn ended while grok was
     alive, `lingered` = seconds waited after seeing it. A turn that never ends is still a
-    TimeoutExpired (with whatever was printed). Under the selftest's subprocess seam it defers to
-    subprocess.run with _run_tree's arguments - no watch there; suite R165 runs the real one."""
+    TimeoutExpired (with whatever was printed) - unless the watchdog fires first. Under the
+    selftest's subprocess seam it defers to subprocess.run with _run_tree's arguments - no watch
+    there; suites R165/R166 run the real one."""
     info = {}
     if subprocess.run is not _STDLIB_SUBPROCESS_RUN:
         return subprocess.run(cmd, timeout=timeout, capture_output=True, text=True,
@@ -4416,7 +4507,7 @@ def _run_grok(cmd, timeout, env, sid):
     kw = {} if os.name == "nt" else {"start_new_session": True}
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                          encoding="utf-8", errors="replace", env=env, **kw)
-    t0, seen, st = time.time(), None, {}
+    t0, seen, st, tst = time.time(), None, {}, {}
     try:
         while True:
             try:
@@ -4441,6 +4532,22 @@ def _run_grok(cmd, timeout, env, sid):
                 info["lingered"] = round(time.time() - seen, 1)
                 rc = p.returncode if p.returncode is not None else -1
                 return subprocess.CompletedProcess(cmd, rc, out or "", err or ""), info
+            if seen is None:
+                # R166 inner watchdog: a tool started and never finished (the 2026-10-26 hang:
+                # run_terminal_command on a 97 KB pipe, 40 min of silence) stops the run now,
+                # not at the channel timeout. A turn that already ENDED keeps the R165 grace
+                # above; a channel timeout that already hit keeps its TimeoutExpired.
+                stuck = _grok_stuck_tool(sid, tst, now)
+                if stuck is not None and stuck[1] >= _grok_tool_silence():
+                    _kill_tree(p)
+                    try:
+                        out, err = p.communicate(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        out = err = None   # a process outside the tree still holds a pipe
+                    info["watchdog"] = {"tool": stuck[0], "stuck_s": round(stuck[1], 1),
+                                        "silence_s": _grok_tool_silence()}
+                    rc = p.returncode if p.returncode is not None else -1
+                    return subprocess.CompletedProcess(cmd, rc, out or "", err or ""), info
     except BaseException:
         if p.poll() is None:
             _kill_tree(p)
@@ -4828,6 +4935,31 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
         # run, reported «TIMEOUT» with the answer on disk until R165.
         p = subprocess.CompletedProcess(cmd, -1, late, exc.stderr if isinstance(exc.stderr, str) else "")
         ginfo = {"turn": ("completed", ""), "late": True}
+    if ginfo.get("watchdog"):
+        # R166: the inner watchdog stopped a grok whose tool never finished - failed with partial
+        # evidence, never 40 min of silence. No answer is claimed: the turn never ended, so the
+        # record holds fragments at best, and the outfile stays unwritten so the round treats the
+        # seat as unanswered (an armed fallback may still run it).
+        wd = ginfo["watchdog"]
+        sn = _grok_session_note(gcwd, t0, before, sid)
+        stext, _outcome = _grok_session_answer(sid)
+        frag = ""
+        if stext.strip():
+            frag = (" Grok's record holds %d chars of assistant text without the end marker - "
+                    "fragments, not an answer: %.300s" % (len(stext), stext.strip()[:300]))
+        log("  [%s] WATCHDOG after %.0fs: tool `%s` never finished - stopped, %s"
+            % (name, wd.get("stuck_s") or 0, wd.get("tool"), sn))
+        return {"channel": name, "ok": False, "text": "", "seconds": round(time.time() - t0, 1),
+                "bytes": 0,
+                "error": ("WATCHDOG after %ss: tool `%s` stayed pending with no completion - the "
+                          "run was stopped after the %.0f s silence limit instead of waiting out "
+                          "the channel timeout. %s.%s"
+                          % (wd.get("stuck_s"), wd.get("tool"), wd.get("silence_s") or 0, sn, frag)),
+                "model": model, "effort": effort, "warnings": ["WATCHDOG"],
+                "notes": (["WATCHDOG: the run was stopped by the inner silence watchdog (R166), "
+                           "not by the channel timeout."] + ([imp_note] if imp_note else [])),
+                "cli_version": cli_ver, "answer_source": None,
+                "watchdog_tool": wd.get("tool"), "watchdog_stuck_s": wd.get("stuck_s")}
     secs = time.time() - t0
     raw = (p.stdout or "").strip()
     warn, note = [], []

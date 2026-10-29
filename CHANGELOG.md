@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.117.0 — 2026-10-29
+
+The inner watchdog (R166): a Grok tool that starts and never finishes stops the run after 90 s of silence instead of the channel timeout.
+
+- `_run_grok` watches Grok's own session record every poll: a tool pending longer than `GROK_TOOL_SILENCE` (90 s, `ORCH_GROK_TOOL_SILENCE` overrides) kills the whole tree at once, with `info["watchdog"]` naming the tool and its age. A turn that already ended keeps the R165 linger grace; a hit channel timeout keeps its `TimeoutExpired`. The 2026-10-26 hang (`run_terminal_command` on a 97 KB pipe no parent drained, 40 min of silence, zero bytes) now costs ~90 s.
+- `call_grokcli` reports the stop as failed-with-partial: no answer text, no outfile (an armed fallback may still run it), a `WATCHDOG` warning, Grok's session note plus the stuck tool in the error, `watchdog_tool` / `watchdog_stuck_s` on the record. `diagnose()` names the stalled tool and says a longer timeout would not help.
+- Other CLIs unchanged: this harness has no per-tool progress signal for them (their output arrives at exit), so the watch is Grok-session-specific by measurement. `selftest.py` gains `suite_r166_grok_tool_watchdog` (stuck child stopped + tree dead, completing tool untouched, tracker unit, record shape, diagnosis).
+- Also in this release: source-tree repair after a kit→source overwrite (local channels, prompt suffixes, maintainer placeholder back in place; see TECHNICAL). No panel changes.
+
 ## 1.116.2 — 2026-10-29
 
 Docs follow the registry: the opencode Nemotron copy is gone from every count and table.

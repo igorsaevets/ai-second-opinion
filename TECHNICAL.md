@@ -293,6 +293,11 @@ with one quota group, as in this registry, that is one extra start at worst; wit
 stale write can also bring back a refusal another round had just cleared, and that group then
 skips until 00:00 UTC.
 
+### What 1.117.0 changed in a run
+
+- The inner watchdog (R166): a grok whose turn has not ended but one of whose tools stays pending longer than `GROK_TOOL_SILENCE` (90 s) is stopped at once — whole tree, `info["watchdog"]` with the tool and its age. `call_grokcli` records it failed-with-partial (no text, no outfile, `WATCHDOG` warning, the session note and the stuck tool in the error, `watchdog_tool` / `watchdog_stuck_s` fields), so an armed fallback may still run the seat. `diagnose()` answers `WATCHDOG after` with the stalled-tool cause (a longer timeout would not help). Other CLIs keep the channel-timeout tree kill only.
+- Source-tree repair (no run-behaviour change, the registry is back to its 1.116.2 intent): five local channels back on (`mcspark13`, `ocspark12go`, `mcwonder10`, `qwen38maxcli`, `kimik3free` — the last off at runtime via the local overlay), 18 `prompt_suffix` blocks and 9 mangled `notes` restored from the 2026-10-24 snapshot, the build-stamped `_kit_excluded_channels` dropped from the source registry, the EN README credit back to the `Igor Saevets` placeholder.
+
 ### What 1.116.1 changed in a run
 
 - `ocnemotron3ultrafree` ships off: `opencode/nemotron-3-ultra-free` is gone from `opencode models` (only `nemotron-3.5-*-free` left) and `opencode run` answers `Model unavailable` for it. The cascade group is unchanged, so the cheap panel still seats ONE Nemotron (NVIDIA's free endpoint, then the OpenRouter twin); the kit cheap panel still runs 6 voices, the standard one 12.

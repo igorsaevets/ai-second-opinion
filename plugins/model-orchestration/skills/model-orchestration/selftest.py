@@ -8136,7 +8136,7 @@ def main():
                   suite_r162_nemotron_nvidia,
                   suite_r163_step5_minimax_chain, suite_r163_i3_hotfix, suite_keys_read_policy,
                   suite_r165_grok_turn_ended,
-                  suite_r165_i2_task_keys,
+                  suite_r165_i2_task_keys, suite_r166_grok_tool_watchdog,
                   suite_r164_muse_spark, suite_r160_kit_defaults, suite_r160_i4_home_scrub,
                   suite_r168_i2_api_read_bound,
                   suite_r168_i3_free_transports,
@@ -19930,6 +19930,173 @@ def suite_r165_i2_task_keys():
     check(bool(named) and not missing,
           "R165 И-2 (e) every channel whose MODEL id names a contributor tier carries contributor: true "
           "(%d found; a census by name / label missed ocspark13go)" % len(named), repr(missing or named))
+
+
+def suite_r166_grok_tool_watchdog():
+    """R166 (2026-10-29). The 2026-10-26 grok hang: run_terminal_command on a 97 KB pipe no parent
+    drained - 40 min of silence, zero bytes on stdout. utf-8 (1.116.0) removes the trigger; the
+    inner watchdog removes the class: a tool pending longer than GROK_TOOL_SILENCE s stops the
+    run at once, failed-with-partial, and the round goes on.
+    (a) a REAL child that writes tool_started and sleeps: _run_grok stops it after the silence
+        limit - names the tool and its age - and its whole tree is really gone (heartbeat stops);
+    (b) a tool that completes before the limit is untouched (no watch result, quick exit kept);
+    (c) _grok_stuck_tool unit: a fresh pending tool reports age ~0, an old now reports its age,
+        the oldest of two is named, completion and a deny resolve, a missing record is None;
+    (d) call_grokcli on a stubbed _run_grok watchdog: failed-with-partial (no text, no outfile,
+        WATCHDOG warning, the session note in the error, watchdog_tool/_stuck_s fields);
+    (e) diagnose() names the stall - and does not advise a longer timeout.
+    """
+    import json as _j
+    import shutil as _sh
+    import subprocess as _sp
+    import sys as _sys
+    import tempfile
+    import time
+    import uuid as _uu
+    import orchestrate as o
+    section("R166 Grok: the inner watchdog stops a silent tool, not the channel timeout")
+    td = tempfile.mkdtemp(prefix="r166-")
+    gh = os.path.join(td, "gh")
+    std = getattr(o, "_STDLIB_SUBPROCESS_RUN", _sp.run)
+    saved = (o.subprocess.run, o.grok_bin, o.neutral_cwd, os.environ.get("GROK_HOME"),
+             getattr(o, "GROK_POLL", None), getattr(o, "GROK_TOOL_SILENCE", None),
+             getattr(o, "GROK_LINGER_GRACE", None))
+    try:
+        os.environ["GROK_HOME"] = gh
+        o.subprocess.run = std
+        o.GROK_POLL, o.GROK_TOOL_SILENCE, o.GROK_LINGER_GRACE = 0.3, 2, 30
+        # (a) a real stuck child
+        child = (
+            "import json, os, sys, time\n"
+            "home, sid, beat = sys.argv[1], sys.argv[2], sys.argv[3]\n"
+            "d = os.path.join(home, 'sessions', 'grp', sid)\n"
+            "os.makedirs(d, exist_ok=True)\n"
+            "open(os.path.join(d, 'events.jsonl'), 'w').write(json.dumps({'type': 'turn_started', "
+            "'ts': '2026-10-29T00:00:00.000Z'}) + chr(10))\n"
+            "open(os.path.join(d, 'events.jsonl'), 'a').write(json.dumps({'type': 'tool_started', "
+            "'tool_name': 'run_terminal_command', 'ts': '2026-10-29T00:00:01.000Z'}) + chr(10))\n"
+            "while True:\n"
+            "    open(beat, 'a').write('x')\n"
+            "    time.sleep(0.2)\n")
+        script = os.path.join(td, "stuck.py")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write(child)
+        sid, beat = str(_uu.uuid4()), os.path.join(td, "beat.txt")
+        t0 = time.time()
+        _res, info = o._run_grok([_sys.executable, script, gh, sid, beat], 60, None, sid)
+        el = time.time() - t0
+        wd = info.get("watchdog") or {}
+        check(wd.get("tool") == "run_terminal_command" and wd.get("stuck_s", 0) >= 2 and el < 20,
+              "R166 (a) a grok whose tool never finishes is stopped after the silence limit, not "
+              "at the timeout - tool and age named", repr((wd, round(el, 1))))
+        time.sleep(0.6)
+        n1 = os.path.getsize(beat) if os.path.exists(beat) else -1
+        time.sleep(1.0)
+        n2 = os.path.getsize(beat) if os.path.exists(beat) else -1
+        check(n1 > 0 and n1 == n2,
+              "R166 (a2) the stopped grok is really gone (its heartbeat stops)", repr((n1, n2)))
+        # (b) a tool that completes in time: untouched
+        quick_child = (
+            "import json, os, sys, time\n"
+            "home, sid = sys.argv[1], sys.argv[2]\n"
+            "d = os.path.join(home, 'sessions', 'grp', sid)\n"
+            "os.makedirs(d, exist_ok=True)\n"
+            "open(os.path.join(d, 'events.jsonl'), 'w').write(json.dumps({'type': 'tool_started', "
+            "'tool_name': 'web_fetch', 'ts': 't'}) + chr(10))\n"
+            "time.sleep(0.6)\n"
+            "open(os.path.join(d, 'events.jsonl'), 'a').write(json.dumps({'type': 'tool_completed', "
+            "'tool_name': 'web_fetch', 'outcome': 'success', 'ts': 't2'}) + chr(10))\n"
+            "print(json.dumps({'text': 'OK R166-DONE'}))\n")
+        quick = os.path.join(td, "quick.py")
+        with open(quick, "w", encoding="utf-8") as f:
+            f.write(quick_child)
+        sid2 = str(_uu.uuid4())
+        t0 = time.time()
+        r2, i2 = o._run_grok([_sys.executable, quick, gh, sid2], 60, None, sid2)
+        check(r2.returncode == 0 and '"OK R166-DONE"' in (r2.stdout or "") and not i2.get("watchdog")
+              and time.time() - t0 < 20,
+              "R166 (b) a tool that completes before the limit is untouched (no watch result)",
+              repr((r2.returncode, i2)))
+        # (c) the pending tracker, unit level (explicit now: no sleeps)
+        sid3 = str(_uu.uuid4())
+        d3 = os.path.join(gh, "sessions", "grp", sid3)
+        os.makedirs(d3, exist_ok=True)
+        ev3 = os.path.join(d3, "events.jsonl")
+        st3 = {}
+        check(o._grok_stuck_tool("no-such-sid-r166", {}) is None,
+              "R166 (c0) a missing record is None (no watch, never a kill)", "no-such-sid-r166")
+        with open(ev3, "w", encoding="utf-8") as f:
+            f.write(_j.dumps({"type": "tool_started", "tool_name": "run_terminal_command",
+                              "ts": "t"}) + "\n")
+        t3 = time.time()
+        got1 = o._grok_stuck_tool(sid3, st3, now=t3)
+        got2 = o._grok_stuck_tool(sid3, st3, now=t3 + 200)
+        check(got1 == ("run_terminal_command", 0.0) and got2[0] == "run_terminal_command"
+              and got2[1] >= 199,
+              "R166 (c1) a fresh pending tool reports age ~0, an old look its age", repr((got1, got2)))
+        with open(ev3, "a", encoding="utf-8") as f:
+            f.write(_j.dumps({"type": "tool_started", "tool_name": "web_fetch", "ts": "t"}) + "\n")
+        got3 = o._grok_stuck_tool(sid3, st3, now=t3 + 200)
+        with open(ev3, "a", encoding="utf-8") as f:
+            f.write(_j.dumps({"type": "tool_completed", "tool_name": "run_terminal_command",
+                              "outcome": "success", "ts": "t"}) + "\n")
+        got4 = o._grok_stuck_tool(sid3, st3, now=t3 + 200)
+        with open(ev3, "a", encoding="utf-8") as f:
+            f.write(_j.dumps({"type": "tool_started", "tool_name": "run_terminal_command",
+                              "ts": "t"}) + "\n")
+            f.write(_j.dumps({"type": "permission_resolved", "tool_name": "run_terminal_command",
+                              "decision": "deny", "ts": "t"}) + "\n")
+        got5 = o._grok_stuck_tool(sid3, st3, now=t3 + 200)
+        check(got3[0] == "run_terminal_command" and got4[0] == "web_fetch"
+              and got5[0] == "web_fetch",
+              "R166 (c2) the oldest pending is named; a completion and a deny each resolve",
+              repr((got3, got4, got5)))
+        # (d) the failed-with-partial record
+        o.grok_bin = lambda: "grok"
+        o.neutral_cwd = lambda: os.path.join(td, "ncwd")
+        saved_run_grok, saved_note, saved_answer = o._run_grok, o._grok_session_note, o._grok_session_answer
+        o._run_grok = lambda cmd, timeout, env, sid: (
+            _sp.CompletedProcess(cmd, -1, "", ""),
+            {"watchdog": {"tool": "run_terminal_command", "stuck_s": 92.3, "silence_s": 2}})
+        o._grok_session_note = lambda *a: ("Grok's own session stub (stub): tool "
+                                           "`run_terminal_command` started 00:00:01 and never finished")
+        o._grok_session_answer = lambda sid: ("partial assistant frag", None)
+        try:
+            r = o.call_grokcli("B", "R166-DONE", os.path.join(td, "wd"), os.path.join(td, "GD.md"),
+                               timeout=7)
+        finally:
+            o._run_grok, o._grok_session_note, o._grok_session_answer = saved_run_grok, saved_note, saved_answer
+        check(not r.get("ok") and r.get("text") == "" and r.get("warnings") == ["WATCHDOG"]
+              and (r.get("error") or "").startswith("WATCHDOG after 92.3s")
+              and "never finished" in (r.get("error") or "")
+              and r.get("watchdog_tool") == "run_terminal_command" and r.get("watchdog_stuck_s") == 92.3
+              and not os.path.isfile(os.path.join(td, "GD.md")),
+              "R166 (d) a watchdog stop is failed-with-partial: no text, no outfile (a fallback "
+              "may still run it), WATCHDOG warning, tool and age on the record",
+              repr((r.get("ok"), r.get("warnings"), (r.get("error") or "")[:80],
+                    r.get("watchdog_tool"))))
+        # (e) the diagnosis
+        cause, fix = o.diagnose("WATCHDOG after 92.3s: tool `run_terminal_command` stayed pending "
+                                "with no completion")
+        check((cause or "").startswith("Grok stalled inside one of its own tools")
+              and "longer timeout would not help" in (fix or ""),
+              "R166 (e) a WATCHDOG reads as a stalled tool, not «raise the timeout»",
+              repr((cause, fix))[:200])
+    finally:
+        o.subprocess.run, o.grok_bin, o.neutral_cwd = saved[:3]
+        if saved[3] is None:
+            os.environ.pop("GROK_HOME", None)
+        else:
+            os.environ["GROK_HOME"] = saved[3]
+        if saved[4] is not None:
+            o.GROK_POLL, o.GROK_TOOL_SILENCE, o.GROK_LINGER_GRACE = saved[4], saved[5], saved[6]
+        else:
+            for attr in ("GROK_POLL", "GROK_TOOL_SILENCE", "GROK_LINGER_GRACE"):
+                try:
+                    delattr(o, attr)
+                except AttributeError:
+                    pass
+        _sh.rmtree(td, ignore_errors=True)
 
 
 def suite_r164_muse_spark():

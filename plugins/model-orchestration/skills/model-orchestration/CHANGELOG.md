@@ -2,6 +2,15 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.117.0 — 2026-10-29
+
+The inner watchdog (R166): a Grok tool that starts and never finishes stops the run after 90 s of silence instead of the channel timeout.
+
+- `_run_grok` watches Grok's own session record every poll: a tool pending longer than `GROK_TOOL_SILENCE` (90 s, `ORCH_GROK_TOOL_SILENCE` overrides) kills the whole tree at once, with `info["watchdog"]` naming the tool and its age. A turn that already ended keeps the R165 linger grace; a hit channel timeout keeps its `TimeoutExpired`. The 2026-10-26 hang (`run_terminal_command` on a 97 KB pipe no parent drained, 40 min of silence, zero bytes) now costs ~90 s.
+- `call_grokcli` reports the stop as failed-with-partial: no answer text, no outfile (an armed fallback may still run it), a `WATCHDOG` warning, Grok's session note plus the stuck tool in the error, `watchdog_tool` / `watchdog_stuck_s` on the record. `diagnose()` names the stalled tool and says a longer timeout would not help.
+- Other CLIs unchanged: this harness has no per-tool progress signal for them (their output arrives at exit), so the watch is Grok-session-specific by measurement. `selftest.py` gains `suite_r166_grok_tool_watchdog` (stuck child stopped + tree dead, completing tool untouched, tracker unit, record shape, diagnosis).
+- Also in this release: source-tree repair after a kit→source overwrite (local channels, prompt suffixes, maintainer placeholder back in place; see TECHNICAL). No panel changes.
+
 ## 1.116.2 — 2026-10-29
 
 Docs follow the registry: the opencode Nemotron copy is gone from every count and table.
@@ -379,13 +388,6 @@ or measured before it was changed):
   has no switch for them), and so do the files in `~/.grok/rules/`. INSTALL.md now says so in the
   heading.
 
-## 1.111.2 — 2026-10-13
-
-The Grok Build channel (`grokbuild`) had stopped answering: on 2026-10-13 no panel got a review from it, and each run sat until its 40-minute timeout.
-
-- **Grok no longer imports Claude Code, Cursor or Codex.** Out of the box Grok Build loads the MCP servers in `~/.claude.json`, Claude Code's skills, rules (the global `CLAUDE.md`), agents and hooks, and the same parts of Cursor and Codex. One MCP server that existed only in `~/.claude.json` made two servers fail at start and a built-in tool start and never return — six of six test runs hung, while the same call with the imports off answered in 10 seconds. The imports also sent your own instructions (about 9,700 tokens) and a list of your skills to xAI with every brief. The harness now sets the 18 `GROK_<CLAUDE|CURSOR|CODEX>_<SKILLS|RULES|AGENTS|MCPS|HOOKS|SESSIONS>_ENABLED=0` switches for each review; Grok's own config, MCP servers and your shell logins stay. Claude Code plugins still load: Grok has no switch for them.
-- **A timeout now says where Grok stopped.** Grok prints its result only when it exits, so a stopped run used to report just «took longer than its allotted time». The harness now reads Grok's own session record and names the tool that started and never finished and the MCP servers that failed at start, with their own diagnosis. Grok runs in a folder of its own per process, so two panels running at once cannot read each other's record, and a timeout now also stops the MCP servers Grok had started.
-
 ## Older releases
 
-157 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+158 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
