@@ -2,6 +2,13 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.116.2 — 2026-10-29
+
+Docs follow the registry: the opencode Nemotron copy is gone from every count and table.
+
+- README / README.ru: the cheap panel's CLI-only line-up is 4 models (MiMo, Step 5, Gemini, Grok), «only opencode» no longer names Nemotron, the Nemotron row and fallback notes describe the NVIDIA endpoint only, the free-flash fallback is the paid Go copy (1.116.0), refused-day counts fixed («CLI only» 3). Version headers say 1.116.2.
+- TECHNICAL.md gains «What 1.116.0 / 1.116.1 changed in a run» (Go fallbacks, HANDOFF model names, utf-8 everywhere; Nemotron retirement). No run-behaviour change in this release.
+
 ## 1.116.1 — 2026-10-29
 
 Retired the opencode Nemotron channel: its model left opencode.

@@ -293,6 +293,16 @@ with one quota group, as in this registry, that is one extra start at worst; wit
 stale write can also bring back a refusal another round had just cleared, and that group then
 skips until 00:00 UTC.
 
+### What 1.116.1 changed in a run
+
+- `ocnemotron3ultrafree` ships off: `opencode/nemotron-3-ultra-free` is gone from `opencode models` (only `nemotron-3.5-*-free` left) and `opencode run` answers `Model unavailable` for it. The cascade group is unchanged, so the cheap panel still seats ONE Nemotron (NVIDIA's free endpoint, then the OpenRouter twin); the kit cheap panel still runs 6 voices, the standard one 12.
+
+### What 1.116.0 changed in a run
+
+- A free opencode voice that ends without an answer hands the brief to the paid copy of the SAME model on the OpenCode Go plan (`ocmimo26flashgo`, `ocdeepseekv41flashgo`, `ocglm53flashgo`: subscription, `enabled: false`, no `quota_group`, deliberately outside the cascade groups). One fallback, never a chain; the cheap panel's line-up is unchanged.
+- The HANDOFF.md fallback line names the models as well as the channels: `` `X` (modelA) answered for `Y` (modelB) ``, from the records' `model` fields; without them the line reads as before.
+- Every Python child process inherits `PYTHONIOENCODING=utf-8` + `PYTHONUTF8=1` + `PYTHONUNBUFFERED=1` (process-wide `setdefault` plus every CLI child env): the 2026-10-26 grok 4.6 hang (cp1251 + non-ASCII print in a PDF script → `UnicodeEncodeError` → pipe deadlock → 40m TIMEOUT) cannot recur through the harness's own CLIs. The `NO_REPO` bypass preamble carries the same rule to the model (temp `.py` over multiline `python -c`, `pdftotext -layout` first).
+
 ### What 1.115.2 changed in a run
 
 - `HANDOFF.md` lists a `never_read` answer (every Nemotron channel) with `never` in its `read` column and counts it nowhere: not in the totals line, the resume block («прочитай каждый файл … КРОМЕ …»), the launch log's `Handoff:` line, the answer-cap lists or `read_order_files`, and the fallback line marks a `never_read` fallback's file (Nemotron's own fallback); `stamp_reading_fields` (moved out of `main`) stamps `never_read` beside `read_order`, `reading_note` and `must_read`.
