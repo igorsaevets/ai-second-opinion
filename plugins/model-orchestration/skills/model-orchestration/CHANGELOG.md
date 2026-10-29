@@ -2,6 +2,12 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.117.1 — 2026-10-29
+
+`upgrade.py` refuses a target that resolves to a source checkout (R166 follow-up, no run-behaviour change).
+
+- On this machine `.agents/skills/model-orchestration` and `.codex/...` are NTFS junctions to the author source tree (since 2026-09-30): their text differs, so the old same-folder check passed while `copy_tree` wrote straight through them into the working copy — twice kit-ifying the source (local channels off, prompt suffixes stripped, a stamped `VERSION`). An install never carries `.git`; the guard refuses any `--to` whose real path holds `.git` + `channels.json` (exit 2, nothing written) and names the junctions. The two junctions need no install at all — they read the live source.
+
 ## 1.117.0 — 2026-10-29
 
 The inner watchdog (R166): a Grok tool that starts and never finishes stops the run after 90 s of silence instead of the channel timeout.
@@ -361,33 +367,6 @@ live Grok run before it was changed):
   deny rules match backslash and forward-slash paths, and they also stop `cat <path>` in Grok's shell
   (1.111.3's comment said the shell could still read the file).
 
-## 1.111.3 — 2026-10-13
-
-Grok Build, after a review panel on 1.111.2 (six reviewers; each item below was checked in the code
-or measured before it was changed):
-
-- **Each run checks that Grok honoured the import switches.** Before the review the harness asks
-  `grok inspect --json` (no model call, 0.2 s measured) and logs «imports verified off»; if a grok
-  version ignores a switch, the run carries a 🔴 note instead of silently sending your Claude Code
-  setup to xAI. 1.111.2 called the switches undocumented: ten of the eighteen are in xAI's settings
-  reference (`docs.x.ai/build/settings/reference`); the `SESSIONS` and `CODEX` ones are not.
-- **A timeout never quotes another run's session.** The sessions already in the run's folder are
-  noted when it starts, so a retry in the same process or a second grok in a `--task` folder is not
-  taken for this run (a newer file time used to win); if two changed, the note says so. Grok's
-  slug + `.cwd` form for long folder paths, macOS's `/var` → `/private/var`, a relative `GROK_HOME`
-  and one unreadable folder no longer hide the record.
-- **«No session record» no longer advises a longer timeout**: it says Grok stopped before opening a
-  session and how to check by hand. A transport decode error on its own is reported as the stall it
-  is.
-- **With bypass on, the reviewer cannot `read_file` the other CLIs' credential stores**:
-  `~/.claude.json`, Claude Code's `.credentials.json`, every `auth.json`, `oauth_creds.json`, Claude
-  Desktop's and Cursor's MCP configs, Kimi's config.
-- **macOS / Linux**: the Grok binary is found as `grok`, also in `~/.grok/bin` (it was looked up as
-  `grok.exe` only), and the `~/.grok/rules` preflight follows `GROK_HOME`.
-- 1.111.2's notes said Grok no longer imports from Claude Code: Claude Code plugins still load (Grok
-  has no switch for them), and so do the files in `~/.grok/rules/`. INSTALL.md now says so in the
-  heading.
-
 ## Older releases
 
-158 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+159 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.117.1 — 2026-10-29
+
+`upgrade.py` refuses a target that resolves to a source checkout (R166 follow-up, no run-behaviour change).
+
+- On this machine `.agents/skills/model-orchestration` and `.codex/...` are NTFS junctions to the author source tree (since 2026-09-30): their text differs, so the old same-folder check passed while `copy_tree` wrote straight through them into the working copy — twice kit-ifying the source (local channels off, prompt suffixes stripped, a stamped `VERSION`). An install never carries `.git`; the guard refuses any `--to` whose real path holds `.git` + `channels.json` (exit 2, nothing written) and names the junctions. The two junctions need no install at all — they read the live source.
+
 ## 1.117.0 — 2026-10-29
 
 The inner watchdog (R166): a Grok tool that starts and never finishes stops the run after 90 s of silence instead of the channel timeout.

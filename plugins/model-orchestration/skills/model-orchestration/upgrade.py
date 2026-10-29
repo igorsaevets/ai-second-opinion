@@ -419,6 +419,23 @@ def main():
               "If you only wanted to move your channels.json edits into your local settings "
               "file, run:  python upgrade.py --migrate" % src)
         return 2
+    # 🔴 R166 (2026-10-29): a junction-deaf same-folder check kit-ified the author's source TWICE.
+    # `.agents/skills/model-orchestration` and `.codex/...` are NTFS junctions to the source tree
+    # (since 2026-09-30), so their TEXT differs while `copy_tree` writes through them into the
+    # working copy: channels.json with kit flips, stripped suffixes, a stamped VERSION. An install
+    # never carries `.git`; a source checkout always does - refuse the write, loudly, before it.
+    if not a.migrate and os.path.isdir(os.path.realpath(dst)) and os.path.isdir(
+            os.path.join(os.path.realpath(dst), ".git")) and os.path.isfile(
+            os.path.join(os.path.realpath(dst), "channels.json")):
+        print("REFUSING TO INSTALL into what looks like a SOURCE checkout, not an install:\n"
+              "  %s\n  real path: %s (carries .git + channels.json)\n\n"
+              "Installs are plain copies without .git; this target resolves (possibly through a "
+              "junction) to a working copy, and copying kit files over it would kit-ify the "
+              "source (local channels off, prompt suffixes stripped, a stamped VERSION). "
+              "On this machine `.agents/...` and `.codex/...` are junctions to the source and "
+              "need no install at all. Pass a real install folder to --to, or nothing to change."
+              % (dst, os.path.realpath(dst)))
+        return 2
     if not os.path.isfile(os.path.join(src, "channels.json")):
         print("not a skill folder: %s (no channels.json). Run this from the unpacked repository, "
               "at plugins/model-orchestration/skills/model-orchestration/upgrade.py" % src)
