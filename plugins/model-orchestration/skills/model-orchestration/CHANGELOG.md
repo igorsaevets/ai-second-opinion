@@ -2,6 +2,13 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.116.1 — 2026-10-29
+
+Retired the opencode Nemotron channel: its model left opencode.
+
+- **`ocnemotron3ultrafree` is off.** `opencode/nemotron-3-ultra-free` is gone from `opencode models` (v2.1.0 lists only `nemotron-3.5-lightning-free` and `nemotron-3.5-super-vl-free`), and `opencode run` answers `Model unavailable` — the id is retired, not quota-spent (the live free ids answer `Free usage limit reached`). Same class as the free Spark (R154). Off, starts by name only; the cascade still seats ONE Nemotron (NVIDIA endpoint, then the OpenRouter twin); the cheap panel still runs 8 voices.
+- **Audit 2026-10-29 (live `opencode models` + live `opencode run` probes + NVIDIA `/v1/models`):** free Spark still gone (known since R154); MiMo/DeepSeek/GLM free ids alive; NVIDIA free endpoint still serves `nemotron-3-ultra-550b-a55b`, `stepfun-ai/step-5-preview`, `z-ai/glm-5.3-flash`. No other registry id is stale on opencode.
+
 ## 1.116.0 — 2026-10-29
 
 A free opencode voice now falls back to the paid copy on the same channel, and every Python child runs utf-8.
@@ -372,15 +379,6 @@ The Grok Build channel (`grokbuild`) had stopped answering: on 2026-10-13 no pan
 - **Grok no longer imports Claude Code, Cursor or Codex.** Out of the box Grok Build loads the MCP servers in `~/.claude.json`, Claude Code's skills, rules (the global `CLAUDE.md`), agents and hooks, and the same parts of Cursor and Codex. One MCP server that existed only in `~/.claude.json` made two servers fail at start and a built-in tool start and never return — six of six test runs hung, while the same call with the imports off answered in 10 seconds. The imports also sent your own instructions (about 9,700 tokens) and a list of your skills to xAI with every brief. The harness now sets the 18 `GROK_<CLAUDE|CURSOR|CODEX>_<SKILLS|RULES|AGENTS|MCPS|HOOKS|SESSIONS>_ENABLED=0` switches for each review; Grok's own config, MCP servers and your shell logins stay. Claude Code plugins still load: Grok has no switch for them.
 - **A timeout now says where Grok stopped.** Grok prints its result only when it exits, so a stopped run used to report just «took longer than its allotted time». The harness now reads Grok's own session record and names the tool that started and never finished and the MCP servers that failed at start, with their own diagnosis. Grok runs in a folder of its own per process, so two panels running at once cannot read each other's record, and a timeout now also stops the MCP servers Grok had started.
 
-## 1.111.1 — 2026-10-13
-
-The Muse Code channel (`mcwonder10cont`) after its first review panel and a look at what it could reach.
-
-- **Built-in web tools only.** With approvals off, every MCP server in the user's Muse Code settings started and the reviewer could reach its tools without a prompt — on the maintainer's machine 9 servers and 163 tools, among them creating GitLab issues and merge requests, paid Firecrawl crawls and monitors, and a browser driving the user's own Chrome. `--disable-write` and `--disable-shell` do not cover MCP tools, and Muse Code refuses to switch off a configured server for one run. The channel now passes `-c run.toolset=["web_fetch","web_search"]`: the servers still start, but the model is offered only those two tools. Measured on a live run: 2 tools offered, 0 MCP calls, the web question answered with the page quoted. The brief and its attachments arrive inline, so no file tool is needed.
-- **No `MUSE_*` variables reach the CLI.** The Muse Code binary reads 87 `MUSE_*` names; the old filter (drop names containing KEY, TOKEN, SECRET or PASSW) let all of them through, among them `MUSE_CUSTOM_HEADERS` (extra HTTP headers, where a credential can ride), `MUSE_TRANSPORT_TRACE`, and the session ids Muse Code sets for its own child processes. The run needs none of them.
-- **A run is OK only when it says so.** A crash after part of the answer had streamed (no final record, exit 1) used to be graded OK. Now the run must end with a completed record and exit 0; anything else is a warning, and the partial text is still saved.
-- When `muse export` gives no token counts for a session, the report says so instead of leaving the columns silently empty. A toolset that names a tool the machine lacks (Muse Code then refuses the whole run) has its own diagnosis.
-
 ## Older releases
 
-156 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+157 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).

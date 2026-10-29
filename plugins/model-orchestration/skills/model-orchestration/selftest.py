@@ -17823,6 +17823,7 @@ def suite_r157_i2_free_fallback():
           "R157 И-2 (e) MiMo refused with provider.quota -> paid Go MiMo (Go plan, no quota_group) IS started; "
           "R170: free GLM (same allowance) was NOT started", notes[:200])
     kit3 = copy.deepcopy(kit)
+    kit3["channels"]["ocnemotron3ultrafree"]["enabled"] = True  # retired 2026-10-29; re-armed here: the control is about quota-group mechanics, not the live roster
     kit3["channels"]["ocnemotron3ultrafree"]["fallback"] = "ocglm53flashfree"
     kit3["channels"]["ocglm53flashfree"]["enabled"] = False         # as shipped now; on the old registry it was on
     pk3 = rt.resolve(copy.deepcopy(kit3), panel="cheap", ready=yes)
@@ -17851,9 +17852,9 @@ def suite_r157_i2_free_fallback():
         p1 = aq(copy.deepcopy(pk), kit, sk) if aq else pk
         w1 = " ".join((p1.get("ocmimo26flashfree") or {}).get("why") or [])
         check(not (p1.get("ocmimo26flashfree") or {}).get("enabled") and "until 00:00 UTC" in w1
-              and (p1.get("ocnemotron3ultrafree") or {}).get("enabled"),
-              "R157 И-2 (i) a group refused today is left out of the plan with the reason; Nemotron (outside the "
-              "allowance) still runs", w1[:200])
+              and not (p1.get("ocnemotron3ultrafree") or {}).get("enabled"),
+              "R157 И-2 (i) a group refused today is left out of the plan with the reason; ocnemotron3ultrafree "
+              "(retired 2026-10-29: its model left opencode) stays out too", w1[:200])
         p2 = aq(copy.deepcopy(pk), kit, sk, named={"ocmimo26flashfree"}) if aq else {}
         fb2 = (p2.get("ocmimo26flashfree") or {}).get("fallback") or {}
         check(bool((p2.get("ocmimo26flashfree") or {}).get("enabled")) and not (fb2.get("off") or ""),
@@ -19031,11 +19032,11 @@ def suite_r154_i3_free_voices():
         c = ch.get(name) or {}
         lim = (c.get("opencode_limit") or {}).get("output")
         check(c.get("kind") == "opencode" and c.get("model") == model and c.get("panel") == "cheap"
-              and c.get("cost") == "free" and c.get("enabled") is (name == "ocnemotron3ultrafree")
+              and c.get("cost") == "free" and c.get("enabled") is False
               and c.get("distribution") == "both"
               and c.get("effort") == effort and lim == out,
-              "R154 И-3 (a) %s: opencode %s, cheap, free, shipped (both), effort %s, output limit %s; on = Nemotron "
-              "only since R157 И-2 (one voice of the free allowance)"
+              "R154 И-3 (a) %s: opencode %s, cheap, free, shipped (both), effort %s, output limit %s; all off "
+              "(GLM/DeepSeek since R157 И-2, Nemotron retired 2026-10-29: model gone from opencode)"
               % (name, model, effort, out),
               repr({k: c.get(k) for k in ("kind", "model", "panel", "enabled", "distribution", "effort")}))
 
@@ -19052,9 +19053,9 @@ def suite_r154_i3_free_voices():
     pk = rt.resolve(copy.deepcopy(kit), panel="cheap", ready=yes)
     free4 = ["ocmimo26flashfree"] + list(want)
     on = [n for n in free4 if (pk.get(n) or {}).get("enabled")]
-    check(on == ["ocmimo26flashfree", "ocnemotron3ultrafree"],
-          "R154 И-3 (b) the kit-shaped cheap panel seats MiMo Flash + Nemotron (R157 И-2: one voice of the free "
-          "allowance; GLM is MiMo's fallback, DeepSeek starts by name)", repr(on))
+    check(on == ["ocmimo26flashfree"],
+          "R154 И-3 (b) the kit-shaped cheap panel seats MiMo Flash alone (R157 И-2: one voice of the free "
+          "allowance; GLM is MiMo's fallback, DeepSeek starts by name, Nemotron retired 2026-10-29)", repr(on))
     sp = ch.get("ocspark13free") or {}
     check(sp.get("enabled") is False and "no-route" in (sp.get("_disabled_r154_i3") or "")
           and not (pk.get("ocspark13free") or {}).get("enabled"),
@@ -19075,7 +19076,8 @@ def suite_r154_i3_free_voices():
           "Contributor since R164; orspark13cont stays off), the plan says it is paid", why[:220])
     ps = rt.resolve(copy.deepcopy(kit), panel="standard", ready=yes)
     nem = [n for n in ("ocnemotron3ultrafree", "ornemotron3ultra") if (ps.get(n) or {}).get("enabled")]
-    check(nem == ["ocnemotron3ultrafree"], "R154 И-3 (f) standard panel: ONE Nemotron, the free opencode one",
+    check(nem == ["ornemotron3ultra"], "R154 И-3 (f) standard panel: ONE Nemotron, the OpenRouter twin "
+          "(ocnemotron3ultrafree retired 2026-10-29: its model left opencode)",
           repr(nem))
     ps2 = rt.resolve(copy.deepcopy(kit), panel="standard",
                      ready=lambda n: ("no opencode" if n == "ocnemotron3ultrafree" else True))

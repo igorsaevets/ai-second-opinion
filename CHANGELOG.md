@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.116.1 — 2026-10-29
+
+Retired the opencode Nemotron channel: its model left opencode.
+
+- **`ocnemotron3ultrafree` is off.** `opencode/nemotron-3-ultra-free` is gone from `opencode models` (v2.1.0 lists only `nemotron-3.5-lightning-free` and `nemotron-3.5-super-vl-free`), and `opencode run` answers `Model unavailable` — the id is retired, not quota-spent (the live free ids answer `Free usage limit reached`). Same class as the free Spark (R154). Off, starts by name only; the cascade still seats ONE Nemotron (NVIDIA endpoint, then the OpenRouter twin); the cheap panel still runs 8 voices.
+- **Audit 2026-10-29 (live `opencode models` + live `opencode run` probes + NVIDIA `/v1/models`):** free Spark still gone (known since R154); MiMo/DeepSeek/GLM free ids alive; NVIDIA free endpoint still serves `nemotron-3-ultra-550b-a55b`, `stepfun-ai/step-5-preview`, `z-ai/glm-5.3-flash`. No other registry id is stale on opencode.
+
 ## 1.116.0 — 2026-10-29
 
 A free opencode voice now falls back to the paid copy on the same channel, and every Python child runs utf-8.
