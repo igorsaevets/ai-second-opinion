@@ -44,7 +44,7 @@ Send the same document **to several independent AI models at once**: GPT, Gemini
 
 **Any AI agent can install it, not only Claude Code.** Any agent with terminal access will do — for example Codex CLI, Cursor, Gemini CLI, opencode, Kimi Code or Qwen Code: this is plain Python with no dependencies. Give the agent the repository link and ask it to install the tool ([a ready-made request is under «Install»](#install)). The repository carries [AGENTS.md](AGENTS.md), the instructions for AI agents on how to install the tool and run a review, so from then on the agent runs the panel itself. The sequence an agent runs — `install.ps1`, `doctor.py` and a free `--dry-run` — was checked on 2026-10-05 from a plain terminal, without Claude Code.
 
-In Claude Code the plugin reacts to "second opinion" by itself. To make another agent do the same, add one line to its standing instructions: *"When I ask for a second opinion, run AI Second Opinion following `~/.claude/skills/model-orchestration/SKILL.md`"*.
+In Claude Code the plugin reacts to "second opinion" by itself. For any other agent `install.ps1`/`install.sh` already installs the skill to every known location (`~/.claude`, `~/.agents`, `~/.codex`, `~/.config/opencode`, `~/.gemini`) so the same phrase works there too; if it doesn't, add one line to its standing instructions: *"When I ask for a second opinion, run AI Second Opinion following `~/.claude/skills/model-orchestration/SKILL.md` (fallback: `~/.agents/...`, `~/.config/opencode/...`, or absolute `python "$HOME/.claude/skills/model-orchestration/orchestrate.py" --ask "..."`)"*.
 
 Pure Python, zero dependencies, MIT license.
 

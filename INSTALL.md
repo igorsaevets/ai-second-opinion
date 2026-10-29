@@ -122,14 +122,19 @@ plugins/model-orchestration/skills/model-orchestration/
 
 **To this location on your machine:**
 
-| Your system | Destination |
+| Agent / system | Destination |
 |---|---|
-| Windows | `%USERPROFILE%\.claude\skills\model-orchestration\` |
-| macOS / Linux | `~/.claude/skills/model-orchestration/` |
+| Claude Code (Windows) | `%USERPROFILE%\.claude\skills\model-orchestration\` |
+| Claude Code (macOS/Linux) | `~/.claude/skills/model-orchestration/` |
+| Any `agentskills.io` agent (Cursor, Codex, Gemini CLI, Kimi, Qwen, etc.) | `~/.agents/skills/model-orchestration/` |
+| **opencode** (Windows) | `%USERPROFILE%\.config\opencode\skills\model-orchestration\` |
+| **opencode** (macOS/Linux) | `~/.config/opencode/skills/model-orchestration/` |
 
-Create the `.claude\skills` folders if they do not exist. When you are done, the destination
+Create the parent `skills` folders if they do not exist. When you are done, the destination
 should contain `SKILL.md`, `orchestrate.py`, `doctor.py` and the `references/` and `systems/`
-folders — not another folder containing those.
+folders — not another folder containing those. Copying to **one** of the rows is enough for the
+agent that reads that path; copying to all rows makes the same install work for every agent on the
+machine.
 
 <details>
 <summary>Copy-paste commands, if you prefer</summary>
@@ -137,10 +142,22 @@ folders — not another folder containing those.
 **Windows PowerShell**, run from the unpacked repository root:
 
 ```powershell
+# Claude Code
 $dst = "$env:USERPROFILE\.claude\skills\model-orchestration"
 New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null
 Copy-Item "plugins\model-orchestration\skills\model-orchestration" $dst -Recurse -Force
 python "$dst\doctor.py"
+
+# Any agentskills.io agent (Cursor / Codex / Gemini / etc.)
+$dst2 = "$env:USERPROFILE\.agents\skills\model-orchestration"
+New-Item -ItemType Directory -Force (Split-Path $dst2) | Out-Null
+Copy-Item "plugins\model-orchestration\skills\model-orchestration" $dst2 -Recurse -Force
+
+# opencode
+$dst3 = "$env:USERPROFILE\.config\opencode\skills\model-orchestration"
+New-Item -ItemType Directory -Force (Split-Path $dst3) | Out-Null
+Copy-Item "plugins\model-orchestration\skills\model-orchestration" $dst3 -Recurse -Force
+python "$dst3\doctor.py"
 ```
 
 **macOS / Linux**, from the repository root:
@@ -150,8 +167,25 @@ dst="$HOME/.claude/skills/model-orchestration"
 mkdir -p "$(dirname "$dst")"
 cp -R plugins/model-orchestration/skills/model-orchestration "$dst"
 python3 "$dst/doctor.py"
+
+# agentskills.io
+dst2="$HOME/.agents/skills/model-orchestration"
+mkdir -p "$(dirname "$dst2")"
+cp -R plugins/model-orchestration/skills/model-orchestration "$dst2"
+
+# opencode
+dst3="$HOME/.config/opencode/skills/model-orchestration"
+mkdir -p "$(dirname "$dst3")"
+cp -R plugins/model-orchestration/skills/model-orchestration "$dst3"
+python3 "$dst3/doctor.py"
 ```
 </details>
+
+**Agent did not auto-discover the skill? Use the absolute path — it always works:**
+```powershell
+python "$HOME/.claude/skills/model-orchestration/orchestrate.py" --ask "your question"
+# opencode alt: python "$HOME/.config/opencode/skills/model-orchestration/orchestrate.py" --ask "..."
+```
 
 **Getting one folder onto a machine with no internet access:** copy it on a USB stick. It is a few
 hundred kilobytes of text files. That is the entire deployment story.

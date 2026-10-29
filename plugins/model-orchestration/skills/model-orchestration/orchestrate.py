@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 orchestrate.py — call external reviewer models in parallel, at full depth, and verify the answers.
@@ -41,6 +41,10 @@ from concurrent.futures import ThreadPoolExecutor
 # in a model's answer. Force UTF-8 on stdout before anything can print.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+# 2026-10-26 grok 4.6 hang 943ca270: ensure every python child inherits utf-8 even when _posix_child_env returns None (ru Windows cp1251 -> UnicodeEncodeError -> pipe deadlock 40m). setdefault so User env wins.
+for _k, _v in (("PYTHONIOENCODING","utf-8"),("PYTHONUTF8","1"),("PYTHONUNBUFFERED","1")):
+    os.environ.setdefault(_k, _v)
 
 # --- thinking tiers -------------------------------------------------------------------------
 # Bare {"type":"adaptive"} silently under-allocates: measured 9,955 output tokens and ZERO web
@@ -1164,9 +1168,16 @@ def _codex_env():
     """The codex child's environment, with a spawnable pwsh put ahead of the Store one."""
     d = sandbox_shell_dir()
     if not d:
-        return None
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONUNBUFFERED"] = "1"
+        return env
     env = dict(os.environ)
     env["PATH"] = d + os.pathsep + env.get("PATH", "")
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
     return env
 
 
@@ -1253,6 +1264,9 @@ def _posix_child_env():
         return None
     env = dict(os.environ)
     env["PATH"] = env.get("PATH", "") + os.pathsep + d
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
     return env
 
 
@@ -2347,14 +2361,21 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
         _fbs = sorted((n, r.get("fallback_for")) for n, r in results.items()
                       if isinstance(r, dict) and r.get("fallback_for"))
         if _fbs:                                        # R142 И-2: say which file stands in for whom
+            # 2026-10-28: name the MODELS too (from which model to which), not just the channels -
+            # records carry `model` in a real round; the R142 fixture has none, so the suffix
+            # prints only when present and that test's exact string is unchanged.
+            def _fbm(n_):
+                _m = (results.get(n_) or {}).get("model") if isinstance(results.get(n_), dict) else None
+                return (" (%s)" % _m) if _m else ""
             L += ["🔁 **Fallback:** %s. A channel that ended with no answer had its declared "
                   "`fallback` (another model, channels.json) run the same brief once after the "
                   "round; weigh that file as the fallback's model, not the original's."
-                  % "; ".join(("`%s` answered for `%s` (`%s`%s)"
-                               % (n, fr, n.upper() + ".md",
+                  % "; ".join(("`%s`%s answered for `%s`%s (`%s`%s)"
+                               % (n, _fbm(n), fr, _fbm(fr), n.upper() + ".md",
                                   # R157 И-8 (F1): a never_read fallback (Nemotron's own) is not a file to weigh
                                   ", never_read - do not open it" if results[n].get("never_read") is True else ""))
-                              if results[n].get("ok") else ("`%s` ran for `%s` and failed too" % (n, fr))
+                              if results[n].get("ok") else ("`%s`%s ran for `%s`%s and failed too"
+                                                            % (n, _fbm(n), fr, _fbm(fr)))
                               for n, fr in _fbs), ""]
         # R144 И-7 (H2): three different things, three lines. v1.108.0 printed «resumed once with
         # tools off» for an answer READ BACK from the CLI's log (no resume - a complete review) and
@@ -3937,11 +3958,72 @@ def _grok_child_env():
     """call_grokcli's child environment: the shared CLI env plus every GROK_COMPAT_OFF switch."""
     env = dict(_task_child_env(_posix_child_env()) or os.environ)
     env.update(dict.fromkeys(GROK_COMPAT_OFF, "0"))
+    # 2026-10-26: prevent cp1251 hang on Cyrillic/é in PDFs (G-1055) — Grok's python -c printed 50K via pwsh on cp1251 and hit UnicodeEncodeError → pipe deadlock → 40m TIMEOUT (943ca270). PYTHONIOENCODING forces utf-8 regardless of console codepage. Second opinion 2026-10-26 (GROKBUILD.md) says patch is incomplete without unbuffered + generalization.
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
     if env.get("GROK_HOME"):
         # R150 И-3: the session note reads _grok_home() (absolute against THIS process's cwd); the
         # child would resolve a relative value against its own --cwd and file sessions elsewhere
         env["GROK_HOME"] = _grok_home()
     return env
+
+
+def _ensure_grok_500k():
+    """Ensure Grok Build CLI frontier models run at 500K context window (not 256K default).
+
+    Since Grok Build 1.0.47 (2026-10-01, changelog) each frontier model (grok-4.5/4.6/4.7)
+    exposes `context_windows [256000,500000]` with `context_window 256000` default
+    (`~/.grok/models_cache.json` 2026-10-25). Headless `grok -p` / `--prompt-file`
+    stays on 256K unless `~/.grok/config.toml` overrides it with
+    `[model.\"grok-4.6\"] context_window = 500000` (docs.x.ai/build/settings).
+    Panel expects 500K (auto-compact 80% = 400K vs 204K). Idempotent, touches only
+    the 4 frontier models, runs before every grok call so both THIS machine and the
+    KIT (orchestrate.py is shipped) are fixed without manual editing.
+    """
+    try:
+        home = _grok_home()
+        p = os.path.join(home, "config.toml")
+        if not os.path.isfile(p):
+            return
+        txt = open(p, "r", encoding="utf-8", errors="replace").read()
+        orig = txt
+        for mid in ("grok-4.6", "grok-4.7", "grok-4.7-build-fast", "grok-4.5"):
+            header = '[model."%s"]' % mid
+            if header not in txt:
+                if not txt.endswith("\n"):
+                    txt += "\n"
+                txt += "\n%s\ncontext_window = 500000\n" % header
+                continue
+            # header exists — ensure its section has context_window = 500000
+            # isolate this section: from header to next "\n[" or EOF
+            start = txt.find(header)
+            after = txt.find("\n[", start + len(header))
+            chunk = txt[start:after if after != -1 else len(txt)]
+            if "context_window" in chunk:
+                if "500000" in chunk:
+                    continue
+                # replace first context_window line's value (256000 or other) with 500000
+                txt = txt[:start] + chunk.replace("256000", "500000", 1).replace("256_000", "500000", 1) + (txt[after:] if after != -1 else "")
+                # if still not 500000 (e.g. other value), force by regex
+                if "500000" not in txt[start:after if after != -1 else len(txt)+500]:
+                    txt = txt.replace(chunk, chunk + "\ncontext_window = 500000\n", 1)
+            else:
+                # no context_window line — insert right after header line
+                ins = txt.find("\n", start)
+                if ins == -1:
+                    txt += "\ncontext_window = 500000\n"
+                else:
+                    txt = txt[:ins+1] + "context_window = 500000\n" + txt[ins+1:]
+        if txt != orig:
+            # atomic write via temp + replace to avoid truncating on crash
+            tmp = p + ".tmp.%d" % os.getpid()
+            open(tmp, "w", encoding="utf-8").write(txt)
+            os.replace(tmp, p)
+            log("  [grokbuild] ensured 500K context_window for frontier models in %s" % p)
+    except Exception:
+        # never fail the review because a config tweak failed
+        pass
 
 
 def _grok_cwd():
@@ -4499,6 +4581,7 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
     and the Windows command line is not, which is the exact trap the agy channel documents.
     """
     binary = grok_bin()
+    _ensure_grok_500k()
     # 🔴🔴 R55/R59 root cause, corrected mid-round by the panel: grokbuild dies with
     # `Failed to read '...\\...\\PROMPT.md': Системе не удается найти указанный путь.
     # (os error 3)` when --prompt-file is a RELATIVE path, because the CLI resolves it against
@@ -4543,7 +4626,8 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
             "absolute path, run_terminal_command for shell commands (git, glab, gh, ssh, python - "
             "read-only use), web_search / web_fetch, and this machine's MCP servers through "
             "search_tool / use_tool (the metered firecrawl server is denied). "
-            + (GROK_KEYS_OPEN_NOTE if keys_ok else GROK_KEYS_DENIED_NOTE) +
+            "Python on Windows defaults to cp1251 and crashes on non-ASCII in PDFs (e.g. Fianc\u00e9): always run python with PYTHONIOENCODING=utf-8 PYTHONUTF8=1 (already in env), write a temp .py file instead of multiline python -c, and prefer pdftotext -layout for plain-text PDFs. " +
+            (GROK_KEYS_OPEN_NOTE if keys_ok else GROK_KEYS_DENIED_NOTE) +
             "Verify claims yourself with these tools instead of reasoning from the brief alone, "
             "and say which sources you could not open. READ ONLY: modify, create or delete "
             "nothing outside a scratch folder under the system TEMP directory, and never write to "
@@ -5429,6 +5513,9 @@ def _opencode_child_env(name, base_model, binary, cwd):
     env = dict(os.environ)
     env["PWD"] = cwd
     env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
     if getattr(_TASK, "ctx", None) is None:              # R153 И-5 G10: a review gets no walk-up AGENTS.md
         env.update(dict.fromkeys(OC_REVIEW_PROMPT_OFF, "1"))
     info = {"standalone": False, "limit": None, "note": None, "key": None, "key_missing": None}
@@ -6805,9 +6892,13 @@ _KIMI_ENV_KEEP = frozenset((
 def _kimi_min_env(base=None):
     """The allowlisted copy of `base` (default: this process's env) for a kimicli child."""
     src = os.environ if base is None else base
-    return {k: v for k, v in src.items()
-            if k.upper() in _KIMI_ENV_KEEP
-            or (k.upper().startswith("KIMI_") and not k.upper().startswith("KIMI_MODEL_"))}
+    out = {k: v for k, v in src.items()
+           if k.upper() in _KIMI_ENV_KEEP
+           or (k.upper().startswith("KIMI_") and not k.upper().startswith("KIMI_MODEL_"))}
+    out["PYTHONIOENCODING"] = "utf-8"
+    out["PYTHONUTF8"] = "1"
+    out["PYTHONUNBUFFERED"] = "1"
+    return out
 
 
 def _kimi_model_env(env_model, effort, key):
@@ -7402,10 +7493,14 @@ def _musecode_env(base=None):
     third-party tools, is not in the 1.4.7 binary at all.
     """
     src = os.environ if base is None else base
-    return {k: v for k, v in src.items()
-            if k.upper() in _KIMI_ENV_KEEP or k.upper() in ("XDG_CONFIG_HOME", "XDG_DATA_HOME",
-                                                            "XDG_STATE_HOME", "XDG_CACHE_HOME",
-                                                            "XDG_RUNTIME_DIR")}
+    out = {k: v for k, v in src.items()
+           if k.upper() in _KIMI_ENV_KEEP or k.upper() in ("XDG_CONFIG_HOME", "XDG_DATA_HOME",
+                                                           "XDG_STATE_HOME", "XDG_CACHE_HOME",
+                                                           "XDG_RUNTIME_DIR")}
+    out["PYTHONIOENCODING"] = "utf-8"
+    out["PYTHONUTF8"] = "1"
+    out["PYTHONUNBUFFERED"] = "1"
+    return out
 
 
 def _musecode_parse(raw):

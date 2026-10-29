@@ -3236,7 +3236,13 @@ def suite_panels():
         ("R168 2026-10-24", "ADD", "nvglm53flash",
          "R168 И-3: GLM 5.3 Flash on NVIDIA's free endpoint, second in its cascade after ocglm53flashfree; off as its head is. distribution both."),
         ("R168 2026-10-24", "ADD", "ormimo26flash",
-         "Igor 2026-10-23 «для mimo вариант в» (R168 Q1): the PAID OpenRouter MiMo v2.6 Flash, last in MiMo Flash's cascade - runs only where opencode is missing, printed PAID; off in his overlay. distribution both.")
+         "Igor 2026-10-23 «для mimo вариант в» (R168 Q1): the PAID OpenRouter MiMo v2.6 Flash, last in MiMo Flash's cascade - runs only where opencode is missing, printed PAID; off in his overlay. distribution both."),
+        ("R170 2026-10-28", "ADD", "ocmimo26flashgo",
+         "Igor 2026-10-28: a free opencode model's fallback is the paid copy on the SAME channel (opencode) - OpenRouter only where opencode has no paid copy. MiMo 2.6 Flash on the Go plan (opencode-go/mimo-v2.6-flash, in `opencode models` v2.1.0; no paid non-Go Zen copy exists), second in MiMo Flash's cascade, ocmimo26flashfree's fallback (survives the free allowance's provider.quota - no quota_group); off as a voice. distribution local."),
+        ("R170 2026-10-28", "ADD", "ocdeepseekv41flashgo",
+         "Igor 2026-10-28 (same rule): DeepSeek V4.1 Flash on the Go plan (opencode-go/deepseek-v4.1-flash), ocdeepseekv41flashfree's fallback; own cascade pair; off as a voice. distribution local."),
+        ("R170 2026-10-28", "ADD", "ocglm53flashgo",
+         "Igor 2026-10-28 (same rule): GLM 5.3 Flash on the Go plan (opencode-go/glm-5.3-flash), ocglm53flashfree's fallback; in the GLM cascade after the free Zen copy; off as a voice. distribution local.")
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -13102,9 +13108,9 @@ def suite_r142_mimo_flash_fallback():
           and fl.get("enabled") is False,
           "R142 (a) mimov26flash: mimocli, xiaomi/mimo-v2.6-flash, enabled:false (no panel seat)")
     check(ch["mimov26pro"].get("fallback") == "mimov26flash", "R142 (a) mimov26pro.fallback")
-    check(any(set(g) == {"ocmimo26flashfree", "mimov26flash", "ormimo26flash"}
+    check(any(set(g) == {"ocmimo26flashfree", "mimov26flash", "ormimo26flash", "ocmimo26flashgo"}
               for g in reg.get("_cascade_groups") or []),
-          "R142 (a) one Flash voice: cascade group [ocmimo26flashfree, mimov26flash, ormimo26flash (R168 И-3)]")
+          "R142 (a) one Flash voice: cascade group [ocmimo26flashfree, mimov26flash, ormimo26flash (R168 И-3), ocmimo26flashgo (Go fallback-only, last, R170 2026-10-28)]")
     mimo = reg["groups"]["mimo"]["channels"]
     check("mimov26flash" in mimo and "ocmimo26flashfree" in mimo,
           "R142 (a) group `mimo` holds both Flash transports, so --skip mimo also forbids the fallback")
@@ -13268,6 +13274,18 @@ def suite_r142_mimo_flash_fallback():
         htxt = "write_handoff raised %r" % (exc,)
     check("**Fallback:** `mimov26flash` answered for `mimov26pro`" in htxt,
           "R142 И-2 (m) HANDOFF.md names the fallback and the channel it stood in for", htxt[-300:])
+    hd2 = os.path.join(tmp, "hand2")
+    os.makedirs(hd2, exist_ok=True)
+    try:
+        o.write_handoff(hd2, {"mimov26pro": dict(dead, model="xiaomi/mimo-v2.6-pro"), "mimov26flash": {
+            "ok": True, "text": "x", "bytes": 1, "fallback_for": "mimov26pro",
+            "model": "xiaomi/mimo-v2.6-flash"}}, marker="R142-MARK")
+        htxt2 = open(os.path.join(hd2, "HANDOFF.md"), encoding="utf-8").read()
+    except Exception as exc:                                   # noqa: BLE001
+        htxt2 = "write_handoff raised %r" % (exc,)
+    check("`mimov26flash` (xiaomi/mimo-v2.6-flash) answered for `mimov26pro` (xiaomi/mimo-v2.6-pro)" in htxt2,
+          "R170 2026-10-28 (n) HANDOFF.md names the MODELS too (from which model to which) when records carry them",
+          htxt2[-300:])
 
 
 def suite_r142_i3_kimi_single_agent():
@@ -17757,9 +17775,9 @@ def suite_r157_i2_free_fallback():
           "R157 И-2 (a) MiMo, GLM, DeepSeek and the free Spark share one quota_group; Nemotron (measured outside) has none",
           repr(grp))
     m, g, d = (ch.get(n) or {} for n in names[:3])
-    check(m.get("enabled") is True and m.get("fallback") == "ocglm53flashfree" and g.get("enabled") is False
+    check(m.get("enabled") is True and m.get("fallback") == "ocmimo26flashgo" and g.get("enabled") is False
           and d.get("enabled") is False and g.get("distribution") == "both",
-          "R157 И-2 (b) the source (= kit) registry: MiMo Flash on with GLM as its fallback, GLM and DeepSeek off",
+          "R157 И-2 (b) the source (= kit) registry: MiMo Flash on with paid Go MiMo as its fallback (R170 2026-10-28: same channel, not OpenRouter; was ocglm53flashfree, then ormimo26flash), GLM and DeepSeek off",
           repr([(x.get("enabled"), x.get("fallback")) for x in (m, g, d)]))
 
     def yes(_n):
@@ -17773,9 +17791,9 @@ def suite_r157_i2_free_fallback():
     pk = rt.resolve(copy.deepcopy(kit), panel="cheap", ready=yes)
     on = sorted(n for n in names[:4] if (pk.get(n) or {}).get("enabled"))
     fbk = (pk.get("ocmimo26flashfree") or {}).get("fallback") or {}
-    check(on == ["ocmimo26flashfree"] and fbk.get("channel") == "ocglm53flashfree" and not fbk.get("off"),
-          "R157 И-2 (c) the kit-shaped cheap panel starts ONE voice of the allowance, MiMo Flash, with GLM armed as "
-          "its fallback", repr((on, fbk)))
+    check(on == ["ocmimo26flashfree"] and fbk.get("channel") == "ocmimo26flashgo" and not fbk.get("off"),
+          "R157 И-2 (c) the kit-shaped cheap panel starts ONE voice of the allowance, MiMo Flash, with paid Go MiMo armed as "
+          "its fallback (R170 2026-10-28: same channel; was GLM free, then OR paid)", repr((on, fbk)))
 
     def fallbacks(regx, plan, failed, outcome, primary="ocmimo26flashfree"):
         calls = []
@@ -17787,24 +17805,23 @@ def suite_r157_i2_free_fallback():
         o.run_fallbacks(res, plan, regx, {primary}, submit=submit, same_voice=rt.same_voice)
         return calls, res
 
-    # (d) a timeout -> GLM once; GLM declares a fallback of its own in this fixture, and it must NOT run (no chain)
+    # (d) a timeout -> paid Go MiMo once; it has no fallback of its own, so nothing else starts (no chain)
     kit2 = copy.deepcopy(kit)
-    kit2["channels"]["ocglm53flashfree"]["fallback"] = "ocdeepseekv41flashfree"
     pk2 = rt.resolve(copy.deepcopy(kit2), panel="cheap", ready=yes)
     dead = {"ok": False, "error": "TIMEOUT after 2400", "text": "", "warnings": []}
     calls, res = fallbacks(kit2, pk2, dead, dead)
     notes = " ".join(res["ocmimo26flashfree"].get("notes") or [])
-    check(calls == ["ocglm53flashfree"] and "it failed too" in notes
-          and sorted(res) == ["ocglm53flashfree", "ocmimo26flashfree"],
-          "R157 И-2 (d) MiMo dies on a timeout -> GLM runs the brief ONCE; GLM fails too -> the record says so and nothing "
-          "else starts (GLM's own fallback never runs)", repr((calls, sorted(res), notes[:160])))
+    check(calls == ["ocmimo26flashgo"] and "it failed too" in notes
+          and sorted(res) == ["ocmimo26flashfree", "ocmimo26flashgo"],
+          "R157 И-2 (d) MiMo dies on a timeout -> paid Go MiMo runs the brief ONCE; it fails too -> the record says so and nothing "
+          "else starts (no chain; R170: was GLM free, then OR paid)", repr((calls, sorted(res), notes[:160])))
     quota = {"ok": False, "error": None, "text": "",
              "warnings": ["EXIT 1: provider.quota (HTTP 429): Rate limit exceeded. Please try again later."]}
     calls, res = fallbacks(kit, pk, quota, {"ok": True, "text": "x" * 4000, "bytes": 4000})
     notes = " ".join(res["ocmimo26flashfree"].get("notes") or [])
-    check(calls == [] and "same daily allowance" in notes and "00:00 UTC" in notes,
-          "R157 И-2 (e) MiMo refused with provider.quota -> GLM (the same allowance) is NOT started; the record says "
-          "why and until when", notes[:200])
+    check(calls == ["ocmimo26flashgo"] and "same daily allowance" not in notes,
+          "R157 И-2 (e) MiMo refused with provider.quota -> paid Go MiMo (Go plan, no quota_group) IS started; "
+          "R170: free GLM (same allowance) was NOT started", notes[:200])
     kit3 = copy.deepcopy(kit)
     kit3["channels"]["ocnemotron3ultrafree"]["fallback"] = "ocglm53flashfree"
     kit3["channels"]["ocglm53flashfree"]["enabled"] = False         # as shipped now; on the old registry it was on
@@ -17839,8 +17856,9 @@ def suite_r157_i2_free_fallback():
               "allowance) still runs", w1[:200])
         p2 = aq(copy.deepcopy(pk), kit, sk, named={"ocmimo26flashfree"}) if aq else {}
         fb2 = (p2.get("ocmimo26flashfree") or {}).get("fallback") or {}
-        check(bool((p2.get("ocmimo26flashfree") or {}).get("enabled")) and "refused earlier today" in (fb2.get("off") or ""),
-              "R157 И-2 (j) named by the human, MiMo still starts - and its GLM fallback (the same allowance) is off",
+        check(bool((p2.get("ocmimo26flashfree") or {}).get("enabled")) and not (fb2.get("off") or ""),
+              "R157 И-2 (j) named by the human, MiMo still starts - and its paid Go fallback (Go plan, no quota_group) stays armed "
+              "(R170: was free GLM, then OR paid)",
               repr(fb2))
         rq = getattr(o, "record_quota_refusals", None)
         sp = os.path.join(tmpd, "state.json")
@@ -18022,9 +18040,9 @@ def suite_r163_step5_minimax_chain():
     k2["channels"]["ocglm53flashfree"]["fallback"] = "ocdeepseekv41flashfree"
     p2 = rt.resolve(copy.deepcopy(k2), panel="cheap", ready=yes)
     mf = (p2.get("ocmimo26flashfree") or {}).get("fallback") or {}
-    check(mf.get("channel") == "ocglm53flashfree" and "then" not in mf,
-          "R163 (d) a fallback never chains: MiMo's GLM keeps no `then` though GLM declares a fallback in this "
-          "fixture", repr(mf))
+    check(mf.get("channel") == "ocmimo26flashgo" and "then" not in mf,
+          "R163 (d) a fallback never chains: MiMo's paid Go copy keeps no `then` though GLM declares a fallback in this "
+          "fixture (R170: was OR paid, before that GLM free)", repr(mf))
 
     dead = {"ok": False, "error": "TIMEOUT after 1200", "text": "", "warnings": []}
     good = {"ok": True, "text": "x" * 4000, "bytes": 4000}
@@ -20493,8 +20511,8 @@ def suite_r168_i3_free_transports():
     срабатывает fallback на просто api. И так для всех бесплатных ИИ моделей». Checks tagged [code] must FAIL on the
     И-2 code with this registry (runs/r168-free-api-fallback/i3/nc_i3.py); [reg] ones read the registry.
       (a) [reg] ocstep5previewnv = opencode + nvidia/ (oc_key NVIDIA_API_KEY <- NVIDIA_NIM_API_KEY), first in the Step 5
-          group, fallback nvstep5preview; nvglm53flash (off) after the Zen GLM; ormimo26flash (OpenRouter, PAID) last
-          in MiMo Flash's group; nvstep5preview + nvnemotron3ultra ship (distribution both);
+          group, fallback nvstep5preview; nvglm53flash (off) after the Zen GLM, Go copy last; ormimo26flash (OpenRouter, PAID) before the
+          fallback-only Go copy (R170); nvstep5preview + nvnemotron3ultra ship (distribution both);
       (b) [code] _opencode_child_env copies the key into the CHILD env only and asks for a private server;
       (c) [code] without the key it names NVIDIA_NIM_API_KEY and its hint, and call_opencode starts nothing;
       (d) [code] with the key the opencode command carries --standalone and the child env the key;
@@ -20526,14 +20544,14 @@ def suite_r168_i3_free_transports():
           "copy, no Zen quota group, first in the Step 5 group, in the cli + opencode words",
           repr({k: ocs.get(k) for k in ("kind", "model", "oc_key", "distribution", "fallback")}))
     check(nvg.get("kind") == "oai" and nvg.get("provider") == "nvidia" and nvg.get("enabled") is False
-          and nvg.get("distribution") == "both" and ["ocglm53flashfree", "nvglm53flash"] in grp
+          and nvg.get("distribution") == "both" and ["ocglm53flashfree", "nvglm53flash", "ocglm53flashgo"] in grp
           and orm.get("kind") == "openrouter" and orm.get("cost") == "metered" and orm.get("distribution") == "both"
-          and orm.get("panel") == "cheap" and ["ocmimo26flashfree", "mimov26flash", "ormimo26flash"] in grp
+          and orm.get("panel") == "cheap" and ["ocmimo26flashfree", "mimov26flash", "ormimo26flash", "ocmimo26flashgo"] in grp
           and "ormimo26flash" in (groups.get("openrouter") or {}).get("channels", [])
           and "ormimo26flash" in (groups.get("mimo") or {}).get("channels", [])
           and (ch.get("nvstep5preview") or {}).get("distribution") == "both"
           and (ch.get("nvnemotron3ultra") or {}).get("distribution") == "both",
-          "R168 И-3 (a) [reg] nvglm53flash off after the Zen GLM; ormimo26flash metered, last in MiMo Flash's group, in "
+          "R168 И-3 (a) [reg] nvglm53flash off after the Zen GLM (Go copy last); ormimo26flash metered, before the fallback-only Go copy (R170 2026-10-28), in "
           "the openrouter + mimo words; nvstep5preview and nvnemotron3ultra ship (both)",
           repr((nvg.get("enabled"), orm.get("enabled"), orm.get("cost"))))
 

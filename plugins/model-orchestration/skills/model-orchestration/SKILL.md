@@ -23,7 +23,9 @@ prerequisite, prints the live version of each CLI, and its last line is the exac
 | install method | `<SKILL_DIR>` |
 |---|---|
 | Claude Code plugin | `${CLAUDE_PLUGIN_ROOT}/skills/model-orchestration` |
-| `install.ps1` / `install.sh` | `~/.claude/skills/model-orchestration` |
+| `install.ps1`/`install.sh` | `~/.claude/skills/model-orchestration`, `~/.agents/skills/model-orchestration`, `~/.config/opencode/skills/model-orchestration` (all three) |
+
+Fallback (no discovery): `python "$HOME/.claude/skills/model-orchestration/orchestrate.py" --ask "question"` (Win: `%USERPROFILE%/.claude/skills/model-orchestration/orchestrate.py`)
 
 Everything here is empirical: each rule exists because it failed at least once, on a real run.
 

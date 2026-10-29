@@ -23,12 +23,24 @@ documents that hold the detail. It deliberately holds no channel list, no counts
   ```
 
   (after an installer or plain-copy install the same directory is
-  `~/.claude/skills/model-orchestration`; call it `SKILL_DIR` — the paths below use that name)
+  `~/.claude/skills/model-orchestration`; call it `SKILL_DIR` — the paths below use that name.
+  For agents that use the `agentskills.io` spec the same files are in
+  `~/.agents/skills/model-orchestration`; for **opencode** they are in
+  `~/.config/opencode/skills/model-orchestration` (Windows: `%USERPROFILE%\.config\opencode\skills\model-orchestration`).
+  If your agent did not auto-discover the skill, use the absolute path — it always works:)
 
   - `python routing.py` — the live channel plan; spends nothing;
   - `python doctor.py` — versions, key presence, what is actually installed;
   - `python orchestrate.py --dry-run ...` — the full resolved plan for a specific round, free;
   - `channels.json` — the registry, the single home of every model name.
+
+  **Fallback for any agent (no skill discovery needed):**
+  ```powershell
+  python "$HOME/.claude/skills/model-orchestration/orchestrate.py" --ask "your question"
+  # Windows: python "%USERPROFILE%\.claude\skills\model-orchestration\orchestrate.py" --ask "..."
+  # opencode alt: python "%USERPROFILE%\.config\opencode\skills\model-orchestration\orchestrate.py" --ask "..."
+  # agentskills.io alt: python "$HOME/.agents/skills/model-orchestration/orchestrate.py" --ask "..."
+  ```
 
 ## Operating discipline — each rule exists because it failed on a real run
 

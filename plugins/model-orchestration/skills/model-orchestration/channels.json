@@ -177,11 +177,13 @@
         "mimov26pro",
         "mimov26flash",
         "ocmimo26flashfree",
+        "ocmimo26flashgo",
         "mimo25pro",
         "ormimopro",
         "ormimo26flash"
       ],
       "_membership_updated_r142": "R142 (2026-10-04): mimov26flash added (the run-time fallback of mimov26pro), and ocmimo26flashfree, which R133 left out - so «--skip mimo» did not skip a MiMo voice and «--only mimo» did not run it. A group word never starts mimov26flash as a voice (enabled:false, see apply_explicit_only); it is here so that «--skip mimo» also forbids the fallback.",
+      "_membership_updated_2026_10_28": "R170: ocmimo26flashgo (Go paid fallback, enabled:false) added for the same reason - «--skip mimo» must forbid it too.",
       "aliases": [
         "mimo",
         "мимо",
@@ -233,9 +235,12 @@
         "ocspark13go",
         "ocspark13free",
         "ocmimo26flashfree",
+        "ocmimo26flashgo",
         "ocnemotron3ultrafree",
         "ocglm53flashfree",
+        "ocglm53flashgo",
         "ocdeepseekv41flashfree",
+        "ocdeepseekv41flashgo",
         "ocstep5previewgo",
         "ocminimax31flashgo",
         "ocstep5previewnv",
@@ -269,9 +274,12 @@
       "label": "every channel that runs through the opencode CLI (its free models, and a Go-plan channel where one is set up)",
       "channels": [
         "ocmimo26flashfree",
+        "ocmimo26flashgo",
         "ocnemotron3ultrafree",
         "ocglm53flashfree",
+        "ocglm53flashgo",
         "ocdeepseekv41flashfree",
+        "ocdeepseekv41flashgo",
         "ocstep5previewnv",
         "ocspark13go",
         "ocspark13free",
@@ -982,9 +990,10 @@
       "panel": "cheap",
       "vendor": "xiaomi",
       "enabled": true,
-      "fallback": "ocglm53flashfree",
+      "fallback": "ocmimo26flashgo",
       "quota_group": "opencode-free",
-      "_fallback_r157": "R157 И-2 (2026-10-19), the operator: «оставить ... одну модель бесплатную mimo и добавить fallback на еще одну бесплатную модель, но если и вторая не сработает, то просто написать, но дальше не идти». The one free voice of opencode's shared free allowance: when it ends a round with no answer, GLM 5.3 Flash Free gets the same brief once after the round, and nothing runs after that (a fallback never chains: run_fallbacks walks the round's own channels once). Not after `provider.quota`: GLM draws on the same allowance - both were refused together on 2026-10-18 23:23Z - so the record says when it returns instead.",
+      "_fallback_r157": "SUPERSEDED 2026-10-28 (free GLM, then paid OpenRouter): fallback was ocglm53flashfree (free GLM, same quota_group opencode-free) - on provider.quota it never ran (both refused 2026-10-18 23:23Z); interim was ormimo26flash (OpenRouter, no quota_group, survived quota) but violated the 2026-10-28 rule - a free opencode model's fallback is the paid copy on the SAME channel (opencode), OpenRouter only where opencode has no paid copy. R157 rule kept below as history.",
+      "_fallback_2026_10_28": "2026-10-28, the operator: a free opencode model's fallback is the paid copy on the SAME channel (opencode) - OpenRouter only where opencode has no paid copy of the model. ocmimo26flashgo (Go plan, same MiMo 2.6 Flash, no quota_group) survives provider.quota where the free GLM could not. Plan prints it (subscription, Go). Explicit override of R157 'just write' and of the no-pay-around-free-allowance rule. One fallback, never a chain (R163).",
       "_quota_group_r157": "R157 И-2 (2026-10-19): channels with the same quota_group draw on ONE allowance. opencode's free models behave as one daily allowance of requests per network address (measured 2026-10-18/19: five refused together at 23:23Z, two of them never used here, all answering at 00:01Z; nemotron-3-ultra-free, beam-free and longcat-2.5-preview-free answered while it was used up - they are outside it). After a `provider.quota` from any member orchestrate.py writes the UTC date to model-orchestration.quota-state.json beside the local overlay (never shipped), and later rounds that UTC day leave the group out unless a channel is named (runs/r157-free-quota/).",
       "distribution": "both",
       "_distribution_r143": "R143 И-3 (2026-10-05): ships ON in the kit (was local since R133). the operator: both free voices in everyone's cheap panel. It needs nothing beyond the opencode CLI the kit already asks for (ocspark13free): no key, no account. The free relay can refuse: on 05.10 both opencode free models got FreeUsageLimitError (provider.quota) in two runs; 30-day ok 49/55 here (runs/r143-i3-ship-free/free_health.log).",
@@ -1312,19 +1321,121 @@
       ],
       "notes": "MiniMax M3.1 Flash on the operator's OpenCode Go plan; off as a voice, it starts by name (no fallback since the Zen copy left opencode, R160 И-4)."
     },
+    "ocmimo26flashgo": {
+      "read_order": 1,
+      "kind": "opencode",
+      "panel": "cheap",
+      "vendor": "xiaomi",
+      "enabled": false,
+      "distribution": "local",
+      "_distribution": "LOCAL ONLY: the kit has no Go plan; a kit user's paid MiMo Flash is ormimo26flash (OpenRouter). package.py flips enabled to false in the kit tree.",
+      "label": "OC MiMo 2.6 Flash (OpenCode Go)",
+      "cost": "subscription",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "model": "opencode-go/mimo-v2.6-flash",
+      "effort": null,
+      "_effort": "Null like the free twin (same model): opencode's free copy rejects every #variant ('Variant unavailable'), and the Go copy is unprobed - so no suffix is sent. Re-probe if the model gains variants.",
+      "timeout": "40m",
+      "_timeout": "Same rationale as ocmimo26flashfree: opencode CLI has no built-in timeout, caller-side via subprocess.run.",
+      "models": {
+        "opencode-go/mimo-v2.6-flash": {
+          "label": "MiMo v2.6 Flash (via opencode, OpenCode Go plan)",
+          "data_policy": "Through opencode's Go gateway (their terms apply) plus Xiaomi's MiMo model terms. Counted against the Go plan's limit.",
+          "aliases": [
+            "opencode-go/mimo-v2.6-flash",
+            "oc mimo flash go"
+          ]
+        }
+      },
+      "aliases": [
+        "ocmimo26flashgo",
+        "ocmimogo",
+        "mimogo"
+      ],
+      "_added_2026_10_28": "the operator 2026-10-28: a free opencode model's fallback is the paid copy on the SAME channel (opencode) - OpenRouter only where opencode has no paid copy of the model. ocmimo26flashfree's run-time fallback: the same MiMo 2.6 Flash on the Go plan, no quota_group, so it survives the free allowance's provider.quota (different quota). Fallback-only (enabled false, like ocstep5previewgo): starts by name or as that twin's fallback; deliberately NOT in the cascade, so the R140/R168 cascade order is untouched. Plan prints it (subscription, Go). Explicit override of R157 'just write' and of the no-pay-around-free-allowance rule. One fallback, never a chain (R163).",
+      "notes": "MiMo 2.6 Flash on the operator's OpenCode Go plan; ocmimo26flashfree's fallback. opencode-go/mimo-v2.6-flash is in `opencode models` (v2.1.0); there is no paid non-Go Zen copy, so Go is the only paid opencode route."
+    },
+    "ocdeepseekv41flashgo": {
+      "read_order": 1,
+      "kind": "opencode",
+      "panel": "cheap",
+      "vendor": "deepseek",
+      "enabled": false,
+      "distribution": "local",
+      "_distribution": "LOCAL ONLY: the kit has no Go plan. package.py flips enabled to false in the kit tree.",
+      "label": "OC DeepSeek V4.1 Flash (OpenCode Go)",
+      "cost": "subscription",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "effort": null,
+      "_effort": "Null on purpose, though the free twin runs #max: the Go copy's variants are unprobed (the ocspark12go precedent: Go rejects the top variant the free copy takes), and a rejected variant fails the fallback. Re-probe on the first run.",
+      "timeout": "40m",
+      "_timeout": "Same rationale as ocmimo26flashfree: opencode CLI has no built-in timeout, caller-side via subprocess.run.",
+      "models": {
+        "opencode-go/deepseek-v4.1-flash": {
+          "label": "DeepSeek V4.1 Flash (via opencode, OpenCode Go plan)",
+          "data_policy": "Through opencode's Go gateway (their terms apply) plus DeepSeek's model terms. Counted against the Go plan's limit.",
+          "aliases": [
+            "opencode-go/deepseek-v4.1-flash",
+            "oc deepseek flash go"
+          ]
+        }
+      },
+      "aliases": [
+        "ocdeepseekv41flashgo",
+        "ocdeepseekgo"
+      ],
+      "_added_2026_10_28": "the operator 2026-10-28: same rule as ocmimo26flashgo - ocdeepseekv41flashfree's paid same-channel fallback (Go plan, no quota_group, survives provider.quota). Fallback-only (enabled false): starts by name or as that twin's fallback.",
+      "notes": "DeepSeek V4.1 Flash on the operator's OpenCode Go plan; ocdeepseekv41flashfree's fallback."
+    },
+    "ocglm53flashgo": {
+      "read_order": 1,
+      "kind": "opencode",
+      "panel": "cheap",
+      "vendor": "zai",
+      "enabled": false,
+      "distribution": "local",
+      "_distribution": "LOCAL ONLY: the kit has no Go plan. package.py flips enabled to false in the kit tree.",
+      "label": "OC GLM 5.3 Flash (OpenCode Go)",
+      "cost": "subscription",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "model": "opencode-go/glm-5.3-flash",
+      "effort": null,
+      "_effort": "Null on purpose, though the free twin runs #max: the Go copy's variants are unprobed (the ocspark12go precedent: Go rejects the top variant the free copy takes), and a rejected variant fails the fallback. Re-probe on the first run.",
+      "timeout": "40m",
+      "_timeout": "Same rationale as ocmimo26flashfree: opencode CLI has no built-in timeout, caller-side via subprocess.run.",
+      "models": {
+        "opencode-go/glm-5.3-flash": {
+          "label": "GLM 5.3 Flash (via opencode, OpenCode Go plan)",
+          "data_policy": "Through opencode's Go gateway (their terms apply) plus Z.ai's model terms. Counted against the Go plan's limit.",
+          "aliases": [
+            "opencode-go/glm-5.3-flash",
+            "oc glm flash go"
+          ]
+        }
+      },
+      "aliases": [
+        "ocglm53flashgo",
+        "ocglmgo"
+      ],
+      "_added_2026_10_28": "the operator 2026-10-28: same rule as ocmimo26flashgo - ocglm53flashfree's paid same-channel fallback (Go plan, no quota_group, survives provider.quota). Fallback-only (enabled false): starts by name or as that twin's fallback; deliberately NOT in the cascade.",
+      "notes": "GLM 5.3 Flash on the operator's OpenCode Go plan; ocglm53flashfree's fallback."
+    },
     "ocglm53flashfree": {
       "read_order": 1,
       "kind": "opencode",
       "panel": "cheap",
       "vendor": "zai",
       "enabled": false,
+      "fallback": "ocglm53flashgo",
+      "_fallback_2026_10_28": "2026-10-28, the operator: same rule as ocmimo26flashgo - a free opencode model's fallback is the paid copy on the SAME channel (Go plan, no quota_group, survives provider.quota).",
       "quota_group": "opencode-free",
-      "_enabled_r157": "R157 И-2 (2026-10-19): off by default - one free voice of opencode's shared daily allowance per panel (the operator: «одну модель бесплатную mimo»); this one is ocmimo26flashfree's run-time fallback and starts by its own name. On 2026-10-18 three voices of the allowance in every round had spent it by 08:25Z (runs/r157-free-quota/).",
+      "_enabled_r157": "R157 И-2 (2026-10-19): off by default - one free voice of opencode's shared daily allowance per panel (the operator: «одну модель бесплатную mimo»); this one is ocmimo26flashfree's run-time fallback and starts by its own name. On 2026-10-18 three voices of the allowance in every round had spent it by 08:25Z (runs/r157-free-quota/). SUPERSEDED 2026-10-28 as a fallback target: ocmimo26flashfree's fallback is ocmimo26flashgo (Go) now; this channel keeps its own Go fallback and starts by name.",
       "distribution": "both",
       "label": "OC GLM 5.3 Flash Free",
       "cost": "free",
       "fetch_fallback_hint_ref": "mcp_fallback",
-      "_added_r154_i3": "the operator 2026-10-18: «у opencode есть же nemotron 3 ultra free, glm 5.3 flash, mimo 2.6 flash (кажется он даже есть в нашей панели), deepseek 4.1 flash. Давай их тогда тоже добавим.» Probe 2026-10-18 (probe_free_i3.py): answered a review-shaped brief at #max in 6 s and refuted the planted claim. A different model from orglm53 (GLM 5.3, metered OpenRouter, standard): its own voice, no cascade; the words «glm» / «глм» still name orglm53.",
+      "_added_r154_i3": "the operator 2026-10-18: «у opencode есть же nemotron 3 ultra free, glm 5.3 flash, mimo 2.6 flash (кажется он даже есть в нашей панели), deepseek 4.1 flash. Давай их тогда тоже добавим.» Probe 2026-10-18 (probe_free_i3.py): answered a review-shaped brief at #max in 6 s and refuted the planted claim. A different model from orglm53 (GLM 5.3, metered OpenRouter, standard): its own voice; the words «glm» / «глм» still name orglm53.",
       "model": "opencode/glm-5.3-flash-free",
       "effort": "max",
       "supported_efforts": [
@@ -1363,13 +1474,15 @@
       "panel": "cheap",
       "vendor": "deepseek",
       "enabled": false,
+      "fallback": "ocdeepseekv41flashgo",
+      "_fallback_2026_10_28": "2026-10-28, the operator: same rule as ocmimo26flashgo - a free opencode model's fallback is the paid copy on the SAME channel (Go plan, no quota_group, survives provider.quota).",
       "quota_group": "opencode-free",
       "_enabled_r157": "R157 И-2 (2026-10-19): off by default - one free voice of opencode's shared daily allowance per panel (the operator: «одну модель бесплатную mimo»); starts by its own name. On 2026-10-18 three voices of the allowance in every round had spent it by 08:25Z (runs/r157-free-quota/).",
       "distribution": "both",
       "label": "OC DeepSeek V4.1 Flash Free",
       "cost": "free",
       "fetch_fallback_hint_ref": "mcp_fallback",
-      "_added_r154_i3": "the operator 2026-10-18: «у opencode есть же nemotron 3 ultra free, glm 5.3 flash, mimo 2.6 flash (кажется он даже есть в нашей панели), deepseek 4.1 flash. Давай их тогда тоже добавим.» Probe 2026-10-18 (probe_free_i3.py): answered a review-shaped brief at #max in 6 s and refuted the planted claim. A different model from ordeepseekv4pro (V4 Pro, metered OpenRouter, standard): its own voice, no cascade; the words «deepseek» / «дипсик» still name ordeepseekv4pro.",
+      "_added_r154_i3": "the operator 2026-10-18: «у opencode есть же nemotron 3 ultra free, glm 5.3 flash, mimo 2.6 flash (кажется он даже есть в нашей панели), deepseek 4.1 flash. Давай их тогда тоже добавим.» Probe 2026-10-18 (probe_free_i3.py): answered a review-shaped brief at #max in 6 s and refuted the planted claim. A different model from ordeepseekv4pro (V4 Pro, metered OpenRouter, standard): its own voice; the words «deepseek» / «дипсик» still name ordeepseekv4pro.",
       "model": "opencode/deepseek-v4.1-flash-free",
       "effort": "max",
       "supported_efforts": [
@@ -2869,7 +2982,8 @@
         "grok-build",
         "билд"
       ],
-      "notes": "The subscription Grok voice, free at the margin like agy and codex. Its web_search and web_fetch are ON by default (the flag is --disable-web-search), the vendor runs the loop, and the harness fetches nothing here - so its grounding is its own claim and only the citation-existence audit can test it."
+      "notes": "The subscription Grok voice, free at the margin like agy and codex. Its web_search and web_fetch are ON by default (the flag is --disable-web-search), the vendor runs the loop, and the harness fetches nothing here - so its grounding is its own claim and only the citation-existence audit can test it. Requires 500K context_window (since Grok Build 1.0.47 each frontier model exposes context_windows [256000,500000] with 256K default; docs.x.ai/build/settings). Harness ensures [model.\"grok-4.6\"] etc. context_window=500000 in ~/.grok/config.toml via _ensure_grok_500k() before every run — both THIS machine and the KIT (orchestrate.py is shipped).",
+      "_500k_2026_10_25": "R172: frontier models 4.5/4.6/4.7 offer 256K default + 500K; panel expects 500K (auto-compact 80% = 400K vs 204K). models_cache.json 2026-10-25 shows 256000 default. Fix is orchestrate._ensure_grok_500k() + ~/.grok/config.toml entries, not channels.json model field."
     },
     "orglm53": {
       "read_order": 2,
@@ -2970,7 +3084,8 @@
     [
       "ocmimo26flashfree",
       "mimov26flash",
-      "ormimo26flash"
+      "ormimo26flash",
+      "ocmimo26flashgo"
     ],
     [
       "nvnemotron3ultra",
@@ -2999,7 +3114,12 @@
     ],
     [
       "ocglm53flashfree",
-      "nvglm53flash"
+      "nvglm53flash",
+      "ocglm53flashgo"
+    ],
+    [
+      "ocdeepseekv41flashfree",
+      "ocdeepseekv41flashgo"
     ]
   ],
   "_cascade_groups_doc": "Panel cascade: when several channels carry the SAME model through different transports, only the first READY one runs; the rest are skipped. Order matters - cheapest/free first. The panel runs independent VOICES in parallel; paying three transports for one voice is waste, not breadth. Added 2026-09-04 (the operator: 'незачем у одних и тех же моделей спрашивать'). R143 И-3 (2026-10-05): a group may span panels. kimik3 (standard, OpenRouter, paid) is the last member of nvkimik3's group; members are only the channels already in THIS run's plan, so a cheap run never pulls kimik3 in, and a standard run gets one Kimi - nvkimik3 when its CLI and key are here, else kimik3.",

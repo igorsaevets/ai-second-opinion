@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.116.0 — 2026-10-29
+
+A free opencode voice now falls back to the paid copy on the same channel, and every Python child runs utf-8.
+
+- **A free opencode model's fallback is the paid copy on the SAME channel (OpenCode Go plan)** — OpenRouter only where opencode has no paid copy of the model. Three new fallback-only channels: `ocmimo26flashgo`, `ocdeepseekv41flashgo`, `ocglm53flashgo` (`opencode-go/*`, subscription, off as voices, local-only: the kit has no Go plan). Rewired: MiMo 2.6 Flash Free → its Go copy (was free GLM, briefly paid OpenRouter), DeepSeek V4.1 Flash Free → its Go copy (new), GLM 5.3 Flash Free → its Go copy (new). The old free→free fallback never fired on `provider.quota` (one shared allowance, refused together); the Go copies carry no `quota_group`, so they survive it. One fallback, never a chain; cascade order untouched; the cheap panel still seats 8 voices.
+- **HANDOFF.md names the models when a fallback fires**, not just the channels: `` `X` (modelA) answered for `Y` (modelB) ``.
+- **Every Python child inherits utf-8** (2026-10-26 grok 4.6 hang 943ca270: cp1251 + non-ASCII print in a PDF script → `UnicodeEncodeError` → pipe deadlock → 40m TIMEOUT): `PYTHONIOENCODING=utf-8` + `PYTHONUTF8=1` + `PYTHONUNBUFFERED=1` set process-wide and in every CLI child env (grok, codex, opencode, kimi, musecode, posix), plus a one-line `NO_REPO` preamble (temp `.py` file over multiline `python -c`, `pdftotext -layout` first). Adjudication 2026-10-29: the trigger byte was `é` on G-1055 p.7 — the curly quotes and bullets printed earlier encode fine on cp1251; the exception alone never explained 40 minutes of silence, the parent never drained the pipe (~11 KB before the crash point, ~97 KB total). Residual, not in this release: no inner watchdog on a silent shell tool yet.
+
 ## 1.115.2 — 2026-10-24
 
 What the cheap panel found in 1.115.1: the reading list still sent you to Nemotron's answer, and the free-allowance memory kept the wrong second.
