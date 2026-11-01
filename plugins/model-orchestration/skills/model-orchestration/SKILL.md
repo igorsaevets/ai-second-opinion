@@ -185,7 +185,7 @@ stable and worth knowing:
 | Antigravity CLI | `agy`, **not on PATH** on Windows; resolved via `AGY_BIN` → PATH → `%LOCALAPPDATA%\agy\bin\agy.exe` |
 | agy models | one model per channel, base slug plus `--effort`; a suffixed slug (`-high`) plus a disagreeing `--effort` is exit 1 in 3 s (`references/channels.md` §6.3) |
 | Grok Build CLI | `grok`, **not on PATH**; `GROK_BIN` → PATH → `%USERPROFILE%\.grok\bin`. Subscription session, no key. Reads `CLAUDE.md` from its cwd upward → neutral cwd. 🔴 **One denied tool discards the whole turn**, and `--tools` does not bound the MCP gateway. Flags in `channels.json` |
-| harness | `orchestrate.py`, standard library only, no `pip install`, Python 3.8+ (`patch_codex_firecrawl.py` alone needs 3.11+ and says so) |
+| harness | `orchestrate.py`, standard library only, no `pip install`, Python 3.9+ (`patch_codex_firecrawl.py` alone needs 3.11+ and says so) |
 
 **Secrets.** Never `Read`, `cat`, `echo` or `Write-Output` the key. The script reads it from the
 environment; `doctor.py` reports presence and length only. Printing the value is a hard failure —

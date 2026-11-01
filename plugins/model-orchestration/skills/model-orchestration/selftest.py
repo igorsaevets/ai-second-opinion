@@ -16275,7 +16275,7 @@ def suite_r153_i5_hotfix():
         free members; `--only kimik3` and `--only kimi,kimik3` run kimik3 (the human named it);
     (b) CONTROL: a cheap Kimi that starts (kimik3free on) keeps the word to it - no stop;
     (c) Wonder has no free member: «только вондер» still starts (R149) and its paid members' plan lines say PAID;
-    (d) M9/U3: over every group word, kit-shaped and as shipped, the stop fires only where the free Kimi is off;
+    (d) M9/U3: over every group word, kit-shaped and as shipped, the stop fires only where the free member is off;
         «только CLI» never adds kimik3;
     (e) H4: `opencode --version` is parsed (v2 «opencode v2.0.29», v1 «1.19.2»); on v1 a model#variant call
         returns a named error with the v2 install line and starts nothing; without a variant it runs, noted;
@@ -21075,7 +21075,9 @@ def suite_r171_nvidia_deepseek():
     (d) «deepseek» / «дипсик» and «glm» are family groups: «не используй deepseek» drops the NVIDIA DeepSeek,
         «не используй glm» turns its fallback off, «только дипсик» runs it alone in the cheap panel;
     (e) the page-fetch fence (citecheck._resolve_public) refuses the tailnet range 100.64.0.0/10 and *.ts.net names -
-        the hole that leaked an operator's admin page in a panel on 2026-10-24 - and still allows a public address.
+        the hole that leaked an operator's admin page in a panel on 2026-10-24 - and still allows a public address;
+        A4 (R171 И-5): mapped IPv6, NAT64, 6to4, ULA, loopback, capitals, trailing dot on every CI leg;
+    (f) A6 (R171 И-5): when both NVIDIA channels are not ready, the fallback prints OFF in this run.
     """
     import copy
     import citecheck as cc
@@ -21136,11 +21138,47 @@ def suite_r171_nvidia_deepseek():
           "R171 (d) «deepseek» / «дипсик» and «glm» are family groups: «не используй deepseek» drops the NVIDIA DeepSeek, "
           "«не используй glm» turns its fallback off, «только дипсик» runs it alone in the cheap panel",
           repr((fam, no_ds, fb_g.get("off"), only_ds)))
-    fence = {h: cc._resolve_public(h) for h in ("100.64.0.1", "100.100.100.100", "8.8.8.8", "stand.tail0abc.ts.net")}
-    check(fence["100.64.0.1"][0] is None and fence["100.100.100.100"][0] is None
-          and fence["8.8.8.8"][0] == ["8.8.8.8"] and "Tailscale" in str(fence["stand.tail0abc.ts.net"][1]),
-          "R171 (e) the page-fetch fence refuses the tailnet range 100.64.0.0/10 and *.ts.net names, and still allows "
-          "a public address", repr(fence))
+    # A4 (R171 И-5): address forms that every CI leg must prove.
+    refuse = [
+        "100.64.0.1",                        # tailnet CGNAT
+        "100.100.100.100",                    # tailnet CGNAT
+        "::ffff:100.64.0.1",                  # mapped IPv4 in IPv6
+        "::ffff:10.0.0.1",                    # mapped private
+        "64:ff9b::100.64.0.1",                # NAT64 well-known prefix
+        "64:ff9b::10.0.0.1",                  # NAT64 private
+        "2002:6440:0001::",                    # 6to4 (100.64.0.1)
+        "fd00::1",                             # ULA
+        "127.0.0.1",                           # loopback
+        "::1",                                 # loopback v6
+        "stand.tail0abc.ts.net",               # tailnet name
+        "STAND.TAIL0ABC.TS.NET",               # capitals
+        "stand.tail0abc.ts.net.",              # trailing dot
+    ]
+    allow = ["8.8.8.8"]
+    fence = {h: cc._resolve_public(h) for h in refuse + allow}
+    refused_ok = all(fence[h][0] is None for h in refuse)
+    allowed_ok = all(fence[h][0] is not None for h in allow)
+    bad = [h for h in refuse if fence[h][0] is not None] + [h for h in allow if fence[h][0] is None]
+    check(refused_ok and allowed_ok,
+          "R171 (e) the page-fetch fence refuses tailnet CGNAT, mapped IPv6, NAT64, 6to4, ULA, loopback, "
+          "*.ts.net (lower/upper/trailing-dot) and still allows a public address",
+          "FAILED: %s" % bad if bad else repr({h: fence[h] for h in refuse[:3] + allow}))
+    # A6: when NEITHER NVIDIA channel is ready, the fallback prints "OFF in this run".
+    import copy as _a6cp
+    reg_nk = _a6cp.deepcopy(reg)
+    def _nk_ready(n):
+        return n not in ("nvdeepseekv41flash", "nvglm53flash")
+    try:
+        p_nk = rt.resolve(_a6cp.deepcopy(reg_nk), tier="max", ready=_nk_ready, panel="cheap")
+        p_nk = p_nk[0] if isinstance(p_nk, tuple) else p_nk
+        ds_nk = p_nk.get("nvdeepseekv41flash") or {}
+        fb_nk = ds_nk.get("fallback") or {}
+    except Exception as exc:  # noqa: BLE001
+        ds_nk, fb_nk = {"err": repr(exc)}, {}
+    check(ds_nk.get("enabled") and fb_nk.get("off") and "cannot run" in str(fb_nk.get("off", "")),
+          "R171 (f) when both NVIDIA channels are not ready, DeepSeek still appears in the plan and its "
+          "fallback is marked OFF with a reason naming that it cannot run",
+          repr((ds_nk.get("enabled"), fb_nk.get("off"))))
 
 
 def suite_r172_lapsed_plan_diagnoses():
@@ -21160,9 +21198,9 @@ def suite_r172_lapsed_plan_diagnoses():
     p = ('HTTP 402 from openrouter: {"error":{"message":"This request would exceed your available credits given '
          'your current in-flight requests. Retry after in-flight requests settle, or add credits.","code":402}}')
     cq, fq = o.diagnose(q)
-    check("Token Plan" in str(cq) and "paused" in str(cq) and "qwen38max" in str(fq)
+    check("Token Plan" in str(cq) and "may have expired" in str(cq) and "qwen38max" in str(fq)
           and "do not make it on your own" in str(fq),
-          "R172 (a) the Qwen CLI's 403 names the lapsed Token Plan; a paid re-run elsewhere is the operator's decision",
+          "R172 (a) the Qwen CLI's 403 names the Token Plan; a paid re-run elsewhere is the operator's decision",
           repr((cq, fq)))
     cp, fp = o.diagnose(p)
     check("lack of credit" in str(cp) and "billed" in str(cp) and "--skip" in str(fp),

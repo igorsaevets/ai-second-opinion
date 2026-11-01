@@ -206,7 +206,7 @@ decide.
 
 A cited URL is model-generated text. `citecheck.py` refuses to fetch non-public hosts (localhost,
 private address ranges, and since 1.118.0 every address that is not globally routable, among them
-the 100.64.0.0/10 range Tailscale uses, and every `*.ts.net` name) for exactly that reason — and since 1.45.0 every such fetch, including
+the 100.64.0.0/10 range Tailscale uses, and every `*.ts.net` name, including Tailscale Funnel pages that are public by design) for exactly that reason — and since 1.45.0 every such fetch, including
 the model-facing page-fetch tool, connects to the exact address the check vetted (per redirect
 hop, TLS validated against the hostname), so a TTL-0 DNS rebinding answer has nothing to rebind.
 

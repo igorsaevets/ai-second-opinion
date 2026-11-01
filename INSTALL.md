@@ -22,7 +22,7 @@ a review, to the channels you chose.
 
 ---
 
-## Prerequisite: Python 3.8 or newer
+## Prerequisite: Python 3.9 or newer
 
 ```
 python --version
@@ -598,7 +598,7 @@ export NVIDIA_NIM_API_KEY="<your key>"
 ```
 
 > NVIDIA's free endpoints allow about 40 requests a minute, and the queue is slow at times: on
-> 2026-10-23 the first byte took 57–110 s. A DeepSeek review has 61 minutes, its GLM fallback 20;
+> 2026-10-23 the first byte took 57–110 s. A DeepSeek review has 61 minutes, its GLM fallback 20 (worst case: 142 minutes = 61 + retry 61 + GLM 20);
 > what each wrote by then is kept.
 
 ### OpenRouter — `OPENROUTER_API_KEY`

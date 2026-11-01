@@ -1,12 +1,16 @@
 # Changelog
 
+## 1.118.1 — 2026-11-01
+
+Panel r171i3 review findings (A1–A10): the docs now state the worst case for a cheap round with DeepSeek (142 min, not "past an hour"); the OpenRouter 402 advice matches the vendor's remedy (retry after in-flight requests settle); the Qwen 403 cause text is softened; the page-fetch fence IDNA-normalises the host before the name check (Unicode spellings of `*.ts.net` are caught by the name rule, not only the IP rule); the selftest's fence check covers mapped IPv6, NAT64, 6to4, ULA, loopback, capitals and trailing-dot on every CI leg; the no-key fallback OFF is pinned; Tailscale Funnel pages are mentioned in SECURITY and TECHNICAL; Python floor 3.8→3.9 (aligned to CI); CHANGELOG lists `z.ai`/`зетай`; the suite_r153_i5 label covers glm too.
+
 ## 1.118.0 — 2026-11-01
 
 DeepSeek V4.1 Flash on NVIDIA's free key takes Step 5 Preview's seat in the cheap panel, with GLM 5.3 Flash as its fallback; «deepseek» and «glm» become family words; the page-fetch tool stops opening Tailscale addresses; CI is green again.
 
 - **DeepSeek V4.1 Flash replaces Step 5 Preview**, which kept failing real rounds. `nvdeepseekv41flash` runs on NVIDIA's free endpoint (`NVIDIA_NIM_API_KEY`) at effort `max` (NVIDIA accepts none..max; n=3 high against max overlapped, so no depth verdict), `max_tokens` 131072, `timeout` 61m, with the page-fetch tool and no web search. Its fallback is GLM 5.3 Flash on the same key (`nvglm53flash`: off as a voice, effort `max`, 20m), started once after the round when DeepSeek ends with under 2000 bytes of text, a timeout included. Without the key the plan names it and prints the fallback `OFF in this run`. `ocstep5previewnv` / `nvstep5preview` are off and start only by name. Counts on a machine with every key and CLI: cheap 6, standard 12, «CLI only» 3 (2 on a day opencode's free allowance was refused), `--ask` 4 (3).
 - **Measured: the seat is slow, so plan for it.** At 20 minutes one live review (~20K tokens of brief and diff) was still reasoning with no answer, hence 61. At 61 minutes the same review's first attempt died silently at 650 s; the automatic retry (the AUTO-RETRY rule, unchanged: the full budget again) answered at 3,556 s of 3,660 with 22 KB and 61,030 reasoning tokens, and opened no page. DeepSeek held that cheap round about 70 minutes. By the rules (not measured), a silent death late in the first attempt, a retry that times out and GLM's turn can hold it past two hours.
-- **Family words**: `deepseek` / `дипсик` and `glm` / `глм` / `zai` are groups over every transport, as `kimi` and `grok` are. «не используй glm» also turns DeepSeek's fallback off; `--only glm` on the cheap panel stops with a route error, because its only startable member there is the paid `orglm53`; `--only deepseek` runs `nvdeepseekv41flash`.
+- **Family words**: `deepseek` / `дипсик` and `glm` / `глм` / `zai` / `z.ai` / `зетай` are groups over every transport, as `kimi` and `grok` are. «не используй glm» also turns DeepSeek's fallback off; `--only glm` on the cheap panel stops with a route error, because its only startable member there is the paid `orglm53`; `--only deepseek` runs `nvdeepseekv41flash`.
 - **The page-fetch fence**: `citecheck._resolve_public` refuses every address that is not `is_global` and every `*.ts.net` name before resolving it. Python calls 100.64.0.0/10, the range Tailscale uses, neither private nor global, so such an address used to pass as public. One function serves the citation check and the page-fetch tool the API reviewers call; a reviewer had fetched a tailnet admin page through it.
 - **Two more causes in `diagnose()`**: Qwen Code's «403 Access to model denied» (the account's Token Plan lapsed or its monthly credits are spent: renewing is the owner's step, and re-running the brief on a paid channel is a spending decision, not a repair) and OpenRouter's «would exceed your available credits» (402; tokens generated before the refusal are billed).
 - **CI green again** (red on every release since 1.116.0). The Python 3.9 leg runs on `ubuntu-24.04`: setup-python has no 3.9 for Ubuntu 26.04, today's `ubuntu-latest`, so 1.116.0-1.117.2 never ran on 3.9. Three checks had not followed 1.116.0's utf-8 change: two Muse Code environment checks now admit the utf-8 variables, and R138 re-pins the grok bypass prompt (its only change is 1.116.0's utf-8 sentence). SKILL.md is back under its 5,000-token re-attach budget. These were checks lagging the code, not run defects; `python selftest.py` on an installed 1.116.0-1.117.2 printed the same failures. `orchestrate.py` loses the UTF-8 byte-order mark 1.116.0 put before its `#!` line.
@@ -598,7 +602,7 @@ Six outside reviewers read the 1.102.3 change: the session-start hook and its wr
   - a drive letter mapped to a network share. This one was probed at every session start, and a dead share can stall one.
   Every doubt now counts as «not gone».
 - **Only the script a hook runs makes it ours.** For an exec-form hook that is its first argument. Another tool's hook that merely mentioned our path as a later argument was taken for ours. It was deleted when that path was gone, and its program was replaced by our Python. A single-quoted path is now recognised too.
-- **The end of a review round only re-points a dead interpreter. It never deletes a hook.** Deletion waits for a session start, where a live copy runs anyway. The replacement interpreter must also start a Python 3.8+ first: a file that merely exists can be the Microsoft Store stub.
+- **The end of a review round only re-points a dead interpreter. It never deletes a hook.** Deletion waits for a session start, where a live copy runs anyway. The replacement interpreter must also start a Python 3.9+ first: a file that merely exists can be the Microsoft Store stub.
 - **A refused write is reported as one.** When Windows refused the rename (a program holding the file open, a read-only file), the message said the file «kept changing». It now says it could not be written.
 - **Another writer's change is lost in fewer cases.** The changed-under-us guard now compares the bytes after the new file is on disk, right before the rename. The window that remains is that comparison and the rename.
 - **The marketplace auto-update switch writes through the same guard.** `--auto-update on|off` for a plugin install had bypassed it.
@@ -1383,7 +1387,7 @@ wiring; the alternative (shipping stubs) would be dead code until then.
 **Kit invariant preserved.** `ground_classify.py` imports only stdlib
 (`collections`, `math`, `re`, `unicodedata`, `os`, `argparse`, `json`,
 `pathlib`, `urllib.parse`) — no torch, no numpy, no sentence-transformers.
-The kit ships to employees under any Python 3.8+.
+The kit ships to employees under any Python 3.9+.
 
 **Integration.** `orchestrate.py:call_oai_reviewer` runs Б-10 right after Б-9
 in the same try/except pattern — if Б-10 raises for any reason, the sidecar

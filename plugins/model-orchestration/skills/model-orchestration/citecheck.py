@@ -185,6 +185,16 @@ def _resolve_public(host, port=None):
     it 10 times. Anything that is not `is_global` is refused now, and a `*.ts.net` name before it
     is resolved (a tailnet name means the operator's own machines, whatever it resolves to).
     """
+    # R171 И-5 (A5): IDNA-normalise the host before the name check.  Fullwidth letters,
+    # U+3002 / U+FF0E dots and other Unicode forms are mapped to their ASCII equivalent
+    # by getaddrinfo's IDNA layer, so a name written in Unicode bypasses the ASCII check
+    # below but still resolves to 100.76.x (MagicDNS) - the IP rule catches it, but the
+    # name rule should too.  encodings.idna handles only IDNA 2003; it is enough for
+    # *.ts.net (all-ASCII after normalisation) and is in the standard library.
+    try:
+        host = host.encode("idna").decode("ascii")
+    except (UnicodeError, UnicodeDecodeError):
+        pass  # leave host as-is; the DNS call below will fail or the IP rule will catch it
     if str(host or "").lower().rstrip(".").endswith(".ts.net"):
         return None, "a Tailscale tailnet name (*.ts.net) - the operator's own network, never fetched"
     try:
