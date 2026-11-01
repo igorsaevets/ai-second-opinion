@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 orchestrate.py — call external reviewer models in parallel, at full depth, and verify the answers.
@@ -1590,6 +1590,25 @@ KNOWN_FAILURES = [
      "it repeats (NVIDIA's free moonshotai/kimi-k3 since 2026-10-06 - every run with text, 4 of 4; "
      "another NIM client reported the same stream). Leave it out with --skip <channel> until the "
      "vendor fixes it; the other reviewers' answers stand."),
+    # R172 (2026-10-31): two causes iron's P357c / P357d printed as «(no stock diagnosis)». With no cause
+    # named, the session re-ran the Qwen CLI's brief on the paid OpenRouter copy (qwen38max): $1.35, then
+    # $0.38 for a 402. The Token Plan had lapsed - the operator renewed it and the CLI answered again.
+    (r"403 Access to model denied\. Please make sure you are eligible",
+     "The Qwen Code CLI's subscription (Alibaba Cloud Model Studio Token Plan) refused the model: the "
+     "plan expired, or its monthly Credits are used up and the service is paused until the next "
+     "subscription month (help.aliyun.com/en/model-studio/token-plan-overview, read 2026-10-31). "
+     "Measured 2026-10-31: every call answered this 403 in 12-15 s while the plan was lapsed, and the "
+     "first call after the operator renewed it answered normally.",
+     "The account owner renews the plan (or buys an Extra Bundle) in the console where it was bought; "
+     "until then a re-run on the same plan fails the same way. Re-running the brief on another channel "
+     "of the model (qwen38max = OpenRouter, paid per call: $0.97-$1.35 a review measured) is a spending "
+     "decision for the operator, not a repair - do not make it on your own."),
+    (r"would exceed your available credits",
+     "OpenRouter refused the request for lack of credit on the key (HTTP 402): the balance, counting the "
+     "requests still in flight, cannot cover it. Tokens the model produced before the refusal are billed "
+     "- 2026-10-31 a qwen38max call billed $0.38 and then got this 402 after 873 s.",
+     "Add credit to the OpenRouter key, or leave the channel out (--skip <channel>); a re-run before the "
+     "balance changes fails the same way and may bill again."),
     # R153 И-2 (2026-10-15): a model the vendor RETIRED. NVIDIA ended moonshotai/kimi-k3 at
     # 2026-10-15T08:00Z - a direct request answers `410 Gone` «has reached its end of life», Kimi Code
     # CLI records only «410 status code (no body)» - and two panels that night printed «stopped before

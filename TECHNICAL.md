@@ -293,6 +293,15 @@ with one quota group, as in this registry, that is one extra start at worst; wit
 stale write can also bring back a refusal another round had just cleared, and that group then
 skips until 00:00 UTC.
 
+### What 1.118.0 changed in a run
+
+- **DeepSeek V4.1 Flash takes Step 5 Preview's seat** in the cheap panel: `nvdeepseekv41flash` (oai, NVIDIA's free endpoint, `NVIDIA_NIM_API_KEY`), effort `max` (NVIDIA accepts none..max; n=3 high against max overlapped, so no depth verdict), `max_tokens` 131072, `timeout` 61m (one live review was still reasoning at 20 minutes), the page-fetch tool on, no web search. Its fallback is GLM 5.3 Flash on the same key (`nvglm53flash`: off as a voice, effort `max`, 20m), started once after the round when DeepSeek ends with under 2000 bytes of text - a timeout counts, and a silent stream death is first retried once with the full budget (the AUTO-RETRY rule, unchanged). Without the key the plan names it and prints the fallback `OFF in this run`. `ocstep5previewnv` / `nvstep5preview` are off and start by name. Kit counts: cheap 6, standard 12, «CLI only» 3 (2 on a refused day), `--ask` 4 (3).
+- **Family words**: `deepseek` / `дипсик` and `glm` / `глм` / `zai` are groups over every transport (as `kimi` and `grok`): «не используй glm» also turns DeepSeek's fallback off; `--only glm` on the cheap panel stops, because its only startable member there is the paid `orglm53`.
+- **The page-fetch fence**: `citecheck._resolve_public` refuses every address that is not `is_global` (Python calls 100.64.0.0/10, the range Tailscale uses, neither private nor global, so it used to pass) and every `*.ts.net` name before it is resolved. One function serves the citation check and the model-facing page-fetch tool; before it, a tailnet admin page counted as public and a panel's API reviewer fetched it.
+- **Two more causes in `diagnose()`**: Qwen Code's «403 Access to model denied. Please make sure you are eligible» (the account's Token Plan lapsed or its monthly credits are spent: renewing is the owner's step, and re-running the brief on a paid channel is a spending decision, not a repair) and OpenRouter's «would exceed your available credits» (402; tokens generated before the refusal are billed).
+- **CI green again** (red since 1.116.0): the Python 3.9 leg runs on `ubuntu-24.04` (setup-python has no 3.9 for Ubuntu 26.04, today's `ubuntu-latest`), two Muse Code env checks admit 1.116.0's utf-8 trio, R138 re-pins the grok bypass prompt for 1.116.0's utf-8 sentence (the only change in it), and SKILL.md is back under its 5,000-token re-attach budget.
+- Not in this release: a free voice's fallback still starts only after the whole round, a timeout included.
+
 ### What 1.117.0 changed in a run
 
 - The inner watchdog (R166): a grok whose turn has not ended but one of whose tools stays pending longer than `GROK_TOOL_SILENCE` (90 s) is stopped at once — whole tree, `info["watchdog"]` with the tool and its age. `call_grokcli` records it failed-with-partial (no text, no outfile, `WATCHDOG` warning, the session note and the stuck tool in the error, `watchdog_tool` / `watchdog_stuck_s` fields), so an armed fallback may still run the seat. `diagnose()` answers `WATCHDOG after` with the stalled-tool cause (a longer timeout would not help). Other CLIs keep the channel-timeout tree kill only.
@@ -339,8 +348,9 @@ skips until 00:00 UTC.
   on Windows, the process group elsewhere. Until 1.113.9 only the program's launcher was stopped (on
   Windows the `opencode.CMD` shim), the agent below it kept working, and one round waited 3,980 s for
   a channel with a 1,200 s timeout. What the agent wrote before the stop is kept.
-- **One voice per model, the first transport that can run here** (`_cascade_groups`): Step 5 Preview =
-  `ocstep5previewnv` (opencode on NVIDIA's free endpoint), `nvstep5preview` (NVIDIA's API); Nemotron 3
+- **One voice per model, the first transport that can run here** (`_cascade_groups`): DeepSeek V4.1
+  Flash = `nvdeepseekv41flash` (NVIDIA's API), then `ocdeepseekv41flashfree` / `ocdeepseekv41flashgo` where switched
+  on; Step 5 Preview = `ocstep5previewnv`, `nvstep5preview` (off since 1.118.0, by name); Nemotron 3
   Ultra = `nvnemotron3ultra`, `ocnemotron3ultrafree`, `ornemotron3ultra` (the last on the standard
   panel); MiMo v2.6 Flash = `ocmimo26flashfree`, `ormimo26flash`. When no member can run, the plan names
   what each one lacks («opencode CLI not found», «NVIDIA_NIM_API_KEY not set (a free key:

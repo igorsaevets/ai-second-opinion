@@ -22,12 +22,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ['3.9', '3.13']
-        exclude:
+        python: ['3.13']
+        include:
           # One Python version per non-Linux runner is enough; the code is standard-library only.
-          - os: macos-latest
-            python: '3.9'
-          - os: windows-latest
+          # The oldest Python we promise, 3.9, runs on the previous Ubuntu LTS image: ubuntu-latest
+          # became Ubuntu 26.04 and setup-python has no 3.9 build for it («The version '3.9' with
+          # architecture 'x64' was not found for Ubuntu 26.04» - CI of 1.116.0-1.117.2 was red on it).
+          # actions/python-versions lists 3.9.25 for Ubuntu 22.04 and 24.04 (read 2026-11-01).
+          - os: ubuntu-24.04
             python: '3.9'
     runs-on: ${{ matrix.os }}
     steps:

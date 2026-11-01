@@ -180,10 +180,10 @@ stable and worth knowing:
 | thing | value |
 |---|---|
 | `MODEL_API_KEY` | the **only** environment variable that must be set. Everything else has a working default |
-| HTTPS endpoint / model | `https://api.meta.ai/v1`; the model comes from `channels.json` and the **registry wins over `MODEL_NAME`** — one process-wide variable cannot address one of two channels on one endpoint. Docs: `dev.meta.ai/docs` (public; the login wall is the console, not the docs) |
+| HTTPS endpoint / model | `https://api.meta.ai/v1`; the model comes from `channels.json` and the **registry wins over `MODEL_NAME`** — one process-wide variable cannot address one of two channels on one endpoint. Docs: `dev.meta.ai/docs` |
 | Codex CLI | resolved via `CODEX_BIN` → PATH → known install dirs |
 | Antigravity CLI | `agy`, **not on PATH** on Windows; resolved via `AGY_BIN` → PATH → `%LOCALAPPDATA%\agy\bin\agy.exe` |
-| agy models | one model per channel, base slug plus `--effort`. **Not** `gemini-3.1-pro-high` — a suffixed slug plus a disagreeing `--effort` is exit 1 in 3 s (`references/channels.md` §6.3) |
+| agy models | one model per channel, base slug plus `--effort`; a suffixed slug (`-high`) plus a disagreeing `--effort` is exit 1 in 3 s (`references/channels.md` §6.3) |
 | Grok Build CLI | `grok`, **not on PATH**; `GROK_BIN` → PATH → `%USERPROFILE%\.grok\bin`. Subscription session, no key. Reads `CLAUDE.md` from its cwd upward → neutral cwd. 🔴 **One denied tool discards the whole turn**, and `--tools` does not bound the MCP gateway. Flags in `channels.json` |
 | harness | `orchestrate.py`, standard library only, no `pip install`, Python 3.8+ (`patch_codex_firecrawl.py` alone needs 3.11+ and says so) |
 
@@ -201,7 +201,7 @@ at the ceiling its own vendor accepts, in every mode: **only the number of model
 
 | `--panel` | who runs |
 |---|---|
-| **`cheap`** (default since 2026-08-16) | free, subscription and low-rate channels — all **except** spark11, codex, kimik3 and qwen38max. *«запусти дешевые»* |
+| **`cheap`** (default since 2026-08-16) | free, subscription and low-rate channels; `python routing.py` prints who. *«запусти дешевые»* |
 | **`standard`** | every enabled channel except `explicit_only` ones (Wonder). *«запусти все»*, *«стандартная панель»* |
 
 **Premium (true-batch + Flex) is a separate script, not a panel**: `premium/premium_panel.py`;
@@ -209,16 +209,14 @@ at the ceiling its own vendor accepts, in every mode: **only the number of model
 
 🔴 **Neither a panel nor a GROUP enables anything.** `--only openrouter`, *«только грок»* run only
 the members already on. **Naming a channel is the one way to start one that ships off** —
-`--only goog36flash`. 🔴 **What `cheap` costs is vendor diversity, not depth**: it drops OpenAI,
-Moonshot, Alibaba, DeepSeek and Meta-Standard; the plan prints the vendor tally and what
-`standard` adds — six Geminis agreeing is one opinion repeated.
+`--only goog36flash`. 🔴 **What `cheap` costs is vendor diversity, not depth**: the plan prints the
+vendor tally and what `standard` adds — six Geminis agreeing is one opinion repeated.
 
 **`--tier` parses and chooses nothing.** One tier, `max`; `strategic`/`deep` are aliases so old
 commands work. Resolved depth is printed per channel.
 
 **A below-floor note names its cause.** With the default `--answer-cap` a short FINAL answer is
 what was asked for; "under-allocated" means something only with the cap off.
-Streaming is automatic above a 32,000 budget — why, in `references/channels.md`.
 
 **Your own settings go in `~/.claude/model-orchestration.local.json`, never in `channels.json`** —
 an update replaces the skill folder and cannot reach that file. `{"channels": {"<name>":
@@ -269,14 +267,14 @@ anything from source. Three that decide what you do next:
   fields the plan prints at the top.
 - 🔴 **The LAUNCH is refused with «Auto mode could not evaluate this action»**: the permission
   classifier returned no verdict — not a decision about your command. **Retry the identical
-  command**, never a rewritten one. Measured; the rule lives in `~/.claude/CLAUDE.md`.
+  command**, never a rewritten one.
 
 ---
 
 ## 10. Report back — always
 
-🔴 **Name every channel WITH its model and depth** — `codex (gpt-5.4 @ xhigh)`, never a bare name
-(the operator, R46: «не просто Codex, а Codex5.4Xhigh»). Per channel: seconds, in/out tokens, **tool/fetch
+🔴 **Name every channel WITH its model and depth** — `codex (gpt-5.4 @ xhigh)`, never a bare name.
+Per channel: seconds, in/out tokens, **tool/fetch
 count**, **grounding** (pages we fetched / vendor-stated / none) and **citations in the text** — a
 web-capable channel that cited nothing is a fact to state, not a blank column: the review is
 training-data-plus-brief, which R45's table hid. Then separately: **accepted**, **rejected with

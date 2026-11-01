@@ -178,7 +178,15 @@ def _resolve_public(host, port=None):
     resolution for a TTL-0 record to rebind. An address getaddrinfo returns but ipaddress
     cannot parse is a refusal, not a skip - an unparseable address cannot be vetted, and
     for a pin «could not check» must never mean «allowed».
+
+    R171 (2026-10-31) closes a third hole, the one that leaked data in an operator's panel
+    (2026-10-24): a Tailscale name resolves into 100.64.0.0/10, where Python says
+    `is_private=False` - so a tailnet admin page counted as «public» and an API reviewer fetched
+    it 10 times. Anything that is not `is_global` is refused now, and a `*.ts.net` name before it
+    is resolved (a tailnet name means the operator's own machines, whatever it resolves to).
     """
+    if str(host or "").lower().rstrip(".").endswith(".ts.net"):
+        return None, "a Tailscale tailnet name (*.ts.net) - the operator's own network, never fetched"
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError as e:
@@ -191,7 +199,7 @@ def _resolve_public(host, port=None):
         except ValueError:
             return None, "unparseable address %r" % raw
         if (ip.is_private or ip.is_loopback or ip.is_link_local
-                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified or not ip.is_global):
             return None, "resolves to non-public address %s" % ip
         addrs.append(raw)
     if not addrs:

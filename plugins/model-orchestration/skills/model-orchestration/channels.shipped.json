@@ -213,6 +213,37 @@
         "k3 max"
       ]
     },
+    "deepseek": {
+      "label": "every DeepSeek voice, all transports",
+      "channels": [
+        "ordeepseekv4pro",
+        "nvdeepseekv41flash",
+        "ocdeepseekv41flashfree",
+        "ocdeepseekv41flashgo"
+      ],
+      "_added_r171": "R171 (2026-10-31): nvdeepseekv41flash put a SECOND DeepSeek model in a running panel, so «deepseek» / «дипсик» - aliases of ordeepseekv4pro until now - would have dropped only V4 Pro from «не используй deepseek» and left V4.1 Flash running (hard rule: a 2nd channel of a vendor makes that vendor's alias a lie; fix in the same commit). Same rule as `kimi` and `grok`: the vendor word means the FAMILY; `ds4pro` / «deepseek v4 pro» still name V4 Pro, «deepseek 4.1 flash» the NVIDIA channel. A group enables nothing: `--only deepseek` runs the members already on in this panel.",
+      "aliases": [
+        "deepseek",
+        "дипсик"
+      ]
+    },
+    "glm": {
+      "label": "every GLM voice (Z.ai), all transports",
+      "channels": [
+        "orglm53",
+        "nvglm53flash",
+        "ocglm53flashfree",
+        "ocglm53flashgo"
+      ],
+      "_added_r171": "R171 (2026-10-31): nvglm53flash became nvdeepseekv41flash's run-time fallback, so «не используй glm» - an alias of orglm53 until now - must also stop that fallback (a fallback the plan's skip list names is printed off). Same rule as `deepseek` above; `orglm53` / «glm 5.3» still name the OpenRouter GLM 5.3.",
+      "aliases": [
+        "glm",
+        "глм",
+        "zai",
+        "z.ai",
+        "зетай"
+      ]
+    },
     "direct": {
       "label": "every channel on a DIRECT vendor key rather than a reseller or a CLI",
       "channels": [
@@ -1127,7 +1158,8 @@
       "kind": "opencode",
       "panel": "cheap",
       "vendor": "stepfun",
-      "enabled": true,
+      "enabled": false,
+      "_enabled_r171": "R171 (2026-10-31): OFF, the operator: «Step 5 модель давай отключим, она постоянно глючит ... заменить ее на deepseek 4.1 Flash и fallback glm 5.3 flash тоже с nvidia». Measured before: this opencode copy failed in panel r157i9 (TIMEOUT at 20 min, 613 B), the 10-26 grok-hang round (1200 s timeout) and iron P357c (50 B); nvstep5preview answered late each time. The seat is nvdeepseekv41flash's now; this channel still starts by name.",
       "distribution": "both",
       "_distribution_r168": "R168 И-3 (2026-10-24): both, on. the operator 2026-10-23: «Step 5 Preview давай добавим тоже в opencode, а если у пользователя в kit нет opencode cli, то срабатывает fallback на просто api». First in the Step 5 cascade; nvstep5preview (the plain API) carries the voice where opencode or the key is missing. Q2's reading: default-on in the kit after D1 (R168 И-2) and one kit-shaped run (R168 И-3's smoke).",
       "label": "OC Step 5 Preview (opencode + NVIDIA free)",
@@ -1163,6 +1195,55 @@
       "notes": "Step 5 Preview through the opencode CLI's own nvidia/ provider on NVIDIA's free endpoint - not Zen's daily allowance (no quota_group: NVIDIA counts its own). The CLI agent's tools; the key as in _oc_key.",
       "_prompt_suffix_r168": "As nvstep5preview: NVIDIA API Trial Terms (training tier); package.py strips it from the kit."
     },
+    "nvdeepseekv41flash": {
+      "read_order": 1,
+      "kind": "oai",
+      "provider": "nvidia",
+      "panel": "cheap",
+      "vendor": "deepseek",
+      "enabled": true,
+      "distribution": "both",
+      "_added_r171": "R171 (2026-10-31), the operator: «Step 5 модель давай отключим, она постоянно глючит. Она на каком канале была ? Если работала через nvidia то заменить ее на deepseek 4.1 Flash и fallback glm 5.3 flash тоже с nvidia». Step 5 ran on NVIDIA (ocstep5previewnv = opencode + NVIDIA, its fallback nvstep5preview = NVIDIA's API), so this channel takes its cheap seat on the same free key. both = ships ON in the kit, like the Step 5 pair it replaces.",
+      "label": "NV DeepSeek V4.1 Flash (NVIDIA free)",
+      "cost": "free",
+      "model": "deepseek-ai/deepseek-v4.1-flash",
+      "reasoning": {
+        "effort": "max"
+      },
+      "_reasoning": "Top-level reasoning_effort (OAI_PROVIDERS nvidia). Measured 2026-10-31 (runs/r171-nvidia-deepseek): the model's own control is an INTEGER 1-100 (Hugging Face card: «All instruct results below use the maximum effort setting (`reasoning_effort=100`)»), but NVIDIA's gateway refuses it (400 «invalid type: integer `100`, expected string or map») and takes its own enum none / minimal / low / medium / high / xhigh / max (an invented value = 400 listing it - the parameter's enum, not the model's). max is accepted; meter on one puzzle, n=3 each: high 861..2843, max 822..1839 reasoning tokens - overlap, so whether max reaches the model's 100 is NOT shown. With no field it reasons anyway (953 on the first probe).",
+      "max_tokens": 131072,
+      "_max_tokens": "min(the endpoint's max_tokens ceiling 1048576, 131072) - the _max_tokens_rule; DeepSeek's card recommends max_tokens >= 256K, so 131072 is our cap, not the model's.",
+      "web": {
+        "enabled": false,
+        "_none": "NVIDIA's endpoint has no search tool: the brief plus fetch_url."
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 16,
+        "_same_as": "nvnemotron3ultra / nvglm53flash"
+      },
+      "timeout": "61m",
+      "_timeout": "R172 (2026-10-31), the operator: «Давай дадим ему 61 мин.» - the answer to R171's budget question. The one live harness run at 20 min (r157i9 brief + a 67 KB diff, ~20K tokens sent) closed the read while DeepSeek was still reasoning (114,348 reasoning chars, no answer text) and its GLM fallback answered after 1,394 s; speed on the free endpoint 2026-10-31: 822-3513 completion tokens in 37-151 s (~20-25 tokens/s). Was 20 min (the Step 5 seat's budget, R168 D1).",
+      "fallback": "nvglm53flash",
+      "_fallback_r171": "the operator: «fallback glm 5.3 flash тоже с nvidia» - ANOTHER model on the same free endpoint (not the same model over another transport, as the other fallbacks): an empty DeepSeek answer still leaves the seat a free NVIDIA voice. One fallback, never a chain (R163 И-3).",
+      "models": {
+        "deepseek-ai/deepseek-v4.1-flash": {
+          "label": "DeepSeek V4.1 Flash (NVIDIA free endpoint)",
+          "data_policy": "NVIDIA API Trial Terms of Service (free trial endpoint) plus the NVIDIA Open Model Agreement; the base model is MIT. Free at point of use; NVIDIA's free endpoints allow about 40 requests a minute.",
+          "aliases": [
+            "deepseek-ai/deepseek-v4.1-flash",
+            "deepseek v4.1 flash",
+            "deepseek 4.1 flash"
+          ]
+        }
+      },
+      "aliases": [
+        "nvdeepseekv41flash",
+        "nvdeepseek"
+      ],
+      "notes": "Direct OpenAI-protocol call (call_oai_reviewer, provider nvidia), streamed, our fetch_url; first in DeepSeek V4.1 Flash's cascade (before the opencode Zen and Go copies); its fallback is GLM 5.3 Flash on the same endpoint.",
+      "_prompt_suffix_r171": "NVIDIA API Trial Terms (training tier), as nvnemotron3ultra / nvglm53flash; package.py strips it from the kit."
+    },
     "nvglm53flash": {
       "read_order": 1,
       "kind": "oai",
@@ -1172,15 +1253,16 @@
       "enabled": false,
       "distribution": "both",
       "_enabled_r168": "R168 И-3 (2026-10-24): off like its head ocglm53flashfree (R157: one free voice); by name, and GLM 5.3 Flash's free API copy where opencode is missing.",
+      "_enabled_r171": "R171 (2026-10-31): still off as a voice; nvdeepseekv41flash's run-time fallback (the operator: «fallback glm 5.3 flash тоже с nvidia»). Live 2026-10-31: 6/6 calls answered in 12-92 s.",
       "label": "NV GLM 5.3 Flash (NVIDIA free)",
       "cost": "free",
       "model": "z-ai/glm-5.3-flash",
       "reasoning": {
-        "effort": "high"
+        "effort": "max"
       },
-      "_reasoning": "Top-level reasoning_effort (OAI_PROVIDERS nvidia). F5 2026-10-23: validated (an invented value = 400 after 69 s); none 37/40 vs high 8/8 reasoning tokens on a trivial prompt - disjoint but inverse, so NO depth verdict. high = the documented top, not a measured ceiling.",
-      "max_tokens": 32768,
-      "_max_tokens": "NOT read from NVIDIA's model reference (R168 И-3): nvnemotron3ultra's value on the same endpoint.",
+      "_reasoning": "Top-level reasoning_effort (OAI_PROVIDERS nvidia). R171 2026-10-31: NVIDIA's model card (build.nvidia.com/z-ai/glm-5-3-flash/modelcard): «`reasoning_effort`, which accepts `low`, `high`, or `max` and defaults to `max`» - so the R168 line «high = the documented top» was wrong and the channel ran BELOW its ceiling. Meter, one puzzle, n=3 each: high 485..1137, max 1047..2715 reasoning tokens - overlap, so the depth is NOT shown; max = the vendor's top value. An invented value = 400 listing the gateway's enum (none..max), the parameter's, not the model's. F5 2026-10-23: none 37/40 vs high 8/8 on a trivial prompt.",
+      "max_tokens": 131072,
+      "_max_tokens": "R171: min(the endpoint's max_tokens ceiling 1048576, 131072) - the _max_tokens_rule (nvstep5preview's value). Was 32768, nvnemotron3ultra's value copied in R168 И-3 without a source.",
       "web": {
         "enabled": false,
         "_none": "NVIDIA's endpoint has no search tool: the brief plus fetch_url."
@@ -1205,7 +1287,7 @@
         "nvglm53flash",
         "nvglm"
       ],
-      "notes": "Direct OpenAI-protocol call (call_oai_reviewer, provider nvidia), streamed, our fetch_url; second in GLM 5.3 Flash's cascade after the Zen copy.",
+      "notes": "Direct OpenAI-protocol call (call_oai_reviewer, provider nvidia), streamed, our fetch_url; second in GLM 5.3 Flash's cascade after the Zen copy; nvdeepseekv41flash's run-time fallback (R171).",
       "_prompt_suffix_r168": "NVIDIA API Trial Terms (training tier), as nvnemotron3ultra."
     },
     "nvstep5preview": {
@@ -1214,7 +1296,8 @@
       "provider": "nvidia",
       "panel": "cheap",
       "vendor": "stepfun",
-      "enabled": true,
+      "enabled": false,
+      "_enabled_r171": "R171 (2026-10-31): OFF with ocstep5previewnv (the operator: «Step 5 модель давай отключим, она постоянно глючит»); still ocstep5previewnv's fallback when that one is started by name, and starts by name itself.",
       "distribution": "both",
       "_distribution_r168": "R168 И-3 (2026-10-24): both - ships ON in the kit. Second in the Step 5 cascade after its opencode copy: the plain API where opencode or the opencode route is missing (the operator 2026-10-23); Q2's reading (default-on after D1 and one kit-shaped run).",
       "_distribution_r163": "R163 (2026-10-22): local - package.py ships it OFF in the kit (a user starts it by name); whether the kit's cheap panel gets it is the owner's kit decision (R160), not taken here.",
@@ -2893,8 +2976,6 @@
       },
       "aliases": [
         "ordeepseekv4pro",
-        "deepseek",
-        "дипсик",
         "ds4pro"
       ],
       "_first_real_run_2026_08_15": "🟢 END TO END THROUGH THE HARNESS, not a raw HTTP probe: an 881-char brief with a live-search question and a planted false claim. 25.6 s, three generations, in=28 837 out=1 149, reasoning 272 tokens, three pages fetched by US (github.com/astral-sh/ruff releases + CHANGELOG + repo root), marker on the last line, citation audit ran (2 cited / 1 LIVE / 1 BLOCKED). It answered correctly with [OPENED] tags and REFUTED the planted claim by quoting the source: «An extremely fast Python linter and code formatter, written in Rust». Cost reported BY THE PROVIDER: $0.025587. 🔴 THE INTERESTING NUMBER IS `cached 21357` OF 28 837 INPUT - 74% of the re-sent conversation came back marked cached, on a route whose catalogue entries all say `supports_implicit_caching: false`. So that flag describes something narrower than «this endpoint caches», and the tool-loop re-send is not being billed at full rate here. Recorded as MEASURED but NOT ATTRIBUTED: the cached count is telemetry, whether the discount reached the price cannot be separated from a three-generation total that may have crossed two providers.",
@@ -3045,12 +3126,7 @@
         }
       },
       "aliases": [
-        "orglm53",
-        "glm",
-        "глм",
-        "zai",
-        "z.ai",
-        "зетай"
+        "orglm53"
       ],
       "notes": "1M context, reasoning-first model from Z.ai (released 2026-08-18). Improves on GLM-5.2 in coding and token efficiency. $1.40/M in, $4.40/M out — no longer the cheapest voice, but a stronger one. Reasoning is always on."
     }
@@ -3121,6 +3197,7 @@
       "ocglm53flashgo"
     ],
     [
+      "nvdeepseekv41flash",
       "ocdeepseekv41flashfree",
       "ocdeepseekv41flashgo"
     ]

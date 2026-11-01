@@ -210,10 +210,12 @@ the line gives the path of its answer file. Nothing failed.
 
 ### "NVIDIA_NIM_API_KEY not set (a free key: build.nvidia.com)"
 
-Since 1.114.0 the cheap panel has a Step 5 Preview voice, and Nemotron 3 Ultra runs first on NVIDIA's free
-endpoint; both need a free NVIDIA key. Without it the plan says so and the Step 5 voice ends at once,
-spending nothing; Nemotron goes through opencode when it is installed. Set the key
-([INSTALL.md](INSTALL.md#nvidia--nvidia_nim_api_key)) or leave the voice out: `--skip ocstep5previewnv`.
+The cheap panel has two voices on NVIDIA's free endpoint, DeepSeek V4.1 Flash (since 1.118.0; Step 5
+Preview from 1.114.0 to 1.117.2) and Nemotron 3 Ultra; both need a free NVIDIA key. Without it the plan
+says so («NVIDIA_NIM_API_KEY is not set. This channel will fail ...») and both voices end at once,
+spending nothing. DeepSeek's GLM fallback needs the same key, so the plan prints it `OFF in this run`;
+Nemotron's OpenRouter fallback still answers after the round. Set the key
+([INSTALL.md](INSTALL.md#nvidia--nvidia_nim_api_key)) or leave the voice out: `--skip nvdeepseekv41flash`.
 
 ### "MiMo v2.6 Flash is PAID in the plan"
 

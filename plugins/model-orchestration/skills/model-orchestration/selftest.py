@@ -3242,7 +3242,9 @@ def suite_panels():
         ("R170 2026-10-28", "ADD", "ocdeepseekv41flashgo",
          "Igor 2026-10-28 (same rule): DeepSeek V4.1 Flash on the Go plan (opencode-go/deepseek-v4.1-flash), ocdeepseekv41flashfree's fallback; own cascade pair; off as a voice. distribution local."),
         ("R170 2026-10-28", "ADD", "ocglm53flashgo",
-         "Igor 2026-10-28 (same rule): GLM 5.3 Flash on the Go plan (opencode-go/glm-5.3-flash), ocglm53flashfree's fallback; in the GLM cascade after the free Zen copy; off as a voice. distribution local.")
+         "Igor 2026-10-28 (same rule): GLM 5.3 Flash on the Go plan (opencode-go/glm-5.3-flash), ocglm53flashfree's fallback; in the GLM cascade after the free Zen copy; off as a voice. distribution local."),
+        ("R171 2026-10-31", "ADD", "nvdeepseekv41flash",
+         "Igor 2026-10-31: «Step 5 модель давай отключим, она постоянно глючит ... заменить ее на deepseek 4.1 Flash и fallback glm 5.3 flash тоже с nvidia». DeepSeek V4.1 Flash on NVIDIA's free endpoint (deepseek-ai/deepseek-v4.1-flash), on, distribution both, head of its cascade, fallback nvglm53flash; ocstep5previewnv + nvstep5preview off (by name only).")
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -8145,6 +8147,8 @@ def main():
         suite_r169_i2_kit_release,
         suite_r157_i5_quota_edges,
         suite_r157_i8_panel_fixes,
+        suite_r171_nvidia_deepseek,
+        suite_r172_lapsed_plan_diagnoses,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -11923,8 +11927,8 @@ R138_GOLDEN_BEFORE = {
     "grok.argv.bypass=True.refs=True": "f3ad07f02a817e4a",   # R150 И-4: +3 --deny (sessions, MCP OAuth, kimi-cli)
     "grok.prompt.bypass=False.refs=False": "7fd767f70586b77a",
     "grok.prompt.bypass=False.refs=True": "57fe754bf739fcf1",
-    "grok.prompt.bypass=True.refs=False": "2290629691e4ea45",  # 2026-10-22 key-file policy: the denied branch
-    "grok.prompt.bypass=True.refs=True": "2290629691e4ea45",   # now also names its shell gate (was e313a10a15bf330e)
+    "grok.prompt.bypass=True.refs=False": "a3acccb4e9007bc7",  # 1.116.0: the bypass preamble gained the utf-8 /
+    "grok.prompt.bypass=True.refs=True": "a3acccb4e9007bc7",   # temp .py / pdftotext rule (was 2290629691e4ea45)
     "main.brief": "b17e5d21bd0e7ab4",
     "main.rc": 0,
     "main.system": "59b505567b05ce0b",
@@ -15230,9 +15234,11 @@ def suite_r149_i3_muse_hotfix():
     e = o._musecode_env({"MUSE_CUSTOM_HEADERS": "x", "MUSE_SESSION_ID": "s", "MUSE_TRANSPORT_TRACE": "1",
                          "MUSE_EXPERIMENTAL_MEMORY": "1", "MUSE_CHANNEL": "muse-stable",
                          "META_API_KEY": "dummy", "PATH": "p", "XDG_CONFIG_HOME": "x"})
-    check(set(e) == {"PATH", "XDG_CONFIG_HOME"},
+    utf8 = {"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"}   # 1.116.0: every child runs utf-8
+    check(set(e) == {"PATH", "XDG_CONFIG_HOME"} | set(utf8) and all(e[k] == v for k, v in utf8.items()),
           "R149 И-3 (a) no MUSE_* name reaches the CLI (custom headers, transport trace, a parent "
-          "session's ids, experimental switches) and no key; PATH and XDG_* stay", repr(sorted(e)))
+          "session's ids, experimental switches) and no key; PATH, XDG_* and 1.116.0's utf-8 trio stay",
+          repr(sorted(e)))
     tmp = tempfile.mkdtemp(prefix="r149i3-")
     sid = "01a1345c-0000-7000-8000-000000000003"
     head = [{"stream": {"kind": "session", "id": sid}, "payload": {"kind": "session_run_linked"}}]
@@ -16335,6 +16341,12 @@ def suite_r153_i5_hotfix():
                 (stops if "will not start" in info else other).append("%s:%s" % (tag, g))
     want = ["%s:kimi" % t for t, reg in (("kit", kit), ("tree", base))
             if not reg["channels"]["kimik3free"].get("enabled", True)]
+    # R171: «glm» became a family group (nvglm53flash = nvdeepseekv41flash's fallback); with every cheap GLM member off,
+    # «--only glm» under the cheap default stops like «kimi» instead of starting the paid orglm53 by name
+    want += ["%s:glm" % t for t, reg in (("kit", kit), ("tree", base))
+             if not any((reg["channels"].get(c) or {}).get("enabled") and (reg["channels"].get(c) or {}).get("panel") == "cheap"
+                        for c in ((reg.get("groups") or {}).get("glm") or {}).get("channels") or [])]
+    stops, want = sorted(stops), sorted(want)
     cli, _ = runs(kit, route="только CLI")
     check(stops == want and not other and cli is not None and "kimik3" not in cli,
           "R153 И-5 (d) every group word, cheap default: the free-to-paid stop fires only where the free Kimi is "
@@ -17219,7 +17231,9 @@ def suite_r149_i2_muse_code():
     e = o._musecode_env({"META_API_KEY": "dummy", "MODEL_API_KEY": "dummy", "OPENROUTER_API_KEY": "dummy",
                          "MUSE_API_KEY": "dummy", "MUSE_CHANNEL": "muse-stable", "PATH": "p",
                          "XDG_CONFIG_HOME": "x", "SystemRoot": "r"})
-    check(set(e) == {"PATH", "XDG_CONFIG_HOME", "SystemRoot"},
+    utf8 = {"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"}   # 1.116.0: every child runs utf-8
+    check(set(e) == {"PATH", "XDG_CONFIG_HOME", "SystemRoot"} | set(utf8)
+          and all(e[k] == v for k, v in utf8.items()),
           "R149 И-2 (d) the CLI's env drops META_API_KEY / MODEL_API_KEY / every other key (a key "
           "outranks the subscription login) and every MUSE_* (R149 И-3), keeps PATH and XDG_*",
           repr(sorted(e)))
@@ -19226,7 +19240,8 @@ def suite_r154_i6_opencode_word_grading_retry():
                     ("--only opencode", {"only": ["opencode"]})):
         got = runs(**kw)
         # R157 И-2: 2 enabled since GLM / DeepSeek free went off (one voice of the shared free allowance); was >= 4
-        check(got == oc_on and len(oc_on) >= 2 and "ocspark13free" not in got,
+        # R171: 1 since the Step 5 opencode copy went off (the operator 2026-10-31); the set still equals oc_on
+        check(got == oc_on and len(oc_on) >= 1 and "ocspark13free" not in got,
               "R154 И-6 (a) %s runs the enabled opencode voices, never the dead ocspark13free" % how,
               repr(sorted(got)))
     got = runs(route="без opencode")
@@ -20698,6 +20713,12 @@ def suite_r168_i3_free_transports():
     import routing as rt
     section("R168 И-3: free voices without opencode - first ready transport, the plan names what is missing")
     reg = rt.load_registry()
+    # R171 (2026-10-31): the Step 5 pair is off (the operator: «Step 5 модель давай отключим»); this suite tests the
+    # cascade / fallback MECHANISM on that group, so it runs on a copy with both back on (suite_r171 owns the product state)
+    reg = copy.deepcopy(reg)
+    for _n in ("ocstep5previewnv", "nvstep5preview"):
+        if _n in reg.get("channels", {}):
+            reg["channels"][_n]["enabled"] = True
     ch = reg.get("channels") or {}
     grp = [g for g in reg.get("_cascade_groups") or [] if isinstance(g, list)]
     ocs, nvg, orm = (ch.get(n) or {} for n in ("ocstep5previewnv", "nvglm53flash", "ormimo26flash"))
@@ -21038,6 +21059,118 @@ def suite_r169_agy_argon():
     check(all(o == ["agy4argon"] and r == ["agy4argon"] for _w, o, r in words),
           "R169 (d) Igor's words start it alone: --only and the route «только ...» for «gemini 4 cli» and "
           "«gemini 4 аргон»", repr(words))
+
+
+def suite_r171_nvidia_deepseek():
+    """R171 (2026-10-31). Igor: «Step 5 модель давай отключим, она постоянно глючит. ... Если работала через nvidia то
+    заменить ее на deepseek 4.1 Flash и fallback glm 5.3 flash тоже с nvidia». Measured on NVIDIA's free endpoint the
+    same day (runs/r171-nvidia-deepseek): /v1/models lists deepseek-ai/deepseek-v4.1-flash and z-ai/glm-5.3-flash, both
+    answer; reasoning_effort takes the gateway's none..max (an invented value 400s, an integer 400s), max is accepted.
+    (a) nvdeepseekv41flash: oai / nvidia, cheap, ships on (both), free, effort max, max_tokens 131072, 61m (R172, the
+        operator's answer to R171's budget question: «Давай дадим ему 61 мин.» - 20 min closed a live review while it
+        was still reasoning), fetch_url on, no search, fallback nvglm53flash, first in DeepSeek V4.1 Flash's cascade;
+    (b) nvglm53flash stays off as a voice, effort max (NVIDIA's card: low / high / max, default max), max_tokens 131072;
+        the Step 5 pair (ocstep5previewnv, nvstep5preview) is off and still starts by name;
+    (c) the cheap plan runs nvdeepseekv41flash with its GLM fallback armed and no Step 5 channel;
+    (d) «deepseek» / «дипсик» and «glm» are family groups: «не используй deepseek» drops the NVIDIA DeepSeek,
+        «не используй glm» turns its fallback off, «только дипсик» runs it alone in the cheap panel;
+    (e) the page-fetch fence (citecheck._resolve_public) refuses the tailnet range 100.64.0.0/10 and *.ts.net names -
+        the hole that leaked an operator's admin page in a panel on 2026-10-24 - and still allows a public address.
+    """
+    import copy
+    import citecheck as cc
+    import routing as rt
+    section("R171: Step 5 off, DeepSeek V4.1 Flash on NVIDIA's free key with GLM 5.3 Flash as its fallback; tailnet fence")
+    reg = rt.load_registry(overlay=False)
+    ch = reg.get("channels") or {}
+    d, g = ch.get("nvdeepseekv41flash") or {}, ch.get("nvglm53flash") or {}
+    casc = [grp for grp in (reg.get("_cascade_groups") or []) if "nvdeepseekv41flash" in grp]
+    check(d.get("kind") == "oai" and d.get("provider") == "nvidia" and d.get("panel") == "cheap"
+          and d.get("enabled") is True and d.get("distribution") == "both" and d.get("cost") == "free"
+          and d.get("model") == "deepseek-ai/deepseek-v4.1-flash" and (d.get("reasoning") or {}).get("effort") == "max"
+          and d.get("max_tokens") == 131072 and d.get("timeout") == "61m"
+          and (d.get("fetch_tool") or {}).get("enabled") is True and (d.get("web") or {}).get("enabled") is False
+          and d.get("fallback") == "nvglm53flash" and casc and casc[0][0] == "nvdeepseekv41flash",
+          "R171 (a) nvdeepseekv41flash: oai/nvidia, cheap, ships on, free, effort max, 131072, 61m, fetch_url, no "
+          "search, fallback nvglm53flash, first in DeepSeek V4.1 Flash's cascade",
+          repr((d.get("kind"), d.get("provider"), d.get("enabled"), d.get("distribution"), d.get("model"),
+                d.get("reasoning"), d.get("max_tokens"), d.get("timeout"), d.get("fallback"), casc)))
+
+    def plan(**kw):
+        res = rt.resolve(copy.deepcopy(reg), tier="max", ready=lambda _n: True, **kw)
+        return res[0] if isinstance(res, tuple) else res
+
+    def on(**kw):
+        try:
+            return sorted(n for n, v in plan(**kw).items() if v.get("enabled"))
+        except Exception as exc:  # noqa: BLE001
+            return "RAISED %r" % exc
+
+    s5 = [(n, (ch.get(n) or {}).get("enabled"), on(only=[n])) for n in ("ocstep5previewnv", "nvstep5preview")]
+    check(g.get("enabled") is False and (g.get("reasoning") or {}).get("effort") == "max" and g.get("max_tokens") == 131072
+          and all(en is False and o == [n] for n, en, o in s5),
+          "R171 (b) nvglm53flash off as a voice at effort max / 131072; the Step 5 pair is off and each still starts by name",
+          repr(((g.get("enabled"), g.get("reasoning"), g.get("max_tokens")), s5)))
+    try:
+        pc = plan(panel="cheap")
+        run = sorted(n for n, v in pc.items() if v.get("enabled"))
+        fb = (pc.get("nvdeepseekv41flash") or {}).get("fallback") or {}
+    except Exception as exc:  # noqa: BLE001
+        run, fb = "RAISED %r" % exc, {}
+    check(isinstance(run, list) and "nvdeepseekv41flash" in run and not any("step5" in n for n in run)
+          and fb.get("channel") == "nvglm53flash" and not fb.get("off"),
+          "R171 (c) the cheap plan runs nvdeepseekv41flash with its GLM fallback armed and no Step 5 channel",
+          repr((run, fb.get("channel"), fb.get("off"))))
+    groups = reg.get("groups") or {}
+    fam = {w: sorted((groups.get(w) or {}).get("channels") or []) for w in ("deepseek", "glm")}
+    try:
+        no_ds = on(panel="cheap", route="не используй deepseek")
+        fb_g = ((plan(panel="cheap", route="не используй glm").get("nvdeepseekv41flash") or {}).get("fallback") or {})
+        only_ds = on(panel="cheap", route="только дипсик")
+    except Exception as exc:  # noqa: BLE001
+        no_ds, fb_g, only_ds = "RAISED %r" % exc, {}, None
+    check({"ordeepseekv4pro", "nvdeepseekv41flash"} <= set(fam["deepseek"]) and {"orglm53", "nvglm53flash"} <= set(fam["glm"])
+          and "дипсик" in ((groups.get("deepseek") or {}).get("aliases") or [])
+          and isinstance(no_ds, list) and "nvdeepseekv41flash" not in no_ds
+          and fb_g.get("channel") == "nvglm53flash" and fb_g.get("off") and only_ds == ["nvdeepseekv41flash"],
+          "R171 (d) «deepseek» / «дипсик» and «glm» are family groups: «не используй deepseek» drops the NVIDIA DeepSeek, "
+          "«не используй glm» turns its fallback off, «только дипсик» runs it alone in the cheap panel",
+          repr((fam, no_ds, fb_g.get("off"), only_ds)))
+    fence = {h: cc._resolve_public(h) for h in ("100.64.0.1", "100.100.100.100", "8.8.8.8", "stand.tail0abc.ts.net")}
+    check(fence["100.64.0.1"][0] is None and fence["100.100.100.100"][0] is None
+          and fence["8.8.8.8"][0] == ["8.8.8.8"] and "Tailscale" in str(fence["stand.tail0abc.ts.net"][1]),
+          "R171 (e) the page-fetch fence refuses the tailnet range 100.64.0.0/10 and *.ts.net names, and still allows "
+          "a public address", repr(fence))
+
+
+def suite_r172_lapsed_plan_diagnoses():
+    """R172 (2026-10-31). iron's P357c / P357d printed «(no stock diagnosis)» for the Qwen Code CLI's 403 and for
+    OpenRouter's 402; with no cause named, the session re-ran the brief on the paid OpenRouter copy ($1.35, then
+    $0.38 for a 402). The Token Plan had lapsed: the operator renewed it and the CLI answered again.
+    (a) the CLI's 403 «Access to model denied ... eligible» names the lapsed plan and says a paid re-run elsewhere is
+        the operator's spending decision;
+    (b) OpenRouter's 402 «would exceed your available credits» names the key's balance and that tokens already
+        produced are billed;
+    (c) control: another host's plain 403 gets neither cause.
+    """
+    import orchestrate as o
+    section("R172: a lapsed Qwen plan and an empty OpenRouter key are named causes, not «no stock diagnosis»")
+    q = ("QWEN STRUCTURED ERROR: type=AlreadyReportedError code=1 message=[API Error: 403 Access to model denied. "
+         "Please make sure you are eligible for using the model.]")
+    p = ('HTTP 402 from openrouter: {"error":{"message":"This request would exceed your available credits given '
+         'your current in-flight requests. Retry after in-flight requests settle, or add credits.","code":402}}')
+    cq, fq = o.diagnose(q)
+    check("Token Plan" in str(cq) and "paused" in str(cq) and "qwen38max" in str(fq)
+          and "do not make it on your own" in str(fq),
+          "R172 (a) the Qwen CLI's 403 names the lapsed Token Plan; a paid re-run elsewhere is the operator's decision",
+          repr((cq, fq)))
+    cp, fp = o.diagnose(p)
+    check("lack of credit" in str(cp) and "billed" in str(cp) and "--skip" in str(fp),
+          "R172 (b) OpenRouter's 402 names the key's balance and that tokens already produced are billed",
+          repr((cp, fp)))
+    cn, _fn = o.diagnose("HTTP 403 Forbidden from some other host")
+    check(not str(cn).startswith(("The Qwen Code CLI", "OpenRouter refused")),
+          "R172 (c) control: another host's plain 403 gets neither cause", repr(cn))
 
 
 def suite_r169_i2_kit_release():
