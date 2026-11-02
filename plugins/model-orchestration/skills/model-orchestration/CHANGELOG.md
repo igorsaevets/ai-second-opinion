@@ -2,6 +2,14 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.118.2 — 2026-11-02
+
+"Second opinion" without a panel name defaults to the cheap panel — the standard panel runs only when explicitly asked for.
+
+- **SKILL.md description no longer says "every external reviewer voice at once"** — the phrase caused AI agents to pass `--panel standard` when a user said "second opinion" without specifying a tier. The description now says "the default (cheap) panel" and carries a 🔴 rule: "second opinion" without a tier/panel name = cheap; NEVER pass `--panel standard` unless the user explicitly asks for it. The same rule is repeated in §0.0 Hard rules and §2.
+- **AGENTS.md carries the same rule** for AI agents that read the repository directly.
+- **Flag table trimmed**: `--answer-cap`, `--attach`, `--strict-pii` descriptions shortened to fit the new rules within the 5000-token auto-compaction budget.
+
 ## 1.118.1 — 2026-11-01
 
 Panel r171i3 review findings (A1–A10): the docs now state the worst case for a cheap round with DeepSeek (142 min, not "past an hour"); the OpenRouter 402 advice matches the vendor's remedy (retry after in-flight requests settle); the Qwen 403 cause text is softened; the page-fetch fence IDNA-normalises the host before the name check (Unicode spellings of `*.ts.net` are caught by the name rule, not only the IP rule); the selftest's fence check covers mapped IPv6, NAT64, 6to4, ULA, loopback, capitals and trailing-dot on every CI leg; the no-key fallback OFF is pinned; Tailscale Funnel pages are mentioned in SECURITY and TECHNICAL; Python floor 3.8→3.9 (aligned to CI); CHANGELOG lists `z.ai`/`зетай`; the suite_r153_i5 label covers glm too.
