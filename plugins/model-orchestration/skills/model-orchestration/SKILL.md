@@ -1,14 +1,15 @@
 ---
 name: model-orchestration
 description: >
-  Run a question past every external reviewer voice at once — Muse Spark, Codex, Gemini (via the
-  Antigravity subscription and via OpenRouter), Grok, DeepSeek, GLM, Kimi, Qwen — in parallel, at
-  maximum depth, with verification that each one actually did the work. `--ask` is the cheap
-  one-shot form. Use this EVERY TIME the user asks for a "second opinion", «второе мнение», a
-  review or verification of a document, plan or analysis by an external model, or names any of
-  those channels; `--task` (references/tasks.md) when a CLI must DO a task («поручи CLI»). §0 is
-  one command. Also holds the wire parameters, CLI flag traps, retry rules, and the checks that
-  catch a model which silently did nothing.
+  Run a question past the default (cheap) panel of external reviewers in parallel, at maximum
+  depth, with verification that each one actually did the work. `--ask` is the cheap one-shot
+  form. Use this EVERY TIME the user asks for a "second opinion", «второе мнение», a review or
+  verification of a document, plan or analysis by an external model, or names any of those
+  channels; `--task` (references/tasks.md) when a CLI must DO a task («поручи CLI»). §0 is one
+  command. 🔴 "Second opinion" without a tier/panel name = the **cheap** panel; NEVER pass
+  `--panel standard` unless the user explicitly asks for it (words: «стандартная», «все модели»,
+  «all», «standard», «full panel»). Also holds the wire parameters, CLI flag traps, retry rules,
+  and the checks that catch a model which silently did nothing.
 user_invocable: true
 ---
 
@@ -69,6 +70,11 @@ changes a decision is in this block.
   Send material, not search demands.
 - 🔴 **Use `orchestrate.py` — do not hand-roll calls.** Three incidents: DNS failure, non-streaming
   at 100K budget, `adaptive` doing zero searches.
+- 🔴 **"Second opinion" / «второе мнение» without a panel name = the CHEAP panel.** Do NOT pass
+  `--panel standard` unless the user explicitly asks for the standard panel by name — «стандартная
+  панель», «все модели», «all channels», «standard», «full panel». When in doubt, omit `--panel`
+  entirely — the code defaults to cheap. The standard panel adds expensive models (Codex, Kimi K3
+  paid, Qwen, Spark Standard) and is slower and costlier.
 
 ## 0.3 Reference files — read on demand
 
@@ -119,14 +125,14 @@ are the registry key, upper-cased.
 | `--marker` | literal string the reply must end with; absent ⇒ incomplete |
 | `--out` | run folder (default `./reviews`): outside every project, not TEMP. A new drive-root folder is refused |
 | `--system` | preset name or path (§0.2). The no-non-existence rule is appended — end the file with a newline |
-| `--attach` / `--attach-dir` | document / folder beside the brief. `--attach`: API channels get the file **inline**, CLIs (opencode, mimo, kimi too) only its **absolute path**. `--attach-dir`: same split, CLIs get a **vetted copy** (skips listed; original path never sent). 🔴 Refs trust the attachment: only material you authored |
-| `--answer-cap` | ask every reviewer to keep the FINAL answer under N chars (default `20000` ≈ 5K tokens; `0` = off and the `--ask` default). Prompt-level at the payload TAIL, after attachments — depth and `max_tokens` untouched; `HANDOFF.md` names who exceeded it or declared `TRUNCATED-BY-LIMIT` |
+| `--attach` / `--attach-dir` | document / folder beside the brief. API channels get the file **inline**; CLIs get its **path**. 🔴 Only material you authored |
+| `--answer-cap` | cap each reviewer's FINAL answer at N chars (default `20000`; `0` = off). `HANDOFF.md` names who exceeded it |
 | `--only` | restrict channels. Names, aliases and **group** words all work — vendor families and billing paths; `routing.py` prints every accepted spelling. 🔴 One channel per argument: `--only a b c`, never `--only "a b c"` |
 | `--skip` | the inverse of `--only`; on a clash (`--only <group> --skip <member>`) **skip wins** |
 | `--set` | pin: `--set codex=gpt-5.4` (a model's alias works too); unlisted → HYPOTHESIS on network kinds |
-| `--route` / `--new-channel` | route: §0.1. `--new-channel N:K:S` → overlay |
+| `--route` / `--new-channel` | route: §0.1; `--new-channel N:K:S` → overlay |
 | `--dry-run` | full preflight (plan, payload, keys, gates), then exit — spends nothing |
-| `--strict-pii` | identifier gate **OFF by default since R45** (summary line, then send); `--warn-pii` itemises, `--strict-pii` refuses, `--allow-pii` is a no-op. **Secrets can never be sent, at any setting** |
+| `--strict-pii` | identifier gate OFF by default; `--warn-pii` itemises, `--strict-pii` refuses. **Secrets can never be sent** |
 
 🔴 **`--only agy` is a GROUP — it returns EVERY agy channel.** When user names CLIs individually,
 use specific channel names for one-per-binary; `--dry-run` shows which names a word expands to.
@@ -143,22 +149,18 @@ negation, substitution incl. anaphora, *«только»*) against the alias tab
 --route "не использовать 5.6 Sol, а использовать вместо нее 5.5. И не использовать для этого промта Spark"
 ```
 
-The resolved plan is **always printed before anything is spent**: the panel and what the other
-panel would add or drop, then one `[RUN ]`/`[skip]` line per channel with its model, effort,
-role, data policy, web access, spend ceiling and tier effect, then the running set and its
-**vendor tally**. Read it; it is the one screen that exists to be read before money moves.
+The resolved plan is **always printed before anything is spent**: panel, `[RUN ]`/`[skip]` per
+channel with model+effort+role, and the **vendor tally**. Read it before money moves.
 
-Rules that matter: an unparseable route is a **hard stop**, never a guess. A refused model with
-no stated replacement falls back to the next in registry order, on a `NOTE:` line. Adding a
-channel: `--new-channel NAME:KIND:SLUG` writes overlay. Free preflight: `--dry-run`.
+Rules: an unparseable route is a **hard stop**. A refused model falls back to the next in
+registry order. `--new-channel NAME:KIND:SLUG` → overlay. Free preflight: `--dry-run`.
 
 ### 0.2 System presets — one line each, detail in `references/systems.md`
 
 `--system <preset|path>` frames the reviewer. Presets: **`base-depth`** (the default — the
 maximum-depth amplifier) and **`legal-research`** (any legal / immigration / regulatory brief —
 read `references/legal-briefs.md` **before** writing it). All presets force English output.
-⚠️ Not interchangeable and never merged — the legal one deliberately omits a clause; the why is
-in `references/systems.md`.
+Not interchangeable — the legal one omits a clause; see `references/systems.md`.
 
 **Timing**: most channels 1–4 min; **Codex 8–35 min** sets the wall-clock (`--panel cheap` is
 far faster). Run rounds in the background; sanity-check with `--ask` (~20 s).
@@ -203,6 +205,10 @@ at the ceiling its own vendor accepts, in every mode: **only the number of model
 |---|---|
 | **`cheap`** (default since 2026-08-16) | free, subscription and low-rate channels; `python routing.py` prints who. *«запусти дешевые»* |
 | **`standard`** | every enabled channel except `explicit_only` ones (Wonder). *«запусти все»*, *«стандартная панель»* |
+
+🔴 **When the user says "second opinion" or «второе мнение» without naming a panel, this is a
+cheap-panel request — do not escalate to standard.** Omit `--panel` (the code defaults to cheap)
+or pass `--panel cheap` explicitly. Standard only when the user said so.
 
 **Premium (true-batch + Flex) is a separate script, not a panel**: `premium/premium_panel.py`;
 `--panel premium` prints it; lane→key table: kit README.

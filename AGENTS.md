@@ -62,6 +62,9 @@ documents that hold the detail. It deliberately holds no channel list, no counts
   `[SNIPPET]` (search result only, page not opened), `[MEMORY]` (training data, unchecked).
   The system presets define them; expect them in answers, and use them yourself when you report
   findings to the person who asked.
+- 🔴 **"Second opinion" without a panel name = the cheap panel.** Do NOT pass `--panel standard`
+  unless the user explicitly asks for it (words: «стандартная», «все модели», «all», «standard»,
+  «full panel»). When in doubt, omit `--panel` — the code defaults to cheap.
 - **Cheap-panel results can be read in the same prompt; standard-panel needs a fresh one.**
   Cheap-panel channels (free and lightweight models) produce shorter reviews. If your context
   window has enough remaining budget (~50K tokens or more), reading cheap-panel results in the
