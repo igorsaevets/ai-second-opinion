@@ -3129,6 +3129,125 @@
         "orglm53"
       ],
       "notes": "1M context, reasoning-first model from Z.ai (released 2026-08-18). Improves on GLM-5.2 in coding and token efficiency. $1.40/M in, $4.40/M out — no longer the cheapest voice, but a stronger one. Reasoning is always on."
+    },
+    "claudeaiseat": {
+      "read_order": 1,
+      "kind": "chatseat",
+      "panel": "chat",
+      "voice": "claude",
+      "vendor": "anthropic",
+      "enabled": false,
+      "distribution": "local",
+      "cost": "subscription",
+      "label": "Claude.ai seat (CDP, dedicated profile)",
+      "model": "Opus 4\\.(6|7)",
+      "_model": "A REGEX, matched against the live picker label by the driver (R147 И-4). Default picks Opus 4.6 (or 4.7) at the operator's current claude.ai setting; feedback-claude-seat-opus-46 pins the family. The model name is NEVER a canonical string here - the compact summary that preceded R173 hard-coded Opus 5.5 and it was wrong.",
+      "effort": "Максимальный",
+      "_effort": "Russian UI label of the «Max» effort slider (R147 И-4). The driver picks it from the live DOM, not from this string.",
+      "timeout": "20m",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "driver": "seats/chat_seats.py",
+      "_driver": "R173 И-3 (2026-11-02): WIRED. SKILL_DIR-relative path; orchestrate.py _resolve_seat_driver joins it against os.path.dirname(__file__). The canonical copy is `~/.claude/skills/model-orchestration/seats/chat_seats.py`; the historical `D:/Claude Code/runs/r147-web-panel/chat_seats.py` is a FROZEN COPY for probe scripts (R173 И-7 removes it). call_chatseat writes the brief to `brief.md` inside the workspace, launches `python -X utf8 <driver> ask claude <brief_file> --out <ws> --timeout <s>`, reads back CLAUDE.md. Seat tests run on Haiku (feedback-seat-tests-on-haiku); the first live round is R173 И-4.",
+      "_tos_risk": "Anthropic Consumer Terms §3(7) forbids bot/script access except by API key or explicit permission. The operator accepted this risk 2026-10-11 (feedback-chat-panel-tos-accepted); account-ban risk is real and shared with Claude Code CLI's own account.",
+      "_cost": "The round costs ONE chat in the operator's claude.ai history. --dry-run prints that line before anything is sent.",
+      "aliases": [
+        "claudeaiseat",
+        "claudeai",
+        "claude.ai",
+        "clseat",
+        "клод чат",
+        "клод сеат"
+      ],
+      "notes": "voice=claude's CDP transport, running against a dedicated Chrome profile logged into claude.ai (R147 И-2 and И-3). In R173 И-2's scaffold phase this is voice=claude's PRIMARY (cldesktopseat is still enabled:false until R161 И-2e closes). When cldesktopseat flips to enabled:true (R173 И-5), claudeaiseat becomes its transport-fallback via same_voice()."
+    },
+    "cldesktopseat": {
+      "read_order": 1,
+      "kind": "uiaseat",
+      "panel": "chat",
+      "voice": "claude",
+      "vendor": "anthropic",
+      "enabled": false,
+      "_enabled": "D3 (approved 2026-11-02): scaffolded disabled until R161 И-2e closes (Haiku-only tests, Stop/refusal live, idle-wait decision). R173 И-5 flips it to true in one line.",
+      "distribution": "local",
+      "cost": "subscription",
+      "fallback": "claudeaiseat",
+      "_fallback": "D1 (approved 2026-11-02): transport-only fallback. A stop_reason=refusal on the primary records REFUSED on the voice and SKIPS the fallback (both seats run under the same Anthropic account - same safety cascade). apply_fallback() will arm it after R173 И-5 when this channel enables.",
+      "label": "Claude Desktop seat (UIA, MSIX install)",
+      "model": "Opus 4\\.(6|7) Максимальный",
+      "_model": "The driver reads the picker's live label (R161 И-2b card-lab); this regex is the matcher, never the canonical name.",
+      "effort": "Максимальный",
+      "timeout": "25m",
+      "_timeout": "Longer than claudeaiseat because R161 И-2d measured 45-50 s idle wait when the operator types; the driver presses after a 3 s idle and that wait is counted INSIDE this budget, not added on top.",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "driver": "seats/desktop_seats.py",
+      "_driver": "R173 И-3 (2026-11-02): WIRED. SKILL_DIR-relative. Canonical: `~/.claude/skills/model-orchestration/seats/desktop_seats.py`; the historical copy in `D:/Claude Code/runs/r161-desktop-seats/` is a FROZEN COPY (R173 И-7 removes it). call_uiaseat launches `python -X utf8 <driver> ask claude-desktop <brief_file> --out <ws> --timeout <s>`. Still `enabled: false` until R161 И-2e closes (D3) - the wiring is live but no live round starts here yet.",
+      "_uia_serialisation": "D2 (approved 2026-11-02): a uiaseat call brings Claude Desktop to the foreground per invocation. The dispatcher serialises uiaseat calls (foreground race between Claude Desktop and daily ChatGPT windows) when --chat both runs two UIA primaries; CDP seats (chatseat) are safe in parallel.",
+      "aliases": [
+        "cldesktopseat",
+        "cldesk",
+        "cldesktop",
+        "клод десктоп",
+        "клод десктоп сеат"
+      ],
+      "notes": "voice=claude's UIA primary (R161 И-2). Ships enabled:false until R161 И-2e closes; after the flip, claudeaiseat is its transport-fallback. Same Anthropic account, so safety refusal cascades - the fallback protects transport failures only (UIA hang, Desktop crash, idle wait)."
+    },
+    "cgptseat": {
+      "read_order": 1,
+      "kind": "chatseat",
+      "panel": "chat",
+      "voice": "chatgpt",
+      "vendor": "openai",
+      "enabled": false,
+      "distribution": "local",
+      "cost": "subscription",
+      "label": "ChatGPT.com seat (CDP, dedicated profile)",
+      "model": "GPT-6\\.1 Sol",
+      "_model": "A REGEX. the operator's observation 2026-11-02 after R147's compact had carried stale GPT-5.5: «у нас уже устарела модель, 5.5 уже нет, вместо нее 6.1 Sol». The driver reads the live picker (R147 И-4: composer button data-composer-navigation-target=reasoning) - the model name NEVER lives here as a canonical string.",
+      "effort": "Extra High",
+      "_effort": "feedback-chatgpt-seat-effort-xhigh (the operator 2026-10-17): one step below Pro. R147 И-4 slider: Instant/Medium/High/Extra High/Pro.",
+      "timeout": "20m",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "driver": "seats/chat_seats.py",
+      "_driver": "R173 И-3 (2026-11-02): WIRED. SKILL_DIR-relative. See claudeaiseat._driver above for the launch contract; this channel passes `chatgpt` as the driver's `seat` arg.",
+      "_tos_risk": "OpenAI ToU (ROW): «Automatically or programmatically extract data or Output». Operator accepted the risk 2026-10-11 (feedback-chat-panel-tos-accepted). Account-ban shares the OpenAI subscription with the Codex CLI.",
+      "_cost": "Each round costs ONE chat in the operator's chatgpt.com history. --dry-run prints the line.",
+      "aliases": [
+        "cgptseat",
+        "cgpt",
+        "chatgpt.com",
+        "гпт чат",
+        "гпт сеат"
+      ],
+      "notes": "voice=chatgpt's CDP transport (R147 И-2 and И-3). Primary while cgptdeskseat does not exist (task #106 pending)."
+    },
+    "cgptdeskseat": {
+      "read_order": 1,
+      "kind": "uiaseat",
+      "panel": "chat",
+      "voice": "chatgpt",
+      "vendor": "openai",
+      "enabled": false,
+      "_enabled": "Task #106 (ChatGPT Desktop seat, daily OpenAI.Codex app, UIA, NEVER restarted - R147 И-1 pin): built in task #106, flipped on in R173 И-6.",
+      "distribution": "local",
+      "cost": "subscription",
+      "fallback": "cgptseat",
+      "_fallback": "D1 transport fallback. Both seats run under the same OpenAI subscription - refusal cascades, so the fallback skips on stop_reason=refusal (D1).",
+      "label": "ChatGPT Desktop seat (UIA, daily OpenAI.Codex app)",
+      "model": "GPT-6\\.1 Sol",
+      "effort": "Extra High",
+      "timeout": "25m",
+      "fetch_fallback_hint_ref": "mcp_fallback",
+      "driver": "seats/desktop_seats.py",
+      "_driver": "R173 И-3 (2026-11-02): path WIRED (SKILL_DIR-relative), driver TBD. The driver file is the same seats/desktop_seats.py as cldesktopseat; `chatgpt-daily` is its APPS key for the daily OpenAI.Codex app. Task #106 BUILDS the UIA mechanics (daily app PID discovery by ExecutablePath, focus-steal, never restart - that app hosts the operator's live Codex app-server, R147 И-1). Flipped on in R173 И-6 after task #106 closes.",
+      "_codex_interference": "The daily OpenAI.Codex app hosts the operator's live Codex app-server. cgptdeskseat MUST NEVER restart the process; the preflight re-discovers by ExecutablePath each round and refuses when the process is absent.",
+      "aliases": [
+        "cgptdeskseat",
+        "cgptdesk",
+        "chatgpt desktop",
+        "гпт десктоп",
+        "гпт десктоп сеат"
+      ],
+      "notes": "voice=chatgpt's UIA primary (future state, task #106). Shares the OpenAI subscription with Codex and with cgptseat; refusal cascades, transport failures fall back to cgptseat (same account, R142 same_voice path)."
     }
   },
   "_models_removed_from_agy": "claude-sonnet-4-6, claude-opus-4-6-thinking and gemini-3.1-pro-low are deliberately absent from both agy channels (the operator, 2026-07-31): routing a Claude model through agy spends the Gemini weekly subscription on a model already reachable directly, and Pro Low is the shallow variant this channel exists to avoid. 🔴 This note lives at TOP LEVEL and not inside `channels`, and that is not cosmetic: every other object in this file takes `_`-prefixed prose keys, so putting one inside `channels` is the natural habit - and there it would be iterated AS A CHANNEL. Written there first, in this very edit. routing.py now skips `_`-prefixed keys inside `channels` (the declared convention) and refuses any other non-object entry by name, so the trap costs a clear error instead of a confusing one.",
@@ -3200,6 +3319,14 @@
       "nvdeepseekv41flash",
       "ocdeepseekv41flashfree",
       "ocdeepseekv41flashgo"
+    ],
+    [
+      "cldesktopseat",
+      "claudeaiseat"
+    ],
+    [
+      "cgptdeskseat",
+      "cgptseat"
     ]
   ],
   "_cascade_groups_doc": "Panel cascade: when several channels carry the SAME model through different transports, only the first READY one runs; the rest are skipped. Order matters - cheapest/free first. The panel runs independent VOICES in parallel; paying three transports for one voice is waste, not breadth. Added 2026-09-04 (the operator: 'незачем у одних и тех же моделей спрашивать'). R143 И-3 (2026-10-05): a group may span panels. kimik3 (standard, OpenRouter, paid) is the last member of nvkimik3's group; members are only the channels already in THIS run's plan, so a cheap run never pulls kimik3 in, and a standard run gets one Kimi - nvkimik3 when its CLI and key are here, else kimik3.",
@@ -3232,6 +3359,26 @@
       "_aliases_and_the_two_things_that_are_NOT_automatic": "«дешёвая» needs no entry: both the panel extractor and the entity scanner fold ё to е before matching, the same normalisation the route parser has always used. Case endings DO need entries, because nothing stems Russian here - «дешевой» is not derivable from «дешевая» by any rule this file implements. 🔴 WHAT A MISSING ENDING ACTUALLY DOES, CORRECTED 2026-08-15 after a reviewer traced it: this note used to say it «falls through to default_panel», which is only half the story and the reassuring half. If the rest of the route names a channel («не используй grok на дешевом»), the panel word is invisible and the round runs the DEFAULT - i.e. the expensive - panel, silently. If it names nothing («запусти на дешевом»), the route dies with «no channel or model in this route matched the registry», an error about the wrong thing entirely. Neither outcome is the one asked for, and one of them costs money. That is why this list is longer than it looks like it needs to be, and why the endings a Russian speaker would actually type were added by asking a panel rather than by introspection.",
       "_what_it_is": "Every channel that is either free, on a flat-rate subscription, or metered below roughly $1/M input. Subscriptions (agy) count as cheap because their marginal cost is zero, even though the weekly allowance is a real and scarce resource - which is why `codex`, also a subscription, is NOT here: it is rationed for a different reason (slow, strategic-only), and that policy predates this key.",
       "_the_seat_it_loses": "kimik3 carries `role: code` and is standard-only. 🔴 CORRECTED R74 (orgemini37flash, R73, against the live registry): this note used to say ordeepseekv4pro fills the cheap panel's code seat - it is `panel: standard` and has been since R48, so for weeks the note named a code voice the cheap panel does not contain. The cheap panel's code voice today is grokbuild (`role: code`, panel: cheap, added R44). See _panels_hidden_cost_doc for the loss that is NOT filled by anything: four vendors."
+    },
+    "chat": {
+      "label": "chat panel",
+      "includes": [
+        "chat"
+      ],
+      "aliases": [
+        "chat",
+        "чат",
+        "чаты",
+        "chat panel",
+        "чат-панель",
+        "чат панель",
+        "чат-оркестр"
+      ],
+      "_added": "R173 И-2 (2026-11-02). The fourth panel beside cheap / standard / batch (D6, approved 2026-11-02: «нет конечно, только 2» voices per round). Chat panel runs 2 voices maximum (claude, chatgpt), each with transport fallback.",
+      "_what_it_is": "A chat-panel question goes to the operator's chat subscriptions (Claude Pro, ChatGPT Plus) and comes back as text, like any CLI panel question. The CDP transport (chatseat kind) drives a dedicated Chrome profile; the UIA transport (uiaseat kind) drives the native desktop app. Same voice: one primary + one fallback, transport-only (same-account refusal cascades, D1 approved 2026-11-02).",
+      "_vendor_required": "D4 (approved 2026-11-02): `--panel chat` without `--chat claude|chatgpt|both` is an ERROR. the operator «запускать чаты только явно и когда сказали какие именно claude или chatgpt или оба». main() refuses the run and names the three vendor keywords.",
+      "_exempt_from_r172_i2": "D5 (approved 2026-11-02): the free-voice-in-round rule (R172 И-2: 25-min window, known-error retry, silence -> nothing) applies only to channels whose cost is `free`. All chat seats are subscription, so the rule is irrelevant to them - no provider free-tier 429s to handle.",
+      "_cost": "Each voice costs one chat in the operator's history (claude.ai or chatgpt.com). --chat both spends 2 chat sessions. --dry-run prints the line before anything is sent."
     },
     "standard": {
       "label": "standard panel",

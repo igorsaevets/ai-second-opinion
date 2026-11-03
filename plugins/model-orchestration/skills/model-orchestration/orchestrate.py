@@ -35,7 +35,7 @@ import re
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait as _cf_wait, FIRST_COMPLETED
 
 # Windows consoles default to cp1251/cp866 and will crash on the first non-ASCII character
 # in a model's answer. Force UTF-8 on stdout before anything can print.
@@ -10459,13 +10459,274 @@ CLI_RESOLVERS = {
 }
 
 
+# R173 И-2 (2026-11-02): chat panel kinds. The real drivers live in the prototype folders
+# (D:/Claude Code/runs/r147-web-panel/chat_seats.py and runs/r161-desktop-seats/desktop_seats.py)
+# and move into ~/.claude/skills/model-orchestration/seats/ in R173 И-3. Until then these two
+# functions are STUBS that record a scaffold refusal on every live call: the plan resolves
+# ($(--dry-run)) and the selftest suite verifies the whole chain, but a real round against a
+# chat seat prints the refusal and ends with no answer, no spend, no history pollution. This
+# matches R173 И-2's scope note «No live ask yet» and the owner's rule that account-ban risk is
+# only to be taken deliberately per round, not silently by a wiring gap.
+#
+# When R173 И-3 moves the drivers into seats/, these stubs become real wrappers around
+# subprocess.run(<python>, <driver.py>, "ask", <seat>, <brief_file>, --out <ws_dir>,
+# --timeout <sec>, --model <regex>, --effort <regex>) that classify the end as OK / REFUSED /
+# BLOCKED / TIMEOUT / PARTIAL from the driver's exit code and the output file it writes under
+# --out. The brief NEVER rides on argv (R173 DESIGN §2): a brief may contain backticks and
+# newlines, and a driver prototype's own argv limit is Windows' 32K.
+
+# R173 И-3 (2026-11-02): the kill switch the selftest / probe harness sets BEFORE importing
+# orchestrate. When "1", every live seat call returns a refusal before subprocess.run - no
+# Chrome launched, no Claude Desktop foregrounded, no slot spent in Igor's live history. The
+# dispatcher's own `if a.dry_run: return 0` at the top of main() is the first fence; this is
+# the second, aimed at tests that call call_chatseat() / call_uiaseat() DIRECTLY, bypassing
+# main(). A real round leaves this unset; the selftest sets it per-check and clears it.
+_SEAT_LIVE_KILL_SWITCH_ENV = "R173_SEAT_FORBID_LIVE"
+# chat_seats.py / desktop_seats.py return the same exit codes (as chat_seats.py says: "as
+# chat_seats.py"); kept here as data because the integer values travel on the wire.
+_SEAT_EXIT = {0: "ok", 1: "fail", 2: "not_ours", 3: "blocked", 4: "timeout"}
+# The driver's first positional arg: a vendor-shaped key, NOT the channel name.
+# chat_seats.py knows "claude" / "chatgpt" (SEATS dict). desktop_seats.py knows "claude-desktop"
+# / "chatgpt-daily" (APPS dict). The channel-name -> driver-arg map lives in exactly one place.
+_SEAT_NAME_TO_DRIVER_ARG = {
+    "claudeaiseat": "claude",
+    "cgptseat": "chatgpt",
+    "cldesktopseat": "claude-desktop",
+    "cgptdeskseat": "chatgpt-daily",
+}
+
+
+def _seat_live_forbidden():
+    """R173 И-3: True when the selftest / probe set the kill switch. Checked at the TOP of each
+    seat call, before any subprocess is built."""
+    return os.environ.get(_SEAT_LIVE_KILL_SWITCH_ENV) == "1"
+
+
+def _resolve_seat_driver(driver_rel, kind, name):
+    """R173 И-3: resolve a channel's `driver` field (channels.json) against SKILL_DIR.
+
+    The registry stores a SKILL_DIR-relative path like "seats/chat_seats.py" (R173 И-3; before
+    this the field held an absolute path into runs/r147-web-panel/, now kept there only as a
+    frozen copy with a FROZEN COPY header). An absolute path is still accepted - overlay files
+    on another of Igor's machines may use one, and that is the operator's call.
+    """
+    if not driver_rel:
+        raise RuntimeError("R173 И-3: channel %r of kind %r has no `driver` field in "
+                           "channels.json. The seat cannot be launched." % (name, kind))
+    full = driver_rel if os.path.isabs(driver_rel) else os.path.join(
+        SKILL_DIR, driver_rel.replace("/", os.sep))
+    if not os.path.isfile(full):
+        raise RuntimeError("R173 И-3: driver for channel %r not found: %r (resolved from %r "
+                           "against SKILL_DIR %r). R173 И-7 removes the frozen runs/ copy; "
+                           "until then, 'seats/chat_seats.py' is canonical."
+                           % (name, full, driver_rel, SKILL_DIR))
+    return full
+
+
+def _run_seat(kind, name, driver_rel, brief_text, outfile, model, effort, timeout):
+    """R173 И-3: launch seats/chat_seats.py or seats/desktop_seats.py through subprocess.
+
+    The BRIEF is written to a `brief.md` file inside the channel's workspace (the parent of
+    `outfile`). It NEVER rides on argv: a brief may contain backticks and newlines, and the
+    driver prototype's own argv limit is Windows' 32 KiB (R173 DESIGN §2).
+
+    The subprocess runs with:
+      - cwd = the channel's workspace (a NEUTRAL dir under TEMP / --out; no CLAUDE.md above it,
+        no project settings - the CLI started inside a project directory injects its CLAUDE.md
+        into the vendor context, R83 CLI leak path);
+      - env scrubbed of credential-shaped variables (E-125 transcript rule) + Python UTF-8 trio;
+      - timeout = max(60, timeout_s) + 60 s wall-clock margin for the driver's own exit cleanup.
+
+    The driver's EXIT codes classify the end:
+      0 ok   -> ok=True, read the answer file (CLAUDE.md / CHATGPT.md under --out)
+      1 fail -> transport-level failure (worth a fallback via run_fallbacks)
+      2 not_ours -> structural (profile mismatch / non-dedicated Chrome); fallback OK
+      3 blocked -> challenge / Cloudflare / Turnstile / limit dialog / safety refusal. D1
+                   REFUSAL FAST-FAIL: the result carries `refused=True` so run_fallbacks can
+                   skip the same-voice fallback (both seats share one Anthropic / OpenAI
+                   account, so the next transport will hit the same account-level wall).
+      4 timeout -> wall-clock hit; fallback OK on cldesktopseat/cgptdeskseat.
+
+    E-125 (transcript is an exfiltration surface): the full argv is NEVER logged - it carries
+    the driver path, the workspace path and the regexes, which are safe but belong in the
+    channel record, not scrolling. The result dict carries kind, ok, size, exit, exit_tag.
+    """
+    if _seat_live_forbidden():
+        msg = ("R173 И-3: %s refuses to launch - %s=1 is set in the environment. The selftest "
+               "and the probe harness use this to exercise the dispatch chain without starting "
+               "Chrome / Claude Desktop. Unset %s for a live call. No slot was spent."
+               % (kind, _SEAT_LIVE_KILL_SWITCH_ENV, _SEAT_LIVE_KILL_SWITCH_ENV))
+        return {"channel": name, "ok": False, "text": "", "model": None,
+                "error": msg, "warnings": ["R173_SEAT_LIVE_FORBIDDEN"],
+                "notes": [msg], "chat_slot_spent": False}
+    seat_arg = _SEAT_NAME_TO_DRIVER_ARG.get(name)
+    if not seat_arg:
+        msg = ("R173 И-3: channel %r (kind %r) has no entry in _SEAT_NAME_TO_DRIVER_ARG. "
+               "Add it beside the four known chat channels." % (name, kind))
+        return {"channel": name, "ok": False, "text": "", "model": None,
+                "error": msg, "warnings": ["R173_SEAT_UNKNOWN_NAME"],
+                "notes": [msg], "chat_slot_spent": False}
+    try:
+        driver_path = _resolve_seat_driver(driver_rel, kind, name)
+    except RuntimeError as exc:
+        return {"channel": name, "ok": False, "text": "", "model": None,
+                "error": str(exc), "warnings": ["R173_SEAT_DRIVER_MISSING"],
+                "notes": [str(exc)], "chat_slot_spent": False}
+    out_dir = os.path.dirname(outfile) or outfile
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError as exc:
+        return {"channel": name, "ok": False, "text": "", "model": None,
+                "error": "R173 И-3: cannot create seat workspace %r: %r" % (out_dir, exc),
+                "warnings": ["R173_SEAT_WORKSPACE"],
+                "notes": [], "chat_slot_spent": False}
+    brief_path = os.path.join(out_dir, "brief.md")
+    try:
+        with open(brief_path, "w", encoding="utf-8") as fh:
+            fh.write(brief_text if isinstance(brief_text, str) else "")
+    except OSError as exc:
+        return {"channel": name, "ok": False, "text": "", "model": None,
+                "error": "R173 И-3: cannot write %r: %r" % (brief_path, exc),
+                "warnings": ["R173_SEAT_BRIEF_WRITE"],
+                "notes": [], "chat_slot_spent": False}
+    timeout_i = max(60, int(timeout or 1200))
+    argv = [sys.executable, "-X", "utf8", driver_path, "ask", seat_arg, brief_path,
+            "--out", out_dir, "--timeout", str(timeout_i)]
+    if model:
+        argv.extend(["--model", str(model)])
+    if effort:
+        argv.extend(["--effort", str(effort)])
+    env = {k: v for k, v in os.environ.items()
+           if not any(bad in k.upper()
+                      for bad in ("TOKEN", "SECRET", "PASSWORD", "API_KEY", "SESSION"))}
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
+    t0 = time.monotonic()
+    try:
+        proc = subprocess.run(argv, cwd=out_dir, env=env,
+                              timeout=timeout_i + 60,
+                              capture_output=True, encoding="utf-8", errors="replace")
+    except subprocess.TimeoutExpired:
+        dur = time.monotonic() - t0
+        return {"channel": name, "ok": False, "text": "", "model": None,
+                "error": "R173 И-3: seat subprocess exceeded wall-clock cap %ds" % (timeout_i + 60),
+                "warnings": ["R173_SEAT_WALL_TIMEOUT"],
+                "notes": [], "chat_slot_spent": True, "duration_s": dur,
+                "exit": None, "exit_tag": "wall_timeout"}
+    dur = time.monotonic() - t0
+    exit_tag = _SEAT_EXIT.get(proc.returncode, "exit_%d" % proc.returncode)
+    # The two drivers write different files per transport. The dispatcher's `outfile` is
+    # <channel>.md and nothing writes there, so we pick the authoritative file and copy it.
+    #   chat_seats.py "ask claude" / "ask chatgpt":  CLAUDE.md / CHATGPT.md (seat.upper()+'.md')
+    #   desktop_seats.py "ask claude-desktop":       CLAUDE.export.md  (the conversation JSON
+    #                                                 text; primary - the UIA screen scrape
+    #                                                 CLAUDE-DESKTOP.screen.md is a fallback
+    #                                                 for when export cannot run);
+    #   desktop_seats.py "ask chatgpt-daily":        TBD by task #106, same shape expected
+    #                                                 (CHATGPT.export.md primary).
+    if kind == "chatseat":
+        cand_names = [seat_arg.upper() + ".md"]
+    elif kind == "uiaseat":
+        _base = seat_arg.split("-", 1)[0]            # "claude-desktop" -> "claude"
+        cand_names = [_base.upper() + ".export.md",
+                      seat_arg.upper() + ".screen.md",
+                      _base.upper() + ".steps.md"]
+    else:
+        cand_names = []
+    answer_file = None
+    for cand in cand_names + [name.upper() + ".md"]:
+        full = os.path.join(out_dir, cand)
+        if os.path.isfile(full):
+            answer_file = full
+            break
+    if not answer_file and os.path.isfile(outfile):
+        answer_file = outfile
+    text = ""
+    if answer_file:
+        try:
+            with open(answer_file, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            pass
+    # Copy to the dispatcher's outfile so downstream reporting sees the answer at its canonical
+    # path (the driver chose a brand name, the dispatcher asks for the channel name).
+    if answer_file and answer_file != outfile and text:
+        try:
+            with open(outfile, "w", encoding="utf-8") as fh:
+                fh.write(text)
+        except OSError:
+            pass
+    ok = (proc.returncode == 0 and bool(text))
+    refused = (proc.returncode == 3)         # D1 refusal fast-fail: carried on the result dict
+    err = ""
+    if not ok:
+        err = ("seat %s exit=%d (%s), size=%d" %
+               (kind, proc.returncode, exit_tag, len(text)))
+    notes = [("R173 И-3: %s %s=%d, size=%d" %
+              (kind, exit_tag, proc.returncode, len(text)))]
+    return {"channel": name, "ok": ok, "text": text, "model": None,
+            "error": err, "warnings": [] if ok else ["R173_SEAT_%s" % exit_tag.upper()],
+            "notes": notes,
+            "chat_slot_spent": True,                  # one live chat slot was consumed
+            "refused": refused,                       # D1: run_fallbacks must skip fallback
+            "exit": proc.returncode, "exit_tag": exit_tag,
+            "duration_s": dur}
+
+
+def call_chatseat(brief, marker, outfile, model=None, effort=None, system=None,
+                  timeout=1200, name="claudeaiseat", driver=None):
+    """R173 И-3 WIRED (2026-11-02; D1-D6 approved).
+
+    CDP transport for the chat panel: a dedicated Chrome profile logged into claude.ai /
+    chatgpt.com. The driver (seats/chat_seats.py) opens one new tab, pastes the brief, waits
+    for the completion signal, saves the answer. One call = one chat in the operator's live
+    history. Never auto-retries (billed_failure flags the kind), so a transient failure costs
+    one slot, never two.
+
+    `brief` is the brief TEXT. `_run_seat` writes it to a file inside the workspace before
+    launch - a brief on argv breaks on backticks and 32-KiB Windows limits.
+    `driver` is the SKILL_DIR-relative "seats/chat_seats.py" (resolved by _resolve_seat_driver).
+    """
+    _ = (marker, system)       # not used by the driver's `ask` command - the brief carries the ask
+    return _run_seat("chatseat", name, driver, brief, outfile, model, effort, timeout)
+
+
+def call_uiaseat(brief, marker, outfile, model=None, effort=None, system=None,
+                 timeout=1500, name="cldesktopseat", driver=None):
+    """R173 И-3 WIRED (2026-11-02; D1-D6 approved).
+
+    Windows UIA transport: Claude Desktop MSIX (seats/desktop_seats.py "claude-desktop") or
+    the daily OpenAI.Codex app ("chatgpt-daily"). D2 serialisation (foreground race) is a
+    DISPATCHER concern - the executor at this call site decides parallelism. In R173 И-3 both
+    uiaseat channels are enabled:false (D3 pending R161 И-2e; D6-note cgptdeskseat built in
+    task #106), so --chat both never schedules two UIA primaries yet. R173 И-5 flips
+    cldesktopseat on, and the executor pool will cap uiaseat concurrency at 1 then.
+
+    cgptdeskseat MUST NEVER restart the daily OpenAI.Codex process (it hosts the operator's
+    live Codex app-server, R147 И-1). desktop_seats.py enforces this: APPS["chatgpt-daily"][1]
+    is None and start_app() raises REFUSED.
+    """
+    _ = (marker, system)
+    return _run_seat("uiaseat", name, driver, brief, outfile, model, effort, timeout)
+
+
 # Every `kind` the dispatcher can launch. ONE home: both main() and channel_preflight() read
 # this, because they used to share a blind spot by construction - each had its own copy of the
 # same five literals, so a kind unknown to one was unknown to the other, and a misspelled kind
 # produced neither a preflight warning nor a result, only a log line that scrolls away.
+# R173 И-2 (2026-11-02): KNOWN_KINDS gains chatseat + uiaseat for the chat panel's two transports.
+# `chatseat` drives a dedicated Chrome profile over CDP (claudeaiseat, cgptseat); `uiaseat` drives
+# the native desktop app over Windows UI Automation (cldesktopseat, cgptdeskseat). Scaffolded
+# here so the preflight knows the kinds; the call_* functions above (STUBS) refuse every live call
+# with a R173_I2_SCAFFOLD note until R173 И-3 moves the drivers into seats/ and wires live
+# subprocess invocation. A dry-run plan now resolves `--panel chat` and names the two voices.
+# NO INLINE COMMENTS INSIDE THIS TUPLE: the selftest reads this literal by splitting the text
+# between the first `(` and the matching `)` on commas, so a hash sign inside the tuple is read as
+# a channel kind, and 2026-11-02's "# R173 И-2" string tripped the invariant on the first build.
 KNOWN_KINDS = ("http", "codex", "agy", "openrouter", "oai", "xai", "gemini", "hermes",
                "grokcli", "opencode", "claudecli", "mimocli", "qwencli", "kimicli",
-               "musecode")
+               "musecode", "chatseat", "uiaseat")
 
 # The kinds that run ON THIS MACHINE and can therefore read an attached document from disk
 # instead of receiving it inline (--attach / --attach-dir). Igor, R46: «CLI агентам не отправлять
@@ -10711,6 +10972,12 @@ def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, 
             fbk = (plan.get(cname) or {}).get("fallback")
             if not fbk or _has_answer(r):
                 continue
+            # R172 И-2: the free-voice in-round rule already decided this record - it either
+            # fired the fallback in-round (fb_name is in results as a fallback_for of this
+            # channel), or it chose nothing (silence, past 25 min). Either way, the after-round
+            # fallback must not fire a second time.
+            if r.get("free_inround"):
+                continue
             fb = fbk["channel"]
             failed = (r.get("error") or "; ".join(r.get("warnings") or []) or "no answer text")
             _nb = len((r.get("text") or "").strip().encode("utf-8"))
@@ -10846,6 +11113,137 @@ def retryable_stream_death(r):
     return False
 
 
+# ---- R172 И-2: free-voice in-round rule (operator 2026-10-31) ----------------------
+#
+# «Для бесплатных моделей правило: fallback только в первые 25 мин. Проверять через
+# 7-10 мин после запуска; если упала с известной ошибкой, перезапустить с фиксом; через
+# 7 мин перепроверить, если опять ошибка - fallback. А если тишина без ошибок - никаких
+# fallback.» R171 И-4 measured that opencode exits at once on a provider refusal
+# (ocmimo26flashfree died at 12 s in r171i3), so no in-call polling is needed - the
+# harness learns the result the moment the call ends. The rule reacts WITHIN the round
+# rather than waiting for the whole thing (today 61-70 min with DeepSeek V4.1 Flash)
+# to end before the fallback can even start.
+FREE_INROUND_WINDOW_S = 1500         # 25 min window from the seat's first start (op's rule)
+FREE_INROUND_RETRY_429_S = 60        # remedy before a 429 retry (Retry-After if given)
+FREE_INROUND_RETRY_5XX_S = 30        # remedy before a 5xx / stream-death retry
+
+
+def _free_inround_window():
+    """FREE_INROUND_WINDOW_S, overridable via ORCH_FREE_INROUND_WINDOW (seconds).
+    Non-numeric or non-positive overrides are ignored - the module default stands."""
+    try:
+        v = int(os.environ.get("ORCH_FREE_INROUND_WINDOW") or 0)
+    except (TypeError, ValueError):
+        v = 0
+    return v if v > 0 else FREE_INROUND_WINDOW_S
+
+
+def _free_inround_delay_429():
+    """FREE_INROUND_RETRY_429_S, overridable via ORCH_FREE_INROUND_RETRY_429."""
+    try:
+        v = int(os.environ.get("ORCH_FREE_INROUND_RETRY_429") or 0)
+    except (TypeError, ValueError):
+        v = 0
+    return v if v > 0 else FREE_INROUND_RETRY_429_S
+
+
+def _free_inround_delay_5xx():
+    """FREE_INROUND_RETRY_5XX_S, overridable via ORCH_FREE_INROUND_RETRY_5XX."""
+    try:
+        v = int(os.environ.get("ORCH_FREE_INROUND_RETRY_5XX") or 0)
+    except (TypeError, ValueError):
+        v = 0
+    return v if v > 0 else FREE_INROUND_RETRY_5XX_S
+
+
+def _free_cost(reg, cname):
+    """R172 И-2: True when the registry marks this channel's `cost` as `free`.
+    The in-round rule applies to free channels only; paid and subscription channels
+    keep today's after-round retry + fallback behaviour exactly."""
+    ch = (((reg or {}).get("channels") or {}).get(cname) or {})
+    return ch.get("cost") == "free"
+
+
+def _free_limit_refused(r):
+    """R172 И-2: True when a channel's record names `provider.free-limit` (opencode 2.2.0,
+    2026-10-27 - the free allowance). Kept SEPARATE from _quota_refused so the day
+    memory (record_quota_refusals) still only fires on `provider.quota` - a plain
+    string widening would drop MiMo from every later round of the day instead of
+    starting its paid Go copy. The in-round rule treats either refusal the same way
+    (fallback directly, no retry: an allowance is spent, re-sending is refused too)."""
+    r = r if isinstance(r, dict) else {}
+    hay = " ".join([str(r.get("error") or "")] + [str(w) for w in (r.get("warnings") or [])])
+    return "provider.free-limit" in hay
+
+
+def _classify_free_failure(r, elapsed_s, window_s):
+    """R172 И-2: classify a FAILED (no answer) free-voice record for the in-round rule.
+
+    `elapsed_s` is how long the seat has been alive (from its FIRST start, same seat
+    across retry and fallback). `window_s` is _free_inround_window().
+
+    Returns one of:
+      ('past_window', None)   - elapsed > window; the rule does nothing.
+      ('silence', None)       - stream_cut / budget_stop / harness-level timeout. The
+                                model was working, not failing (operator's «тишина без
+                                ошибок»): no retry, no fallback.
+      ('transient', delay_s)  - 429 / 5xx / silent death (reasoning but no text, finish
+                                None). Retry once with a remedy delay bounded by the
+                                remaining window. 429 uses Retry-After if the record
+                                carries one, else _free_inround_delay_429(); 5xx and
+                                silent death use _free_inround_delay_5xx().
+      ('quota', None)         - provider.quota (R157) or provider.free-limit (opencode
+                                2.2.0, 2026-10-27): the allowance is spent, so a
+                                re-send is refused too. Fallback starts directly.
+      ('other', None)         - any other failure within the window: 4xx config, 404 /
+                                410 retired, unknown error. Fallback directly.
+    """
+    r = r if isinstance(r, dict) else {}
+    if elapsed_s is not None and elapsed_s > window_s:
+        return ("past_window", None)
+    # Silence: harness-closed, budget-reached, or a plain timeout that was not a 429/5xx
+    if r.get("stream_cut") or r.get("budget_stop") or r.get("timed_out"):
+        return ("silence", None)
+    err_s = str(r.get("error") or "")
+    err_lo = err_s.lower()
+    if ("timeout" in err_lo and " 429" not in err_s and "HTTP 429" not in err_s
+            and " 500" not in err_s and " 502" not in err_s
+            and " 503" not in err_s and " 504" not in err_s
+            and "HTTP 5" not in err_s):
+        return ("silence", None)
+    if retryable_stream_death(r):
+        pe = r.get("provider_error") if isinstance(r.get("provider_error"), dict) else {}
+        code = None
+        for k in ("code", "status"):
+            try:
+                code = int(pe.get(k)) if pe.get(k) is not None else code
+                if code is not None:
+                    break
+            except (TypeError, ValueError):
+                pass
+        if code is None:
+            # "HTTP 429" in the error string is still a 429, same as retryable_stream_death
+            if ("HTTP 429" in err_s) or (" 429" in err_s):
+                code = 429
+            else:
+                for c in (500, 502, 503, 504):
+                    if ("HTTP %d" % c) in err_s:
+                        code = c
+                        break
+        if code == 429:
+            ra = pe.get("retry_after") or r.get("retry_after")
+            try:
+                delay = max(1, int(ra)) if ra is not None else _free_inround_delay_429()
+            except (TypeError, ValueError):
+                delay = _free_inround_delay_429()
+        else:
+            delay = _free_inround_delay_5xx()
+        return ("transient", delay)
+    if _quota_refused(r) or _free_limit_refused(r):
+        return ("quota", None)
+    return ("other", None)
+
+
 def billed_failure(r, kind=None):
     """True when a failed attempt already COST MONEY (R144 И-7, H1).
 
@@ -10855,6 +11253,13 @@ def billed_failure(r, kind=None):
     all. Billed = a reported price above 0, or - on a metered API seat (kind "http") that reported
     no price - any tokens or reasoning the vendor generated: «no price» is not «free». A
     subscription CLI with no price is not billed per call.
+
+    🔴 R173 И-3: `chatseat` and `uiaseat` ARE billed on every subprocess launch - the slot in the
+    operator's live claude.ai / chatgpt.com history is spent whether the driver's exit was 0 or
+    4. `chat_slot_spent` records that; a seat refused by the kill switch leaves it False and
+    stays retryable (defense in depth even though retryable_stream_death does not match seats
+    today - a future contributor adding a new transient-death trigger would otherwise bill the
+    operator a second message silently).
     """
     u = r.get("usd")
     if isinstance(u, (int, float)) and not isinstance(u, bool) and u > 0:
@@ -10866,6 +11271,8 @@ def billed_failure(r, kind=None):
                     return True
             except (TypeError, ValueError):
                 continue
+    if kind in ("chatseat", "uiaseat") and r.get("chat_slot_spent"):
+        return True
     return False
 
 
@@ -10873,9 +11280,16 @@ def auto_retry_split(results, kind_of):
     """(retry, held): the AUTO-RETRY's decision, at module level so the selftest runs the real one.
     `retry` = transient stream deaths that cost nothing; `held` = the same deaths that already
     billed money (billed_failure) - the harness never re-runs those itself. `kind_of(name)` gives a
-    channel's kind."""
+    channel's kind.
+
+    R172 И-2 (2026-11-02): a record with `free_inround` is one the free-voice in-round rule already
+    decided (retry, fallback, or «nothing» for silence / past-window). After-round AUTO-RETRY never
+    reconsiders those - the primary record may be a RETRY that failed, which must not be retried a
+    second time, or a primary whose fallback already ran in-round, which must not fire another one.
+    """
     dead = {cn: r for cn, r in (results or {}).items()
-            if isinstance(r, dict) and retryable_stream_death(r)}
+            if isinstance(r, dict) and retryable_stream_death(r)
+            and not r.get("free_inround")}
     held = {cn: r for cn, r in dead.items() if billed_failure(r, kind_of(cn))}
     return {cn: r for cn, r in dead.items() if cn not in held}, held
 
@@ -13462,6 +13876,17 @@ def main():
                          "field>'. Same blast radius, same directive, same tripwire on agy. "
                          "Prefer naming channels one by one until you have run each bypassed "
                          "with your own workload")
+    # R173 И-2 (2026-11-02): the chat panel's vendor-selection flag. `--panel chat` without this
+    # flag is a hard refusal (D4, approved 2026-11-02: «запускать чаты только явно и когда сказали
+    # какие именно claude или chatgpt или оба»). Passing `--chat <vendor>` on its own implies
+    # `--panel chat` (the chat panel is the only panel these voices live in).
+    ap.add_argument("--chat", default=None, choices=["claude", "chatgpt", "both"],
+                    help="which chat vendor(s) the chat panel asks: 'claude' = voice=claude only, "
+                         "'chatgpt' = voice=chatgpt only, 'both' = both voices (2 chat sessions "
+                         "spent). REQUIRED whenever --panel chat is active: the chat panel has "
+                         "no default vendor (D4, R173 И-2) because chats cost one message in "
+                         "Igor's live history per voice per round. Passing --chat on its own "
+                         "implies --panel chat.")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the resolved plan and exit without spending anything")
     ap.add_argument("--strict-pii", action="store_true",
@@ -13537,6 +13962,27 @@ def main():
                          "REFUSE_ARBITRARY_MODEL_KINDS in routing.py). The SLUG may contain "
                          "'/' or ':' (the vendor decides its shape) and is written verbatim")
     a = ap.parse_args()
+
+    # R173 И-2 (2026-11-02): the chat panel refuses to run without an explicit vendor (D4,
+    # approved 2026-11-02: «запускать чаты только явно и когда сказали какие именно claude или
+    # chatgpt или оба»). `--chat <vendor>` on its own implies `--panel chat`; `--chat` beside a
+    # non-chat `--panel` is a contradiction, not a filter - the chat seats live only in the chat
+    # panel, so --chat on a cheap/standard run cannot mean anything coherent.
+    if a.chat is not None:
+        if a.panel is None:
+            a.panel = "chat"
+        elif a.panel != "chat":
+            ap.error("--chat %s applies to the chat panel only (D4, R173 И-2). "
+                     "Either drop --panel %s or drop --chat; they do not compose."
+                     % (a.chat, a.panel))
+    elif a.panel == "chat":
+        ap.error("--panel chat refuses to run without an explicit vendor (D4, R173 И-2). "
+                 "Pass one of:\n"
+                 "  --chat claude    - Claude only  (voice=claude)\n"
+                 "  --chat chatgpt   - ChatGPT only (voice=chatgpt)\n"
+                 "  --chat both      - both voices  (2 chat sessions spent)\n"
+                 "The chat panel has no default vendor because each voice costs ONE chat in "
+                 "the operator's live history per round.")
 
     # R90 iter 2: --new-channel handler. Runs BEFORE any brief-related logic; a config-write is
     # not a review. We import routing here even though the review path also does - keeping the
@@ -13729,6 +14175,18 @@ def main():
                 _fbk = _fp.get("fallback")
                 if _fbk and not _fbk.get("off") and (a.no_fallback or task_mode):
                     _fbk["off"] = "--no-fallback" if a.no_fallback else "--task runs no fallback"
+            # R173 И-2 (2026-11-02): after resolve, when a single vendor was asked for, cut the
+            # voice=other channels from the plan. `--chat both` leaves the plan as it stands;
+            # `--chat claude` keeps only voice=claude, and `--chat chatgpt` keeps only voice=chatgpt.
+            # A chat seat that was off anyway (enabled:false in channels.json or dropped by another
+            # flag) is left as-is - the plan reader can still see why it did not run.
+            if a.chat and a.chat != "both":
+                for _cn, _p in plan.items():
+                    _voice = ((reg.get("channels") or {}).get(_cn) or {}).get("voice")
+                    if _voice and _voice != a.chat and _p.get("enabled"):
+                        _p["enabled"] = False
+                        _p.setdefault("why", []).append(
+                            "chat: --chat %s drops voice=%s channels" % (a.chat, _voice))
             if ask_mode and getattr(a, "ask_extras", False):        # R157 И-5 (F3)
                 log(_ask_plan_line(plan, reg, a.only, _qskips, routing.same_voice))
             log(routing.format_plan(plan, reg))
@@ -14220,6 +14678,156 @@ def main():
                       for c in want)
     credits_before = openrouter_credits() if uses_or_key else None
 
+    # R172 И-2 (hoisted from after the wait loop): see comment at the original
+    # location below. Both the in-round rule and the after-round AUTO-RETRY /
+    # FALLBACK phases call this one dispatcher so they cannot drift.
+    def _submit_again(_rex, cname):
+        """Dispatch ONE channel again on an open executor; the future, or None for an unknown kind.
+
+        R142: the auto-retry below and the fallback phase after it share this one chain, so the
+        two cannot drift (phase 1's own chain above still differs: --task and unknown kinds).
+        """
+        p = (plan or {}).get(cname) or _legacy_slot(cname)
+        p["_name"] = cname
+        kind = p.get("kind")
+        outfile = os.path.join(a.out, cname.upper() + ".md")
+        workdir = _ws(a, cname)
+        use_refs = bool((atts or att_dirs) and kind in REFS_KINDS)
+        cbrief = (((brief_refs_full if _tools_full(kind, cname, a, reg) else brief_refs)
+                   if use_refs else brief))
+        att_parents = (sorted({os.path.dirname(pth) for pth, _t in atts}
+                              | {sd for sd, _d in _snap_pairs})
+                       if use_refs else None)
+        _note_sent(cname, _system_for(system, p),
+                   _with_bypass_safety(cbrief, cli_bypass_active(cname, a, reg)))
+        if kind == "http":
+            return _rex.submit(
+                call_http_reviewer, cbrief, _system_for(system, p),
+                a.tier, a.marker, timeout=_seconds(p.get("timeout"), 2400),
+                model=p.get("model"), name=cname, effort=p.get("effort"),
+                fallback_model=p.get("fallback_model"),
+                answer_cap=a.answer_cap if a.answer_cap and a.answer_cap > 0
+                else None)
+        elif kind == "codex":
+            return _rex.submit(
+                call_codex, cbrief, a.marker, workdir, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                timeout=p.get("timeout"), system=_system_for(system, p),
+                bypass=bool(cli_bypass_active(cname, a, reg)))
+        elif kind == "agy":
+            return _rex.submit(
+                call_agy, cbrief, a.marker, workdir, outfile,
+                model=p.get("model"), effort=p.get("effort") or "high",
+                timeout=p.get("timeout") or "25m",
+                system=_system_for(system, p), add_dirs=att_parents,
+                bypass=bool(cli_bypass_active(cname, a, reg)))
+        elif kind == "grokcli":
+            return _rex.submit(
+                call_grokcli, cbrief, a.marker, workdir, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                timeout=p.get("timeout") or "40m",
+                system=_system_for(system, p), name=cname,
+                file_refs=use_refs,
+                bypass=bool(cli_bypass_active(cname, a, reg)),
+                keys_ok=channel_may_read_keys(cname, reg))
+        elif kind == "hermes":
+            return _rex.submit(
+                call_hermes, cbrief, a.marker, outfile,
+                model=p.get("model"), toolsets=p.get("toolsets"),
+                system=_system_for(system, p),
+                timeout=_seconds(p.get("timeout"), 2400))
+        elif kind in ("openrouter", "oai"):
+            return _rex.submit(
+                call_oai_reviewer, cbrief, a.marker, outfile,
+                model=p.get("model"), system=_system_for(system, p),
+                web=p.get("web"), name=cname,
+                reasoning=p.get("reasoning"),
+                max_tokens=p.get("max_tokens"),
+                fetch_tool=p.get("fetch_tool"),
+                provider=p.get("provider") or "openrouter",
+                provider_route=p.get("provider_route"),
+                spend_guard=p.get("spend_guard"),
+                fallback_models=p.get("fallback_models"),
+                timeout=_seconds(p.get("timeout"), 2400))
+        elif kind == "xai":
+            return _rex.submit(
+                call_xai_responses, cbrief, a.marker, outfile,
+                model=p.get("model"), system=_system_for(system, p),
+                name=cname, tools=p.get("tools"),
+                timeout=_seconds(p.get("timeout"), 2400),
+                max_tokens=p.get("max_tokens"))
+        elif kind == "gemini":
+            return _rex.submit(
+                call_gemini_direct, cbrief, a.marker, outfile,
+                model=p.get("model"), system=_system_for(system, p),
+                name=cname, thinking_level=p.get("thinking_level"),
+                tools=p.get("tools"), max_tokens=p.get("max_tokens"),
+                timeout=_seconds(p.get("timeout"), 2400))
+        elif kind == "opencode":
+            return _rex.submit(
+                call_opencode, cbrief, a.marker, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                system=_system_for(system, p),
+                timeout=_seconds(p.get("timeout"), 2400), name=cname)
+        elif kind == "mimocli":
+            return _rex.submit(
+                call_mimocli, cbrief, a.marker, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                system=_system_for(system, p),
+                timeout=_seconds(p.get("timeout"), 2400), name=cname)
+        elif kind == "musecode":
+            return _rex.submit(
+                call_musecode, cbrief, a.marker, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                system=_system_for(system, p),
+                timeout=_seconds(p.get("timeout"), 2700), name=cname,
+                max_steps=p.get("max_turns"))
+        elif kind == "claudecli":
+            return _rex.submit(
+                call_claudecli, cbrief, a.marker, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                system=_system_for(system, p),
+                fallback_model=p.get("fallback_model"),
+                timeout=_seconds(p.get("timeout"), 2400),
+                max_turns=p.get("max_turns"), name=cname)
+        elif kind == "qwencli":
+            return _rex.submit(
+                call_qwencli, cbrief, a.marker, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                system=_system_for(system, p),
+                fallback_model=p.get("fallback_model"),
+                timeout=_seconds(p.get("timeout"), 2400),
+                max_turns=p.get("max_turns"),
+                max_tool_calls=p.get("max_tool_calls"), name=cname)
+        elif kind == "kimicli":
+            return _rex.submit(
+                call_kimicli, cbrief, a.marker, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                system=_system_for(system, p),
+                timeout=_seconds(p.get("timeout"), 2400), name=cname,
+                workdir=_ws(a, cname),
+                bypass=bool(cli_bypass_active(cname, a, reg)),
+                env_model=_kimi_env_model(cname, reg))
+        elif kind == "chatseat":
+            # R173 И-2: scaffold stub (same as the primary dispatcher above).
+            return _rex.submit(
+                call_chatseat, cbrief, a.marker, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                system=_system_for(system, p),
+                timeout=_seconds(p.get("timeout"), 1200),
+                name=cname, driver=p.get("driver"))
+        elif kind == "uiaseat":
+            # R173 И-2: scaffold stub.
+            return _rex.submit(
+                call_uiaseat, cbrief, a.marker, outfile,
+                model=p.get("model"), effort=p.get("effort"),
+                system=_system_for(system, p),
+                timeout=_seconds(p.get("timeout"), 1500),
+                name=cname, driver=p.get("driver"))
+        log("  [%s] cannot dispatch again: unknown kind %r" % (cname, kind))
+        return None
+
+
     jobs, unlaunched = {}, {}
     log("brief=%d chars  tier=%s  marker=%s" % (len(brief), a.tier, a.marker))
     _SENT_SEEN.clear()
@@ -14377,6 +14985,24 @@ def main():
                                         name=cname, workdir=workdir,
                                         bypass=bool(cli_bypass_active(cname, a, reg)),
                                         env_model=_kimi_env_model(cname, reg))
+            elif kind == "chatseat":
+                # R173 И-2: scaffold. The call_chatseat stub returns a R173_I2_SCAFFOLD refusal
+                # for every live round; the plan still prints [RUN ] and the selftest still
+                # enumerates the channel. R173 И-3 moves the driver and wires live subprocess.
+                jobs[cname] = ex.submit(call_chatseat, cbrief, a.marker, outfile,
+                                        model=p.get("model"), effort=p.get("effort"),
+                                        system=_system_for(system, p),
+                                        timeout=_seconds(p.get("timeout"), 1200),
+                                        name=cname, driver=p.get("driver"))
+            elif kind == "uiaseat":
+                # R173 И-2: scaffold. See chatseat above. The UIA serialisation (D2) comes online
+                # in R173 И-3 when both uiaseat channels have live drivers; the stub records the
+                # refusal and exits in milliseconds, so no foreground race is possible yet.
+                jobs[cname] = ex.submit(call_uiaseat, cbrief, a.marker, outfile,
+                                        model=p.get("model"), effort=p.get("effort"),
+                                        system=_system_for(system, p),
+                                        timeout=_seconds(p.get("timeout"), 1500),
+                                        name=cname, driver=p.get("driver"))
             else:
                 # Named in the registry, unknown to the code. A log line is NOT enough: a log
                 # line scrolls, and every downstream consumer - the "N/M channels returned"
@@ -14390,20 +15016,232 @@ def main():
                     "error": "channels.json gives this channel kind %r, which this version of "
                              "orchestrate.py cannot dispatch. Known kinds: %s. Fix the `kind` "
                              "field or disable the channel." % (kind, ", ".join(KNOWN_KINDS))}
-        # 🔴 NOT a dict comprehension over f.result(). Future.result() RE-RAISES whatever the
-        # worker raised, so one channel throwing would abort the comprehension and discard the
-        # results of every other channel - which have already run and already been paid for.
-        # Four good reviews lost to a fifth channel's crash, with an unhandled traceback in
-        # place of the output. Each failure is converted into the same shape every call function
-        # already returns for its own errors, so one channel dying costs exactly one channel.
+        # R172 И-2 (2026-11-02): a FIRST_COMPLETED wait loop so a FREE voice that fails early
+        # is retried / replaced by its fallback INSIDE the round, before the slowest channel
+        # ends (today 61-70 min with DeepSeek V4.1 Flash). Paid and subscription voices keep
+        # today's after-round AUTO-RETRY and FALLBACK behaviour exactly. The rule's four
+        # states are in _classify_free_failure's docstring; _free_cost gates it, so a mis-
+        # typed cost in the registry quietly turns the rule off for that channel (no false
+        # positive on a paid voice).
+        #
+        # 🔴 Each `f.result()` is wrapped in try/except because Future.result() RE-RAISES
+        # whatever the worker raised, so one channel throwing would otherwise discard every
+        # other channel - which have already run and already been paid for. Four good reviews
+        # once lost to a fifth channel's crash, with an unhandled traceback in place of the
+        # output. Each failure is converted into the same shape every call function returns
+        # for its own errors, so one channel dying costs exactly one channel.
         results = {}
-        for cname, f in jobs.items():
-            try:
-                results[cname] = f.result()
-            except BaseException as exc:                    # noqa: BLE001 - deliberate catch-all
-                log("  [%s] RAISED: %r" % (cname, exc))
-                results[cname] = {"ok": False, "error": "channel raised: %r" % (exc,),
-                                  "traceback": traceback.format_exc()}
+        _free_window_s = _free_inround_window()
+        _can_inround = (plan is not None and not task_mode and reg is not None)
+        _no_panel_retry = bool(getattr(a, "no_panel_retry", False))
+        _no_fallback = bool(getattr(a, "no_fallback", False))
+        _future_name = dict((f, cn) for cn, f in jobs.items())
+        _future_tag = dict((f, "primary") for f in jobs.values())
+        _future_primary = {}             # fallback future -> the primary it serves
+        _free_retry_spent = set()
+        _free_fb_submitted = {}          # primary cname -> fallback cname
+        _free_retry_prior = {}           # cname -> prior primary record (for cost merge)
+        _wave_t0 = time.time()
+        _seat_start = {cn: _wave_t0 for cn in jobs}
+
+        def _refused_qg_now():
+            out = set()
+            for _n, _rr in (results or {}).items():
+                _g = _quota_group(reg, _n)
+                if _g and _quota_refused(_rr):
+                    out.add(_g)
+            return out
+
+        def _in_round_fire_fallback(cname, prim_r):
+            fbk = ((plan or {}).get(cname) or {}).get("fallback")
+            if not fbk:
+                prim_r["free_inround"] = dict(prim_r.get("free_inround") or {},
+                                              action="no_action",
+                                              note="in-round: no fallback configured")
+                return None
+            fb = fbk["channel"]
+            why_not = None
+            if fbk.get("off"):
+                why_not = "OFF in this run - %s" % fbk["off"]
+            elif _no_fallback:
+                why_not = "--no-fallback"
+            elif _quota_group(reg, fb) in _refused_qg_now():
+                why_not = ("it draws on the same daily allowance (quota group «%s») that refused this "
+                           "round - it would be refused too, until 00:00 UTC" % _quota_group(reg, fb))
+            elif fb in results and _has_answer(results.get(fb)):
+                why_not = "%s already answered in this round" % fb
+            elif fb in _free_fb_submitted.values():
+                why_not = "%s is already another channel's fallback here" % fb
+            else:
+                _voiced = [s for s in routing.same_voice(reg, fb) if _has_answer(results.get(s))]
+                if _voiced:
+                    why_not = "the same model already answered here through %s" % ", ".join(_voiced)
+            if why_not:
+                log("  [%s] in-round fallback %s not run: %s" % (cname, fb, why_not))
+                prim_r.setdefault("notes", []).append("FALLBACK %s not run: %s." % (fb, why_not))
+                prim_r["free_inround"] = dict(prim_r.get("free_inround") or {},
+                                              action="no_action",
+                                              note="in-round fallback skipped: " + str(why_not)[:120])
+                return None
+            fut = _submit_again(_irex, fb)
+            if fut is None:
+                prim_r.setdefault("notes", []).append(
+                    "FALLBACK %s could not be dispatched (no caller for its kind)." % fb)
+                prim_r["free_inround"] = dict(prim_r.get("free_inround") or {},
+                                              action="no_action",
+                                              note="in-round fallback: no caller for kind")
+                return None
+            _free_fb_submitted[cname] = fb
+            _future_name[fut] = fb
+            _future_tag[fut] = "fallback"
+            _future_primary[fut] = cname
+            prim_r["free_inround"] = dict(prim_r.get("free_inround") or {},
+                                          action="fallback_direct",
+                                          note="in-round fallback -> %s (operator's 25-min rule)" % fb)
+            _elap = int(time.time() - _seat_start.get(cname, _wave_t0))
+            log("  [%s] in-round: no answer at %ds -> FALLBACK %s runs the same brief now "
+                "(operator's 25-min rule)" % (cname, _elap, fb))
+            return fut
+
+        def _in_round_retry(cname, prim_r, elapsed_s, delay_s):
+            remaining = max(0.0, float(_free_window_s) - float(elapsed_s) - 1.0)
+            actual_delay = max(0.0, min(float(delay_s or 0), remaining))
+            _free_retry_spent.add(cname)
+            _free_retry_prior[cname] = dict(prim_r)
+
+            def _delayed_retry_body(c=cname, d=actual_delay):
+                if d > 0:
+                    time.sleep(d)
+                inner = _submit_again(_irex, c)
+                if inner is None:
+                    return {"ok": False, "error": "in-round retry: cannot dispatch kind"}
+                return inner.result()
+
+            fut = _irex.submit(_delayed_retry_body)
+            _future_name[fut] = cname
+            _future_tag[fut] = "retry"
+            prim_r["free_inround"] = dict(prim_r.get("free_inround") or {},
+                                          action="retry_submitted",
+                                          note="in-round retry after %ds, delay %.1fs"
+                                               % (int(elapsed_s), actual_delay))
+            log("  [%s] in-round: transient failure at %ds -> AUTO-RETRY once in %.1fs "
+                "(operator's 25-min rule)" % (cname, int(elapsed_s), actual_delay))
+            return fut
+
+        _n_free = sum(1 for cn in jobs if _can_inround and _free_cost(reg, cn))
+        _MAX_IR_WORKERS = max(2, 3 * max(1, _n_free))
+        with ThreadPoolExecutor(max_workers=_MAX_IR_WORKERS) as _irex:
+            _pending = set(jobs.values())
+            while _pending:
+                _done, _pending = _cf_wait(_pending, return_when=FIRST_COMPLETED)
+                for f in _done:
+                    cname = _future_name[f]
+                    tag = _future_tag[f]
+                    try:
+                        r = f.result()
+                    except BaseException as exc:          # noqa: BLE001 - deliberate catch-all
+                        log("  [%s] %s RAISED: %r" % (cname, tag.upper(), exc))
+                        r = {"ok": False, "error": "channel raised: %r" % (exc,),
+                             "traceback": traceback.format_exc()}
+                    if tag == "primary":
+                        results[cname] = r
+                        if (_can_inround and _free_cost(reg, cname) and not _has_answer(r)
+                                and cname not in _free_retry_spent
+                                and cname not in _free_fb_submitted):
+                            _elapsed = time.time() - _seat_start.get(cname, _wave_t0)
+                            _action, _delay = _classify_free_failure(r, _elapsed, _free_window_s)
+                            if _action == "past_window":
+                                r["free_inround"] = {"action": "no_action",
+                                                     "note": "failed at %ds - past the 25-min window "
+                                                             "(operator's rule)" % int(_elapsed)}
+                                log("  [%s] in-round: failed at %ds - past 25-min window, no retry, no "
+                                    "fallback" % (cname, int(_elapsed)))
+                            elif _action == "silence":
+                                r["free_inround"] = {"action": "no_action",
+                                                     "note": "silence (harness closed at its time budget) - "
+                                                             "operator's rule"}
+                                log("  [%s] in-round: silence at %ds - no retry, no fallback (operator's "
+                                    "rule)" % (cname, int(_elapsed)))
+                            elif _action == "transient" and not _no_panel_retry:
+                                nf = _in_round_retry(cname, r, _elapsed, _delay)
+                                if nf is not None:
+                                    _pending.add(nf)
+                            elif _action in ("quota", "other"):
+                                nf = _in_round_fire_fallback(cname, r)
+                                if nf is not None:
+                                    _pending.add(nf)
+                            else:
+                                # transient but --no-panel-retry
+                                r["free_inround"] = {"action": "no_action",
+                                                     "note": "transient failure but --no-panel-retry; "
+                                                             "no in-round retry"}
+                                log("  [%s] in-round: transient at %ds, --no-panel-retry; held"
+                                    % (cname, int(_elapsed)))
+                    elif tag == "retry":
+                        _prior = _free_retry_prior.get(cname) or {}
+                        _prior_usd = _prior.get("usd")
+                        if _prior_usd is not None:
+                            r["panel_retry_prior_usd"] = round(_prior_usd, 6)
+                            if r.get("usd") is not None:
+                                r["usd"] = round(r["usd"] + _prior_usd, 6)
+                            else:
+                                r["usd"] = round(_prior_usd, 6)
+                        r["panel_retry"] = True
+                        r["free_inround"] = {
+                            "action": "retry_in_round",
+                            "note": "in-round retry (operator's 25-min rule); first attempt billed %s"
+                                    % (("$%.4f" % _prior_usd) if _prior_usd is not None else "nothing")}
+                        _first_cause = str(_prior.get("error")
+                                           or next(iter(_prior.get("warnings") or []), "")
+                                           or "no cause recorded")[:240]
+                        r.setdefault("notes", []).append(
+                            "AUTO-RETRIED IN-ROUND (R172 И-2) after a transient free-voice failure. "
+                            "First attempt: finish=%s, cause: %s; billed %s. The operator's rule holds "
+                            "the retry to the first 25 min of the seat's life."
+                            % (_prior.get("finish_reason"), _first_cause,
+                               ("$%.4f" % _prior_usd) if _prior_usd is not None
+                               else "nothing (no price reported)"))
+                        results[cname] = r
+                        _stat = "OK" if r.get("ok") else "STILL FAILED"
+                        log("  [%s] in-round retry %s%s" %
+                            (cname, _stat,
+                             (" - %s bytes" % r.get("bytes")) if r.get("text") else ""))
+                        if (_can_inround and not _has_answer(r)
+                                and cname not in _free_fb_submitted
+                                and (time.time() - _seat_start.get(cname, _wave_t0)) <= _free_window_s):
+                            _retry_elapsed = time.time() - _seat_start.get(cname, _wave_t0)
+                            _r_act, _ = _classify_free_failure(r, _retry_elapsed, _free_window_s)
+                            if _r_act == "silence":
+                                r["free_inround"] = {
+                                    "action": "retry_then_silence",
+                                    "note": "retry ended in silence; no fallback (operator's rule)"}
+                                log("  [%s] in-round: retry ended in silence - no fallback" % cname)
+                            elif _r_act == "past_window":
+                                r["free_inround"] = {
+                                    "action": "retry_then_past_window",
+                                    "note": "retry past 25-min window; no fallback"}
+                                log("  [%s] in-round: retry past 25-min window - no fallback" % cname)
+                            else:
+                                nf = _in_round_fire_fallback(cname, r)
+                                if nf is not None:
+                                    _pending.add(nf)
+                    elif tag == "fallback":
+                        primary = _future_primary.get(f) or cname
+                        r["fallback_for"] = primary
+                        r.setdefault("notes", []).append(
+                            "FALLBACK for %s - ran in-round within the operator's 25-min window "
+                            "(R172 И-2, 2026-10-31). Primary: %s" %
+                            (primary,
+                             scrub(str(results.get(primary, {}).get("error") or "no answer text"))[:160]))
+                        results[cname] = r
+                        if primary in results:
+                            results[primary].setdefault("notes", []).append(
+                                "IN-ROUND FALLBACK: %s ran the same brief in the round - %s." %
+                                (cname, "it answered (%s)" % (cname.upper() + ".md")
+                                 if r.get("ok") else "it failed too"))
+                        log("  [%s] in-round fallback for %s: %s" %
+                            (cname, primary,
+                             ("OK - %s bytes" % r.get("bytes")) if r.get("ok") else "FAILED too"))
     results.update(unlaunched)
     if task_mode:
         _task_finish(results, task_dirs, task_before, a.out, copy_out=not a.workdir)
@@ -14416,136 +15254,10 @@ def main():
     # happened but no text and finish_reason is None). The retry is safe: no ANSWER text
     # was generated, so re-sending the brief can only re-bill INPUT tokens. The failed
     # attempt's cost is preserved and added to the retry's cost for correct totals.
-    def _submit_again(_rex, cname):
-        """Dispatch ONE channel again on an open executor; the future, or None for an unknown kind.
-
-        R142: the auto-retry below and the fallback phase after it share this one chain, so the
-        two cannot drift (phase 1's own chain above still differs: --task and unknown kinds).
-        """
-        p = (plan or {}).get(cname) or _legacy_slot(cname)
-        p["_name"] = cname
-        kind = p.get("kind")
-        outfile = os.path.join(a.out, cname.upper() + ".md")
-        workdir = _ws(a, cname)
-        use_refs = bool((atts or att_dirs) and kind in REFS_KINDS)
-        cbrief = (((brief_refs_full if _tools_full(kind, cname, a, reg) else brief_refs)
-                   if use_refs else brief))
-        att_parents = (sorted({os.path.dirname(pth) for pth, _t in atts}
-                              | {sd for sd, _d in _snap_pairs})
-                       if use_refs else None)
-        _note_sent(cname, _system_for(system, p),
-                   _with_bypass_safety(cbrief, cli_bypass_active(cname, a, reg)))
-        if kind == "http":
-            return _rex.submit(
-                call_http_reviewer, cbrief, _system_for(system, p),
-                a.tier, a.marker, timeout=_seconds(p.get("timeout"), 2400),
-                model=p.get("model"), name=cname, effort=p.get("effort"),
-                fallback_model=p.get("fallback_model"),
-                answer_cap=a.answer_cap if a.answer_cap and a.answer_cap > 0
-                else None)
-        elif kind == "codex":
-            return _rex.submit(
-                call_codex, cbrief, a.marker, workdir, outfile,
-                model=p.get("model"), effort=p.get("effort"),
-                timeout=p.get("timeout"), system=_system_for(system, p),
-                bypass=bool(cli_bypass_active(cname, a, reg)))
-        elif kind == "agy":
-            return _rex.submit(
-                call_agy, cbrief, a.marker, workdir, outfile,
-                model=p.get("model"), effort=p.get("effort") or "high",
-                timeout=p.get("timeout") or "25m",
-                system=_system_for(system, p), add_dirs=att_parents,
-                bypass=bool(cli_bypass_active(cname, a, reg)))
-        elif kind == "grokcli":
-            return _rex.submit(
-                call_grokcli, cbrief, a.marker, workdir, outfile,
-                model=p.get("model"), effort=p.get("effort"),
-                timeout=p.get("timeout") or "40m",
-                system=_system_for(system, p), name=cname,
-                file_refs=use_refs,
-                bypass=bool(cli_bypass_active(cname, a, reg)),
-                keys_ok=channel_may_read_keys(cname, reg))
-        elif kind == "hermes":
-            return _rex.submit(
-                call_hermes, cbrief, a.marker, outfile,
-                model=p.get("model"), toolsets=p.get("toolsets"),
-                system=_system_for(system, p),
-                timeout=_seconds(p.get("timeout"), 2400))
-        elif kind in ("openrouter", "oai"):
-            return _rex.submit(
-                call_oai_reviewer, cbrief, a.marker, outfile,
-                model=p.get("model"), system=_system_for(system, p),
-                web=p.get("web"), name=cname,
-                reasoning=p.get("reasoning"),
-                max_tokens=p.get("max_tokens"),
-                fetch_tool=p.get("fetch_tool"),
-                provider=p.get("provider") or "openrouter",
-                provider_route=p.get("provider_route"),
-                spend_guard=p.get("spend_guard"),
-                fallback_models=p.get("fallback_models"),
-                timeout=_seconds(p.get("timeout"), 2400))
-        elif kind == "xai":
-            return _rex.submit(
-                call_xai_responses, cbrief, a.marker, outfile,
-                model=p.get("model"), system=_system_for(system, p),
-                name=cname, tools=p.get("tools"),
-                timeout=_seconds(p.get("timeout"), 2400),
-                max_tokens=p.get("max_tokens"))
-        elif kind == "gemini":
-            return _rex.submit(
-                call_gemini_direct, cbrief, a.marker, outfile,
-                model=p.get("model"), system=_system_for(system, p),
-                name=cname, thinking_level=p.get("thinking_level"),
-                tools=p.get("tools"), max_tokens=p.get("max_tokens"),
-                timeout=_seconds(p.get("timeout"), 2400))
-        elif kind == "opencode":
-            return _rex.submit(
-                call_opencode, cbrief, a.marker, outfile,
-                model=p.get("model"), effort=p.get("effort"),
-                system=_system_for(system, p),
-                timeout=_seconds(p.get("timeout"), 2400), name=cname)
-        elif kind == "mimocli":
-            return _rex.submit(
-                call_mimocli, cbrief, a.marker, outfile,
-                model=p.get("model"), effort=p.get("effort"),
-                system=_system_for(system, p),
-                timeout=_seconds(p.get("timeout"), 2400), name=cname)
-        elif kind == "musecode":
-            return _rex.submit(
-                call_musecode, cbrief, a.marker, outfile,
-                model=p.get("model"), effort=p.get("effort"),
-                system=_system_for(system, p),
-                timeout=_seconds(p.get("timeout"), 2700), name=cname,
-                max_steps=p.get("max_turns"))
-        elif kind == "claudecli":
-            return _rex.submit(
-                call_claudecli, cbrief, a.marker, outfile,
-                model=p.get("model"), effort=p.get("effort"),
-                system=_system_for(system, p),
-                fallback_model=p.get("fallback_model"),
-                timeout=_seconds(p.get("timeout"), 2400),
-                max_turns=p.get("max_turns"), name=cname)
-        elif kind == "qwencli":
-            return _rex.submit(
-                call_qwencli, cbrief, a.marker, outfile,
-                model=p.get("model"), effort=p.get("effort"),
-                system=_system_for(system, p),
-                fallback_model=p.get("fallback_model"),
-                timeout=_seconds(p.get("timeout"), 2400),
-                max_turns=p.get("max_turns"),
-                max_tool_calls=p.get("max_tool_calls"), name=cname)
-        elif kind == "kimicli":
-            return _rex.submit(
-                call_kimicli, cbrief, a.marker, outfile,
-                model=p.get("model"), effort=p.get("effort"),
-                system=_system_for(system, p),
-                timeout=_seconds(p.get("timeout"), 2400), name=cname,
-                workdir=_ws(a, cname),
-                bypass=bool(cli_bypass_active(cname, a, reg)),
-                env_model=_kimi_env_model(cname, reg))
-        log("  [%s] cannot dispatch again: unknown kind %r" % (cname, kind))
-        return None
-
+    # R172 И-2: `_submit_again` is defined ABOVE the primary jobs block so the
+    # in-round free-voice rule can dispatch retries and fallbacks the moment a
+    # free voice fails. Phase 1's own dispatch chain stays separate (it carries
+    # --task and tracks unknown kinds against `want`).
     # 🔴 R144 И-7 (H1): a transient death that already BILLED money is held, never re-run by the
     # harness itself (billed_failure); the others are retried once, as before.
     _retryable, _held = auto_retry_split(results,

@@ -246,6 +246,12 @@ a subscription limit reset, a key was rotated.
 
 ---
 
+### "A free voice ended with no fallback" (1.119.0 in-round rule)
+
+If a free voice ended without an answer and nothing fell back for it, the in-round rule (new in 1.119.0) classified the failure as `silence` (clean exit, no error) or `past_window` (the primary ran past 25 minutes of its start). Both branches intentionally skip the retry and the fallback — the operator's rule verbatim «silence or past 25 min: no fallback». Grep `in-round:` in `run.log` to see which classifier branch fired; the full note is in the `free_inround` field of `diagnostics.json`. Paid and subscription voices are not affected — their after-round fallback still runs on the same inputs. If you want a free voice retried unconditionally, raise its primary timeout or run the fallback directly by name (`--only <fallback>`), the in-round classifier only acts on the first failure.
+
+---
+
 ## Verifying the tool itself
 
 ```

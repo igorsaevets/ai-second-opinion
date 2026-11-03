@@ -3432,9 +3432,15 @@ def suite_panels():
     check(not (_retired & set(CH)),
           "a channel recorded as RETIRED is really gone from the registry",
           "still present=%s" % sorted(_retired & set(CH)))
-    standard_only = {c for c in CH} - actual_cheap
+    # R173 И-2 (2026-11-02): the chat panel is a fourth panel, so «outside cheap» is no longer
+    # the same as «standard». Subtract the chat panel's members too; the invariant then reads
+    # «every channel is either in cheap, in standard, or in chat» which is the actual property.
+    _actual_chat = {c for c, v in CH.items() if v.get("panel") == "chat"}
+    standard_only = {c for c in CH} - actual_cheap - _actual_chat
     check({c for c, v in CH.items() if v.get("panel") == "standard"} == standard_only,
-          "everything outside the cheap panel is standard-only", ", ".join(sorted(standard_only)))
+          "everything outside the cheap panel is standard-only (R173 И-2: or chat)",
+          ", ".join(sorted(standard_only.symmetric_difference(
+              {c for c, v in CH.items() if v.get("panel") == "standard"}))))
     # The ladder is NESTED, not a partition: «стандартная» has to mean "what normally runs".
     reg = _r.load_registry()
     check(_r.panel_members(reg, "cheap") < _r.panel_members(reg, "standard"),
@@ -8149,6 +8155,10 @@ def main():
         suite_r157_i8_panel_fixes,
         suite_r171_nvidia_deepseek,
         suite_r172_lapsed_plan_diagnoses,
+        suite_r173_i2_chat_panel_scaffold,
+        suite_r173_i3_seats_topology,
+        suite_r174_valid_through,
+        suite_r172_i2_free_inround,
                   suite_r137_kimi_argv, suite_r137_i2_cli_tools,
                   suite_r137_i3_attach_truth, suite_r138_task_mode,
                   suite_r138_i2_hotfix, suite_r139_hook_hygiene,
@@ -21211,6 +21221,275 @@ def suite_r172_lapsed_plan_diagnoses():
           "R172 (c) control: another host's plain 403 gets neither cause", repr(cn))
 
 
+def suite_r173_i2_chat_panel_scaffold():
+    """R173 И-2 + И-3 (2026-11-02). The chat panel's channels, kinds, `--chat` flag AND live
+    subprocess wiring. The suite keeps its I-2 name because every I-2 property is still an
+    invariant; (e) now tests that the STUB is GONE and the subprocess wiring is present (the
+    scaffold refusal R173_I2_SCAFFOLD has been removed from the call functions, the live kill
+    switch R173_SEAT_FORBID_LIVE takes its place for tests).
+
+    (a) chatseat + uiaseat are KNOWN_KINDS of orchestrate.py;
+    (b) the four seats exist with panel=chat, voice in {claude, chatgpt}, distribution=local,
+        and the expected enabled bits (claudeaiseat/cgptseat on, cldesktopseat/cgptdeskseat off
+        in SOURCE - the kit flips enabled off for every distribution=local on build);
+    (c) cldesktopseat.fallback = claudeaiseat, cgptdeskseat.fallback = cgptseat (transport-only
+        fallback, D1);
+    (d) panels.chat.includes = [chat] and chat is NOT inside cheap.includes / standard.includes;
+    (e) call_chatseat / call_uiaseat are WIRED (R173 И-3): the body carries subprocess.run and
+        _run_seat; the kill switch R173_SEAT_FORBID_LIVE=1 forces a refusal with
+        R173_SEAT_LIVE_FORBIDDEN before any subprocess runs (safe to invoke in a test);
+    (f) --panel chat without --chat refuses with the D4 message naming claude/chatgpt/both;
+    (g) --chat <vendor> without --panel implies --panel chat; --chat beside --panel cheap is
+        refused as a contradiction;
+    (h) the voice filter after resolve cuts the other vendor: --chat claude keeps only
+        voice=claude, --chat chatgpt keeps only voice=chatgpt, --chat both keeps both.
+    """
+    import io
+    import contextlib
+    import orchestrate as o
+    import routing as rt
+    section("R173 И-2+И-3: chat panel scaffold + wired (channels, kinds, --chat flag, subprocess, plan filter)")
+
+    # (a) kinds
+    check("chatseat" in o.KNOWN_KINDS and "uiaseat" in o.KNOWN_KINDS,
+          "R173 И-2 (a) chatseat + uiaseat appear in orchestrate.KNOWN_KINDS",
+          repr(o.KNOWN_KINDS))
+
+    # (b, c, d) registry shape
+    reg = rt.load_registry(overlay=False)
+    ch = reg["channels"]
+    seats = {n: ch.get(n) or {} for n in ("claudeaiseat", "cldesktopseat", "cgptseat", "cgptdeskseat")}
+    missing = [n for n, s in seats.items() if not s]
+    check(not missing,
+          "R173 И-2 (b1) the four chat seats exist in channels.json",
+          "missing=%s" % missing)
+    check(seats["claudeaiseat"].get("voice") == "claude"
+          and seats["cldesktopseat"].get("voice") == "claude"
+          and seats["cgptseat"].get("voice") == "chatgpt"
+          and seats["cgptdeskseat"].get("voice") == "chatgpt",
+          "R173 И-2 (b2) voices: claudeaiseat / cldesktopseat = claude; cgptseat / cgptdeskseat = chatgpt",
+          repr({n: s.get("voice") for n, s in seats.items()}))
+    check(all(s.get("panel") == "chat" for s in seats.values()),
+          "R173 И-2 (b3) every chat seat declares panel=chat",
+          repr({n: s.get("panel") for n, s in seats.items()}))
+    check(seats["claudeaiseat"].get("kind") == "chatseat"
+          and seats["cgptseat"].get("kind") == "chatseat"
+          and seats["cldesktopseat"].get("kind") == "uiaseat"
+          and seats["cgptdeskseat"].get("kind") == "uiaseat",
+          "R173 И-2 (b4) kinds: *seat / *desktopseat = chatseat / uiaseat",
+          repr({n: s.get("kind") for n, s in seats.items()}))
+    check(all(s.get("distribution") == "local" for s in seats.values()),
+          "R173 И-2 (b5) every chat seat ships distribution=local (so package.py flips enabled off in the kit)",
+          repr({n: s.get("distribution") for n, s in seats.items()}))
+    # (b6) enabled bits depend on which tree runs this suite. In the AUTHOR'S SOURCE every chat
+    # channel is distribution=local and shipped as its design wants: claudeaiseat / cgptseat
+    # true (local primary), cldesktopseat / cgptdeskseat false (R161 И-2e / task #106). In the
+    # SHIPPED kit tree package.py flips every distribution=local to false, so all four read
+    # false there. `_kit_excluded_channels` is the signal the kit was built: package.py adds it,
+    # the source does not. The design intent — distribution=local on all four, UIA seats off in
+    # both worlds — stays enforced by (b5) above and by the enabled check in whichever world
+    # applies.
+    _is_kit_tree = "_kit_excluded_channels" in reg
+    if _is_kit_tree:
+        _enabled_ok = all(s.get("enabled") is False for s in seats.values())
+        _enabled_what = "KIT: all four flipped off by distribution=local"
+    else:
+        _enabled_ok = (seats["claudeaiseat"].get("enabled") is True
+                       and seats["cgptseat"].get("enabled") is True
+                       and seats["cldesktopseat"].get("enabled") is False
+                       and seats["cgptdeskseat"].get("enabled") is False)
+        _enabled_what = "SOURCE: CDP seats true (local primary); UIA seats false (R161 И-2e / task #106)"
+    check(_enabled_ok,
+          "R173 И-2 (b6) enabled bits per tree, %s" % _enabled_what,
+          repr({n: s.get("enabled") for n, s in seats.items()}))
+    check(seats["cldesktopseat"].get("fallback") == "claudeaiseat"
+          and seats["cgptdeskseat"].get("fallback") == "cgptseat",
+          "R173 И-2 (c) transport fallbacks (D1): cldesktopseat->claudeaiseat; cgptdeskseat->cgptseat",
+          repr({n: s.get("fallback") for n, s in seats.items() if s.get("fallback")}))
+
+    panels = reg["panels"]
+    chat_panel = panels.get("chat") or {}
+    check(chat_panel.get("includes") == ["chat"],
+          "R173 И-2 (d1) panels.chat.includes = ['chat'] (a fourth panel, not nested inside cheap/standard)",
+          repr(chat_panel.get("includes")))
+    check("chat" not in (panels.get("cheap") or {}).get("includes", [])
+          and "chat" not in (panels.get("standard") or {}).get("includes", []),
+          "R173 И-2 (d2) chat label is NOT inside cheap.includes / standard.includes (so --panel cheap / standard never pulls chat seats)",
+          "cheap.includes=%s standard.includes=%s"
+          % ((panels.get("cheap") or {}).get("includes"),
+             (panels.get("standard") or {}).get("includes")))
+
+    # (e) R173 И-3 wiring: the scaffold refusal is GONE; subprocess.run is present; the kill
+    # switch forces a refusal with R173_SEAT_LIVE_FORBIDDEN before any live call.
+    import inspect
+    src_chat = inspect.getsource(o.call_chatseat)
+    src_uia = inspect.getsource(o.call_uiaseat)
+    src_run_seat = inspect.getsource(o._run_seat) if hasattr(o, "_run_seat") else ""
+    check(
+        "_run_seat(" in src_chat
+        and "_run_seat(" in src_uia
+        and "subprocess.run" in src_run_seat
+        and "R173_I2_SCAFFOLD" not in src_chat
+        and "R173_I2_SCAFFOLD" not in src_uia,
+        "R173 И-3 (e1) call_chatseat / call_uiaseat are WIRED through _run_seat + subprocess.run; "
+        "the R173_I2_SCAFFOLD stub text is gone from both",
+        "chat has _run_seat=%s | uia has _run_seat=%s | _run_seat has subprocess.run=%s | "
+        "I2 stub still in chat=%s | I2 stub still in uia=%s"
+        % ("_run_seat(" in src_chat, "_run_seat(" in src_uia,
+           "subprocess.run" in src_run_seat,
+           "R173_I2_SCAFFOLD" in src_chat, "R173_I2_SCAFFOLD" in src_uia))
+
+    # The kill switch MUST stop the function before any subprocess ever starts. The suite sets
+    # it in the environment, calls both functions, and checks that the refusal is the one that
+    # names R173_SEAT_LIVE_FORBIDDEN. Nothing is spawned because _run_seat returns at the top.
+    tmp_out_pre = tempfile.mkdtemp(prefix="r173-e2-")
+    outfile_dummy = os.path.join(tmp_out_pre, "CLAUDEAISEAT.md")
+    _prev_env = os.environ.get("R173_SEAT_FORBID_LIVE")
+    os.environ["R173_SEAT_FORBID_LIVE"] = "1"
+    try:
+        r_ch = o.call_chatseat(brief="probe", marker="PROBE", outfile=outfile_dummy,
+                               model="Opus 4\\.(6|7)", effort="Максимальный",
+                               name="claudeaiseat", driver="seats/chat_seats.py")
+        r_ui = o.call_uiaseat(brief="probe", marker="PROBE",
+                              outfile=os.path.join(tmp_out_pre, "CLDESKTOPSEAT.md"),
+                              model="Opus 4\\.(6|7) Максимальный", effort="Максимальный",
+                              name="cldesktopseat", driver="seats/desktop_seats.py")
+    finally:
+        if _prev_env is None:
+            os.environ.pop("R173_SEAT_FORBID_LIVE", None)
+        else:
+            os.environ["R173_SEAT_FORBID_LIVE"] = _prev_env
+        shutil.rmtree(tmp_out_pre, ignore_errors=True)
+    check(isinstance(r_ch, dict) and r_ch.get("ok") is False
+          and "R173_SEAT_LIVE_FORBIDDEN" in (r_ch.get("warnings") or [])
+          and r_ch.get("chat_slot_spent") is False
+          and "R173_SEAT_FORBID_LIVE" in str(r_ch.get("error") or ""),
+          "R173 И-3 (e2) call_chatseat refuses when R173_SEAT_FORBID_LIVE=1 (no slot spent, "
+          "no subprocess) - the test-only kill switch for safe invocation",
+          repr({k: r_ch.get(k) for k in ("ok", "warnings", "chat_slot_spent")}
+                if isinstance(r_ch, dict) else r_ch))
+    check(isinstance(r_ui, dict) and r_ui.get("ok") is False
+          and "R173_SEAT_LIVE_FORBIDDEN" in (r_ui.get("warnings") or [])
+          and r_ui.get("chat_slot_spent") is False
+          and "R173_SEAT_FORBID_LIVE" in str(r_ui.get("error") or ""),
+          "R173 И-3 (e3) call_uiaseat refuses when R173_SEAT_FORBID_LIVE=1 (no slot spent, "
+          "no subprocess) - mirrors the chatseat kill switch",
+          repr({k: r_ui.get(k) for k in ("ok", "warnings", "chat_slot_spent")}
+                if isinstance(r_ui, dict) else r_ui))
+
+    # (f) --panel chat refuses without --chat (SystemExit from ap.error, message on stderr)
+    tmp_brief = tempfile.NamedTemporaryFile("w", delete=False, suffix=".md", encoding="utf-8")
+    tmp_brief.write("test brief\n")
+    tmp_brief.close()
+    tmp_out = tempfile.mkdtemp(prefix="r173-dry-")
+
+    def _run_main(argv):
+        err = io.StringIO()
+        rc = None
+        exc = None
+        with contextlib.redirect_stderr(err):
+            try:
+                sys.argv = ["orchestrate.py"] + argv
+                rc = o.main()
+            except SystemExit as e:
+                rc = e.code
+            except BaseException as e:  # noqa: BLE001
+                exc = e
+        return rc, err.getvalue(), exc
+
+    rc, errtxt, exc = _run_main(
+        ["--panel", "chat", "--brief", tmp_brief.name,
+         "--out", os.path.join(tmp_out, "f"), "--dry-run", "--no-log"])
+    check(rc == 2 and exc is None and "D4, R173 И-2" in errtxt
+          and "--chat claude" in errtxt and "--chat chatgpt" in errtxt
+          and "--chat both" in errtxt,
+          "R173 И-2 (f) --panel chat without --chat refuses with the D4 message naming three vendor keywords",
+          repr((rc, errtxt[-220:] if errtxt else errtxt)))
+
+    # (g) --chat beside non-chat panel is a contradiction
+    rc, errtxt, exc = _run_main(
+        ["--panel", "cheap", "--chat", "claude", "--brief", tmp_brief.name,
+         "--out", os.path.join(tmp_out, "g"), "--dry-run", "--no-log"])
+    check(rc == 2 and exc is None and "chat panel only" in errtxt and "do not compose" in errtxt,
+          "R173 И-2 (g) --chat beside --panel cheap is refused as a contradiction",
+          repr((rc, errtxt[-200:] if errtxt else errtxt)))
+
+    # (h) voice filter after resolve: claude / chatgpt / both
+    def _run_capture(argv):
+        buf = io.StringIO()
+        rc = None
+        exc = None
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            try:
+                sys.argv = ["orchestrate.py"] + argv
+                rc = o.main()
+            except SystemExit as e:
+                rc = e.code
+            except BaseException as e:  # noqa: BLE001
+                exc = e
+        return rc, buf.getvalue(), exc
+
+    # (h) In the SOURCE tree claudeaiseat / cgptseat are enabled=True, so the voice filter has
+    # material to cut. In the SHIPPED kit tree package.py flips them off (distribution=local),
+    # so --chat claude resolves to zero running channels - which is correct, since the kit's
+    # intended user has not flipped their overlay yet. The voice-filter CODE still has to work
+    # the same way in both worlds; the test shape differs, not the mechanism.
+    if _is_kit_tree:
+        rc, out_c, exc = _run_capture(
+            ["--panel", "chat", "--chat", "claude", "--brief", tmp_brief.name,
+             "--out", os.path.join(tmp_out, "h_claude"), "--dry-run", "--no-log"])
+        # On the kit tree every chat seat is disabled (distribution=local), so the plan is
+        # "0 channel(s): NONE". orchestrate.py refuses an empty plan with rc=2 - that is the
+        # correct behaviour for a kit user who has not flipped their overlay yet. The voice
+        # filter did not fire (nothing on to drop), which is the property this check pins.
+        check(rc == 2 and exc is None
+              and "running 0 channel(s)" in out_c
+              and "nothing to run" in out_c
+              and "drops voice=" not in out_c,
+              "R173 И-2 (h1-kit) --chat claude on the SHIPPED kit tree resolves to 0 channels "
+              "(package.py flipped the four seats off per distribution=local), orchestrate.py "
+              "refuses the empty plan with rc=2, and the voice filter never fires - correct",
+              repr((rc, [ln for ln in out_c.splitlines()
+                         if "running " in ln or "drops voice=" in ln
+                         or "nothing to run" in ln])))
+    else:
+        rc, out_c, exc = _run_capture(
+            ["--panel", "chat", "--chat", "claude", "--brief", tmp_brief.name,
+             "--out", os.path.join(tmp_out, "h_claude"), "--dry-run", "--no-log"])
+        check(rc == 0 and exc is None
+              and "running 1 channel(s): claudeaiseat" in out_c
+              and "drops voice=chatgpt" in out_c,
+              "R173 И-2 (h1) --chat claude keeps claudeaiseat alone and names the dropped voice",
+              repr((rc, [ln for ln in out_c.splitlines()
+                         if "running " in ln or "drops voice=" in ln])))
+
+        rc, out_g, exc = _run_capture(
+            ["--panel", "chat", "--chat", "chatgpt", "--brief", tmp_brief.name,
+             "--out", os.path.join(tmp_out, "h_chatgpt"), "--dry-run", "--no-log"])
+        check(rc == 0 and exc is None
+              and "running 1 channel(s): cgptseat" in out_g
+              and "drops voice=claude" in out_g,
+              "R173 И-2 (h2) --chat chatgpt keeps cgptseat alone and names the dropped voice",
+              repr((rc, [ln for ln in out_g.splitlines()
+                         if "running " in ln or "drops voice=" in ln])))
+
+        rc, out_b, exc = _run_capture(
+            ["--chat", "both", "--brief", tmp_brief.name,
+             "--out", os.path.join(tmp_out, "h_both"), "--dry-run", "--no-log"])
+        check(rc == 0 and exc is None
+              and "running 2 channel(s): claudeaiseat, cgptseat" in out_b
+              and "drops voice=" not in out_b,
+              "R173 И-2 (h3) --chat both (implicit --panel chat) runs both voices and drops nobody",
+              repr((rc, [ln for ln in out_b.splitlines()
+                         if "running " in ln or "drops voice=" in ln])))
+
+    try:
+        os.unlink(tmp_brief.name)
+    except OSError:
+        pass
+    shutil.rmtree(tmp_out, ignore_errors=True)
+
+
 def suite_r169_i2_kit_release():
     """R169 И-2 (2026-10-24), the kit release that ships agy4argon.
     (a) agy31pro is off: agy 1.4.7 on a Google AI Pro account offers no gemini-3.1-pro (`agy -p /model --model
@@ -21256,6 +21535,370 @@ def suite_r169_i2_kit_release():
     check(a.get("read_order") == 1 and "Q4" in str(a.get("_read_order_r169i2", "")),
           "R169 И-2 (c) agy4argon keeps read 1 with the reason from its first review",
           repr((a.get("read_order"), str(a.get("_read_order_r169i2", ""))[:60])))
+
+
+def suite_r173_i3_seats_topology():
+    """R173 И-3 (2026-11-02). The driver topology:
+    (a) ~/.claude/skills/model-orchestration/seats/ exists in SOURCE with 5 .py files
+        (chat_seats.py, desktop_seats.py, claude_export.py, cdp_one_tab.py, cdp_own_tabs.py);
+    (b) seats/ is ABSENT from the SHIPPED kit tree (package.py's COPY_DIRS whitelist does not
+        name it, so build output never carries it). The signal that this is a kit tree is
+        `_kit_excluded_channels` in the registry (added by package.py);
+    (c) channels.json's four chat seats carry `driver` that resolves (SKILL_DIR + path) to a
+        real file, and - in the SOURCE tree - the resolved path is under seats/;
+    (d) orchestrate.py carries the three helpers R173 И-3 adds (_SEAT_LIVE_KILL_SWITCH_ENV,
+        _resolve_seat_driver, _run_seat), the four-channel map _SEAT_NAME_TO_DRIVER_ARG, and
+        the E-125 contract (no full argv in result dict).
+    """
+    import orchestrate as o
+    import routing as rt
+    section("R173 И-3: seats/ topology (5 drivers in SOURCE, absent in kit, driver paths resolve)")
+
+    reg = rt.load_registry(overlay=False)
+    is_kit = "_kit_excluded_channels" in reg
+    skill_dir = o.SKILL_DIR
+    seats_dir = os.path.join(skill_dir, "seats")
+
+    seat_files = ("chat_seats.py", "desktop_seats.py", "claude_export.py",
+                  "cdp_one_tab.py", "cdp_own_tabs.py")
+
+    if is_kit:
+        check(not os.path.isdir(seats_dir),
+              "R173 И-3 (a-kit) seats/ is ABSENT from the SHIPPED kit tree "
+              "(package.py COPY_DIRS whitelist does not include it)",
+              "seats/ exists in kit = %s" % os.path.isdir(seats_dir))
+    else:
+        check(os.path.isdir(seats_dir),
+              "R173 И-3 (a) seats/ exists at %r in SOURCE" % seats_dir,
+              "exists = %s" % os.path.isdir(seats_dir))
+        present = sorted(f for f in os.listdir(seats_dir) if f.endswith(".py")) if os.path.isdir(seats_dir) else []
+        missing = [f for f in seat_files if f not in present]
+        check(not missing,
+              "R173 И-3 (b) seats/ carries the 5 expected driver files",
+              "missing=%s | present=%s" % (missing, present))
+
+    # (c) driver paths resolve
+    unresolved = []
+    for cname in ("claudeaiseat", "cldesktopseat", "cgptseat", "cgptdeskseat"):
+        p = reg["channels"].get(cname) or {}
+        d = p.get("driver") or ""
+        full = d if os.path.isabs(d) else os.path.join(skill_dir, d.replace("/", os.sep))
+        if is_kit:
+            # package.py did not ship seats/; the SKILL_DIR-relative resolve points at a path
+            # that does not exist on this tree, and that is correct behaviour. The channel is
+            # distribution=local; the kit user's overlay points it elsewhere or leaves it off.
+            continue
+        if not os.path.isfile(full):
+            unresolved.append("%s -> %r" % (cname, full))
+        elif "seats" not in full.replace("\\", "/"):
+            unresolved.append("%s path %r is NOT under seats/" % (cname, full))
+    check(not unresolved,
+          "R173 И-3 (c) all four chat seats' `driver` resolves to a file under seats/ "
+          "(SOURCE tree); kit tree does not ship seats/ and that is the design",
+          "unresolved=%s" % unresolved)
+
+    # (d) orchestrate.py helpers
+    check(getattr(o, "_SEAT_LIVE_KILL_SWITCH_ENV", "") == "R173_SEAT_FORBID_LIVE"
+          and callable(getattr(o, "_resolve_seat_driver", None))
+          and callable(getattr(o, "_run_seat", None))
+          and callable(getattr(o, "_seat_live_forbidden", None)),
+          "R173 И-3 (d1) orchestrate carries _SEAT_LIVE_KILL_SWITCH_ENV, _resolve_seat_driver, "
+          "_run_seat and _seat_live_forbidden",
+          "env=%r resolve=%s run=%s forbid=%s"
+          % (getattr(o, "_SEAT_LIVE_KILL_SWITCH_ENV", None),
+             callable(getattr(o, "_resolve_seat_driver", None)),
+             callable(getattr(o, "_run_seat", None)),
+             callable(getattr(o, "_seat_live_forbidden", None))))
+    name_map = getattr(o, "_SEAT_NAME_TO_DRIVER_ARG", {}) or {}
+    check(name_map.get("claudeaiseat") == "claude"
+          and name_map.get("cgptseat") == "chatgpt"
+          and name_map.get("cldesktopseat") == "claude-desktop"
+          and name_map.get("cgptdeskseat") == "chatgpt-daily",
+          "R173 И-3 (d2) _SEAT_NAME_TO_DRIVER_ARG covers all four channels with the "
+          "driver-expected keys",
+          repr(name_map))
+
+    # (d3) billed_failure flags chat_slot_spent on chatseat / uiaseat (defense: an auto-retry
+    # would spend a second live chat slot otherwise - R173 DESIGN D-note).
+    import inspect
+    src_bf = inspect.getsource(o.billed_failure)
+    check(("chatseat" in src_bf and "uiaseat" in src_bf
+           and "chat_slot_spent" in src_bf),
+          "R173 И-3 (d3) billed_failure() treats chatseat / uiaseat with chat_slot_spent as "
+          "already billed - the auto-retry phase holds them, never re-spends a slot",
+          "chatseat in src=%s | uiaseat in src=%s | chat_slot_spent in src=%s"
+          % ("chatseat" in src_bf, "uiaseat" in src_bf, "chat_slot_spent" in src_bf))
+
+
+def suite_r174_valid_through():
+    """R174 (2026-11-02). A channel can carry `valid_through: "YYYY-MM-DD"` to
+    self-expire on that date. routing._valid_through_expired reports the expiry
+    date (ISO string) when today > valid_through, else None; routing.initial_plan
+    AND-s the result into `enabled` and prints a `why` line naming the date.
+
+    Igor's one-week Spark-depth A/B uses this to drop the two test channels
+    (mcspark12, ocspark13go) on 2026-11-09 - without this suite the enforcement
+    rots silently and the overlay stays live past its intended end.
+    """
+    import routing as rr
+    section("R174: valid_through self-expiry (overlay time-bomb for test channels)")
+
+    # (a-l) The helper is a pure function: deterministic given (ch, today).
+    check(rr._valid_through_expired({"valid_through": "2020-01-01"}, today="2026-11-02") == "2020-01-01",
+          "R174 (a) past date -> that date is returned",
+          "got=%r" % rr._valid_through_expired({"valid_through": "2020-01-01"}, today="2026-11-02"))
+    check(rr._valid_through_expired({"valid_through": "2099-12-31"}, today="2026-11-02") is None,
+          "R174 (b) future date -> None")
+    check(rr._valid_through_expired({"valid_through": "2026-11-02"}, today="2026-11-02") is None,
+          "R174 (c) today == valid_through -> None (not yet expired, lasts the whole day)")
+    check(rr._valid_through_expired({"valid_through": "2026-11-01"}, today="2026-11-02") == "2026-11-01",
+          "R174 (d) yesterday -> expired")
+    check(rr._valid_through_expired({}, today="2026-11-02") is None,
+          "R174 (e) no valid_through -> None")
+    check(rr._valid_through_expired({"valid_through": None}, today="2026-11-02") is None,
+          "R174 (f) null valid_through -> None")
+    check(rr._valid_through_expired({"valid_through": ""}, today="2026-11-02") is None,
+          "R174 (g) empty string -> None")
+    check(rr._valid_through_expired({"valid_through": 20261109}, today="2026-11-02") is None,
+          "R174 (h) non-string (int) -> None (shape guard)")
+    check(rr._valid_through_expired({"valid_through": "2026/11/09"}, today="2026-11-02") is None,
+          "R174 (i) wrong separator -> None (shape guard)")
+    check(rr._valid_through_expired({"valid_through": "20261109"}, today="2026-11-02") is None,
+          "R174 (j) no separators -> None (shape guard)")
+    check(rr._valid_through_expired({"valid_through": "YYYY-MM-DD"}, today="2026-11-02") is None,
+          "R174 (k) non-digit components -> None (shape guard)")
+
+    # (m-r) initial_plan plumbs it into `enabled` + `expired_on` + a `why` line.
+    reg = {"channels": {
+        "chExpired": {"kind": "http", "enabled": True, "valid_through": "2020-01-01"},
+        "chFuture":  {"kind": "http", "enabled": True, "valid_through": "2099-12-31"},
+        "chNoDate":  {"kind": "http", "enabled": True},
+        "chOffFuture": {"kind": "http", "enabled": False, "valid_through": "2099-12-31"},
+    }}
+    plan = rr.initial_plan(reg)
+    check(not plan["chExpired"]["enabled"],
+          "R174 (m) initial_plan: enabled True + past valid_through -> enabled False")
+    check(plan["chExpired"].get("expired_on") == "2020-01-01",
+          "R174 (n) expired_on carries the date")
+    check(any("2020-01-01" in w for w in plan["chExpired"]["why"]),
+          "R174 (o) the plan's why names the date so format_plan can print it")
+    check(plan["chFuture"]["enabled"] and plan["chFuture"].get("expired_on") is None,
+          "R174 (p) future valid_through -> enabled True, expired_on None")
+    check(plan["chNoDate"]["enabled"] and plan["chNoDate"].get("expired_on") is None
+          and not plan["chNoDate"]["why"],
+          "R174 (q) no valid_through -> unchanged (no why line, no expired_on)")
+    check(not plan["chOffFuture"]["enabled"] and plan["chOffFuture"].get("expired_on") is None,
+          "R174 (r) enabled False + future date -> enabled False, expired_on None "
+          "(the off direction is a channel decision, not an expiry)")
+
+    # (s) The initial_plan DOES NOT drop `default_enabled` on expiry - that field records what the
+    # registry shipped, so the spend-gate downstream can still tell an "off by default" channel
+    # from an "on but expired" one.
+    check(plan["chExpired"]["default_enabled"] is True,
+          "R174 (s) default_enabled is NOT touched by expiry - it still reflects the registry's "
+          "ship-state so the spend-gate can distinguish 'off by default' from 'on but expired'")
+
+
+def suite_r172_i2_free_inround():
+    """R172 И-2 (2026-11-02). Operator's rule of 2026-10-31 for FREE voices:
+      - retry + fallback happen IN-ROUND within the first 25 min of the seat's life;
+      - silence (`stream_cut` / `budget_stop` / `timed_out`) ends the seat quietly:
+        no retry, no fallback (op's «тишина без ошибок»);
+      - a late failure (past 25 min) also ends quietly;
+      - a transient 429 / 5xx / silent death retries once with a remedy delay;
+      - a quota refusal (`provider.quota` or opencode 2.2.0's `provider.free-limit`)
+        goes directly to the fallback (a re-send on a spent allowance is refused too).
+
+    Paid and subscription voices are NOT affected: `_free_cost` keys on the registry
+    `cost: free` and gates every in-round branch.
+
+    This suite tests the classifier and the window / delay env overrides directly, the
+    `auto_retry_split` + `run_fallbacks` skip-on-`free_inround` (with a control that
+    an undecided record still goes through), the plan-line wording (free -> within
+    25 min; metered -> after the round, as a control), and the main() wait-loop shape
+    via inspect.getsource. The in-round orchestration itself is validated by one live
+    cheap round (next prompt reads the answers).
+    """
+    import inspect
+    import os as _os
+    import orchestrate as o
+    import routing as rt
+    section("R172 И-2: free-voice in-round retry+fallback (operator's 25-min rule)")
+
+    # (a) 429 at 1 s -> transient with a positive delay (429 remedy > 0).
+    r_429 = {"ok": False, "provider_error": {"code": 429, "status": 429}, "finish_reason": "error"}
+    act_a, delay_a = o._classify_free_failure(r_429, elapsed_s=1, window_s=1500)
+    check(act_a == "transient" and isinstance(delay_a, int) and delay_a > 0,
+          "R172 И-2 (a) 429 at 1 s -> transient with a positive delay",
+          "(%r, %r)" % (act_a, delay_a))
+
+    # The 429 Retry-After takes precedence over the module default when present.
+    r_429_ra = dict(r_429, retry_after=7)
+    _, delay_ra = o._classify_free_failure(r_429_ra, elapsed_s=1, window_s=1500)
+    check(delay_ra == 7,
+          "R172 И-2 (a-ra) retry_after on the record is honoured (not the module default)",
+          "delay=%r" % delay_ra)
+
+    # (b) 429 classified twice: both calls return transient. The main-loop _free_retry_spent
+    # set gates whether an ACTUAL retry fires - the classifier itself stays idempotent (the
+    # second call is what fires the fallback through the retry's completion branch).
+    act_b, _ = o._classify_free_failure(r_429, elapsed_s=100, window_s=1500)
+    check(act_b == "transient",
+          "R172 И-2 (b) 429 twice: classifier still returns transient both times - "
+          "_free_retry_spent in main() gates the actual retry")
+
+    # (c) silence: stream_cut / budget_stop / timed_out are each the harness closing the read.
+    for rec, lab in [({"ok": False, "stream_cut": True, "error": "harness-closed at the budget"},
+                      "stream_cut"),
+                     ({"ok": False, "budget_stop": True, "error": "channel ran out of budget"},
+                      "budget_stop"),
+                     ({"ok": False, "timed_out": True,
+                       "error": "the harness closed the read at the window"}, "timed_out")]:
+        act_c, _ = o._classify_free_failure(rec, elapsed_s=100, window_s=1500)
+        check(act_c == "silence",
+              "R172 И-2 (c-%s) %s -> silence (operator's «тишина без ошибок»)" % (lab, lab))
+
+    # (d) failure past the window -> past_window (no retry, no fallback), whatever the error.
+    r_any = {"ok": False, "error": "whatever", "provider_error": {"code": 429}}
+    act_d, _ = o._classify_free_failure(r_any, elapsed_s=2000, window_s=1500)
+    check(act_d == "past_window",
+          "R172 И-2 (d) elapsed > window -> past_window, no retry, no fallback",
+          repr(act_d))
+
+    # (e) quota refusals: both provider.quota (R157) and provider.free-limit (opencode 2.2.0,
+    # 2026-10-27) route to the fallback directly, no retry.
+    r_quota = {"ok": False, "error": "provider.quota: limit reached"}
+    act_q, _ = o._classify_free_failure(r_quota, elapsed_s=10, window_s=1500)
+    check(act_q == "quota",
+          "R172 И-2 (e-pq) provider.quota -> quota (fallback direct, no retry)")
+
+    r_fl = {"ok": False, "warnings": ["opencode: provider.free-limit reached today"]}
+    act_fl, _ = o._classify_free_failure(r_fl, elapsed_s=10, window_s=1500)
+    check(act_fl == "quota",
+          "R172 И-2 (e-fl) provider.free-limit (opencode 2.2.0) -> quota, same path as "
+          "provider.quota in the in-round rule",
+          repr(act_fl))
+    check(o._free_limit_refused(r_fl) and not o._quota_refused(r_fl),
+          "R172 И-2 (e-ctl) _free_limit_refused keyed on `provider.free-limit`, _quota_refused on "
+          "`provider.quota` - the two are intentionally separate so record_quota_refusals does NOT "
+          "fire on the opencode 2.2.0 refusal (which would drop MiMo from every later round)",
+          repr((o._free_limit_refused(r_fl), o._quota_refused(r_fl))))
+    check(not o._free_limit_refused(r_quota),
+          "R172 И-2 (e-ctl-inv) _free_limit_refused is False on provider.quota - the two "
+          "classifiers do not overlap")
+
+    # (f) PAID voice: _free_cost False, so the in-round branch is skipped even for a free-shaped
+    # failure record. The paid path keeps today's after-round AUTO-RETRY + FALLBACK exactly.
+    reg_f = {"channels": {
+        "freeOne":   {"kind": "oai", "enabled": True, "cost": "free"},
+        "paidOne":   {"kind": "oai", "enabled": True, "cost": "metered"},
+        "subOne":    {"kind": "opencode", "enabled": True, "cost": "subscription"},
+        "nocostOne": {"kind": "oai", "enabled": True},
+    }}
+    check(o._free_cost(reg_f, "freeOne") is True,
+          "R172 И-2 (f-1) _free_cost True on `cost: free`")
+    check(o._free_cost(reg_f, "paidOne") is False,
+          "R172 И-2 (f-2) _free_cost False on `cost: metered` - paid voices unchanged by the rule")
+    check(o._free_cost(reg_f, "subOne") is False,
+          "R172 И-2 (f-3) _free_cost False on `cost: subscription` - subscription voices unchanged")
+    check(o._free_cost(reg_f, "nocostOne") is False,
+          "R172 И-2 (f-4) _free_cost False on a missing `cost` field - no silent widening")
+    check(o._free_cost(None, "whatever") is False,
+          "R172 И-2 (f-5) _free_cost False on a None registry (degraded mode)")
+
+    # (g) --no-panel-retry and --no-fallback are honoured in the in-round code (source check -
+    # the main() loop has an elif on transient that reads _no_panel_retry, and the fallback
+    # helper reads _no_fallback inside its skip rules).
+    main_src = inspect.getsource(o.main)
+    check('_action == "transient" and not _no_panel_retry' in main_src,
+          "R172 И-2 (g-1) main's in-round branch: `transient` only fires _in_round_retry when "
+          "_no_panel_retry is False (--no-panel-retry honoured)",
+          "...%s..." % main_src[main_src.find('_action == "transient"'):
+                                main_src.find('_action == "transient"') + 160]
+          if '_action == "transient"' in main_src else "no match")
+    check("_no_fallback = bool(getattr(a, \"no_fallback\", False))" in main_src
+          and "_no_fallback" in main_src,
+          "R172 И-2 (g-2) main's in-round code binds and reads --no-fallback (the fallback "
+          "helper's skip rules check it before dispatching)")
+
+    # (h) After-round phases skip in-round-decided records.
+    src_ar = inspect.getsource(o.auto_retry_split)
+    check("free_inround" in src_ar,
+          "R172 И-2 (h-1) auto_retry_split skips records with free_inround set - the in-round "
+          "retry's result (which also marks free_inround) never trips the after-round retry")
+    r_t_decided = {"ok": False, "finish_reason": "error",
+                   "provider_error": {"code": 500},
+                   "free_inround": {"action": "retry_in_round"}}
+    r_t_undecided = {"ok": False, "finish_reason": "error",
+                     "provider_error": {"code": 500}}
+    retry_bk, held_bk = o.auto_retry_split({"decided": r_t_decided, "undecided": r_t_undecided},
+                                           kind_of=lambda _n: "oai")
+    check("decided" not in retry_bk and "decided" not in held_bk and "undecided" in retry_bk,
+          "R172 И-2 (h-2) auto_retry_split: a decided transient is held out; an undecided one "
+          "still goes through (control)",
+          "retry=%r held=%r" % (sorted(retry_bk), sorted(held_bk)))
+    src_rf = inspect.getsource(o.run_fallbacks)
+    check("free_inround" in src_rf,
+          "R172 И-2 (h-3) run_fallbacks skips records with free_inround set")
+
+    # (i) The plan line for a free channel with a fallback names the 25-min rule; the control
+    # is the same registry with `cost: metered`, which keeps the after-round wording.
+    reg_i = {"channels": {
+        "freeDS":  {"kind": "oai", "enabled": True, "cost": "free",
+                    "model": "deepseek-v4.1-flash", "fallback": "paidGLM",
+                    "timeout": "20m"},
+        "paidGLM": {"kind": "oai", "enabled": False, "cost": "metered",
+                    "model": "glm-5.3-flash", "timeout": "20m"},
+    }, "panels": {"cheap": ["freeDS", "paidGLM"], "standard": ["freeDS", "paidGLM"]}}
+    plan_i = rt.apply_fallback(rt.initial_plan(reg_i), reg_i, ready=lambda _n: True)
+    joined_i = rt.format_plan(plan_i, reg_i)   # already a joined string, not a list
+    check("within 25 min" in joined_i and "operator's rule" in joined_i,
+          "R172 И-2 (i-1) free channel's fallback plan line names the 25-min window and "
+          "cites the operator's rule 2026-10-31",
+          joined_i[max(0, joined_i.find("fallback:") - 20):joined_i.find("fallback:") + 400]
+          if "fallback:" in joined_i else joined_i[:400])
+
+    reg_j = {"channels": dict(reg_i["channels"]),
+             "panels": dict(reg_i["panels"])}
+    reg_j["channels"]["freeDS"] = dict(reg_j["channels"]["freeDS"], cost="metered")
+    plan_j = rt.apply_fallback(rt.initial_plan(reg_j), reg_j, ready=lambda _n: True)
+    joined_j = rt.format_plan(plan_j, reg_j)
+    check("after the round" in joined_j and "within 25 min" not in joined_j,
+          "R172 И-2 (i-2 control) PAID channel's fallback plan line keeps the after-round "
+          "wording - flipping just the cost flips the line back",
+          joined_j[max(0, joined_j.find("fallback:") - 20):joined_j.find("fallback:") + 400]
+          if "fallback:" in joined_j else joined_j[:400])
+
+    # (j) main() carries the new wait-loop shape (positive markers).
+    check(("FIRST_COMPLETED" in main_src and "_classify_free_failure(" in main_src
+           and "_free_cost(" in main_src and "operator's 25-min rule" in main_src),
+          "R172 И-2 (j) main() carries the FIRST_COMPLETED wait loop + classifier + 25-min rule")
+
+    # (k) Env overrides for the window and the remedy delays - lets the hermetic tests
+    # shrink the window to seconds.
+    _env_names = ("ORCH_FREE_INROUND_WINDOW",
+                  "ORCH_FREE_INROUND_RETRY_429",
+                  "ORCH_FREE_INROUND_RETRY_5XX")
+    _orig = {n: _os.environ.pop(n, None) for n in _env_names}
+    try:
+        _os.environ["ORCH_FREE_INROUND_WINDOW"] = "60"
+        check(o._free_inround_window() == 60,
+              "R172 И-2 (k-1) env ORCH_FREE_INROUND_WINDOW overrides the module default")
+        _os.environ["ORCH_FREE_INROUND_WINDOW"] = "garbage"
+        check(o._free_inround_window() == o.FREE_INROUND_WINDOW_S,
+              "R172 И-2 (k-2) non-numeric env override is ignored - the default stands")
+        _os.environ["ORCH_FREE_INROUND_WINDOW"] = "-5"
+        check(o._free_inround_window() == o.FREE_INROUND_WINDOW_S,
+              "R172 И-2 (k-3) non-positive env override is ignored - the default stands")
+        _os.environ["ORCH_FREE_INROUND_RETRY_429"] = "11"
+        _os.environ["ORCH_FREE_INROUND_RETRY_5XX"] = "7"
+        check(o._free_inround_delay_429() == 11 and o._free_inround_delay_5xx() == 7,
+              "R172 И-2 (k-4) 429 / 5xx remedy delays are also env-overridable")
+    finally:
+        for n, v in _orig.items():
+            _os.environ.pop(n, None)
+            if v is not None:
+                _os.environ[n] = v
 
 
 if __name__ == "__main__":

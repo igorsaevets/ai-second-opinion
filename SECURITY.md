@@ -234,3 +234,5 @@ construction, so it is safe to attach.
 This tool has no server, no account system, no database and no network listener. Its attack
 surface is: the documents you feed it, the model output it parses, and the local files it writes.
 Findings in those areas are in scope.
+
+**In 1.119.0 the free-voice in-round rule operates within the same page-fetch fence as 1.118.0.** The classifier runs locally on the harness state (no new vendor call), the 25-minute window is wall-clock from the primary's start, and no new environment surface or secret is read. The three `ORCH_FREE_INROUND_*` env overrides are optional and carry integer seconds only — not secrets.

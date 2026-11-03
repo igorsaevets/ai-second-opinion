@@ -223,6 +223,8 @@ and prints exactly that command when there is one.
 
 ### Automatic updates
 
+**1.119.0 adds no new install step and no new environment surface.** The free-voice in-round rule reads optional integer env overrides (`ORCH_FREE_INROUND_WINDOW`, `ORCH_FREE_INROUND_RETRY_429`, `ORCH_FREE_INROUND_RETRY_5XX`) if present; nothing changes if they are not set. The four chat panel channels (`claudeaiseat`, `cldesktopseat`, `cgptseat`, `cgptdeskseat`) ship with `enabled: false` — they do nothing until an overlay turns them on, and their drivers are the author's local-only tooling.
+
 `--apply`, the installer and `upgrade.py` switch automatic updates **on** — unless you switched
 them off before (that choice is kept), or you pass `--no-auto-update`. From then on:
 

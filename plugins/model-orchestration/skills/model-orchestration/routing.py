@@ -1120,6 +1120,37 @@ def alias_index(reg):
     return idx
 
 
+def _valid_through_expired(ch, today=None):
+    """
+    Returns the ISO date string in ch["valid_through"] when today > that date (channel
+    self-expired), else None. Non-string / missing / malformed valid_through -> None.
+
+    R174 (2026-11-02): a channel can carry `valid_through: "YYYY-MM-DD"` to self-expire
+    on that date - the enforcement here (and in initial_plan below) flips `enabled` to
+    False once today > that date, so a temporary A/B test channel in the overlay drops
+    out on its own without the operator having to remember a calendar date. The plan
+    prints it (loud, with the date named) so expiry is visible, not silent.
+
+    Comparing ISO dates as strings is correct: "2026-11-09" < "2026-11-10" lexically
+    equals the chronological order for the YYYY-MM-DD form. The today argument is for
+    the selftest; production callers leave it None and get the system date.
+    """
+    vt = ch.get("valid_through")
+    if not isinstance(vt, str) or not vt:
+        return None
+    # Shape check without a parse: "YYYY-MM-DD" is 10 chars, two "-" at positions 4 and 7, digits elsewhere.
+    if len(vt) != 10 or vt[4] != "-" or vt[7] != "-":
+        return None
+    if not (vt[:4].isdigit() and vt[5:7].isdigit() and vt[8:10].isdigit()):
+        return None
+    try:
+        import datetime as _dt
+        _today = today or _dt.date.today().isoformat()
+    except Exception:
+        return None
+    return vt if _today > vt else None
+
+
 def initial_plan(reg):
     # `default_enabled` is carried BESIDE `enabled`, never derived from it later, because the two
     # answer different questions and the answer to the first is destroyed by the time anyone needs
@@ -1128,15 +1159,26 @@ def initial_plan(reg):
     # channel is off unless someone asks" is only distinguishable from "this channel is on" once
     # both values exist. Deriving it downstream would mean re-reading the registry in a second
     # place, which is how the plan and the dispatcher came to disagree in round 23.
-    return {c: {"enabled": ch.get("enabled", True), "model": ch.get("model"),
-                "default_enabled": ch.get("enabled", True),
-                "spend_guard": ch.get("spend_guard") or None,
-                "panel": ch.get("panel"), "vendor": ch.get("vendor") or c,
-                "explicit_only": bool(ch.get("explicit_only")),
-                "kind": ch["kind"], "label": ch.get("label", c),
-                "effort": ch.get("effort"), "agent": ch.get("agent"),
-                "timeout": ch.get("timeout"), "why": []}
-            for c, ch in reg["channels"].items()}
+    out = {}
+    for c, ch in reg["channels"].items():
+        exp = _valid_through_expired(ch)
+        out[c] = {"enabled": ch.get("enabled", True) and not exp,
+                  "model": ch.get("model"),
+                  "default_enabled": ch.get("enabled", True),
+                  "spend_guard": ch.get("spend_guard") or None,
+                  "panel": ch.get("panel"), "vendor": ch.get("vendor") or c,
+                  "explicit_only": bool(ch.get("explicit_only")),
+                  "kind": ch["kind"], "label": ch.get("label", c),
+                  "effort": ch.get("effort"), "agent": ch.get("agent"),
+                  "timeout": ch.get("timeout"),
+                  "valid_through": ch.get("valid_through"),
+                  "expired_on": exp,
+                  "why": []}
+        if exp:
+            out[c]["why"].append("valid_through: expired on %s - this channel self-expired "
+                                 "and is OFF until you remove or renew valid_through "
+                                 "(R174, overlay time-bomb for test channels)" % exp)
+    return out
 
 
 # Panel words a human can type into a free-text route, resolved from the registry so the flag
@@ -3511,6 +3553,21 @@ def _web_line(p):
                 "`-p` mode, no tool approvals. The model may use search and page-reading "
                 "tools configured in ~/.kimi-code/config.toml. Grounding is the agent's "
                 "own claim")
+    if kind == "chatseat":
+        # R173 И-2 (2026-11-02): the CDP transport (claudeaiseat / cgptseat). The vendor's own
+        # web UI drives the search. On chatgpt.com the pill «Поиск в сети» selects it (R147 И-3);
+        # claude.ai searches on its own with no visible switch and reports its sources.
+        return ("web: the chat vendor's native search runs inside its own web UI (claude.ai or "
+                "chatgpt.com) under this chat seat's dedicated Chrome profile. The harness neither "
+                "picks the engine nor opens the pages; grounding is the vendor's own list of "
+                "sources and the chat seat records what came back")
+    if kind == "uiaseat":
+        # R173 И-2: the native-app UIA transport (cldesktopseat / cgptdeskseat). Same vendor
+        # account as the chat seat; search works through the desktop app's own UI (R161 И-2).
+        return ("web: the native desktop app (Claude Desktop MSIX or the daily OpenAI.Codex app) "
+                "drives search under this seat's vendor account; the UIA driver presses the "
+                "picker and reads the DOM/UIA tree, never a browser - so grounding is the "
+                "vendor's own list of sources as the app reports them")
     return None
 
 
@@ -3784,14 +3841,30 @@ def format_plan(plan, reg):
             # «nothing else here carries that model» printed while this very channel carried it.
             _same = same_voice(reg, fbk["channel"])
             sib = [s for s in _same if s != c and (plan.get(s) or {}).get("enabled")]
-            lines.append("           - fallback: if this channel fails with under %d bytes of text "
-                         "(no answer), %s (%s, %s) runs the same brief once, after the round "
-                         "(up to %s more)"
-                         % (SUBSTANTIAL_BYTES, fbk["channel"],
-                            fslot.get("model_label") or fslot.get("model"),
-                            reg["channels"][fbk["channel"]].get("cost", "?"),
-                            fslot.get("timeout") or reg["channels"][fbk["channel"]].get("timeout")
-                            or "its own timeout"))
+            # R172 И-2 (2026-11-02): for FREE channels the operator's in-round rule holds the
+            # retry + fallback to the first 25 min of the seat's life, so the plan line names
+            # that window instead of «after the round». Paid and subscription channels keep the
+            # after-round wording. Branching on the primary channel's cost (not the fallback's)
+            # so «free -> paid Go» prints the 25-min rule, which is what actually governs.
+            _primary_cost = (reg["channels"].get(c) or {}).get("cost")
+            if _primary_cost == "free":
+                lines.append("           - fallback: if this channel fails with under %d bytes "
+                             "of text (no answer), %s (%s, %s) runs the same brief once, in the "
+                             "round within 25 min of this channel's start (operator's rule "
+                             "2026-10-31; silence or past 25 min: no fallback)"
+                             % (SUBSTANTIAL_BYTES, fbk["channel"],
+                                fslot.get("model_label") or fslot.get("model"),
+                                reg["channels"][fbk["channel"]].get("cost", "?")))
+            else:
+                lines.append("           - fallback: if this channel fails with under %d bytes "
+                             "of text (no answer), %s (%s, %s) runs the same brief once, after "
+                             "the round (up to %s more)"
+                             % (SUBSTANTIAL_BYTES, fbk["channel"],
+                                fslot.get("model_label") or fslot.get("model"),
+                                reg["channels"][fbk["channel"]].get("cost", "?"),
+                                fslot.get("timeout")
+                                or reg["channels"][fbk["channel"]].get("timeout")
+                                or "its own timeout"))
             lines.append("             %s; its answer is its own file. --no-fallback turns it off."
                          % ("- not if %s (the same model) answers in this round (ok, or %d+ "
                             "bytes)" % (" or ".join(sib), SUBSTANTIAL_BYTES)
