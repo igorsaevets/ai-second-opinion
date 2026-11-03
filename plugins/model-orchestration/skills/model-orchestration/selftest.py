@@ -21629,6 +21629,23 @@ def suite_r173_i3_seats_topology():
           "chatseat in src=%s | uiaseat in src=%s | chat_slot_spent in src=%s"
           % ("chatseat" in src_bf, "uiaseat" in src_bf, "chat_slot_spent" in src_bf))
 
+    # (e) R173 И-4b (2026-11-02): routing.initial_plan must carry `driver` from the registry
+    # into the plan slot - orchestrate.main() dispatches each kind through p.get("driver")
+    # (line 14818 for chatseat, 14823 for uiaseat), and the plan slot is initial_plan's
+    # whitelisted copy, not the raw channel dict. R173 И-4's first live round found this gap:
+    # the registry's claudeaiseat.driver was present but initial_plan dropped it, so every
+    # live chatseat / uiaseat call failed at _resolve_seat_driver with R173_SEAT_DRIVER_MISSING
+    # before any subprocess ran (no slot spent - the safety design held, but the bug blocked
+    # the first live round). R173 И-3's suite dispatched call_chatseat() DIRECTLY and bypassed
+    # main(), so it never saw the plan. This check closes that gap for every future seat.
+    plan = rt.initial_plan(reg)
+    for cname in ("claudeaiseat", "cldesktopseat", "cgptseat", "cgptdeskseat"):
+        slot = plan.get(cname) or {}
+        reg_driver = (reg["channels"].get(cname) or {}).get("driver")
+        check(slot.get("driver") == reg_driver,
+              "R173 И-4b (e) initial_plan carries %r.driver from the registry into the plan slot" % cname,
+              "slot.driver=%r | reg.driver=%r" % (slot.get("driver"), reg_driver))
+
 
 def suite_r174_valid_through():
     """R174 (2026-11-02). A channel can carry `valid_through: "YYYY-MM-DD"` to

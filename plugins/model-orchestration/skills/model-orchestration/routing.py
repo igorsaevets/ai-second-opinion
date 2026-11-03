@@ -1171,6 +1171,7 @@ def initial_plan(reg):
                   "kind": ch["kind"], "label": ch.get("label", c),
                   "effort": ch.get("effort"), "agent": ch.get("agent"),
                   "timeout": ch.get("timeout"),
+                  "driver": ch.get("driver"),
                   "valid_through": ch.get("valid_through"),
                   "expired_on": exp,
                   "why": []}

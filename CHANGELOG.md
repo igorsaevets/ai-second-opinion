@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.119.1 — 2026-11-02
+
+Latent dispatcher-shape fix found by the first live chat round. `routing.initial_plan` now carries the chat seat's `driver` field from the registry into the plan slot — otherwise the dispatcher could not find the driver script for a seat kind, and `orchestrate.py --panel chat --chat claude` on an enabled chat seat failed with `R173_SEAT_DRIVER_MISSING` before `subprocess.run`. Nothing user-visible changed: chat seats still ship `enabled: false` in the kit and are enabled only through the author's overlay; the fix matters when an operator enables a seat. No chat slot is spent on the failed path (the resolver raises before any subprocess runs), so no live cost ever rode this bug.
+
+- **routing.initial_plan copies `driver` into the plan slot** (one line). The plan slot's field whitelist did not include `driver`, which R173 И-3 added to `channels.json` for chat seat kinds. The R173 И-3 suite exercised `call_chatseat()` directly, bypassing `main()`'s `initial_plan`, so the plan slot's missing field was not caught at the time. One new suite block in `suite_r173_i3_seats_topology` (e) iterates over `claudeaiseat` / `cldesktopseat` / `cgptseat` / `cgptdeskseat` and checks that `initial_plan(reg)` carries each one's `driver` into the plan slot.
+- Live-verified on 2026-11-02 by a cheap chat round on Haiku 5.5: driver resolved, subprocess ran, 3,384-byte answer in 42.6 s with `chat_slot_spent: True`, planted false claim refuted with the correct release date and a vendor citation. Selftest in SOURCE after the fix: 2521/2521 PASS (R173 И-4b's 4 added to 1.119.0's 2517).
+
 ## 1.119.0 — 2026-11-02
 
 Three source-tree features bundle together. A free voice that fails inside its 25-minute window now retries or falls back inside the same round, not after it. Chat panel seats scaffold ships off by default (overlay flips them on). Overlay channels can carry a `valid_through` date that flips them off automatically.

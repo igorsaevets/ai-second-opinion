@@ -2,6 +2,13 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.119.1 — 2026-11-02
+
+Latent dispatcher-shape fix found by the first live chat round. `routing.initial_plan` now carries the chat seat's `driver` field from the registry into the plan slot — otherwise the dispatcher could not find the driver script for a seat kind, and `orchestrate.py --panel chat --chat claude` on an enabled chat seat failed with `R173_SEAT_DRIVER_MISSING` before `subprocess.run`. Nothing user-visible changed: chat seats still ship `enabled: false` in the kit and are enabled only through the author's overlay; the fix matters when an operator enables a seat. No chat slot is spent on the failed path (the resolver raises before any subprocess runs), so no live cost ever rode this bug.
+
+- **routing.initial_plan copies `driver` into the plan slot** (one line). The plan slot's field whitelist did not include `driver`, which R173 И-3 added to `channels.json` for chat seat kinds. The R173 И-3 suite exercised `call_chatseat()` directly, bypassing `main()`'s `initial_plan`, so the plan slot's missing field was not caught at the time. One new suite block in `suite_r173_i3_seats_topology` (e) iterates over `claudeaiseat` / `cldesktopseat` / `cgptseat` / `cgptdeskseat` and checks that `initial_plan(reg)` carries each one's `driver` into the plan slot.
+- Live-verified on 2026-11-02 by a cheap chat round on Haiku 5.5: driver resolved, subprocess ran, 3,384-byte answer in 42.6 s with `chat_slot_spent: True`, planted false claim refuted with the correct release date and a vendor citation. Selftest in SOURCE after the fix: 2521/2521 PASS (R173 И-4b's 4 added to 1.119.0's 2517).
+
 ## 1.119.0 — 2026-11-02
 
 Three source-tree features bundle together. A free voice that fails inside its 25-minute window now retries or falls back inside the same round, not after it. Chat panel seats scaffold ships off by default (overlay flips them on). Overlay channels can carry a `valid_through` date that flips them off automatically.
@@ -304,17 +311,6 @@ Route grammar fixes from the review panel on 1.112.2, each reproduced on the cod
 - **A member you name and also `--skip` does not hold its family.** `--only wonder mcwonder10cont --skip mcwonder10cont` ran an empty round; it now stops with «you excluded it in this run».
 - The two readers of a route - the one that switches channels and the one that decides what you «named» - now order the words through one shared function, so they cannot drift apart again.
 
-## 1.112.2 — 2026-10-16
-
-Fixes from the review panel on 1.112.1, and one found while checking them.
-
-- **An exclusion inside «только <group>» is kept.** «только cli без codex» ran codex, and in the kit «только кими, не используй kimik3» ran ONLY the paid kimik3: when a sentence both named a group and excluded one of its members, the group's «only» list switched the excluded member back on (since 2026-08-14), and 1.112.1's free-to-paid stop read the excluded name as «the human named the paid channel». Now the exclusion holds, a name inside «не/без/кроме» or the channel being replaced («вместо») does not count as naming it, and when a run excludes every voice of the family it named, it stops and lists each one with the reason.
-- **The free-to-paid stop knows what can run on this machine.** In the kit, «только вондер» on a machine without Muse Code passed the stop (the subscription member counted) and then ran the paid `wonder10`, which has no per-run ceiling. A member that is not ready here (its CLI or key is missing) now counts as one that will not start, so the run stops before spending and says «not ready here».
-- **A member you name starts; one you exclude does not hold the family.** `--only kimi kimik3free` stopped «kimik3free will not start» right after naming it; `--only kimi --skip kimik3free` (free Kimi on) ran nothing at all. Both fixed; the stop now says «you excluded it in this run».
-- **opencode:** `opencode --version` is read from «opencode vX.Y.Z» (or the last bare version line), so a wrapper's banner printed first cannot pass for the version; on v1 a channel never gets `--standalone`; the v1 error names the binary it found. Checked on opencode 2.0.31 (the npm release since 1.112.1): `--standalone` is still found and the review switches are still in the binary.
-- Scope of 1.112.1, stated plainly: the review switches act on opencode's private server (MiMo Flash); the Spark channels run on the shared background service and still send the home folder's `AGENTS.md` - open. The free-to-paid stop concerns a family word on a panel that holds none of that family; the standard panel includes the paid Kimi by design.
-- New known failure: AIHubMix's 429 «limit of the free model quota» (the key's free allowance is used up; a re-run fails the same way). A stale registry note that still said `npm install -g opencode-ai` is marked superseded.
-
 ## Older releases
 
-163 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+164 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
