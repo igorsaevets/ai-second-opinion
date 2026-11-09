@@ -8149,6 +8149,7 @@ def main():
                   suite_r164_muse_spark, suite_r160_kit_defaults, suite_r160_i4_home_scrub,
                   suite_r168_i2_api_read_bound,
                   suite_r176_headers_resend,
+                  suite_r177_route_model_words,
                   suite_r168_i3_free_transports,
                   suite_r168_i4_panel_fixes,
                   suite_r169_agy_argon,
@@ -20713,6 +20714,125 @@ def suite_r176_headers_resend():
     check("R176" in c1 and "twice" not in c1,
           "[resend] R176 (h) diagnose() names a plain headers cut (P300-28's run.log said «no stock diagnosis») "
           "and keeps it apart from the failed re-send", c1[:120])
+
+
+def suite_r177_route_model_words():
+    """R177 (2026-11-08): a bare tier word named a retired channel, and a group word hid the model words after it.
+
+    A real round (2026-11-09 UTC): the operator asked for codex and MiMo 2.6 Pro beside the cheap panel; the route
+    «дешёвая панель, включая codex и mimo 2.6 pro» started agy31pro pinned to gemini-3.1-pro (agy no longer serves it,
+    R169) and no MiMo Pro. «pro» was a MODEL alias of agy31pro - naming a channel by its model names it directly, so
+    it overrode `enabled: false` and `explicit_only` - and «mimo 2.6 pro» had no Latin alias: «mimo» named the group,
+    which may not start the default-off MiMo Pro. «flash» (agy36flash) did the same to «mimo 2.6 flash», «glm 5.3
+    flash», «step 5 flash». And _detect_silent_drop never read the words after a GROUP word (it measured a member's
+    span by the member's own id). Checks named [fix] must FAIL on the old code (runs/r177-route-mimo-pro/nc_r177.py),
+    [control] ones pass on both. The shipped registry, no overlay:
+      (a) [fix] the round's words: ormimopro on and pinned to xiaomi/mimo-v2.6-pro, agy31pro off; [control] codex on;
+      (b) [fix] «mimo v2.6 pro» and «mimo-v2.6-pro» name ormimopro;
+      (c) [fix] «добавь pro» / «добавь flash» name nothing (RouteError);
+      (d) [fix] «mimo 2.6 flash», «glm 5.3 flash», «step 5 flash» never start agy36flash («glm 5.3 flash» still adds
+          orglm53's GLM 5.3: a model alias followed by a variant word is not guarded - an R177 follow-up);
+      (e) [fix] a group word followed by model words it does not know is refused, and the refusal names the group:
+          «mimo 2.7 pro», «gemini 4 pro»;
+      (f) [control] «мимо 2.6 про» -> ormimopro; «agy 3.1 pro» -> agy31pro (its model alias, named directly);
+          «deepseek v4 pro» -> ordeepseekv4pro; «mimocli» -> mimov26pro; «gemini 4 аргон» -> agy4argon; «только agy»
+          -> agy38flash on and the explicit_only agy31pro off (a group word alone is still a group); «только codex 5.9
+          nova ultra» still refused (R86, #44 criterion 1);
+      (g) [fix] census: no one-word alias of a channel that is off by default or explicit_only is a word of another
+          channel's id / label / model id / model label, unless it starts its owner's own id («ocspark», «ormimo»);
+      (h) [control] the census can fail: «pro» put back on agy31pro is flagged.
+    """
+    import copy
+    import re
+    import routing as r
+    section("R177: a bare tier word named a retired channel; a group word hid the model words after it")
+    reg = r.load_registry(overlay=False)
+
+    def run(route):
+        try:
+            return r.resolve(copy.deepcopy(reg), route=route), ""
+        except r.RouteError as exc:
+            return None, str(exc)
+
+    def on(plan):
+        return "on: " + ", ".join(sorted(c for c, v in (plan or {}).items() if v.get("enabled")))
+
+    def lit(plan, chan, model=None):
+        slot = (plan or {}).get(chan) or {}
+        return bool(slot.get("enabled")) and (model is None or slot.get("model") == model)
+
+    plan, err = run("дешёвая панель, включая codex и mimo 2.6 pro")
+    check(lit(plan, "ormimopro", "xiaomi/mimo-v2.6-pro"),
+          "[fix] (a) «дешёвая панель, включая codex и mimo 2.6 pro» runs MiMo v2.6 Pro (ormimopro)", err[:200] or on(plan))
+    check(plan is not None and not lit(plan, "agy31pro"),
+          "[fix] (a) ... and not the retired, explicit_only agy31pro", err[:200] or on(plan))
+    check(lit(plan, "codex"), "[control] (a) ... and codex", err[:200] or on(plan))
+
+    for words in ("добавь mimo v2.6 pro", "добавь mimo-v2.6-pro"):
+        plan, err = run(words)
+        check(lit(plan, "ormimopro", "xiaomi/mimo-v2.6-pro") and not lit(plan, "agy31pro"),
+              "[fix] (b) «%s» -> ormimopro" % words, err[:200] or on(plan))
+
+    for words in ("добавь pro", "добавь flash"):
+        plan, err = run(words)
+        check(plan is None and "matched the registry" in err, "[fix] (c) «%s» names nothing" % words,
+              err[:200] or on(plan))
+
+    for words in ("добавь mimo 2.6 flash", "добавь glm 5.3 flash", "добавь step 5 flash"):
+        plan, err = run(words)
+        check(not lit(plan, "agy36flash"), "[fix] (d) «%s» never starts agy36flash" % words, err[:200] or on(plan))
+
+    for words, group in (("добавь mimo 2.7 pro", "mimo"), ("добавь gemini 4 pro", "gemini")):
+        plan, err = run(words)
+        check(plan is None and ("the group %r" % group) in err,
+              "[fix] (e) «%s» is refused, naming the group %r" % (words, group), err[:200] or on(plan))
+
+    for words, chan, model in (("добавь мимо 2.6 про", "ormimopro", "xiaomi/mimo-v2.6-pro"),
+                               ("добавь agy 3.1 pro", "agy31pro", "gemini-3.1-pro"),
+                               ("добавь deepseek v4 pro", "ordeepseekv4pro", "deepseek/deepseek-v4-pro"),
+                               ("добавь mimocli", "mimov26pro", None),
+                               ("добавь gemini 4 аргон", "agy4argon", None)):
+        plan, err = run(words)
+        check(lit(plan, chan, model), "[control] (f) «%s» -> %s" % (words, chan), err[:200] or on(plan))
+    plan, err = run("только agy")
+    check(lit(plan, "agy38flash") and not lit(plan, "agy31pro"),
+          "[control] (f) «только agy»: a group word alone is still a group (agy38flash on, agy31pro off)",
+          err[:200] or on(plan))
+    plan, err = run("только codex 5.9 nova ultra")
+    check(plan is None and "'codex'" in err and "not in the registry" in err,
+          "[control] (f) «только codex 5.9 nova ultra» is still refused", err[:200] or on(plan))
+
+    def census(rg):
+        words_of = {}
+        for c, ch in rg["channels"].items():
+            texts = [c, str(ch.get("label") or ""), str(ch.get("model") or "")]
+            for m, mv in (ch.get("models") or {}).items():
+                texts += [m, str((mv or {}).get("label") or "")]
+            words_of[c] = set(re.findall(r"[a-zа-я]+", " ".join(texts).lower().replace("ё", "е")))
+        out = []
+        for c, ch in rg["channels"].items():
+            if ch.get("enabled", True) and not ch.get("explicit_only"):
+                continue
+            als = list(ch.get("aliases") or [])
+            for mv in (ch.get("models") or {}).values():
+                als += list((mv or {}).get("aliases") or [])
+            for a in als:
+                w = str(a).lower().replace("ё", "е").strip()
+                if not re.fullmatch(r"[a-zа-я]+", w) or c.startswith(w):
+                    continue
+                others = sorted(o for o in words_of if o != c and w in words_of[o])
+                if others:
+                    out.append("%s: %r (also a word of %s)" % (c, w, ", ".join(others[:4])))
+        return out
+
+    bad = census(reg)
+    check(not bad, "[fix] (g) census: no one-word alias of an off / explicit_only channel is a word of another channel",
+          "; ".join(bad[:6]))
+    rg2 = copy.deepcopy(reg)
+    rg2["channels"]["agy31pro"]["models"]["gemini-3.1-pro"].setdefault("aliases", []).append("pro")
+    bad2 = census(rg2)
+    check(any(x.startswith("agy31pro: 'pro'") for x in bad2), "[control] (h) the census flags «pro» put back on agy31pro",
+          "; ".join(bad2[:4]))
 
 
 def suite_r168_i2_api_read_bound():

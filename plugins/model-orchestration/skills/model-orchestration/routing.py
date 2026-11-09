@@ -1479,18 +1479,37 @@ def _detect_silent_drop(text, stream, alias_idx, reg):
     if not channels_in_stream:
         return
 
-    for i, (cpos, cval) in enumerate(channels_in_stream):
-        end_pos = channels_in_stream[i + 1][0] if i + 1 < len(channels_in_stream) else len(t)
-        cname = cval[1]
+    # 🔴 R177 (2026-11-08): THE WORDS AFTER A GROUP WORD WERE NEVER READ. _expand_groups puts every member of a group
+    # at the group word's position, and this walk measured each member's span by a CHANNEL alias of that member, which
+    # is not what is written there: `chan_len` fell back to the member's id («ormimo26flash», 13 characters) and the
+    # interval began past the words that followed. «mimo 2.6 pro» therefore added the mimo group, whose default-off
+    # MiMo Pro channels a group may not start, so of its members only the free MiMo Flash would have run (dry run,
+    # runs/r177-route-mimo-pro/probe_dry_base.out) - silently, while the human had named another model. One written
+    # word is one unit now: the members at one position are walked together, the span is the alias written there, and
+    # a model alias of ANY member pins the model (has_model) or makes a word model-looking (alias_words).
+    units = []
+    for pos, val in channels_in_stream:
+        if units and units[-1][0] == pos:
+            units[-1][1].append(val[1])
+        else:
+            units.append((pos, [val[1]]))
+    groups = reg.get("groups") or {}
+    for i, (cpos, names) in enumerate(units):
+        end_pos = units[i + 1][0] if i + 1 < len(units) else len(t)
         has_model = any(cpos < pos < end_pos and k == "entity"
-                        and v[0] == "model" and v[1] == cname
+                        and v[0] == "model" and v[1] in names
                         for pos, k, v in stream)
         if has_model:
             continue
-        chan_len = len(cname)
-        for al, ent in alias_idx:
-            if ent[0] == "channel" and ent[1] == cname and t[cpos:cpos + len(al)] == al:
+        chan_len, gword = 0, None
+        for al, ent in alias_idx:                     # longest first, as _scan matched it
+            if t[cpos:cpos + len(al)] != al:
+                continue
+            if ent[0] == "channel" and ent[1] in names:
                 chan_len = len(al)
+                break
+            if ent[0] == "group" and set(names) <= set((groups.get(ent[1]) or {}).get("channels") or []):
+                chan_len, gword = len(al), ent[1]
                 break
         chan_end = cpos + chan_len
         # Walk the interval and collect runs of [A-Za-z0-9.-] that no alias or marker covers.
@@ -1514,11 +1533,13 @@ def _detect_silent_drop(text, stream, alias_idx, reg):
         # R141: a word that is PART of one of this channel's own model aliases is model-looking by
         # construction, whatever its length. «только codex sol» (three Sol models listed) and
         # «только codex 7 sol» ran the default gpt-5.5 in silence: «sol» is three letters, «7» one.
-        alias_words = {w for mv in (reg["channels"][cname].get("models") or {}).values()
+        # R177: after a group word, the model aliases of EVERY member («gemini 4 pro»: «pro» is a word of «3.1 pro»);
+        # a function word («or», «and») is never model-looking - the alias words of a big group hold «or».
+        alias_words = {w for cname in names for mv in (reg["channels"][cname].get("models") or {}).values()
                        for a in (mv or {}).get("aliases") or [] for w in str(a).lower().split()}
         for pos, w in runs:
             w = w.strip(".-")
-            if not w:
+            if not w or w in _FUNCTION_WORDS:
                 continue
             has_digit = bool(re.search(r"[0-9]", w))
             has_letter = bool(re.search(r"[A-Za-z]", w))
@@ -1535,6 +1556,17 @@ def _detect_silent_drop(text, stream, alias_idx, reg):
         for pos, w in significant:
             src = text[pos - 1:pos - 1 + len(w)]
             shown.append(src if src else w)
+        if len(names) > 1:
+            known = sorted({str(a) for cname in names for mv in (reg["channels"][cname].get("models") or {}).values()
+                            for a in (mv or {}).get("aliases") or []})
+            raise RouteError(
+                "route names the group %r (%s) followed by word(s) not in the registry: %s. A group word pins no "
+                "model: the members that are on by default would run and the model these words name would not "
+                "(R177, 2026-11-08: «mimo 2.6 pro» added the mimo group, of which only the free MiMo Flash would "
+                "have run). Name the model or the channel as the registry spells it - this group's members answer "
+                "to: %s." % (gword or names[0], ", ".join(names), ", ".join("%r" % w for w in shown),
+                             ", ".join(known[:30]) + (" ..." if len(known) > 30 else "")))
+        cname = names[0]
         default = reg["channels"][cname].get("model")
         known = list((reg["channels"][cname].get("models") or {}).keys())
         raise RouteError(

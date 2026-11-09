@@ -2,6 +2,17 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.119.3 — 2026-11-09
+
+A route that named MiMo v2.6 Pro started the retired Gemini 3.1 Pro instead. A model word in a route now names only the model it spells.
+
+- **"pro" and "flash" alone name nothing.** Gemini 3.1 Pro (`agy31pro`) answered to the bare word "pro" and Gemini 3.6 Flash (`agy36flash`) to the bare word "flash". A model's own name counts as naming its channel directly, which starts a channel even when it is off or starts only by name. So in 1.119.2 "cheap panel, including codex and mimo 2.6 pro" ran Gemini 3.1 Pro (off since 1.115.0: agy no longer offers its model on our account) and no MiMo Pro; "only qwen pro" and "only gemini 4 pro" added Gemini 3.1 Pro; "only mimo 2.6 flash" and "only glm 5.3 flash" added Gemini 3.6 Flash (off). Both channels keep their full names ("agy31pro", "gemini-3.1-pro", "3.1 pro"; "agy36flash", "gemini-3.6-flash", "3.6 flash").
+- **"mimo 2.6 pro" names MiMo v2.6 Pro through OpenRouter** (`ormimopro`, paid, ≈ $0.06 a run), as «мимо 2.6 про» already did; "mimo v2.6 pro" and "mimo-v2.6-pro" too. "add mimo 2.6 pro" adds it to the cheap panel, "only mimo 2.6 pro" runs it alone. "mimocli", «мимо кли» and "mimo cli v2.6" still name the same model through the mimo CLI (`mimov26pro`, where that CLI is installed). Before, "mimo" was only a group word, and a group word never starts a channel that is off by default, so of the whole group only the free MiMo v2.6 Flash ran.
+- **Words after a group word are checked.** A model-looking word after a group word ("mimo", "gemini", ...) that none of the group's channels answers to now stops the route and lists the names the group's channels do answer to, so "only mimo 2.6 flash" and "only gemini 4 pro" are refused. Before, only the words after a channel's own name were checked: words after a group word were dropped and the group's default members ran.
+- New selftest suite `suite_r177_route_model_words` (21 checks), with a registry census: a one-word model name of a channel that is off or starts only by name may not be a word of another channel's name, label or model.
+
+Known and unchanged: "qwen pro" runs Qwen 3.8 Max (a short word after a channel's name is let through on purpose), "glm 5.3 flash" runs GLM 5.3 (a word after a model's name is not checked), and Cyrillic words after a group word are not checked.
+
 ## 1.119.2 — 2026-11-08
 
 Two fixes on the default path. A Grok tool may now run up to 300 s before the inner watchdog stops the run (90 s cut working web searches), and a free API voice whose request gets no response headers sends that request once more inside the same call (DeepSeek V4.1 Flash on NVIDIA's free endpoint lost 10 of its last 24 reviews that way).
@@ -292,21 +303,6 @@ Route grammar fixes from the review panel on 1.112.4, each reproduced on the cod
   SKILL.md, `references/briefs.md` and AGENTS.md said attachments go inline to every channel and CLI channels get
   the path as well; the CLI channels get the path only.
 
-## 1.112.4 — 2026-10-17
-
-Route grammar fixes from the review panel on 1.112.3, each reproduced on the code before it was changed.
-
-- **«don't use X» excludes X.** The router kept the shorter «use» it found inside «don't use» / «dont use» and read the sentence as «use X» (since 2026-09-14): «don't use codex» started the expensive codex on the cheap panel, and the README's own example «don't use openrouter» excluded nothing (on the standard panel every OpenRouter channel still ran). «just use codex» ran the whole panel. The longest instruction word now wins, and an instruction word counts only where a word starts («refuse codex» is not «use codex»).
-- **«не» and «только» keep their meaning next to another instruction word.** «codex не используй, а используй grokbuild» ran codex; «только используй codex» and «только вместо grokbuild возьми codex» ran the whole panel. «не только codex, но и grokbuild» now adds both (it excluded both).
-- **«вместо X используй / поставь / возьми Y» switches X off.** X stayed on (on the standard panel «вместо codex поставь grokbuild» kept codex). «возьми» and «бери» are add words now.
-- **«вместо него / неё / них / этого» replaces what came before it.** «kimik3, вместо него kimik3free» ran the PAID kimik3 and switched the free kimik3free off.
-- **A replaced channel does not come back on its paid twin.** «codex вместо agy38flash» also ran orgemini38flash (the same Gemini through OpenRouter, paid per call), with no reason in the plan. A channel you only exclude («не используй agy38flash», `--skip agy38flash`) still hands its voice to the twin, as before; that plan line now says the twin is PAID per call.
-- **A family member named as the one to replace is replaced.** «кими вместо kimik3» and «вместо kimik3 возьми кими» on the standard panel ran the PAID kimik3; now kimik3 is off, and when no other Kimi voice can start (the free ones ship off) the run stops and says so.
-- **Unclear sentences stop and say how to write them**, instead of guessing: a trailing «не используй» after another instruction («kimik3 вместо kimik3free не используй» ran the PAID kimik3); «вместо X» with nothing that replaces X; «не используй A, B вместо C» (two readings with opposite costs); «A вместо B вместо C». Clear forms run as before: «grokbuild не используй», «не используй kimik3free вместо kimik3», «только grokbuild, вместо codex agy38flash».
-- After a «не», «вместо A B» replaces A with B («не используй grokbuild, вместо codex qwen38maxcli» ran codex).
-- Both readers of a route - the one that switches channels and the one that decides what you named - ask one function what each «вместо» means.
-- README: «only kimi» on the default cheap panel stops and asks you to name `kimik3` (since 1.112.1); the «You say» table and two paragraphs still said it starts the paid channel.
-
 ## Older releases
 
-165 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+166 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).

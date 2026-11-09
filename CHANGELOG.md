@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.119.3 — 2026-11-09
+
+A route that named MiMo v2.6 Pro started the retired Gemini 3.1 Pro instead. A model word in a route now names only the model it spells.
+
+- **"pro" and "flash" alone name nothing.** Gemini 3.1 Pro (`agy31pro`) answered to the bare word "pro" and Gemini 3.6 Flash (`agy36flash`) to the bare word "flash". A model's own name counts as naming its channel directly, which starts a channel even when it is off or starts only by name. So in 1.119.2 "cheap panel, including codex and mimo 2.6 pro" ran Gemini 3.1 Pro (off since 1.115.0: agy no longer offers its model on our account) and no MiMo Pro; "only qwen pro" and "only gemini 4 pro" added Gemini 3.1 Pro; "only mimo 2.6 flash" and "only glm 5.3 flash" added Gemini 3.6 Flash (off). Both channels keep their full names ("agy31pro", "gemini-3.1-pro", "3.1 pro"; "agy36flash", "gemini-3.6-flash", "3.6 flash").
+- **"mimo 2.6 pro" names MiMo v2.6 Pro through OpenRouter** (`ormimopro`, paid, ≈ $0.06 a run), as «мимо 2.6 про» already did; "mimo v2.6 pro" and "mimo-v2.6-pro" too. "add mimo 2.6 pro" adds it to the cheap panel, "only mimo 2.6 pro" runs it alone. "mimocli", «мимо кли» and "mimo cli v2.6" still name the same model through the mimo CLI (`mimov26pro`, where that CLI is installed). Before, "mimo" was only a group word, and a group word never starts a channel that is off by default, so of the whole group only the free MiMo v2.6 Flash ran.
+- **Words after a group word are checked.** A model-looking word after a group word ("mimo", "gemini", ...) that none of the group's channels answers to now stops the route and lists the names the group's channels do answer to, so "only mimo 2.6 flash" and "only gemini 4 pro" are refused. Before, only the words after a channel's own name were checked: words after a group word were dropped and the group's default members ran.
+- New selftest suite `suite_r177_route_model_words` (21 checks), with a registry census: a one-word model name of a channel that is off or starts only by name may not be a word of another channel's name, label or model.
+
+Known and unchanged: "qwen pro" runs Qwen 3.8 Max (a short word after a channel's name is let through on purpose), "glm 5.3 flash" runs GLM 5.3 (a word after a model's name is not checked), and Cyrillic words after a group word are not checked.
+
 ## 1.119.2 — 2026-11-08
 
 Two fixes on the default path. A Grok tool may now run up to 300 s before the inner watchdog stops the run (90 s cut working web searches), and a free API voice whose request gets no response headers sends that request once more inside the same call (DeepSeek V4.1 Flash on NVIDIA's free endpoint lost 10 of its last 24 reviews that way).

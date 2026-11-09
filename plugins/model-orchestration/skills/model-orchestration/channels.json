@@ -1910,9 +1910,9 @@
           "label": "Gemini 3.1 Pro",
           "aliases": [
             "gemini-3.1-pro",
-            "3.1 pro",
-            "pro"
+            "3.1 pro"
           ],
+          "_alias_pro_removed_r177": "R177 (2026-11-08): the bare word «pro» was removed from these aliases. Naming a channel by a MODEL alias names it directly, so «pro» overrode `enabled: false` and `explicit_only` - and it is a word of MiMo v2.6 Pro, MiMo 2.5 Pro and DeepSeek V4 Pro too: in a real round (2026-11-09 UTC) the route «дешёвая панель, включая codex и mimo 2.6 pro» started this channel pinned to gemini-3.1-pro, which agy no longer serves (R169), and no MiMo Pro. «3.1 pro», «gemini-3.1-pro» and the channel words agy31pro / agypro / аджипро still name it; selftest suite_r177_route_model_words (g) keeps a one-word alias of an off channel from being a word of another channel.",
           "efforts": [
             "low",
             "high"
@@ -1947,9 +1947,9 @@
           "label": "Gemini 3.6 Flash",
           "aliases": [
             "gemini-3.6-flash",
-            "3.6 flash",
-            "flash"
+            "3.6 flash"
           ],
+          "_alias_flash_removed_r177": "R177 (2026-11-08): the bare word «flash» was removed from these aliases, for the reason under agy31pro's `_alias_pro_removed_r177`: it is a word of 16 other channels, and «mimo 2.6 flash», «glm 5.3 flash», «step 5 flash» each started this default-off channel pinned to gemini-3.6-flash. «3.6 flash» and «gemini-3.6-flash» still name it.",
           "efforts": [
             "low",
             "medium",
@@ -2768,8 +2768,12 @@
             "or mimo",
             "or mimo 2.6",
             "мимо через openrouter",
-            "мимо 2.6 про"
-          ]
+            "мимо 2.6 про",
+            "mimo 2.6 pro",
+            "mimo v2.6 pro",
+            "mimo-v2.6-pro"
+          ],
+          "_aliases_r177": "R177 (2026-11-08): the Latin spellings of «мимо 2.6 про». Without them «mimo 2.6 pro» matched only the `mimo` GROUP, which may not start this default-off channel, plus agy31pro's bare «pro». The bare model name stays on this channel - the kit's MiMo Pro, which any install with an OpenRouter key can run; the mimo CLI copy (mimov26pro, local) answers to its own words: mimocli, «мимо кли», «mimo cli v2.6»."
         },
         "xiaomi/mimo-v2.5-pro": {
           "label": "MiMo v2.5 Pro (OpenRouter, legacy)",

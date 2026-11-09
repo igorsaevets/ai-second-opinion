@@ -93,6 +93,7 @@ In Claude Code with the plugin (and in any agent you gave the line from the top 
 | "only wonder", "muse wonder", «вондер»; "add wonder" | One Muse Wonder, on your Muse Code subscription where the Muse Code CLI is installed. Without it the run stops before paying and names the paid ones: "only wonder10" (Meta key) or "only orwonder" (OpenRouter) runs that one |
 | "only kimi" | The run stops and says why: since 1.112.0 the cheap panel has no free Kimi, and the only Kimi it could start is `kimik3` (OpenRouter, paid). "only kimik3" runs it; on the standard panel "only kimi" runs it too |
 | "only gemini 4 cli", «только gemini 4 аргон» | Gemini 4 Argon alone (it is on the standard panel, not the cheap one). "only agy31pro" still starts Gemini 3.1 Pro, off since 1.115.0 (below, «By name only») |
+| "add mimo 2.6 pro", "only mimo 2.6 pro", «добавь мимо 2.6 про» | MiMo v2.6 Pro through OpenRouter (`ormimopro`, paid, ≈ $0.06 a run), with the cheap panel or alone. Since 1.119.3: before, "mimo 2.6 pro" started the retired Gemini 3.1 Pro (it answered to the bare word "pro") and no MiMo Pro. The bare words "pro" and "flash" name nothing |
 | "don't use openrouter" | Everything except the OpenRouter channels |
 
 From a terminal the same is done with flags: `--panel cheap` (the default), `--panel standard`, `--route "only CLI"`, `--only codex`, `--skip openrouter`. You can see the plan before anything is spent, for free: `python routing.py` or `--dry-run`.
