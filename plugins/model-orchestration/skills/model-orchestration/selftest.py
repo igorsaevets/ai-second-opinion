@@ -8145,8 +8145,10 @@ def main():
                   suite_r163_step5_minimax_chain, suite_r163_i3_hotfix, suite_keys_read_policy,
                   suite_r165_grok_turn_ended,
                   suite_r165_i2_task_keys, suite_r166_grok_tool_watchdog,
+                  suite_r175_grok_tool_limits,
                   suite_r164_muse_spark, suite_r160_kit_defaults, suite_r160_i4_home_scrub,
                   suite_r168_i2_api_read_bound,
+                  suite_r176_headers_resend,
                   suite_r168_i3_free_transports,
                   suite_r168_i4_panel_fixes,
                   suite_r169_agy_argon,
@@ -20124,6 +20126,186 @@ def suite_r166_grok_tool_watchdog():
         _sh.rmtree(td, ignore_errors=True)
 
 
+def suite_r175_grok_tool_limits():
+    """R175 (2026-11-08, ironmemo P300-28). R166's flat 90 s watchdog stopped Grok in the middle
+    of a WORKING web search: Grok Build's `web_search` is an agentic search on xAI's side - 64
+    calls on this machine ran median 58.7 s, max 172.3 s, 5 of them past 90 s - and the 15th call
+    of that round completed (94.6 s, success) as the watchdog fired. The record said the tool
+    «stayed pending with no completion» and the operator read it as «the web search hung».
+    (a) the limit is per tool: web_search waits 300 s, every other tool the default; the env
+        override moves only the default (a per-tool entry is a floor, never lower);
+    (b) the tracker names the pending tool furthest along ITS OWN limit - a 200 s web_search
+        (limit 300) does not hide a 95 s read_file (limit 90) - and a lone 200 s web_search is
+        under its limit;
+    (c) a REAL child whose web_search outlives the default but not its own limit is untouched;
+    (d) after a stop, a completion found in Grok's record marks the stop RACED; a tool still
+        pending past its limit does not;
+    (e) call_grokcli says «completed as the watchdog fired» on a raced stop and keeps R166's text
+        otherwise; diagnose() advises raising that tool's limit, not the timeout.
+    """
+    import json as _j
+    import shutil as _sh
+    import subprocess as _sp
+    import sys as _sys
+    import tempfile
+    import time
+    import uuid as _uu
+    import orchestrate as o
+    section("R175 Grok: the watchdog limit is per tool (web_search 300 s); a raced stop says so")
+    td = tempfile.mkdtemp(prefix="r175-")
+    gh = os.path.join(td, "gh")
+    std = getattr(o, "_STDLIB_SUBPROCESS_RUN", _sp.run)
+    saved = (o.subprocess.run, o.grok_bin, o.neutral_cwd, os.environ.get("GROK_HOME"),
+             o.GROK_POLL, o.GROK_TOOL_SILENCE, o.GROK_LINGER_GRACE,
+             dict(getattr(o, "GROK_TOOL_SILENCE_BY_TOOL", {}) or {}),
+             os.environ.get("ORCH_GROK_TOOL_SILENCE"))
+    try:
+        os.environ["GROK_HOME"] = gh
+        os.environ.pop("ORCH_GROK_TOOL_SILENCE", None)
+        o.subprocess.run = std
+        # (a) the shipped table and the default
+        a1 = (o.GROK_TOOL_SILENCE_BY_TOOL.get("web_search"), o._grok_tool_silence("web_search"),
+              o._grok_tool_silence("run_terminal_command"), o._grok_tool_silence())
+        os.environ["ORCH_GROK_TOOL_SILENCE"] = "7"
+        a2 = (o._grok_tool_silence("web_search"), o._grok_tool_silence("read_file"),
+              o._grok_tool_silence())
+        os.environ["ORCH_GROK_TOOL_SILENCE"] = "600"
+        a3 = o._grok_tool_silence("web_search")
+        os.environ.pop("ORCH_GROK_TOOL_SILENCE", None)
+        check(a1 == (300, 300, 300, 300) and o.GROK_TOOL_SILENCE == 300 and a2 == (300, 7, 7)
+              and a3 == 600,
+              "R175 (a) every Grok tool waits 300 s (the operator's «Вариант в», 2026-11-08), "
+              "web_search never less; ORCH_GROK_TOOL_SILENCE moves the default and never lowers a "
+              "per-tool floor", repr((a1, a2, a3, o.GROK_TOOL_SILENCE)))
+        # (b) the tracker: each pending tool against its own limit (explicit now, no sleeps)
+        o.GROK_TOOL_SILENCE_BY_TOOL = {"web_search": 300}
+        o.GROK_TOOL_SILENCE = 90
+        sid = str(_uu.uuid4())
+        d = os.path.join(gh, "sessions", "grp", sid)
+        os.makedirs(d, exist_ok=True)
+        ev = os.path.join(d, "events.jsonl")
+        st = {}
+        t = time.time()
+        with open(ev, "w", encoding="utf-8") as f:
+            f.write(_j.dumps({"type": "tool_started", "tool_name": "web_search", "ts": "t"}) + "\n")
+        b1 = o._grok_stuck_tool(sid, st, now=t)
+        b2 = o._grok_stuck_tool(sid, st, now=t + 200)
+        with open(ev, "a", encoding="utf-8") as f:
+            f.write(_j.dumps({"type": "tool_started", "tool_name": "read_file", "ts": "t"}) + "\n")
+        o._grok_stuck_tool(sid, st, now=t + 105)
+        b3 = o._grok_stuck_tool(sid, st, now=t + 200)
+        check(b1 == ("web_search", 0.0) and b2 is not None and b2[0] == "web_search"
+              and 199 <= b2[1] < o._grok_tool_silence("web_search")
+              and b3 is not None and b3[0] == "read_file" and 94 <= b3[1] <= 96
+              and b3[1] >= o._grok_tool_silence("read_file"),
+              "R175 (b) a lone 200 s web_search is under its own limit; with a 95 s read_file "
+              "pending beside it, the read_file - past ITS limit - is the one named",
+              repr((b1, b2, b3)))
+        # (c) a REAL child: its web_search outlives the 2 s default but not its own 4 s limit
+        o.GROK_POLL, o.GROK_TOOL_SILENCE, o.GROK_LINGER_GRACE = 0.3, 2, 30
+        o.GROK_TOOL_SILENCE_BY_TOOL = {"web_search": 4}
+        child = (
+            "import json, os, sys, time\n"
+            "home, sid = sys.argv[1], sys.argv[2]\n"
+            "d = os.path.join(home, 'sessions', 'grp', sid)\n"
+            "os.makedirs(d, exist_ok=True)\n"
+            "p = os.path.join(d, 'events.jsonl')\n"
+            "open(p, 'w').write(json.dumps({'type': 'tool_started', 'tool_name': 'web_search', "
+            "'ts': 't'}) + chr(10))\n"
+            "time.sleep(2.8)\n"
+            "open(p, 'a').write(json.dumps({'type': 'tool_completed', 'tool_name': 'web_search', "
+            "'outcome': 'success', 'duration_ms': 2800, 'ts': 't2'}) + chr(10))\n"
+            "print(json.dumps({'text': 'OK R175-DONE'}))\n")
+        script = os.path.join(td, "slow_search.py")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write(child)
+        sid2 = str(_uu.uuid4())
+        t0 = time.time()
+        r2, i2 = o._run_grok([_sys.executable, script, gh, sid2], 60, None, sid2)
+        el = time.time() - t0
+        check(r2.returncode == 0 and '"OK R175-DONE"' in (r2.stdout or "")
+              and not i2.get("watchdog") and 2.5 <= el < 20,
+              "R175 (c) a real grok whose web_search runs past the 2 s default but under its own "
+              "4 s limit is NOT stopped (the flat R166 limit stopped it at 2 s)",
+              repr((r2.returncode, i2, round(el, 1))))
+        # (d) a stop that raced a completion, and one that did not
+        o.GROK_TOOL_SILENCE_BY_TOOL = {"web_search": 300}
+        o.GROK_TOOL_SILENCE = 90
+        sid3 = str(_uu.uuid4())
+        d3 = os.path.join(gh, "sessions", "grp", sid3)
+        os.makedirs(d3, exist_ok=True)
+        ev3 = os.path.join(d3, "events.jsonl")
+        with open(ev3, "w", encoding="utf-8") as f:
+            f.write(_j.dumps({"type": "tool_started", "tool_name": "web_search", "ts": "t"}) + "\n")
+        st3 = {}
+        o._grok_stuck_tool(sid3, st3, now=time.time() - 301)
+        pre3 = o._grok_stuck_tool(sid3, st3, now=time.time())
+        with open(ev3, "a", encoding="utf-8") as f:
+            f.write(_j.dumps({"type": "tool_completed", "tool_name": "web_search",
+                              "outcome": "success", "duration_ms": 301000, "ts": "t"}) + "\n")
+        raced3 = o._grok_stop_raced(sid3, st3)
+        sid4 = str(_uu.uuid4())
+        d4 = os.path.join(gh, "sessions", "grp", sid4)
+        os.makedirs(d4, exist_ok=True)
+        with open(os.path.join(d4, "events.jsonl"), "w", encoding="utf-8") as f:
+            f.write(_j.dumps({"type": "tool_started", "tool_name": "run_terminal_command",
+                              "ts": "t"}) + "\n")
+        st4 = {}
+        o._grok_stuck_tool(sid4, st4, now=time.time() - 95)
+        raced4 = o._grok_stop_raced(sid4, st4)
+        check(pre3 is not None and pre3[1] >= 300 and raced3 is True and raced4 is False,
+              "R175 (d) after a stop, a completion found in Grok's record marks the stop RACED; "
+              "a tool still pending past its limit does not", repr((pre3, raced3, raced4)))
+        # (e) the record and the diagnosis of a raced stop vs a real stall
+        o.grok_bin = lambda: "grok"
+        o.neutral_cwd = lambda: os.path.join(td, "ncwd")
+        saved_rg, saved_note, saved_ans = o._run_grok, o._grok_session_note, o._grok_session_answer
+        o._grok_session_note = lambda *a: "Grok's own session stub (stub): last event x at 00:00:01"
+        o._grok_session_answer = lambda sid: ("", None)
+        try:
+            o._run_grok = lambda cmd, timeout, env, sid: (
+                _sp.CompletedProcess(cmd, -1, "", ""),
+                {"watchdog": {"tool": "web_search", "stuck_s": 90.1, "silence_s": 90,
+                              "raced": True}})
+            re1 = o.call_grokcli("B", "R175-DONE", os.path.join(td, "wd1"),
+                                 os.path.join(td, "G1.md"), timeout=7)
+            o._run_grok = lambda cmd, timeout, env, sid: (
+                _sp.CompletedProcess(cmd, -1, "", ""),
+                {"watchdog": {"tool": "run_terminal_command", "stuck_s": 92.3, "silence_s": 90}})
+            re2 = o.call_grokcli("B", "R175-DONE", os.path.join(td, "wd2"),
+                                 os.path.join(td, "G2.md"), timeout=7)
+        finally:
+            o._run_grok, o._grok_session_note, o._grok_session_answer = saved_rg, saved_note, saved_ans
+        e1, e2 = re1.get("error") or "", re2.get("error") or ""
+        c1, f1 = o.diagnose(e1)
+        c2, _f2 = o.diagnose(e2)
+        check(e1.startswith("WATCHDOG after 90.1s: tool `web_search` reached its 90 s silence limit")
+              and "completed as the watchdog fired" in e1 and re1.get("watchdog_raced") is True
+              and not re1.get("ok") and not os.path.isfile(os.path.join(td, "G1.md"))
+              and e2.startswith("WATCHDOG after 92.3s: tool `run_terminal_command` stayed pending "
+                                "with no completion")
+              and re2.get("watchdog_raced") is False
+              and (c1 or "").startswith("The inner watchdog (R166) stopped a grok whose tool was SLOW")
+              and "GROK_TOOL_SILENCE_BY_TOOL" in (f1 or "")
+              and (c2 or "").startswith("Grok stalled inside one of its own tools"),
+              "R175 (e) a raced stop is recorded as «completed as the watchdog fired» and diagnosed "
+              "as a too-low limit; a real stall keeps R166's text and diagnosis",
+              repr((e1[:110], re1.get("watchdog_raced"), e2[:70], (c1 or "")[:50], (c2 or "")[:40])))
+    finally:
+        o.subprocess.run, o.grok_bin, o.neutral_cwd = saved[:3]
+        if saved[3] is None:
+            os.environ.pop("GROK_HOME", None)
+        else:
+            os.environ["GROK_HOME"] = saved[3]
+        o.GROK_POLL, o.GROK_TOOL_SILENCE, o.GROK_LINGER_GRACE = saved[4], saved[5], saved[6]
+        o.GROK_TOOL_SILENCE_BY_TOOL = saved[7]
+        if saved[8] is None:
+            os.environ.pop("ORCH_GROK_TOOL_SILENCE", None)
+        else:
+            os.environ["ORCH_GROK_TOOL_SILENCE"] = saved[8]
+        _sh.rmtree(td, ignore_errors=True)
+
+
 def suite_r164_muse_spark():
     """R164 (2026-10-22). Igor: «добавь spark 1.3 и 1.2 максимальный effort через muse code cli и 1.3 модель по
     дефолту активна, 1.2 ее fallback», «Muse Wonder через muse code cli ... по дефолту не активна» and «У меня и в kit
@@ -20331,6 +20513,206 @@ def suite_r160_kit_defaults():
         check(ok, "R160 И-4 (g) the builder flips nothing ON, and refuses before the old tree is removed")
     else:
         check(True, "R160 И-4 (f)(g) package.py is not in this tree (the kit does not ship the builder)")
+
+
+def suite_r176_headers_resend():
+    """R176 (2026-11-08): a FREE API voice re-sends ONE request per call that got no response headers.
+
+    P300-28 (2026-11-09 00:33Z): DeepSeek V4.1 Flash on NVIDIA's free endpoint read 12 pages in 27.5 min, then one
+    request got no headers for 300 s and the whole review (50,774 tokens) was lost - 10 of its 24 rounds since
+    2026-10-31 ended with that error (runs/r176-deepseek-resend/cut_census.py). The operator chose «А»: re-send the
+    stalled request once inside the same call. A loopback server plays the endpoint request by request. Checks
+    named [resend] must FAIL on the old code (runs/r176-deepseek-resend/nc_r176.py), [control] ones pass on both:
+      (a) a tool round, a request with no headers, the copy answers -> ok, the page kept, the copy byte-identical
+          to the stalled request, retries 1, headers_resent names the stall, a note says so;
+      (b) the FIRST request gets no headers -> re-sent once, ok;
+      (c) the copy gets no headers either -> ok False, stream_cut headers, exactly 3 requests, the error says it was
+          the re-send, and diagnose() names that case;
+      (d) [control] no `headers_resends` (the default, every paid channel) -> 2 requests, ok False, no re-send;
+      (e) a `deadline` cut is never re-sent (1 request);
+      (f) headers_waits_s holds every streamed request's wait for its headers;
+      (g) the dispatcher's value: 1 for every free API channel in channels.json, 0 for every other; both call
+          sites in main() pass it; call_oai_reviewer's default is 0;
+      (h) diagnose() names a plain headers cut (P300-28's run.log printed «no stock diagnosis»).
+    """
+    import http.server
+    import inspect
+    import json
+    import threading
+    import time
+    import orchestrate as o
+    section("R176: a free API voice re-sends one request per call that got no response headers")
+    HOLD, LIMIT, CAP = 3.0, 1, 20.0
+    TOOL = (b'data: {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", "type": "function", '
+            b'"function": {"name": "fetch_url", "arguments": "{\\"url\\": \\"https://example.org/r176\\"}"}}]}, '
+            b'"finish_reason": "tool_calls"}], "model": "selftest/echo"}\n\n'
+            b'data: {"usage": {"prompt_tokens": 10, "completion_tokens": 3}}\n\n'
+            b'data: [DONE]\n\n')
+    GOOD = (b'data: {"choices": [{"delta": {"content": "Fine.\\nR176-MARK"}, "finish_reason": "stop"}], '
+            b'"model": "selftest/echo"}\n\n'
+            b'data: {"usage": {"prompt_tokens": 12, "completion_tokens": 4}}\n\n'
+            b'data: [DONE]\n\n')
+    hits, scripts, added = [], {}, []
+    lock = threading.Lock()
+
+    class _EP(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            sc = self.path.strip("/").split("/")[0]
+            with lock:
+                n = sum(1 for s, _b in hits if s == sc)
+                hits.append((sc, raw))
+            steps = scripts.get(sc) or ["good"]
+            step = steps[min(n, len(steps) - 1)]
+            try:
+                if step == "silent":
+                    time.sleep(HOLD)          # never a status line: the client's header limit ends it
+                    return
+                body = TOOL if step == "tool" else GOOD
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except OSError:
+                pass
+
+        def log_message(self, *args):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _EP)
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = "http://127.0.0.1:%d" % srv.server_address[1]
+    d = tempfile.mkdtemp(prefix="r176-")
+
+    def _timed(fn):
+        box = {}
+
+        def run():
+            t0 = time.time()
+            try:
+                box["r"] = fn()
+            except BaseException as e:  # noqa: BLE001 - the check prints it
+                box["e"] = e
+            box["s"] = time.time() - t0
+        th = threading.Thread(target=run, daemon=True)
+        th.start()
+        th.join(CAP)
+        return box.get("r"), box.get("e"), box.get("s", CAP)
+
+    def _rev(sc, steps, resends, timeout=12):
+        scripts[sc] = steps
+        pname = "_r176_" + sc
+        o.OAI_PROVIDERS[pname] = {"key_env": "SELFTEST_NOT_A_KEY", "url": base + "/" + sc + "/v1/chat/completions",
+                                  "depth": "reasoning", "search": "plugin", "usage_request": None,
+                                  "label": "r176 loopback " + sc, "streaming": True}
+        added.append(pname)
+        kw = {} if resends is None else {"headers_resends": resends}
+        return _timed(lambda: o.call_oai_reviewer(
+            "Say OK.", "R176-MARK", os.path.join(d, sc + ".md"), model="selftest/echo", name=pname,
+            provider=pname, fetch_tool={"enabled": True, "max_calls": 4}, max_tokens=200, timeout=timeout, **kw))
+
+    def _bodies(sc):
+        return [b for s, b in hits if s == sc]
+
+    def _show(r, e, s, sc):
+        r = r if isinstance(r, dict) else {}
+        return "s=%.1f requests=%d ok=%r cut=%r retries=%r resent=%r waits=%r err=%s exc=%r" % (
+            s, len(_bodies(sc)), r.get("ok"), r.get("stream_cut"), r.get("retries"), r.get("headers_resent"),
+            r.get("headers_waits_s"), str(r.get("error") or "")[:120], e)
+
+    real_hl, real_envkey, real_log, real_fetch = o.API_HEADER_LIMIT_S, o._env_key, o.log, o._safe_fetch_url
+    try:
+        o._env_key = lambda name: "selftest-dummy"
+        o.log = lambda *a, **k: None
+        o._safe_fetch_url = lambda url, timeout=25: "R176 page body for " + url
+        o.API_HEADER_LIMIT_S = LIMIT
+        # ---- (a) tool round, a stall, the copy answers ----------------------------------------------------------
+        r, e, s = _rev("a", ["tool", "silent", "good"], 1)
+        ra = r if isinstance(r, dict) else {}
+        bs = _bodies("a")
+        hr = ra.get("headers_resent") or [{}]
+        try:
+            msgs = json.loads(bs[2].decode("utf-8")).get("messages") or [] if len(bs) > 2 else []
+        except ValueError:
+            msgs = []
+        kept = any(m.get("role") == "tool" and "R176 page body" in str(m.get("content")) for m in msgs)
+        check(ra.get("ok") is True and "R176-MARK" in str(ra.get("text")) and len(bs) == 3 and bs[1] == bs[2]
+              and kept and ra.get("retries") == 1 and ra.get("fetches") == 1
+              and len(hr) == 1 and hr[0].get("after_rounds") == 1 and hr[0].get("answered") is True
+              and any("R176" in str(n) for n in (ra.get("notes") or [])),
+              "[resend] R176 (a) a tool round, then a request with no headers: the SAME request (byte-identical, "
+              "the fetched page still in it) is re-sent once and the review ends with its answer; retries 1, "
+              "headers_resent and a note record it", _show(r, e, s, "a"))
+        # ---- (f) the wait for headers, per streamed request -------------------------------------------------------
+        hw = ra.get("headers_waits_s") or []
+        check(len(hw) == 2 and all(isinstance(x, (int, float)) and 0 <= x < LIMIT for x in hw),
+              "[resend] R176 (f) headers_waits_s holds the wait for headers of each streamed request that got them "
+              "(2 here; the stalled one is in headers_resent instead)", repr(hw))
+        # ---- (b) the first request stalls ---------------------------------------------------------------------------
+        r, e, s = _rev("b", ["silent", "good"], 1)
+        rb = r if isinstance(r, dict) else {}
+        hb = rb.get("headers_resent") or [{}]
+        check(rb.get("ok") is True and len(_bodies("b")) == 2 and hb[0].get("after_rounds") == 0
+              and rb.get("retries") == 1,
+              "[resend] R176 (b) the FIRST request gets no headers -> re-sent once and answered", _show(r, e, s, "b"))
+        # ---- (c) the copy stalls too: one re-send per call, then the old failure, named -------------------------------
+        r, e, s = _rev("c", ["tool", "silent", "silent", "good"], 1)
+        rc = r if isinstance(r, dict) else {}
+        cause = o.diagnose(str(rc.get("error") or ""))[0] or ""
+        check(rc.get("ok") is False and rc.get("stream_cut") == "headers" and len(_bodies("c")) == 3
+              and rc.get("retries") == 1 and "R176" in str(rc.get("error")) and "twice" in cause,
+              "[resend] R176 (c) the copy gets no headers either -> ONE re-send per call (3 requests), then ok False "
+              "with stream_cut headers; the error says it was the re-send and diagnose() names that case",
+              _show(r, e, s, "c") + " cause=" + cause[:80])
+        # ---- (d) control: the default (every paid channel) never re-sends -----------------------------------------
+        r, e, s = _rev("d", ["tool", "silent", "good"], None)
+        rd = r if isinstance(r, dict) else {}
+        check(rd.get("ok") is False and rd.get("stream_cut") == "headers" and len(_bodies("d")) == 2
+              and not rd.get("retries") and not rd.get("headers_resent"),
+              "[control] R176 (d) without headers_resends (the default - a paid channel) a request with no headers "
+              "ends the call as before: 2 requests, no re-send", _show(r, e, s, "d"))
+        # ---- (e) a deadline cut is never re-sent --------------------------------------------------------------------
+        o.API_HEADER_LIMIT_S = 5
+        r, e, s = _rev("e", ["silent", "good"], 1, timeout=1)
+        o.API_HEADER_LIMIT_S = LIMIT
+        re_ = r if isinstance(r, dict) else {}
+        check(re_.get("stream_cut") == "deadline" and len(_bodies("e")) == 1 and not re_.get("headers_resent"),
+              "[resend] R176 (e) a cut by the channel's deadline (not by the header limit) is never re-sent",
+              _show(r, e, s, "e"))
+    finally:
+        o.API_HEADER_LIMIT_S, o._env_key, o.log, o._safe_fetch_url = real_hl, real_envkey, real_log, real_fetch
+        for pn in added:
+            o.OAI_PROVIDERS.pop(pn, None)
+        srv.shutdown()
+        srv.server_close()
+        shutil.rmtree(d, ignore_errors=True)
+    # ---- (g) who gets the re-send: derived from channels.json, both dispatch sites --------------------------------
+    with open(os.path.join(str(HERE), "channels.json"), encoding="utf-8") as fh:
+        reg = json.load(fh)
+    api = {n: c for n, c in (reg.get("channels") or {}).items()
+           if isinstance(c, dict) and c.get("kind") in ("oai", "openrouter")}
+    fn = getattr(o, "_headers_resends", None)
+    got = {n: (fn(reg, n) if fn else None) for n in api}
+    want = {n: (1 if c.get("cost") == "free" else 0) for n, c in api.items()}
+    sig = inspect.signature(o.call_oai_reviewer).parameters.get("headers_resends")
+    src_main = inspect.getsource(o.main)
+    check(got == want and 1 in want.values() and 0 in want.values()
+          and sig is not None and sig.default == 0
+          and src_main.count("headers_resends=_headers_resends(reg, cname)") == 2,
+          "[resend] R176 (g) every free API channel in channels.json gets one re-send and every other none; "
+          "call_oai_reviewer defaults to none; both dispatch sites in main() pass the value",
+          "free=%s mismatch=%s default=%r sites=%d" % (
+              sorted(n for n, v in want.items() if v), sorted(n for n in api if got.get(n) != want[n]),
+              getattr(sig, "default", None), src_main.count("headers_resends=_headers_resends(reg, cname)")))
+    # ---- (h) a plain headers cut has a stock diagnosis --------------------------------------------------------------
+    plain = ("NO RESPONSE HEADERS within 300 s - the endpoint never started answering (R168 И-2; NVIDIA's free "
+             "queue sent headers after 57-110 s on 2026-10-23)")
+    c1 = o.diagnose(plain)[0] or ""
+    check("R176" in c1 and "twice" not in c1,
+          "[resend] R176 (h) diagnose() names a plain headers cut (P300-28's run.log said «no stock diagnosis») "
+          "and keeps it apart from the failed re-send", c1[:120])
 
 
 def suite_r168_i2_api_read_bound():

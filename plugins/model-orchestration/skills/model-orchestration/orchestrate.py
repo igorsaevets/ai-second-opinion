@@ -235,6 +235,9 @@ def log(msg):
 #     OpenRouter) sends only comments while it thinks, for many minutes.
 # What had arrived is kept and graded partial; a cut read is never auto-retried (retryable_stream_death) - a re-run
 # gets the same budget.
+# SUPERSEDED in part 2026-11-08 (R176): a `headers` cut on a FREE channel is re-sent ONCE inside the same call
+# (call_oai_reviewer's `headers_resends`, the operator's «вариант А») - nothing had arrived, so nothing is lost or
+# billed, and the deadline still bounds the copy. The after-round retry still never re-runs a cut.
 API_HEADER_LIMIT_S = 300
 
 
@@ -1968,6 +1971,29 @@ KNOWN_FAILURES = [
      "surfaces. Turn them off in ~/.grok/config.toml (`[compat.claude]` / `[compat.cursor]`, e.g. "
      "`mcps = false` - docs.x.ai/build/settings/reference) or update the kit; `--skip grokbuild` "
      "until then. A re-run changes nothing."),
+    # R176 (2026-11-08): P300-28's run.log printed «(no stock diagnosis)» for a headers cut. The re-send case first.
+    (r"NO RESPONSE HEADERS within \d+ s.*this was the R176 re-send",
+     "The endpoint started nothing within the header limit twice in a row: the harness re-sent the stalled "
+     "request once inside the call (R176, free channels only) and the copy failed too. Whatever the voice had "
+     "read so far is lost; nothing was billed.",
+     "Re-run the seat at another hour, or run its fallback by name (--only <fallback>). Measured on NVIDIA's free "
+     "endpoint 2026-10-31..11-08: DeepSeek V4.1 Flash got no headers in 10 of 24 rounds while Nemotron on the "
+     "same endpoint answered - a queue of that one model, not your network or key."),
+    (r"NO RESPONSE HEADERS within \d+ s",
+     "The endpoint accepted the request but did not start answering within the header limit (R168 И-2; a free "
+     "queue such as NVIDIA's sits before the headers). A free channel re-sends one such request per call (R176); "
+     "a paid one never does - a request with no headers may still be queued and billed upstream.",
+     "Re-run the seat at another hour or run its fallback by name (--only <fallback>). A longer channel timeout "
+     "does not help: the limit is on the wait for headers, not on the call."),
+    (r"WATCHDOG after .*completed as the watchdog fired",
+     "The inner watchdog (R166) stopped a grok whose tool was SLOW, not stuck: the tool reached "
+     "its silence limit and Grok's own record shows it completed at that moment, so a working run "
+     "was cut. On 2026-11-08 (R175) this was web_search at the old flat 90 s - an agentic search "
+     "on xAI's side that ran 37-172 s across 64 calls on this machine.",
+     "Raise that tool's entry in GROK_TOOL_SILENCE_BY_TOOL (orchestrate.py), or the default for "
+     "every tool (300 s since R175) with ORCH_GROK_TOOL_SILENCE=<seconds>, and re-run "
+     "the seat. A longer channel timeout would not help - the watchdog, not the timeout, stopped "
+     "it."),
     (r"Grok's own session [^\n]*(never finished|failed at start|transport decode errors)",
      "Grok Build stalled inside its own runtime: a tool it started never returned, or an MCP "
      "server died at start-up - its own session record, quoted in the error, names which. The "
@@ -2001,7 +2027,8 @@ KNOWN_FAILURES = [
      "grok version and the folder names under ~/.grok/sessions."),
     (r"WATCHDOG after",
      "Grok stalled inside one of its own tools: the tool it started never returned, and the "
-     "harness stopped the run after ~90 s of silence (the inner watchdog, R166) instead of "
+     "harness stopped the run at the tool's silence limit (300 s for every tool since R175, 90 s "
+     "before - the inner watchdog, R166) instead of "
      "waiting out the channel timeout. On 2026-10-26 this was `run_terminal_command` on a "
      "97 KB pipe no parent drained - 40 min of silence with zero bytes on stdout.",
      "Read the stuck tool named in the error and Grok's session folder beside it. A re-run of "
@@ -4270,9 +4297,29 @@ GROK_POLL = 5               # s between two looks at Grok's own record while it 
 # removed by utf-8 in 1.116.0) and the class survives the trigger (wait-then-read, pwsh stalls,
 # upstream CLI bugs). 90 s: shell probes in review briefs finish in seconds; a legit minute-long
 # shell is cheaper lost (failed-with-partial, the round goes on) than 40 min of subscription.
+# SUPERSEDED 2026-11-08 (R175): 300 s for every tool - the operator's choice, the data below.
 # Overridable for probes via ORCH_GROK_TOOL_SILENCE (seconds); the selftest sets the module
 # constant instead - both are read live, every poll.
-GROK_TOOL_SILENCE = 90      # s a started-but-unfinished tool may stay pending before grok is stopped
+# R175 (2026-11-08): ONE limit of 5 min for every tool - the operator's «Вариант в», chosen over 90 s
+# (+300 s for web_search) and over no watchdog at all («сторожа ... только на бесплатных моделях?» -
+# Grok is a subscription seat, so that read as OFF). runs/r175-grok-deepseek/watchdog_evidence.py,
+# 403 harness sessions: no normal call past 271 s (web_search max 172.3 s, use_tool 271.2 s); the
+# stalls this guards against ran 15-40 min (the 10-26 shell 40 min, a 954 s grep, a 1857 s shell).
+# Since R166 it stopped 2 of 40 rounds: P300-28 (a working web_search, 94.6 s) and ironmemo-web
+# p398-bl64 2026-11-07 (4 tools incl. 2 read_file silent 90 s - a likely real stall). A later
+# stop rarely costs the round time: it waits for its slower seats anyway.
+GROK_TOOL_SILENCE = 300     # s a started-but-unfinished tool may stay pending before grok is stopped
+# R175 (2026-11-08, ironmemo P300-28): that flat 90 s was set for SHELL work and fired on a web
+# search that was WORKING. Grok Build's `web_search` is an agentic search on xAI's side and takes
+# about a minute by design: census of every Grok session on this machine (499 sessions, 64
+# web_search calls, 2026-09-12..11-09; runs/r175-grok-deepseek/grok_tool_census.py) - median
+# 58.7 s, p90 85.8 s, p99 120.3 s, max 172.3 s, 5 calls past 90 s. P300-28's 15th call took 94.6 s
+# and completed with success as the watchdog stopped grok - a 7-loop review was lost and the
+# record said the search «stayed pending». Every other tool keeps the default (p99: read_file
+# 2.1 s, web_fetch 11.9 s, grep 17.4 s, use_tool 26.1 s). Seconds per tool name, a FLOOR: the
+# default (ORCH_GROK_TOOL_SILENCE or the constant above) never lowers it. The selftest sets this
+# dict - read live, every poll.
+GROK_TOOL_SILENCE_BY_TOOL = {"web_search": 300}   # = the default since «Вариант в»; stays the floor
 # The two refusals a bypass run can meet, by the vendor's own words (R165 census of every Grok
 # session here: the first is Grok's gate for a command whose files it cannot tell while Read/Edit
 # deny rules exist - 9 of 1,125 shell calls, all after its 1.0.62 auto-update; the second is one of
@@ -4326,18 +4373,23 @@ def _grok_turn_end(sid, st):
     return None
 
 
-def _grok_tool_silence():
-    """Seconds a pending tool may live before the R166 watchdog fires. Env override for probes;
-    the module constant for the selftest seam - both read live, every poll."""
+def _grok_tool_silence(tool=None):
+    """Seconds a pending tool may live before the R166 watchdog fires. The default: env override
+    for probes, else the module constant (the selftest seam) - both read live, every poll. R175: a
+    tool named in GROK_TOOL_SILENCE_BY_TOOL waits at least its own entry (web_search 300 s)."""
     try:
         v = int(float(os.environ.get("ORCH_GROK_TOOL_SILENCE", "") or 0))
     except (TypeError, ValueError):
         v = 0
-    return v or GROK_TOOL_SILENCE
+    base = v or GROK_TOOL_SILENCE
+    per = (globals().get("GROK_TOOL_SILENCE_BY_TOOL") or {}).get(tool) if tool else None
+    return max(base, per) if per else base
 
 
 def _grok_stuck_tool(sid, st, now=None):
-    """(tool_name, age_s) of the OLDEST tool Grok started and never finished, else None.
+    """(tool_name, age_s) of the pending tool furthest along ITS OWN limit (R175: _grok_tool_silence
+    per tool; under one shared limit that is the OLDEST tool Grok started and never finished), else
+    None.
 
     R166 inner watchdog: incremental over events.jsonl, the same record _grok_turn_end reads -
     `st` keeps the folder, the byte offset and the pending list (each entry: [name, first_seen]).
@@ -4391,8 +4443,19 @@ def _grok_stuck_tool(sid, st, now=None):
                     break
     if not st["pend"]:
         return None
-    name, first = min(st["pend"], key=lambda p: p[1])
+    # R175: each pending tool against its OWN limit - a 200 s web_search (limit 300) must not hide
+    # a 95 s shell call (limit 90). Under one shared limit this is the oldest, as before.
+    name, first = max(st["pend"], key=lambda p: (now - p[1]) / float(_grok_tool_silence(p[0]) or 1))
     return (name, now - first)
+
+
+def _grok_stop_raced(sid, st):
+    """R175: True when one more look at Grok's record, taken AFTER the watchdog's kill (grok can no
+    longer write), finds no pending tool past its own limit - the stop raced a completion, so the
+    tool was slow, not stuck. P300-28: web_search completed (94.6 s, success) as the 90 s watchdog
+    fired, and the record said it «stayed pending with no completion»."""
+    after = _grok_stuck_tool(sid, st, time.time())
+    return after is None or after[1] < _grok_tool_silence(after[0])
 
 
 def _grok_session_answer(sid):
@@ -4512,8 +4575,9 @@ def _run_grok(cmd, timeout, env, sid):
     every GROK_POLL s. Once the run's turn has ENDED, a grok still alive GROK_LINGER_GRACE s later is
     stopped (whole tree) and the run goes on with what it printed - call_grokcli reads the answer
     from the session record when grok printed nothing (`--output-format json` prints at exit).
-    R166 adds the inner watchdog on the same record: a tool pending longer than
-    GROK_TOOL_SILENCE s stops the run at once, with info["watchdog"] naming it.
+    R166 adds the inner watchdog on the same record: a tool pending longer than its limit
+    (GROK_TOOL_SILENCE s - 300 since R175; a tool in GROK_TOOL_SILENCE_BY_TOOL never less) stops the run
+    at once, with info["watchdog"] naming it and `raced` = the tool completed as it fired.
 
     Returns (CompletedProcess, info): `turn` = (outcome, ts) when the turn ended while grok was
     alive, `lingered` = seconds waited after seeing it. A turn that never ends is still a
@@ -4558,14 +4622,17 @@ def _run_grok(cmd, timeout, env, sid):
                 # not at the channel timeout. A turn that already ENDED keeps the R165 grace
                 # above; a channel timeout that already hit keeps its TimeoutExpired.
                 stuck = _grok_stuck_tool(sid, tst, now)
-                if stuck is not None and stuck[1] >= _grok_tool_silence():
+                if stuck is not None and stuck[1] >= _grok_tool_silence(stuck[0]):
                     _kill_tree(p)
                     try:
                         out, err = p.communicate(timeout=15)
                     except subprocess.TimeoutExpired:
                         out = err = None   # a process outside the tree still holds a pipe
+                    # R175: one more look AFTER the kill (grok can no longer write) - P300-28's
+                    # web_search completed (94.6 s, success) as the watchdog fired
                     info["watchdog"] = {"tool": stuck[0], "stuck_s": round(stuck[1], 1),
-                                        "silence_s": _grok_tool_silence()}
+                                        "silence_s": _grok_tool_silence(stuck[0]),
+                                        "raced": _grok_stop_raced(sid, tst)}
                     rc = p.returncode if p.returncode is not None else -1
                     return subprocess.CompletedProcess(cmd, rc, out or "", err or ""), info
     except BaseException:
@@ -4967,19 +5034,36 @@ def call_grokcli(brief, marker, workdir, outfile, model=None, effort=None,
         if stext.strip():
             frag = (" Grok's record holds %d chars of assistant text without the end marker - "
                     "fragments, not an answer: %.300s" % (len(stext), stext.strip()[:300]))
-        log("  [%s] WATCHDOG after %.0fs: tool `%s` never finished - stopped, %s"
-            % (name, wd.get("stuck_s") or 0, wd.get("tool"), sn))
+        raced = bool(wd.get("raced"))
+        if raced:
+            # R175: the tool finished as the watchdog fired (P300-28: web_search, 94.6 s, success)
+            # - slow, not stuck. «never finished» sent the operator looking for a hang that was
+            # not there; say what the record shows.
+            log("  [%s] WATCHDOG after %.0fs: tool `%s` reached its %.0f s limit and was stopped, "
+                "but Grok's record shows it COMPLETED as the watchdog fired (slow, not stuck) - %s"
+                % (name, wd.get("stuck_s") or 0, wd.get("tool"), wd.get("silence_s") or 0, sn))
+            what = ("reached its %.0f s silence limit and the run was stopped, but Grok's record "
+                    "shows the tool completed as the watchdog fired - the limit cut a working run "
+                    "(the tool was slow, not stuck)" % (wd.get("silence_s") or 0))
+        else:
+            log("  [%s] WATCHDOG after %.0fs: tool `%s` never finished - stopped, %s"
+                % (name, wd.get("stuck_s") or 0, wd.get("tool"), sn))
+            what = ("stayed pending with no completion - the run was stopped after the %.0f s "
+                    "silence limit instead of waiting out the channel timeout"
+                    % (wd.get("silence_s") or 0))
         return {"channel": name, "ok": False, "text": "", "seconds": round(time.time() - t0, 1),
                 "bytes": 0,
-                "error": ("WATCHDOG after %ss: tool `%s` stayed pending with no completion - the "
-                          "run was stopped after the %.0f s silence limit instead of waiting out "
-                          "the channel timeout. %s.%s"
-                          % (wd.get("stuck_s"), wd.get("tool"), wd.get("silence_s") or 0, sn, frag)),
+                "error": "WATCHDOG after %ss: tool `%s` %s. %s.%s" % (
+                    wd.get("stuck_s"), wd.get("tool"), what, sn, frag),
                 "model": model, "effort": effort, "warnings": ["WATCHDOG"],
                 "notes": (["WATCHDOG: the run was stopped by the inner silence watchdog (R166), "
-                           "not by the channel timeout."] + ([imp_note] if imp_note else [])),
+                           "not by the channel timeout."]
+                          + (["WATCHDOG RACED (R175): the tool completed as the watchdog fired - "
+                              "its limit is too low (GROK_TOOL_SILENCE_BY_TOOL)."] if raced else [])
+                          + ([imp_note] if imp_note else [])),
                 "cli_version": cli_ver, "answer_source": None,
-                "watchdog_tool": wd.get("tool"), "watchdog_stuck_s": wd.get("stuck_s")}
+                "watchdog_tool": wd.get("tool"), "watchdog_stuck_s": wd.get("stuck_s"),
+                "watchdog_raced": raced}
     secs = time.time() - t0
     raw = (p.stdout or "").strip()
     warn, note = [], []
@@ -8501,7 +8585,7 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
 def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2400,
                       web=None, name="kimi", reasoning=None, max_tokens=None,
                       fetch_tool=None, provider="openrouter", provider_route=None,
-                      spend_guard=None, fallback_models=None):
+                      spend_guard=None, fallback_models=None, headers_resends=0):
     """
     Any OpenAI-protocol model over /chat/completions, DIRECTLY - no CLI in between.
 
@@ -8805,7 +8889,9 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                      for _, v in sorted(calls.items())],
                     sorted(served), finish)
         cut = {}
+        _t_rq = time.time()
         with _open_bounded(rq, read_deadline[0], True) as resp:
+            headers_waits.append(round(time.time() - _t_rq, 1))      # R176: the queue sits before the headers
             for raw in _bounded_lines(resp, read_deadline[0], stall_s, cut):
                 line = raw.decode("utf-8", "replace").strip()
                 if not line or line.startswith(":"):    # ": OPENROUTER PROCESSING" keep-alive
@@ -8966,6 +9052,8 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                 "usd_rounds": rounds_done if usd_seen else None,
                 "fetches": fetches if fetch_on else None,
                 "retries": retries_used or None,
+                "headers_resent": headers_resent or None,          # R176
+                "headers_waits_s": headers_waits or None,          # R176
                 "seconds": round(time.time() - start, 1)}
 
     last_finish = {}
@@ -8978,12 +9066,27 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # from this door, so the log no longer claims «billed nothing» for a 5xx (R73, codex).
     # Deliberately NOT retried: timeouts and mid-stream drops - an unstreamed call that timed
     # out may have finished, and billed, on the vendor's side (they surface as URLError /
-    # socket errors, which this handler does not catch). R74, six R73 reviewers converging:
+    # socket errors, which this handler does not catch). [SUPERSEDED in part 2026-11-08, R176: a FREE channel's
+    # request that got no response headers at all is re-sent once - see headers_resends below.] R74, six R73
+    # reviewers converging:
     # the budget is per CALL, not per review - the old per-review budget let a burst in round
     # 1 make round 5's single 503 fatal after every paid fetch; and the forced-final call,
     # the most expensive request of the review, sat outside the loop entirely. Both now go
     # through _stream_with_retry.
     retries_used = 0
+    # R176 (2026-11-08, the operator's «DeepSeek Вараинт А»): ONE request per call that got no response headers
+    # within API_HEADER_LIMIT_S is re-sent once, verbatim, inside the same call - only when the dispatcher passes
+    # `headers_resends` (1 for a channel whose `cost` is `free`, 0 otherwise: a paid request with no headers may
+    # still be queued and billed upstream, and a copy could pay twice). Measured (runs/r176-deepseek-resend/
+    # cut_census.py): DeepSeek V4.1 Flash on NVIDIA's free endpoint, 24 rounds 2026-10-31..11-08, 11 answered;
+    # 10 ended «NO RESPONSE HEADERS within 300 s» - 6 on the FIRST request, 4 after 2-12 fetches (P300-28: 32 min,
+    # 12 pages, 50,774 tokens gone) - while Nemotron on the same endpoint answered in those rounds. The pages read
+    # so far stay in `body`, which grows only after a successful round. The copy waits at most the same limit, so a
+    # failed re-send costs this seat at most API_HEADER_LIMIT_S more. `headers_waits` keeps every streamed
+    # request's wait for its headers, so the next stall shows whether the queue was slow or the request dropped.
+    headers_resends_left = max(0, int(headers_resends or 0))
+    headers_resent = []          # [{"after_rounds": n, "at_s": s, "answered": bool}] - a stalled request re-sent
+    headers_waits = []           # s from send to response headers, every streamed request that got them
 
     def _transient_stream_err(err):
         """True when an SSE error event names a retryable status (429 / 5xx)."""
@@ -8999,12 +9102,26 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         return False
 
     def _stream_with_retry(b):
-        nonlocal retries_used, in_tot, cached_tot, usd_tot, usd_seen, usd_max_round
+        nonlocal retries_used, in_tot, cached_tot, usd_tot, usd_seen, usd_max_round, headers_resends_left
         retries_left = 2
         while True:
             err_base, cite_base = len(stream_error), len(vendor_cites)
             try:
                 out = _stream_once(b)
+            except APIReadCut as e:
+                # R176: the one in-call re-send of a request whose headers never came (headers_resends above). A
+                # `deadline` or `stall` cut is never re-sent: the budget is gone, or the stream had started.
+                if e.kind != "headers" or headers_resends_left <= 0:
+                    raise
+                headers_resends_left -= 1
+                retries_used += 1
+                headers_resent.append({"after_rounds": rounds_done, "at_s": round(time.time() - start, 1),
+                                       "answered": False})
+                log("  [%s] ⏱ no response headers within %d s (%.0f s into the call, after %d completed "
+                    "round(s)) - re-sending the SAME request once (R176, a free channel). The pages read so far "
+                    "are kept; the copy waits at most the same limit."
+                    % (name, API_HEADER_LIMIT_S, time.time() - start, rounds_done))
+                continue
             except urllib.error.HTTPError as e:
                 if retries_left <= 0 or (e.code != 429 and e.code < 500):
                     raise
@@ -9068,6 +9185,8 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                                                 "y" if retries_left == 1 else "ies"))
                 time.sleep(wait)
                 continue
+            if headers_resent and not headers_resent[-1]["answered"]:
+                headers_resent[-1]["answered"] = True       # R176: the copy came back
             return out
 
     try:
@@ -9444,8 +9563,17 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         return out
     except APIReadCut as e:
         # R168 И-2: the endpoint never sent headers, or the budget was gone before a request could be sent.
-        log("  [%s] ⏱ %s" % (name, e))
-        out = {"channel": name, "ok": False, "error": str(e), "stream_cut": e.kind}
+        # R176: the error says whether the one re-send of this call was used, and how it went (KNOWN_FAILURES keys
+        # on «this was the R176 re-send»).
+        err = str(e)
+        if headers_resent and not headers_resent[-1]["answered"]:
+            err += (" - and this was the R176 re-send: the request that got no headers %.0f s into the call was "
+                    "sent once more and its copy failed too" % headers_resent[-1]["at_s"])
+        elif headers_resent:
+            err += (" (R176: this call's one re-send was used at %.0f s, where the copy answered)"
+                    % headers_resent[-1]["at_s"])
+        log("  [%s] ⏱ %s" % (name, err))
+        out = {"channel": name, "ok": False, "error": err, "stream_cut": e.kind}
         out.update(_telemetry())
         return out
     except Exception as e:
@@ -9653,6 +9781,10 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # not exist yet. Assigning `[]` here would have discarded it silently.
     note = list(fallback_notes)
     record_refusal(refusal_check(text, marker), warn, note)
+    for _hr in headers_resent:
+        note.append("R176: a request got no response headers within %d s (%.0f s into the call, after %d completed "
+                    "round(s)); it was re-sent once and the copy answered, so the review went on."
+                    % (API_HEADER_LIMIT_S, _hr["at_s"], _hr["after_rounds"]))
     if stream_cut == "deadline":
         warn.insert(0, "⏱ " + ("TIME LIMIT (R168 И-2): the harness closed the read at %s s - this channel's `timeout` (%d s) bounds the whole call, not each wait. What had arrived is kept as a PARTIAL answer and is not re-run (a re-run gets the same budget)." % (stream_cut_s, timeout)))
     elif stream_cut == "stall":
@@ -9879,6 +10011,8 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             # invisible one (the R48 shape: a field most return sites promise, missing from
             # the one that runs most often). Found by the R75 suite, not by a review.
             "retries": retries_used or None,
+            "headers_resent": headers_resent or None,          # R176: a stalled request re-sent once
+            "headers_waits_s": headers_waits or None,          # R176: per streamed request, s to its headers
             # D6: `opened_urls` here really was ours, but it shared a name with the vendor-side
             # count on xai and gemini. Same vocabulary now, so the two can never be added up.
             **_grounding(fetched=opened),
@@ -11162,6 +11296,12 @@ def _free_cost(reg, cname):
     keep today's after-round retry + fallback behaviour exactly."""
     ch = (((reg or {}).get("channels") or {}).get(cname) or {})
     return ch.get("cost") == "free"
+
+
+def _headers_resends(reg, cname):
+    """R176: how many requests of one API call may be re-sent after a headers cut - 1 for a channel whose `cost` is
+    `free`, 0 for every other (a paid request with no headers may still be queued and billed upstream)."""
+    return 1 if _free_cost(reg, cname) else 0
 
 
 def _free_limit_refused(r):
@@ -14748,6 +14888,7 @@ def main():
                 provider_route=p.get("provider_route"),
                 spend_guard=p.get("spend_guard"),
                 fallback_models=p.get("fallback_models"),
+                headers_resends=_headers_resends(reg, cname),
                 timeout=_seconds(p.get("timeout"), 2400))
         elif kind == "xai":
             return _rex.submit(
@@ -14921,6 +15062,7 @@ def main():
                                         provider_route=p.get("provider_route"),
                                         spend_guard=p.get("spend_guard"),
                                         fallback_models=p.get("fallback_models"),
+                                        headers_resends=_headers_resends(reg, cname),
                                         timeout=_seconds(p.get("timeout"), 2400))
             elif kind == "xai":
                 # 🔴 THE TIER TIMEOUT WAS NEVER PASSED HERE, and the plan claimed otherwise.

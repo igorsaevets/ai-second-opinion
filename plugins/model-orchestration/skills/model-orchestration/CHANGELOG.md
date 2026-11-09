@@ -2,6 +2,13 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.119.2 — 2026-11-08
+
+Two fixes on the default path. A Grok tool may now run up to 300 s before the inner watchdog stops the run (90 s cut working web searches), and a free API voice whose request gets no response headers sends that request once more inside the same call (DeepSeek V4.1 Flash on NVIDIA's free endpoint lost 10 of its last 24 reviews that way).
+
+- **Grok's inner watchdog waits 300 s for every tool** (was 90 s since 1.117.0). Measured on the author's machine: 64 Grok web searches, median 58.7 s, the longest 172.3 s, 5 past 90 s; in a 2026-11-09 round the 90 s limit fired as a web search completed (94.6 s) and the whole review was lost under «stayed pending». `GROK_TOOL_SILENCE` is 300 s (`ORCH_GROK_TOOL_SILENCE` still overrides) and `GROK_TOOL_SILENCE_BY_TOOL` (`web_search` 300 s) is a per-tool floor the default never lowers. A tool that completed as the watchdog fired is now recorded as such (`watchdog_raced: true`, «completed as the watchdog fired», its own `diagnose()` entry) instead of as a hang. Suite `suite_r175_grok_tool_limits`.
+- **A free API voice re-sends one request that got no response headers.** When the headers of a request do not arrive within 300 s, the same request is sent once more inside the call; the conversation grows only after a successful round, so the copy carries the pages already read. Once per call and only on channels whose `cost` is `free`: a paid request with no headers may still be queued and billed upstream, so paid channels never re-send. Deadline and stall cuts are never re-sent. The record gains `headers_resent` (`after_rounds`, `at_s`, `answered`) and `headers_waits_s`, `retries` counts the re-send, and `diagnose()` gains two entries for `NO RESPONSE HEADERS within` (plain, and after the re-send). A copy that fails too costs at most 300 s more, and 1.119.0's free-voice rule then applies unchanged (silence: no retry, no fallback). Measured: DeepSeek V4.1 Flash on NVIDIA's free endpoint, 24 rounds since 2026-10-31, 11 answered, 10 ended on «no response headers within 300 s» (6 on the first request). A live probe on 2026-11-09 got HTTP 504 from NVIDIA's own gateway after ~302 s for a small and a large request alike, so a longer limit would not help, and in such an hour the copy fails too: the re-send rescues a single dropped request; `headers_resent[].answered` in the records shows how often. Suite `suite_r176_headers_resend`.
+
 ## 1.119.1 — 2026-11-02
 
 Latent dispatcher-shape fix found by the first live chat round. `routing.initial_plan` now carries the chat seat's `driver` field from the registry into the plan slot — otherwise the dispatcher could not find the driver script for a seat kind, and `orchestrate.py --panel chat --chat claude` on an enabled chat seat failed with `R173_SEAT_DRIVER_MISSING` before `subprocess.run`. Nothing user-visible changed: chat seats still ship `enabled: false` in the kit and are enabled only through the author's overlay; the fix matters when an operator enables a seat. No chat slot is spent on the failed path (the resolver raises before any subprocess runs), so no live cost ever rode this bug.
@@ -300,17 +307,6 @@ Route grammar fixes from the review panel on 1.112.3, each reproduced on the cod
 - Both readers of a route - the one that switches channels and the one that decides what you named - ask one function what each «вместо» means.
 - README: «only kimi» on the default cheap panel stops and asks you to name `kimik3` (since 1.112.1); the «You say» table and two paragraphs still said it starts the paid channel.
 
-## 1.112.3 — 2026-10-16
-
-Route grammar fixes from the review panel on 1.112.2, each reproduced on the code before it was changed.
-
-- **«X вместо Y» swaps the right way.** «kimik3free вместо kimik3» («kimik3free instead of kimik3») ran the PAID kimik3 and switched the free kimik3free off; «codex вместо grokbuild» ran grokbuild. When words came before «вместо», the router moved the marker to the front and read the first name as the one to replace (since 2026-09-14). Now the name before «вместо» is the replacement and the name after it is the one replaced - also inside «только ...» / «включая ...». «вместо X возьми Y» and «не X, вместо него Y» are unchanged.
-- **«только X, добавь Y» runs Y too.** The «add» switched Y on and the «only» rule switched it off again («not in the 'only' list»), in either word order. A name that «добавь/плюс/включая» or a replacement gives in an «only» sentence now belongs to that «only».
-- **Names on both sides of a «не» are refused, not dropped together.** «codex, не используй grokbuild» and «kimi не используй kimik3» excluded every name in the sentence; now the run stops and says how to write it («только codex, не используй grokbuild», «включая ...»). A trailing «grokbuild не используй» still excludes.
-- **«вместо» with more than two names.** «вместо grokbuild возьми qwen38maxcli, codex»: codex is a second replacement (it was left off as a new «target»). A group after «вместо» is replaced as a whole («вместо кими возьми grokbuild» turns every Kimi channel off; one Kimi member used to become the replacement).
-- **A member you name and also `--skip` does not hold its family.** `--only wonder mcwonder10cont --skip mcwonder10cont` ran an empty round; it now stops with «you excluded it in this run».
-- The two readers of a route - the one that switches channels and the one that decides what you «named» - now order the words through one shared function, so they cannot drift apart again.
-
 ## Older releases
 
-164 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+165 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
