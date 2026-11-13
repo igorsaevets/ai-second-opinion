@@ -1582,6 +1582,17 @@ CLI_BINARIES = (
 CLI_ENV_VARS = " / ".join(env for _, env, _ in CLI_BINARIES)
 
 
+# R179 И-3 (2026-11-09): OpenCode Go refuses a model that the WORKSPACE's privacy settings do not allow. opencode's own
+# texts (github.com/anomalyco/opencode/issues/50016 and /50155, read 2026-11-09): «Upstream request failed: This Go
+# model trains on request data. Allow paid endpoints that train on request data in your workspace's Privacy settings to
+# use it.» (code Account.TrainingNotAllowed) and «... This Go model requires Global regions. Select Global in your
+# workspace's Privacy settings to use it.» opencode.ai/docs/go (read 2026-11-09): both Muse Spark Contributor models
+# need the first switch, DeepSeek V4.1 Flash / V4 Pro the second; both are off by default and an owner or admin changes
+# them in Settings › Privacy. One home per text: KNOWN_FAILURES (cause + fix) and OWNER_ACTIONS (the short action the
+# round's tables carry) both read these.
+_GO_TRAINING_RE = r"TrainingNotAllowed|trains on request data"
+_GO_REGIONS_RE = r"requires Global regions"
+
 KNOWN_FAILURES = [
     # R146: FIRST - a corrupted reply also carries END MARKER / bracket text that entries below
     # would answer with «re-run» or «narrow the brief», and neither helps a broken decoder.
@@ -1593,6 +1604,25 @@ KNOWN_FAILURES = [
      "it repeats (NVIDIA's free moonshotai/kimi-k3 since 2026-10-06 - every run with text, 4 of 4; "
      "another NIM client reported the same stream). Leave it out with --skip <channel> until the "
      "vendor fixes it; the other reviewers' answers stand."),
+    # R179 И-3 (2026-11-09): HIGH in the list - the refusal comes before any answer, and the generic status-code
+    # rows below would answer it with «re-run». Igor: «наш kit должен говорить владельцу, что бы тот активировал
+    # каким-то образом Privacy». Texts and sources: _GO_TRAINING_RE above.
+    (_GO_TRAINING_RE,
+     "OpenCode Go refused this model: the workspace's Privacy settings do not allow it yet. A Go workspace starts "
+     "with the setting this model needs switched off (opencode.ai/docs/go names both Muse Spark Contributor "
+     "models), so a re-run fails the same way until it is switched on.",
+     "A workspace owner or admin opens the OpenCode Console, Settings › Privacy (directly: "
+     "https://opencode.ai/console/<workspace id>/settings/privacy; the page is shown to owners and admins of a "
+     "workspace with an active Go subscription) and turns on «Allow paid endpoints that train on request data». "
+     "The next run uses it. Until then the other channels' answers stand; leave this one out with --skip "
+     "<channel>."),
+    (_GO_REGIONS_RE,
+     "OpenCode Go refused this model: the workspace's Privacy settings allow Europe and the United States (the "
+     "default), and this model needs Global regions (opencode.ai/docs/go: DeepSeek V4.1 Flash and V4 Pro). A "
+     "re-run fails the same way until the setting changes.",
+     "A workspace owner or admin opens the OpenCode Console, Settings › Privacy (directly: "
+     "https://opencode.ai/console/<workspace id>/settings/privacy) and selects Global under Regions. Until then "
+     "the other channels' answers stand; leave this one out with --skip <channel>."),
     # R172 (2026-10-31): two causes iron's P357c / P357d printed as «(no stock diagnosis)». With no cause
     # named, the session re-ran the Qwen CLI's brief on the paid OpenRouter copy (qwen38max): $1.35, then
     # $0.38 for a 402. The Token Plan had lapsed - the operator renewed it and the CLI answered again.
@@ -2061,6 +2091,29 @@ def diagnose(text):
     return None, None
 
 
+# R179 И-3 (2026-11-09). Igor: «Может когда ии пишет в чат аналитику по моделям как сработало второе мнение, в
+# таблице с моделями на против spark contributor писать что не работала, надо в настройках нажать ...». A failure only
+# the account's owner can clear: this short action goes into REPORT.md's «What each channel actually did» verdict cell
+# (the table another chat quotes) and into HANDOFF.md beside the failed list the reporting session reads first. Only an
+# opencode channel meets these refusals, so only a machine with opencode sees the line. No «|»: it sits in a table cell.
+OWNER_ACTIONS = [
+    (_GO_TRAINING_RE,
+     "OpenCode Go refused it: a workspace owner or admin turns on «Allow paid endpoints that train on request data» "
+     "in the OpenCode Console › Settings › Privacy"),
+    (_GO_REGIONS_RE,
+     "OpenCode Go refused it: a workspace owner or admin selects Global under Regions in the OpenCode Console › "
+     "Settings › Privacy"),
+]
+
+
+def owner_action(text):
+    """The short action for a failure only the account's owner can clear (OWNER_ACTIONS), or None."""
+    for sig, action in OWNER_ACTIONS:
+        if re.search(sig, text or "", re.I):
+            return action
+    return None
+
+
 def _atomic_write(path, text):
     """
     Write `text` to `path` so that a reader never sees a half-written file.
@@ -2415,6 +2468,22 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             L += ["🔴 **Ran but left no answer file:** %s. Those channels cost time and possibly "
                   "money and produced nothing to read; their cause is in `diagnostics.json` → "
                   "`problems`." % ", ".join("`%s`" % m for m in missing), ""]
+        # R179 И-3 (2026-11-09, Igor: «в таблице с моделями на против spark contributor писать что не работала, надо в
+        # настройках нажать ...»): a failure only the account's owner can clear is named HERE, beside the failed list
+        # the reporting session reads first, with the action - not only in diagnostics.json.
+        _own = {}
+        for _on, _or in sorted((results or {}).items()):
+            if not isinstance(_or, dict) or _or.get("ok"):
+                continue
+            for _ot in ([_or.get("error")] if _or.get("error") else []) + list(_or.get("warnings") or []):
+                _oa = owner_action(str(_ot))
+                if _oa:
+                    _own[_on] = _oa
+                    break
+        if _own:
+            L += ["🔑 **Needs the account's owner - the voice fails the same way in every round until then:** %s. "
+                  "Put this action in that channel's row when you report the round."
+                  % "; ".join("`%s` - %s" % (n_, a_) for n_, a_ in sorted(_own.items())), ""]
         _fbs = sorted((n, r.get("fallback_for")) for n, r in results.items()
                       if isinstance(r, dict) and r.get("fallback_for"))
         if _fbs:                                        # R142 И-2: say which file stands in for whom
@@ -11638,6 +11707,7 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
                    "agy runs in will be mirrored to an ASCII path under %%TEMP%%; your "
                    "outfile still lands at the path you asked for. This is safe - it is here "
                    "so you know why %%TEMP%% shows up in agy's own log lines." % p)
+    _oc_pre_memo = {}                                    # R179 И-2: one `opencode models` listing per preflight
     for c in sorted(by_kind.get("opencode", [])):
         b = opencode_bin()
         if os.path.isfile(b) or shutil.which(b):
@@ -11645,6 +11715,16 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
             # comes from the model's provider + the registry's `cost` (a wokey.ai channel is PAID, not «free»).
             _ocm = str(((plan or {}).get(c) or {}).get("model") or "")
             yield ("%s: opencode CLI present (%s); %s" % (c, b, _opencode_billing_line(c, _ocm)))
+            # R179 И-2 (2026-11-09): an opencode-go/ model needs the OpenCode Go plan's login, which the binary does
+            # not prove. A kit user without the plan who asks for «CLI only» gets ocspark12go / ocspark13go (their
+            # OpenRouter twins are no CLI agents) and the line above told them the run counts against a plan they do
+            # not have. Measured in a private opencode home with no Go login: «Model unavailable» in 2.3 s.
+            _gp = _oc_go_problem({"model": _ocm}, _oc_pre_memo)
+            if _gp and _gp.startswith("the OpenCode Go plan"):
+                yield ("%s: %s. This channel will fail; set the plan up in opencode, or exclude the channel with "
+                       "--skip %s." % (c, _gp, c))
+            elif _gp:
+                yield "%s: could not check the OpenCode Go plan: %s." % (c, _gp)
     for c in sorted(by_kind.get("claudecli", [])):
         b = claudecli_bin()
         if os.path.isfile(b) or shutil.which(b):
@@ -12928,7 +13008,46 @@ def _print_ask_answers(results, reg, ask_channel, marker, outdir, voice_label=No
     return shown
 
 
-def _channel_key_ready(ch):
+_OC_GO_PREFIX = "opencode-go/"
+
+
+def _oc_listed_models(binary):
+    """R179 (2026-11-09): the model ids `opencode models` lists on this machine (a set), or a str saying why it could
+    not tell. An `opencode-go/` model runs on the OpenCode Go plan's login, which the binary alone does not prove.
+    Measured (runs/r179-kit-defaults/oc_go_probe.py): this machine, with the Go plan, lists 20 opencode-go/ models
+    (0.3 s); a private opencode home with no Go login lists none (2.1 s). No model is called and nothing is billed;
+    no credential is read here - it is opencode's own listing."""
+    try:
+        p = _run_tree([binary, "models"], timeout=60, capture_output=True, text=True, encoding="utf-8",
+                      errors="replace", input="")
+    except Exception as e:                               # noqa: BLE001 - a listing that fails says so
+        return "`opencode models` did not answer here (%s)" % type(e).__name__
+    if p.returncode != 0:
+        return "`opencode models` exited %s here" % p.returncode
+    return {ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip()}
+
+
+def _oc_go_problem(ch, memo=None):
+    """R179: None when `ch` is not an OpenCode Go model (opencode-go/...) or this machine's opencode lists it; else
+    why it cannot run here. `memo` (one dict per plan) keeps ONE listing per binary for every member the cascade
+    asks about. Igor 2026-11-09, for the kit: the Contributor Sparks «в начале opencode, если нету, то fallback
+    openrouter» - in opencode they exist only on the Go plan, so opencode without that plan counts as «нету»."""
+    model = str(ch.get("model") or "").split("#", 1)[0]
+    if not model.startswith(_OC_GO_PREFIX):
+        return None
+    b = opencode_bin()
+    memo = {} if memo is None else memo
+    if b not in memo:
+        memo[b] = _oc_listed_models(b)
+    got = memo[b]
+    if isinstance(got, str):
+        return got
+    if model in got:
+        return None
+    return ("the OpenCode Go plan is not set up in opencode here (`opencode models` lists no %s)" % model)
+
+
+def _channel_key_ready(ch, memo=None):
     """
     True when the env var this channel's transport needs is present; True unconditionally for
     the subscription CLIs, whose reachability is a binary on PATH, not a key - preflight checks
@@ -12952,7 +13071,9 @@ def _channel_key_ready(ch):
         if not (os.path.isfile(b) or shutil.which(b)):
             return False
         k = _oc_key_valid(ch.get("oc_key"))              # R168 И-3: opencode + NVIDIA also needs the key
-        return not k or bool(_env_key(k["env"]) or _env_key(k["from"]))
+        if k and not (_env_key(k["env"]) or _env_key(k["from"])):
+            return False
+        return _oc_go_problem(ch, memo) is None          # R179: an opencode-go/ model also needs the Go plan
     if kind == "claudecli":
         b = claudecli_bin()
         return bool(os.path.isfile(b) or shutil.which(b))
@@ -13040,7 +13161,7 @@ def _ask_default_channel():
     return _pick_ask_channel(reg, _channel_key_ready)
 
 
-def _not_ready_reason(ch):
+def _not_ready_reason(ch, memo=None):
     """R168 И-3 (D4): what this channel lacks on this machine, in words a user can act on - the opencode CLI, the key
     variable (with its provider's hint), else the old generic text."""
     kind = ch.get("kind") or "unknown kind"
@@ -13049,8 +13170,11 @@ def _not_ready_reason(ch):
         if not (os.path.isfile(b) or shutil.which(b)):
             return "opencode CLI not found"
         k = _oc_key_valid(ch.get("oc_key"))
-        if k:
+        if k and not (_env_key(k["env"]) or _env_key(k["from"])):
             return "%s not set%s" % (k["from"], _key_hint_for(k["from"]))
+        prob = _oc_go_problem(ch, memo)                  # R179: the Go plan's login
+        if prob:
+            return prob
     if kind in ("openrouter", "oai"):
         env = (OAI_PROVIDERS.get(ch.get("provider") or "openrouter") or {}).get("key_env")
         if env:
@@ -13070,10 +13194,11 @@ def _cascade_ready(reg):
     called (R140 И-2 panel, 3 of 3 reviewers).
     """
     chans = reg.get("channels") or {}
+    memo = {}                                            # R179: one `opencode models` per plan
 
     def ready(name):
         ch = chans.get(name) or {}
-        if _channel_key_ready(ch):
+        if _channel_key_ready(ch, memo):
             return True
         em = ch.get("env_model")
         if em is not None:
@@ -13082,7 +13207,7 @@ def _cascade_ready(reg):
                 return prob
             if not _env_key(em["key_env"]):
                 return "%s is not set" % em["key_env"]
-        return _not_ready_reason(ch)                     # R168 И-3 (D4)
+        return _not_ready_reason(ch, memo)               # R168 И-3 (D4); R179: memo
     return ready
 
 
@@ -16010,6 +16135,9 @@ def main():
             cause, fix = diagnose(str(text))
             problems.append({"channel": name, "detail": str(text),
                              "likely_cause": cause, "suggested_fix": fix})
+            _oa = owner_action(str(text))              # R179 И-3: only where the account's owner must act
+            if _oa:
+                problems[-1]["owner_action"] = _oa
     # A missing binary is reported twice - once by the preflight, once by the channel that then
     # failed on it - and printing the same advice four times reads like four separate faults.
     # Keep the channel-level entry, which names the channel, and drop the preflight echo.

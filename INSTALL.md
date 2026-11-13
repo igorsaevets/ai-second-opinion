@@ -444,10 +444,10 @@ disagreement this tool exists to produce. Everything else is optional.
 
 | what it needs | what that unlocks | cost |
 |---|---|---|
-| the opencode CLI v2 (`npm install -g @opencode/cli`) | one **free** voice, in the cheap panel and in `--ask` (not on a day the free allowance was refused): `ocmimo26flashfree` (MiMo v2.6 Flash). `ocglm53flashfree` (GLM 5.3 Flash) and `ocdeepseekv41flashfree` (DeepSeek V4.1 Flash) start only when named; the Nemotron copy retired in 1.116.1, and `ocstep5previewnv` (Step 5 Preview on your NVIDIA key) runs only when named since 1.118.0. The free Spark 1.3 (`ocspark13free`) is gone since 2026-10-17 | **free** |
+| the opencode CLI v2 (`npm install -g @opencode/cli`) | one **free** voice, in the cheap panel and in `--ask` (not on a day the free allowance was refused): `ocmimo26flashfree` (MiMo v2.6 Flash). `ocglm53flashfree` (GLM 5.3 Flash) and `ocdeepseekv41flashfree` (DeepSeek V4.1 Flash) start only when named; the Nemotron copy retired in 1.116.1, and `ocstep5previewnv` (Step 5 Preview on your NVIDIA key) runs only when named since 1.118.0. The free Spark 1.3 (`ocspark13free`) is gone since 2026-10-17. With an OpenCode Go plan, since 1.120.0, opencode also runs both Muse Spark Contributor voices (`ocspark12go`, `ocspark13go`) on the plan, once a workspace owner or admin turns on «Allow paid endpoints that train on request data» in the OpenCode Console, Settings › Privacy (README, «Spark on an OpenCode Go plan») | **free**; the Go plan is an opencode subscription |
 | `NVIDIA_NIM_API_KEY` (free, [below](#nvidia--nvidia_nim_api_key)) | two **free** voices on NVIDIA's own endpoint: DeepSeek V4.1 Flash (`nvdeepseekv41flash`, since 1.118.0; GLM 5.3 Flash, `nvglm53flash`, is its fallback) and Nemotron 3 Ultra (`nvnemotron3ultra`); Step 5 Preview, the voice of 1.114.0–1.117.2, by name only | **free** |
 | ~~the Kimi Code CLI~~ — **not needed since 1.112.0** ([why](#kimi-code-cli-retired-free-kimi-k3-through-nvidia)) | `nvkimik3` ships switched off: NVIDIA retired its free Kimi K3 on 2026-10-15. Kimi K3 answers in the standard panel through `OPENROUTER_API_KEY` (`kimik3`) | — |
-| `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, a Muse Spark voice and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
+| `OPENROUTER_API_KEY` | **the largest group** — Kimi, Qwen, Gemini, MiMo, Grok, GLM, DeepSeek, the Muse Spark voices where opencode has no Go plan and a **free** NVIDIA Nemotron, all on one account | metered per token, **plus per web search**; the Nemotron model itself is free |
 | `MODEL_API_KEY` | the Muse Spark voices reached directly from Meta | metered API |
 | the Codex CLI, signed in | `codex` | your existing subscription |
 | the Claude Code CLI, signed in | `cclopus46` — Claude Opus, **off by default**; runs with permission prompts bypassed, see its section below | your existing subscription |
@@ -536,7 +536,7 @@ To point at a different endpoint, also set `MODEL_API_BASE`.
 
 **No Meta key?** `--ask` works without one. Its first channel is Muse Spark 1.2 Contributor: `spark12cont` with
 this key, otherwise `orspark12cont` on the OpenRouter key (the same Contributor model and price;
-with the README's OpenCode Go overlay on, `ocspark12go` comes first). The free `ocspark13free` that
+on an OpenCode Go plan, since 1.120.0, `ocspark12go` comes first). The free `ocspark13free` that
 used to come first is switched off: its free model left opencode on 2026-10-17. The opencode CLI's free voices answer `--ask` as
 well, key or no key (MiMo Flash not on a day its free allowance was refused). Without the opencode CLI, an OpenRouter key makes `--ask` ask Nemotron 3 Ultra
 through `ornemotron3ultra`, a free model on OpenRouter (with opencode it answers there instead): the
@@ -606,7 +606,7 @@ export NVIDIA_NIM_API_KEY="<your key>"
 ### OpenRouter — `OPENROUTER_API_KEY`
 
 One key serves **every channel that routes through OpenRouter** — the largest part of the panel,
-including `orspark12cont`, the Spark voice for anyone without a `MODEL_API_KEY`. Do not count
+including `orspark12cont` and `orspark13cont`, the Spark voices for anyone without the OpenCode Go plan (Spark 1.2 runs on a `MODEL_API_KEY` instead when there is one). Do not count
 those channels from this file; `python routing.py` prints the live list and spends nothing.
 
 **No account yet?** Register at **openrouter.ai** (an email address or a Google/GitHub sign-in
@@ -630,11 +630,11 @@ export OPENROUTER_API_KEY="<your key>"
 > the provider on the same account. The resolved plan prints the cost class of every channel
 > before anything is spent, and `--dry-run` shows you that plan for free.
 
-> `orspark12cont` runs Meta's *Contributor* tier through OpenRouter — discounted because the
+> `orspark12cont` and `orspark13cont` run Meta's *Contributor* tier through OpenRouter — discounted because the
 > vendor may train on what you send (see [PRIVACY.md](PRIVACY.md)) — with an automatic fallback
 > to the Standard, non-training tier if the Contributor endpoint fails for your account: Muse
-> Spark 1.2 at $1.25 / $4.25 per 1M tokens, 12.5× the Contributor input price (the channel's spend
-> guard stops a review at $1.00). When `MODEL_API_KEY` is absent (without the Go overlay), `--ask` starts with this channel:
+> Spark 1.2 / 1.3 at $1.25 / $4.25 per 1M tokens, 12.5× the Contributor input price (the channel's spend
+> guard stops a review at $1.00). When `MODEL_API_KEY` is absent and opencode has no Go plan, `--ask` starts with `orspark12cont`:
 > the choice comes from `ask_default` in `channels.json` and is printed when it fires.
 
 ### The premium batch panel — same keys, one more
@@ -691,7 +691,7 @@ off the final plan: it names who starts, and after «not started:» who does not
 group «opencode-free» refused earlier today», «one voice with <channel>»). Nemotron 3 Ultra runs,
 but its answer is not printed: channels.json marks every Nemotron channel `never_read`, and
 `--ask` prints one line «ANSWER [<channel>] … NOT PRINTED … its file: <path>» in its place. Its
-first channel is Muse Spark, which since 1.113.3 needs a key: `spark12cont` (`MODEL_API_KEY`) or
+first channel is Muse Spark: `ocspark12go` on an OpenCode Go plan (since 1.120.0), otherwise one that needs a key: `spark12cont` (`MODEL_API_KEY`) or
 `orspark12cont` (`OPENROUTER_API_KEY`), both paid. On a machine with neither, that line fails with
 «MODEL_API_KEY not set»; that is not fatal, and the free voices still answer.
 
@@ -747,8 +747,8 @@ this in `~/.claude/model-orchestration.local.json`:
 ```
 
 The registry also holds Muse Code channels for Muse Spark 1.3 (`mcspark13`, its fallback
-`mcspark12`) and Wonder Standard (`mcwonder10`). They ship switched off (the kit's Spark voice is
-an API one) and start when you name one or switch it on in your settings file; `musecode` /
+`mcspark12`) and Wonder Standard (`mcwonder10`). They ship switched off (the kit's Spark voices
+run through opencode's Go plan or an API) and start when you name one or switch it on in your settings file; `musecode` /
 «muse code» is a group word, and like every group it runs only the members that are on. Since
 1.113.8 every Muse Code call passes `--contributor-mode` from the channel's model id: with contributor mode on in
 Muse Code's own settings, a request for the Standard `muse-spark-1.3` was answered by the

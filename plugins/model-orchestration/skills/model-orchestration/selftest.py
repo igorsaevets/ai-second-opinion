@@ -8150,6 +8150,8 @@ def main():
                   suite_r168_i2_api_read_bound,
                   suite_r176_headers_resend,
                   suite_r177_route_model_words,
+                  suite_r179_kit_defaults,
+                  suite_r179_i3_go_owner_action,
                   suite_r168_i3_free_transports,
                   suite_r168_i4_panel_fixes,
                   suite_r169_agy_argon,
@@ -14365,9 +14367,9 @@ def suite_r146_i3_spark_go():
     # 🔴 R154 И-3 (2026-10-18): the free Spark left opencode (provider.no-route since 2026-10-17), so the product
     # checks below say «no fallback» now; (e) keeps the run-time fallback MECHANISM on a fixture registry.
     check(ch.get("kind") == "opencode" and ch.get("model") == "opencode-go/muse-spark-1.3-contributor"
-          and ch.get("effort") == "xhigh" and ch.get("distribution") == "local"
+          and ch.get("effort") == "xhigh" and ch.get("distribution") == "kit"   # R179: local -> kit
           and ch.get("fallback") is None and ch.get("panel") == "cheap",
-          "R146 И-3 (a) ocspark13go = opencode, opencode-go/muse-spark-1.3-contributor #xhigh, local, "
+          "R146 И-3 (a) ocspark13go = opencode, opencode-go/muse-spark-1.3-contributor #xhigh, kit (R179), "
           "cheap; no run-time fallback since R154 И-3 (the free Spark is gone)")
     # R164 (2026-10-22): the Go Spark is Spark 1.2 Contributor now (ocspark12go); ocspark13go is off, by name only.
     grp = next((g for g in reg.get("_cascade_groups") or [] if "ocspark12go" in g), [])
@@ -14388,10 +14390,11 @@ def suite_r146_i3_spark_go():
           "fallback", repr(fb))
     pc = rt.resolve(rt.load_registry(), panel="cheap", ready=yes)
     if ((reg.get("channels") or {}).get("ocspark12go") or {}).get("enabled"):
+        want13 = not (pc.get("mcspark13") or {}).get("enabled")   # R179: the 1.3 Go Spark where mcspark13 is off
         check(pc["ocspark12go"]["enabled"] and not pc["ocspark13free"]["enabled"]
-              and not pc["ocspark13go"]["enabled"],
+              and bool(pc["ocspark13go"]["enabled"]) == want13,
               "R146 И-3 (b) this tree's cheap panel runs the Go Spark (ocspark12go since R164), not the free "
-              "one and not the 1.3 one")
+              "one; the 1.3 Go Spark exactly where mcspark13 does not run (R179)")
     else:
         keyed = [c for c in ("spark12cont", "orspark12cont") if (pc.get(c) or {}).get("enabled")]
         check(not pc["ocspark13free"]["enabled"] and not pc["ocspark12go"]["enabled"] and len(keyed) == 1,
@@ -14410,10 +14413,11 @@ def suite_r146_i3_spark_go():
         if isinstance(c, dict) and c.get("distribution") == "local":
             c["enabled"] = False
     p4 = rt.resolve(kit, panel="cheap", ready=yes)
-    check(not p4["ocspark13free"]["enabled"] and not p4["ocspark12go"]["enabled"]
-          and (p4["spark12cont"]["enabled"] or p4["orspark12cont"]["enabled"]),
-          "R146 И-3 (d) kit-shaped registry (local channels off): the free Spark is off since R154 И-3, a keyed "
-          "Spark 1.2 Contributor (spark12cont / orspark12cont, R164) is the Spark voice")
+    check(not p4["ocspark13free"]["enabled"] and p4["ocspark12go"]["enabled"] and p4["ocspark13go"]["enabled"]
+          and not (p4["spark12cont"]["enabled"] or p4["orspark12cont"]["enabled"]
+                   or p4["orspark13cont"]["enabled"]),
+          "R146 И-3 (d) kit-shaped registry (local channels off, everything ready): the free Spark is off since "
+          "R154 И-3; since R179 both Go-plan Contributor Sparks carry the Spark voices, the keyed copies wait")
 
     calls = []
 
@@ -15752,6 +15756,9 @@ def suite_r153_i11_hotfix():
     section("R153 И-11: «только не X», English negators, reversed «->», «вместо того чтобы», twins, second reader")
 
     base = _r.load_registry(overlay=False)
+    # R179: the kit ships orgemini38flash off (distribution local); these checks are about how a twin
+    # carries a voice, so they keep the source's value.
+    base["channels"]["orgemini38flash"]["enabled"] = True
     kit = _cp.deepcopy(base)
     for ch in kit["channels"].values():
         if ch.get("distribution") == "local":
@@ -15820,8 +15827,11 @@ def suite_r153_i11_hotfix():
          if not (off("вместо kimik3 и codex возьми grokbuild", "codex", panel=pn)
                  and swapped("вместо kimik3 и codex возьми grokbuild", "grokbuild", "kimik3", panel=pn))]
     check(not f, "R153 И-11 (f) «вместо A и B возьми C» replaces both A and B", "wrong on: %r" % f)
+    import copy as _cp                                   # R179: the kit runs ocspark13go now, and an ADD does not
+    kit_g = _cp.deepcopy(kit)                            # beat an earlier enabled member of the cascade - the
+    kit_g["channels"]["ocspark13go"]["enabled"] = False  # grammar is the point here, so the 1.119.3 shape
     g = [s for s in ("не без ocspark13free", "don't exclude ocspark13free", "не исключи ocspark13free")
-         if not swapped(s, "ocspark13free", "spark13cont", reg=kit)]
+         if not swapped(s, "ocspark13free", "spark13cont", reg=kit_g)]
     check(not g, "R153 И-11 (g) a negated exclusion includes: the free Spark stays, the paid spark13cont does not start",
           "wrong: %r" % g)
     h = [s for s in ("только добавь codex", "only add codex", "только плюс codex") if not added(s, "codex")]
@@ -15930,6 +15940,9 @@ def suite_r153_i8_hotfix():
     section("R153 И-8: longest marker, collapse keeps «не»/«только», one «вместо» decision, refusals, paid twins")
 
     base = _r.load_registry(overlay=False)
+    # R179: the kit ships orgemini38flash off (distribution local); these checks are about how a twin
+    # carries a voice, so they keep the source's value.
+    base["channels"]["orgemini38flash"]["enabled"] = True
 
     kit = _cp.deepcopy(base)
     for ch in kit["channels"].values():
@@ -19094,13 +19107,15 @@ def suite_r154_i3_free_voices():
     check((ch.get("ocspark13go") or {}).get("fallback") is None
           and not ((pl.get("ocspark13go") or {}).get("fallback") or {}),
           "R154 И-3 (d) ocspark13go arms no run-time fallback: the free Spark it fell back to is gone")
-    pk2 = rt.resolve(copy.deepcopy(kit), panel="cheap",
-                     ready=lambda n: ("no MODEL_API_KEY" if n == "spark12cont" else True))
+    pk2 = rt.resolve(copy.deepcopy(kit), panel="cheap",            # R179: the kit's Go Sparks need the Go plan
+                     ready=lambda n: ("no MODEL_API_KEY" if n == "spark12cont" else
+                                      "no OpenCode Go plan" if n in ("ocspark12go", "ocspark13go") else True))
     why = " ".join((pk2.get("orspark12cont") or {}).get("why") or [])
     check(bool((pk2.get("orspark12cont") or {}).get("enabled")) and "carries this voice" in why
-          and "paid" in why.lower() and not (pk2.get("orspark13cont") or {}).get("enabled"),
+          and "paid" in why.lower() and bool((pk2.get("orspark13cont") or {}).get("enabled")),
           "R154 И-3 (e) kit, an OpenRouter key and no Meta key: orspark12cont carries the Spark voice (the 1.2 "
-          "Contributor since R164; orspark13cont stays off), the plan says it is paid", why[:220])
+          "Contributor since R164; R179: orspark13cont carries Spark 1.3 the same way), the plan says it is paid",
+          why[:220])
     ps = rt.resolve(copy.deepcopy(kit), panel="standard", ready=yes)
     nem = [n for n in ("ocnemotron3ultrafree", "ornemotron3ultra") if (ps.get(n) or {}).get("enabled")]
     check(nem == ["ornemotron3ultra"], "R154 И-3 (f) standard panel: ONE Nemotron, the OpenRouter twin "
@@ -20338,16 +20353,19 @@ def suite_r164_muse_spark():
         "mcwonder10": dict(kind="musecode", model="muse-wonder-1.0", contributor=False, effort="max",
                            explicit_only=True, panel="standard", distribution="local"),
         "ocspark12go": dict(kind="opencode", model="opencode-go/muse-spark-1.2-contributor", contributor=True,
-                            enabled=True, panel="cheap", distribution="local"),
+                            enabled=True, panel="cheap", distribution="both"),   # R179: local -> both
         "spark12cont": dict(model="muse-spark-1.2-contributor", contributor=True, enabled=True),
         "orspark12cont": dict(model="meta/muse-spark-1.2-contributor", contributor=True, enabled=True),
-        "ocspark13go": dict(enabled=False), "spark13cont": dict(enabled=False), "orspark13cont": dict(enabled=False)}
+        # R179 (Igor 2026-11-09): the kit runs BOTH Contributor Sparks - Spark 1.3 through opencode's Go plan, else
+        # OpenRouter (Meta's-key copy spark13cont stays off); ocspark12go ships on (distribution both).
+        "ocspark13go": dict(enabled=True, distribution="kit"), "spark13cont": dict(enabled=False),
+        "orspark13cont": dict(enabled=True, distribution="kit")}
     if (HERE / "VERSION").is_file():   # R160: a BUILT kit tree (R60's shipped run, CI) - package.py turns local off
-        want["mcspark13"]["enabled"] = want["ocspark12go"]["enabled"] = False
+        want["mcspark13"]["enabled"] = False
     bad = ["%s.%s=%r (want %r)" % (n, k, g(n).get(k), v) for n, w in want.items() for k, v in w.items()
            if g(n).get(k) != v]
     check(not bad, "R164 (a) the Muse Code Spark / Wonder channels and the 1.2 Contributor voice are as Igor set them, "
-          "the 1.3 Contributor channels off", "; ".join(bad))
+          "the 1.3 Contributor channels as R179 set them (Go plan + OpenRouter on, Meta's key off)", "; ".join(bad))
     cas = [c for c in reg.get("_cascade_groups") or [] if isinstance(c, list)]
     ok_b = (["ocspark12go", "mcspark12", "spark12cont", "orspark12cont"] in cas
             and any(c[:1] == ["mcspark13"] and "spark13cont" in c for c in cas)
@@ -20367,8 +20385,9 @@ def suite_r164_muse_spark():
         fb = plan.get("mcspark13", {}).get("fallback") or {}
         sv = rt.same_voice(reg, "mcspark12")
         if shipped:
-            ok_c = ("spark12cont" in on and "orspark12cont" not in on and "ocspark12go" in sv
-                    and not {"mcspark13", "mcspark12", "ocspark12go", "ocspark13go", "spark13cont",
+            # R179: the built kit runs the Go-plan Sparks first (ready = everything here); the keyed copies wait
+            ok_c = ("ocspark12go" in on and "ocspark13go" in on and "ocspark12go" in sv
+                    and not {"mcspark13", "mcspark12", "spark12cont", "orspark12cont", "spark13cont",
                              "orspark13cont"} & set(on))
         else:
             ok_c = ("mcspark13" in on and "ocspark12go" in on and fb.get("channel") == "mcspark12"
@@ -20378,7 +20397,7 @@ def suite_r164_muse_spark():
     except Exception as exc:                              # noqa: BLE001
         ok_c, why_c = False, "RAISED " + repr(exc)[:200]
     check(ok_c, "R164 (c) the cheap plan runs mcspark13 AND ocspark12go, arms mcspark12, and counts it the same voice "
-          "as ocspark12go (a built kit: spark12cont, Muse Code / the Go plan off)", why_c)
+          "as ocspark12go (a built kit since R179: ocspark12go + ocspark13go, Muse Code off)", why_c)
     seen = []
     old = (o._run_tree, o._musecode_usage, o.muse_bin)
     term = json.dumps({"payload": {"kind": "run_terminal", "terminal": "completed", "text": "fine\nM-R164"}})
@@ -20453,6 +20472,7 @@ def suite_r160_kit_defaults():
                       and c.get("distribution") == "kit" and not c.get("enabled", True))
     neg = copy.deepcopy(reg)
     neg["channels"]["orspark13cont"]["distribution"] = "kit"
+    neg["channels"]["orspark13cont"]["enabled"] = False   # R179: it ships ON now; the control needs kit + off
     check(not kit_off(reg) and kit_off(neg) == ["orspark13cont"],
           "R160 (c) no channel is `distribution: kit` and off (package.py would ship it ON); the control with "
           "orspark13cont back at kit + off is reported", "live=%s control=%s" % (kit_off(reg), kit_off(neg)))
@@ -20477,11 +20497,12 @@ def suite_r160_kit_defaults():
         cont = [n for n in on if "muse-spark" in str((kch.get(n) or {}).get("model", ""))
                 and str((kch.get(n) or {}).get("model", "")).endswith("-contributor")]
         rows.append("%s %d: %s" % (panel, len(on), ",".join(on)))
-        if ({"ormimopro", "mimov26pro"} & set(on) or cont != ["spark12cont"]
+        if ({"ormimopro", "mimov26pro"} & set(on) or cont != ["ocspark12go", "ocspark13go"]   # R179
                 or (plan.get("grokbuild") or {}).get("model") != "grok-4.6"):
             bad.append(panel)
-    check(not bad, "R160 (d) the kit-shaped cheap and standard plans run no MiMo Pro and no Spark 1.3 Contributor, one "
-          "Spark Contributor voice (spark12cont), and grokbuild at grok-4.6", " | ".join(rows + bad))
+    check(not bad, "R160 (d) the kit-shaped cheap and standard plans run no MiMo Pro, both Contributor Sparks through "
+          "the Go plan (R179: ocspark12go + ocspark13go, everything ready), and grokbuild at grok-4.6",
+          " | ".join(rows + bad))
     named = []
     for n in ("ormimopro", "mimov26pro", "orspark13cont"):
         try:
@@ -20714,6 +20735,294 @@ def suite_r176_headers_resend():
     check("R176" in c1 and "twice" not in c1,
           "[resend] R176 (h) diagnose() names a plain headers cut (P300-28's run.log said «no stock diagnosis») "
           "and keeps it apart from the failed re-send", c1[:120])
+
+
+def suite_r179_kit_defaults():
+    """R179 (2026-11-09). Igor: «Так же в kit spark 1.2 contributor и spark 1.3 contributor должны по дефолту оба
+    работать, в начале opencode, если нету, то fallback openrouter.» and «У тех, у кого нет agy, то Gemini 3.8 Flash
+    через любой api и openrouter по дефолту не включаем.»
+    (a) the registry: ocspark12go on + distribution both; ocspark13go and orspark13cont on + kit; orgemini38flash
+        distribution local; spark13cont off; the cascades keep opencode first and OpenRouter last;
+    (b) the kit-shaped registry (local -> off): both Go Sparks and both OpenRouter Sparks on, orgemini38flash off;
+    (c) _oc_go_problem: a listed opencode-go/ model is ready, an unlisted one names the Go plan, a failed listing says
+        so, a non-Go opencode model never asks for the listing;
+    (d) _channel_key_ready / _not_ready_reason for ocspark12go follow the listing; CONTROL: an oc_key channel without
+        its key still says «not set»;
+    (e) one plan asks opencode for ONE listing however many Go members the cascade weighs;
+    (f) worlds on the kit-shaped registry: opencode without the Go plan + OpenRouter -> orspark12cont / orspark13cont
+        (the Go members' plan lines name the plan); opencode + Go, no agy -> the Go Sparks and NO orgemini38flash;
+        OpenRouter only -> the OpenRouter Sparks, no Gemini copy; CONTROL everything here -> the Go Sparks + agy38flash;
+        CONTROL the 1.119.3 shape (orgemini38flash on) in the OpenRouter-only world runs it - the world can fail;
+    (g) «unless named»: `only orgemini38flash` still runs it on the kit-shaped registry;
+    (h) the registry with everything ready keeps the author's plan: mcspark13 leads Spark 1.3, ocspark12go Spark 1.2,
+        agy38flash Gemini (a built kit: both Go Sparks, mcspark13 off).
+    (i) R179 И-2: the preflight of an opencode-go/ channel whose model opencode does not list names the missing Go
+        plan («will fail», --skip); CONTROL: a listed model gets no such line.
+    """
+    import copy as _copy
+    import sys as _sys
+    import orchestrate as o
+    import routing as rt
+    section("R179: kit defaults - both Contributor Sparks (opencode Go, else OpenRouter); no API Gemini 3.8 Flash "
+            "without agy")
+    reg = rt.load_registry(overlay=False)
+    ch = reg["channels"]
+
+    def g(n):
+        return ch.get(n) or {}
+    want = {"ocspark12go": dict(enabled=True, distribution="both"),
+            "ocspark13go": dict(enabled=True, distribution="kit"),
+            "orspark13cont": dict(enabled=True, distribution="kit"),
+            "orgemini38flash": dict(distribution="local"),
+            "spark13cont": dict(enabled=False)}
+    bad = ["%s.%s=%r" % (n, k, g(n).get(k)) for n, w in want.items() for k, v in w.items() if g(n).get(k) != v]
+    cas = [c for c in reg.get("_cascade_groups") or [] if isinstance(c, list)]
+    s12 = next((c for c in cas if "ocspark12go" in c), [])
+    s13 = next((c for c in cas if "ocspark13go" in c), [])
+    gem = next((c for c in cas if "agy38flash" in c), [])
+    order_ok = (s12[:1] == ["ocspark12go"] and s12[-1:] == ["orspark12cont"] and "orspark13cont" in s13
+                and s13.index("ocspark13go") < s13.index("orspark13cont") and gem[:2] == ["agy38flash", "orgemini38flash"])
+    check(not bad and order_ok, "R179 (a) registry: both Go Sparks + orspark13cont on, orgemini38flash local, the "
+          "cascades keep opencode first and OpenRouter last", "; ".join(bad) + " s12=%r s13=%r gem=%r" % (s12, s13, gem))
+
+    kit = _copy.deepcopy(reg)
+    for c in kit["channels"].values():
+        if isinstance(c, dict) and c.get("distribution") == "local":
+            c["enabled"] = False
+    kc = kit["channels"]
+    check(all(kc[n].get("enabled") for n in ("ocspark12go", "ocspark13go", "orspark12cont", "orspark13cont"))
+          and not kc["orgemini38flash"].get("enabled") and not kc["mcspark13"].get("enabled"),
+          "R179 (b) kit-shaped: both Go Sparks and both OpenRouter Sparks on; orgemini38flash and mcspark13 off")
+
+    GO = {"opencode-go/muse-spark-1.2-contributor", "opencode-go/muse-spark-1.3-contributor"}
+    saved = (o._oc_listed_models, o.opencode_bin, o._env_key, o.CLI_RESOLVERS.get("agy"),
+             o.CLI_RESOLVERS.get("musecode"))
+
+    def restore():
+        (o._oc_listed_models, o.opencode_bin, o._env_key, o.CLI_RESOLVERS["agy"],
+         o.CLI_RESOLVERS["musecode"]) = saved
+    calls = []
+    try:
+        o.opencode_bin = lambda: "X:/oc.cmd"
+        o._oc_listed_models = lambda b: (calls.append(b), {"opencode-go/muse-spark-1.2-contributor"})[1]
+        c1 = o._oc_go_problem({"model": "opencode-go/muse-spark-1.2-contributor"})
+        c2 = o._oc_go_problem({"model": "opencode-go/muse-spark-1.3-contributor#xhigh"})
+        n0 = len(calls)
+        c3 = o._oc_go_problem({"model": "opencode/mimo-v2.6-flash-free"})
+        c3n = len(calls) - n0
+        o._oc_listed_models = lambda b: "`opencode models` exited 1 here"
+        c4 = o._oc_go_problem({"model": "opencode-go/muse-spark-1.2-contributor"})
+    finally:
+        restore()
+    check(c1 is None and "OpenCode Go plan" in str(c2) and "opencode-go/muse-spark-1.3-contributor" in str(c2)
+          and "#" not in str(c2) and c3 is None and c3n == 0 and "exited 1" in str(c4),
+          "R179 (c) _oc_go_problem: listed -> ready; unlisted -> names the Go plan and the model; a failed listing says "
+          "so; a Zen model never asks", repr((c1, c2, c3, c3n, c4)))
+
+    okn = next((n for n, c in ch.items() if isinstance(c, dict) and c.get("kind") == "opencode" and c.get("oc_key")
+                and o._oc_key_valid(c.get("oc_key"))), None)
+    try:
+        o.opencode_bin = lambda: _sys.executable
+        o._oc_listed_models = lambda b: set(GO)
+        d1 = o._channel_key_ready(dict(g("ocspark12go")))
+        o._oc_listed_models = lambda b: set()
+        d2 = o._channel_key_ready(dict(g("ocspark12go")))
+        d3 = o._not_ready_reason(dict(g("ocspark12go")))
+        o._env_key = lambda k: ""
+        d4 = o._not_ready_reason(dict(g(okn))) if okn else "skip: not set (no oc_key channel)"
+    finally:
+        restore()
+    check(d1 is True and d2 is False and "OpenCode Go plan" in str(d3) and "not set" in str(d4),
+          "R179 (d) ocspark12go is ready exactly where its model is listed; CONTROL: an oc_key channel without its key "
+          "still says «not set»", repr((d1, d2, d3[:90] if isinstance(d3, str) else d3, okn, str(d4)[:60])))
+
+    n = []
+    try:
+        o.opencode_bin = lambda: _sys.executable
+        o._oc_listed_models = lambda b: (n.append(b), set())[1]
+        rdy = o._cascade_ready(kit)
+        e1, e2 = rdy("ocspark12go"), rdy("ocspark13go")
+    finally:
+        restore()
+    check(len(n) == 1 and "OpenCode Go plan" in str(e1) and "OpenCode Go plan" in str(e2),
+          "R179 (e) one plan = ONE `opencode models` listing for both Go members", repr((len(n), e1, e2)))
+
+    def world(agy, oc, go, keys, r=None, **kw):
+        r = _copy.deepcopy(kit if r is None else r)
+        try:
+            o._env_key = lambda k: ("set" if k in keys else "")
+            o.opencode_bin = (lambda: _sys.executable) if oc else (lambda: "X:/no/opencode.cmd")
+            o.CLI_RESOLVERS["agy"] = (lambda: _sys.executable) if agy else (lambda: None)
+            # Muse Code (mcspark13) counts as installed in every world: the full selftest and CI have no muse CLI,
+            # and a world must not depend on this machine (found by the full selftest, 2571/2572)
+            o.CLI_RESOLVERS["musecode"] = lambda: _sys.executable
+            o._oc_listed_models = (lambda b: set(GO)) if go else (lambda b: set())
+            plan = rt.resolve(r, ready=o._cascade_ready(r), **kw)
+        finally:
+            restore()
+        return {c for c, p in plan.items() if p.get("enabled")}, plan
+    ORK, MK = "OPENROUTER_API_KEY", "MODEL_API_KEY"
+    f1, p1 = world(True, True, False, {ORK}, panel="cheap")
+    w1 = " ".join(p1["ocspark12go"].get("why") or []) + " " + " ".join(p1["ocspark13go"].get("why") or [])
+    f2, _ = world(False, True, True, {ORK}, panel="cheap")
+    f3, _ = world(False, False, False, {ORK}, panel="cheap")
+    f4, _ = world(True, True, True, {ORK, MK}, panel="cheap")
+    old = _copy.deepcopy(kit)
+    old["channels"]["orgemini38flash"]["enabled"] = True
+    f5, _ = world(False, False, False, {ORK}, r=old, panel="cheap")
+    sp = {"ocspark12go", "ocspark13go", "spark12cont", "orspark12cont", "orspark13cont", "orgemini38flash", "agy38flash"}
+    check({"orspark12cont", "orspark13cont", "agy38flash"} <= f1 and not {"ocspark12go", "ocspark13go",
+                                                                          "orgemini38flash"} & f1
+          and w1.count("OpenCode Go plan") == 2,
+          "R179 (f1) opencode without the Go plan + OpenRouter: the OpenRouter Sparks carry both voices, the Go members' "
+          "plan lines name the plan", "%s why=%r" % (sorted(f1 & sp), w1[:200]))
+    check({"ocspark12go", "ocspark13go"} <= f2 and "orgemini38flash" not in f2 and not {"orspark12cont",
+                                                                                         "orspark13cont"} & f2,
+          "R179 (f2) opencode + the Go plan, no agy: the Go Sparks, and NO API Gemini 3.8 Flash", repr(sorted(f2 & sp)))
+    check({"orspark12cont", "orspark13cont"} <= f3 and "orgemini38flash" not in f3,
+          "R179 (f3) OpenRouter only: the OpenRouter Sparks, no Gemini copy", repr(sorted(f3 & sp)))
+    check({"ocspark12go", "ocspark13go", "agy38flash"} <= f4 and not {"spark12cont", "orspark12cont", "orspark13cont",
+                                                                       "orgemini38flash"} & f4,
+          "R179 (f4) CONTROL everything here: the Go Sparks + agy38flash, the keyed copies wait", repr(sorted(f4 & sp)))
+    check("orgemini38flash" in f5, "R179 (f5) CONTROL the 1.119.3 shape (orgemini38flash on) in the OpenRouter-only "
+          "world runs it - the world can fail", repr(sorted(f5 & sp)))
+    gn, _ = world(False, False, False, {ORK}, only=["orgemini38flash"])
+    check(gn == {"orgemini38flash"}, "R179 (g) named by its own name, orgemini38flash still runs where agy is missing",
+          repr(sorted(gn)))
+    shipped = (HERE / "VERSION").is_file()
+    hn, _ = world(True, True, True, {ORK, MK}, r=reg, panel="cheap")
+    if shipped:
+        ok_h = {"ocspark12go", "ocspark13go", "agy38flash"} <= hn and "mcspark13" not in hn
+    else:
+        ok_h = ({"mcspark13", "ocspark12go", "agy38flash"} <= hn
+                and not {"ocspark13go", "orspark13cont", "orgemini38flash"} & hn)
+    check(ok_h, "R179 (h) this tree with everything ready: %s" % (
+          "a built kit runs both Go Sparks + agy38flash" if shipped else
+          "the author's plan - mcspark13 leads Spark 1.3, ocspark12go Spark 1.2, agy38flash Gemini"),
+          repr(sorted(hn & (sp | {"mcspark13"}))))
+    # (i) R179 И-2: `--only cli` on a kit machine without the Go plan runs ocspark12go / ocspark13go; the preflight must
+    # say the plan is missing instead of «counted against the plan's limits».
+    tmpd = tempfile.mkdtemp(prefix="r179i2-")
+    saved_i = (o.opencode_bin, o._oc_listed_models)
+    gm = "opencode-go/muse-spark-1.2-contributor"
+    pf_no, pf_yes = [], []
+    try:
+        o.opencode_bin = lambda: _sys.executable
+        o._oc_listed_models = lambda b: set()
+        pf_no = list(o.channel_preflight(["ocspark12go"], tmpd, kinds={"ocspark12go": "opencode"},
+                                         plan={"ocspark12go": {"model": gm}}))
+        o._oc_listed_models = lambda b: {gm}
+        pf_yes = list(o.channel_preflight(["ocspark12go"], tmpd, kinds={"ocspark12go": "opencode"},
+                                          plan={"ocspark12go": {"model": gm}}))
+    finally:
+        o.opencode_bin, o._oc_listed_models = saved_i
+        shutil.rmtree(tmpd, ignore_errors=True)
+    no = [x for x in pf_no if x.startswith("ocspark12go:") and "OpenCode Go plan is not set up" in x
+          and gm in x and "will fail" in x and "--skip ocspark12go" in x]
+    yes = [x for x in pf_yes if "not set up" in x or "could not check" in x]
+    check(len(no) == 1 and not yes, "R179 (i) the preflight names a missing OpenCode Go plan for ocspark12go "
+          "(«will fail», --skip); CONTROL: a listed model gets no such line", repr((pf_no, pf_yes))[:400])
+
+
+def suite_r179_i3_go_owner_action():
+    """R179 И-3 (2026-11-09). Igor: «Тогда наш kit должен говорить владельцу, что бы тот активировал каким-то образом
+    Privecy. Может когда ии пишет в чат аналитику по моделям как сработало второе мнение, в таблице с моделями на
+    против spark contributor писать что не работала, надо в настройках нажать ... И конечно же, если у пользователя
+    установлен opencode.» OpenCode Go refuses both Contributor Sparks until a workspace owner or admin turns on «Allow
+    paid endpoints that train on request data» in Settings › Privacy (opencode.ai/docs/go; opencode issues #50016 and
+    #50155 give the texts). Only an opencode channel meets the refusal, so only a machine with opencode sees the line.
+    (a) diagnose(): opencode's refusal - as an NDJSON error frame (two shapes) rendered by _cli_ndjson_error, and as a
+        stderr line - gets the Go cause, its fix naming Settings › Privacy and the switch; the regions text gets its
+        own entry; CONTROL: provider.quota keeps its entry and a plain 403 gets neither Go entry;
+    (b) owner_action(): short actions for both texts, no «|» (a table cell); CONTROL: quota / timeout -> None;
+    (c) REPORT.md «What each channel actually did»: the refused channel's FAILED cell carries the action; CONTROL: a
+        FAILED row without an owner action stays «🔴 FAILED» alone, an OK row stays «OK»;
+    (d) HANDOFF.md names the action for the refused channel; CONTROL: a round whose only failure is a timeout has no
+        such line;
+    (e) main's problems builder records `owner_action` (source pin: the rendering in (c) reads it from there).
+    """
+    import inspect as _insp
+    import orchestrate as o
+    import report as rp
+    section("R179 И-3: an OpenCode Go refusal names the owner's action (Settings › Privacy)")
+    msg = ("Upstream request failed: This Go model trains on request data. Allow paid endpoints that train on request "
+           "data in your workspace's Privacy settings to use it.")
+    f_a = json.dumps({"type": "error", "error": {"name": "APIError", "data": {"message": msg, "statusCode": 403}}})
+    f_b = json.dumps({"type": "error", "error": {"type": "Account.TrainingNotAllowed",
+                                                  "message": msg.split(": ", 1)[1]}})
+    e_a = o._cli_ndjson_error('{"type":"step_start","sessionID":"ses_R179I3"}' + chr(10) + f_a + chr(10))
+    e_b = o._cli_ndjson_error(f_b + chr(10))
+    err = "EXIT 1: Error: " + msg
+    reg_txt = ("EXIT 1: Error: Upstream request failed: This Go model requires Global regions. Select Global in your "
+               "workspace's Privacy settings to use it.")
+    ca, fa = o.diagnose("EXIT 1: %s" % e_a)
+    cb, fb = o.diagnose("EXIT 1: %s" % e_b)
+    cs, fs = o.diagnose(err)
+    cr, fr = o.diagnose(reg_txt)
+    cq, _fq = o.diagnose("EXIT 1: provider.quota (HTTP 429): Rate limit exceeded")
+    c4, _f4 = o.diagnose("EXIT 1: APIError (HTTP 403): Forbidden")
+    check(bool(cs) and ca == cb == cs and all("Settings › Privacy" in (f or "")
+                                              and "Allow paid endpoints that train on request data" in (f or "")
+                                              for f in (fa, fb, fs))
+          and bool(cr) and cr != cs and "Global" in (fr or "") and "Settings › Privacy" in (fr or "")
+          and bool(cq) and cq not in (cs, cr) and c4 not in (cs, cr),
+          "R179 И-3 (a) diagnose(): opencode's Go refusal (two NDJSON frame shapes + the stderr line) gets the Go "
+          "cause with Settings › Privacy and the switch; regions get their own entry; CONTROL: quota keeps its "
+          "entry, a plain 403 gets neither", repr((e_a, e_b, ca == cs, cb == cs, (cr or "")[:60], (cq or "")[:60],
+                                                   c4))[:500])
+    _oa = getattr(o, "owner_action", lambda t: None)
+    a_s, a_r = _oa(err), _oa(reg_txt)
+    check(bool(a_s) and "owner or admin" in a_s and "Settings › Privacy" in a_s
+          and "Allow paid endpoints that train on request data" in a_s
+          and bool(a_r) and a_r != a_s and "Global" in a_r and "|" not in a_s + a_r
+          and _oa("EXIT 1: provider.quota (HTTP 429): x") is None and _oa("TIMEOUT after 2400s") is None,
+          "R179 И-3 (b) owner_action(): a short action for the training and the regions refusal, no «|»; CONTROL: "
+          "quota / timeout -> None", repr((a_s, a_r)))
+    act = a_s or ("OpenCode Go refused it: a workspace owner or admin turns on «Allow paid endpoints that train on "
+                  "request data» in the OpenCode Console › Settings › Privacy")
+    dd = {"plan": {"ocspark12go": {"model_label": "Muse Spark 1.2 Contributor"}, "orglm53": {"model_label": "GLM"},
+                   "agy38flash": {"model_label": "Gemini 3.8 Flash"}},
+          "channels": {"ocspark12go": {"ok": False, "seconds": 2.3, "bytes": 0, "error": err},
+                       "orglm53": {"ok": False, "seconds": 5.0, "bytes": 0, "error": "TIMEOUT after 2400s"},
+                       "agy38flash": {"ok": True, "seconds": 60.0, "bytes": 5000}},
+          "problems": [{"channel": "ocspark12go", "detail": err, "likely_cause": cs, "suggested_fix": fs,
+                        "owner_action": act},
+                       {"channel": "orglm53", "detail": "TIMEOUT after 2400s", "likely_cause": None,
+                        "suggested_fix": None}]}
+    try:
+        txt = rp.render(dd)
+    except Exception as exc:                                   # noqa: BLE001
+        txt = "render raised %r" % (exc,)
+    sec = txt.split("## What each channel actually did")[-1].split(chr(10) + "## ")[0]
+    rows = {k: [ln for ln in sec.splitlines() if ln.startswith("| `%s`" % k)] for k in dd["channels"]}
+    check(len(rows["ocspark12go"]) == 1 and "🔴 FAILED — " + act in rows["ocspark12go"][0]
+          and len(rows["orglm53"]) == 1 and "| 🔴 FAILED |" in rows["orglm53"][0]
+          and len(rows["agy38flash"]) == 1 and "| OK |" in rows["agy38flash"][0],
+          "R179 И-3 (c) REPORT «What each channel actually did»: the refused channel's FAILED cell carries the "
+          "owner's action; CONTROL: a timeout row stays «🔴 FAILED», an OK row «OK»", repr(rows)[:600])
+    hd = tempfile.mkdtemp(prefix="r179i3-")
+    try:
+        o.write_handoff(hd, {"ocspark12go": {"ok": False, "seconds": 2.3, "error": err, "warnings": []},
+                             "orglm53": {"ok": False, "seconds": 5.0, "error": "TIMEOUT after 2400s",
+                                         "warnings": ["TIMEOUT"]}}, marker="R179I3-MARK")
+        h1 = open(os.path.join(hd, "HANDOFF.md"), encoding="utf-8").read()
+        hd2 = os.path.join(hd, "control")
+        os.makedirs(hd2)
+        o.write_handoff(hd2, {"orglm53": {"ok": False, "seconds": 5.0, "error": "TIMEOUT after 2400s",
+                                          "warnings": ["TIMEOUT"]}}, marker="R179I3-MARK")
+        h2 = open(os.path.join(hd2, "HANDOFF.md"), encoding="utf-8").read()
+    except Exception as exc:                                   # noqa: BLE001
+        h1 = h2 = "write_handoff raised %r" % (exc,)
+    finally:
+        shutil.rmtree(hd, ignore_errors=True)
+    own = [ln for ln in h1.splitlines() if "Needs the account's owner" in ln]
+    check(len(own) == 1 and "`ocspark12go` - " + act in own[0] and "orglm53" not in own[0]
+          and "Needs the account's owner" not in h2 and "raised" not in h2,
+          "R179 И-3 (d) HANDOFF names the owner's action for the refused channel; CONTROL: a timeout-only round has "
+          "no such line", repr((own, h1[-300:]))[:500])
+    src = _insp.getsource(o.main)
+    check("owner_action(str(text))" in src and 'problems[-1]["owner_action"]' in src,
+          "R179 И-3 (e) main's problems builder records owner_action (REPORT reads it there)")
 
 
 def suite_r177_route_model_words():

@@ -314,6 +314,13 @@ def render(d):
     # Same rule as the table above: a row of dashes under "what each channel actually did" is not
     # data, it is a channel that was never asked. They are named once, above, and not repeated as
     # eleven empty rows a reader has to scan past to find the three that matter.
+    # R179 И-3 (2026-11-09, Igor: «в таблице с моделями на против spark contributor писать что не работала, надо в
+    # настройках нажать ...»): a failure only the account's owner can clear carries that action in its verdict cell -
+    # this is the table another chat quotes (below). The action comes from the round's problems record.
+    _owner = {}
+    for _p in (d.get("problems") or []):
+        if isinstance(_p, dict) and _p.get("owner_action") and _p.get("channel") not in _owner:
+            _owner[_p.get("channel")] = _p["owner_action"]
     for r in ran_rows:
         # Three verdicts, not two. "FAILED" over a 46 KB review that merely misplaced its end
         # marker told the reader to throw the review away; the harness records the difference
@@ -327,6 +334,8 @@ def render(d):
             verdict = "⚠ UNVERIFIED — text present, read it"
         else:
             verdict = "🔴 FAILED"
+            if _owner.get(r["name"]):
+                verdict += " — %s" % _owner[r["name"]]
         # 🔴 THE MODEL TRAVELS WITH THE CHANNEL NAME IN EVERY TABLE. Igor, 2026-08-07: «пусть ИИ
         # выводит codex и название модели, а не просто Codex». This table is what another chat
         # quotes when asked how the orchestration went, and `codex` alone does not say whether it

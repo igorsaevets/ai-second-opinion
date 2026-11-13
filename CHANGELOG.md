@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.120.0 — 2026-11-13
+
+Both Muse Spark Contributor voices run in the cheap panel, on the OpenCode Go plan where opencode has it and through OpenRouter elsewhere; without agy no paid Gemini 3.8 Flash starts in its place; an OpenCode Go refusal names what the workspace owner must switch on.
+
+- **Two Spark voices.** Muse Spark 1.2 Contributor and 1.3 Contributor, each on the first route the machine has: the OpenCode Go plan (`ocspark12go`, `ocspark13go`), then a Meta key (1.2 only, `spark12cont`), then OpenRouter (`orspark12cont`, `orspark13cont`; $0.10 / $0.20 per 1M). The cheap panel has 7 voices, «CLI only» 5, the standard panel 13. The README overlay that switched `ocspark12go` on is no longer needed.
+- **The Go plan is checked, not assumed.** An `opencode-go/` channel is ready only where `opencode models` lists its model, so opencode without the Go plan no longer takes the Spark voices away from OpenRouter. In «CLI only» such a machine still starts the two Go channels; the plan now says they will fail and how to leave them out (`--skip ocspark12go ocspark13go`).
+- **No paid Gemini 3.8 Flash without agy.** `orgemini38flash` (OpenRouter) starts only when named; up to 1.119.3 it took agy's seat by itself.
+- **The OpenCode Go Privacy switch.** A Go workspace refuses both Contributor models until an owner or admin turns on «Allow paid endpoints that train on request data» in the OpenCode Console, Settings › Privacy. The refusal is diagnosed with that action, and `REPORT.md` (the channel table) and `HANDOFF.md` print it opposite the refused Spark; DeepSeek's «requires Global regions» refusal on Go is diagnosed the same way. README and INSTALL carry the step.
+- New selftest suites `suite_r179_kit_defaults` and `suite_r179_i3_go_owner_action`.
+
 ## 1.119.3 — 2026-11-09
 
 A route that named MiMo v2.6 Pro started the retired Gemini 3.1 Pro instead. A model word in a route now names only the model it spells.
