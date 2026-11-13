@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.120.1 — 2026-11-13
+
+Four route phrases now name the model they spell, and a Codex pin to GPT-5.6 Sol may run at max.
+
+- **"mimo pro" / «мимо про» names MiMo v2.6 Pro through OpenRouter** (`ormimopro`, paid, ≈ $0.06 a run), as "mimo 2.6 pro" does since 1.119.3. In 1.120.0 "only mimo pro" started the older MiMo v2.5 Pro (`mimo25pro`) and «только мимо про» the free MiMo v2.6 Flash.
+- **"mimo flash" / «мимо флеш» names the MiMo v2.6 Flash voice of the cheap panel**: a new group, `mimoflash`, holds exactly that voice's channels, so the run takes the same route as the cheap panel (opencode's free copy where opencode runs). "mimo 2.6 flash" and «мимо 2.6 флеш» too. In 1.120.0 «только мимо флеш» started the paid mimo CLI copy (`mimov26flash`), and "only mimo flash" and "only mimo 2.6 flash" were refused.
+- **"glm 5.3 flash" / «глм 5.3 флеш» names GLM 5.3 Flash** (`ocglm53flashfree`, free, through opencode; also "glm-5.3-flash", "glm flash", «глм флеш»). In 1.120.0 it started the paid GLM 5.3 (`orglm53`); "glm 5.3" alone still names GLM 5.3.
+- **"codex cli" / «кодекс кли» names Codex alone.** In 1.120.0 the word "cli" there also named the group of CLI agents, so "only codex cli" ran Codex plus every CLI agent of the cheap panel.
+- **More words are checked.** A word after a model's name that the registry uses to spell another model now stops the route, as a word after a group word does since 1.119.3, and Cyrillic words after a group word or a channel's name are checked too. So "only glm-5.3 flash" (GLM 5.3 in 1.120.0) and «только квен про» (Qwen 3.8 Max in 1.120.0) are refused; the Latin "only qwen pro" still runs Qwen 3.8 Max.
+- **Codex effort ladders follow Codex's own model list.** GPT-5.6 Sol offers low to max (the registry stopped at xhigh), so "only codex 5.6 sol" with `"effort": "max"` in your settings now sends max where 1.120.0 sent xhigh; with the kit's default effort (xhigh) nothing changes. GPT-6 Sol's list lost `none`. Codex's `ultra` (max plus sub-agents Codex starts by itself) is in no list and is never sent. GPT-5.5 and GPT-5.4 are no longer in Codex's list; their pins are kept, unmeasured.
+- New selftest suite `suite_r178_route_residuals` (24 checks).
+
 ## 1.120.0 — 2026-11-13
 
 Both Muse Spark Contributor voices run in the cheap panel, on the OpenCode Go plan where opencode has it and through OpenRouter elsewhere; without agy no paid Gemini 3.8 Flash starts in its place; an OpenCode Go refusal names what the workspace owner must switch on.

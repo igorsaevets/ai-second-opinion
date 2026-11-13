@@ -81,19 +81,20 @@ To check what was found: `python doctor.py`. It prints which keys and programs i
 
 In Claude Code with the plugin (and in any agent you gave the line from the top of this page) just say it in plain words:
 
-| You say | What runs (version 1.120.0) |
+| You say | What runs (version 1.120.1) |
 |---|---|
 | **"second opinion"** (for example, "give me a second opinion on this file") | **The cheap panel**, the default: 7 models |
 | **"second opinion, CLI only"** | Only the CLI agents of the cheap panel: 5 models — MiMo v2.6 Flash, Gemini 3.8 Flash, Grok 4.6 and, since 1.120.0, Muse Spark 1.2 and 1.3 Contributor through opencode on the OpenCode Go plan (the NVIDIA voices are API calls). Not one paid request on your OpenRouter key. Without the Go plan the two Spark voices still start here and end at once, spending nothing (the plan says so before the run); leave them out with `--skip ocspark12go ocspark13go` |
 | "standard panel" or "all models" | 13 models: the cheap panel plus GPT-6.1 Sol, Gemini 4 Argon, Kimi K3 (through OpenRouter, paid), Qwen 3.8 Max, DeepSeek V4 Pro and GLM 5.3. No Muse Wonder: since 1.113.0 it starts only when named; no MiMo v2.6 Pro: since 1.113.8 it too starts only when named |
 | "CLI only, standard panel" | 7 models: the five CLI agents plus Codex (GPT-6.1 Sol) and Gemini 4 Argon |
-| "ask only codex", "only grok" | The one named channel |
+| "ask only codex", "only codex cli", "only grok" | The one named channel ("codex cli" since 1.120.1: before, "cli" also added every CLI agent) |
 | "only opencode", «только opencode» | The opencode voices that are on: in the kit MiMo v2.6 Flash (free); opencode's GLM 5.3 Flash and DeepSeek V4.1 Flash only when named, and since 1.118.0 Step 5 Preview too. "without opencode" runs everything else. Before 1.113.5 the word named only the free Spark that is gone since 2026-10-17. On a day opencode's free allowance was refused, MiMo v2.6 Flash is left out (`[skip]`): a group word never counts as naming a channel (the cheap panel below) |
 | "only ocglm53flashfree", "only ocmimo26flashfree" | That one free voice, also on a day its allowance was refused (otherwise the plan shows `[skip]` for it, see the cheap panel below) |
+| "only mimo flash", «только мимо флеш»; "only glm 5.3 flash", «только глм 5.3 флеш» | MiMo v2.6 Flash: the same voice as in the cheap panel (opencode's free copy where opencode runs). GLM 5.3 Flash: `ocglm53flashfree` (free, through opencode). Since 1.120.1: before, «мимо флеш» started the paid mimo CLI copy, "mimo flash" was refused and "glm 5.3 flash" started the paid GLM 5.3 |
 | "only wonder", "muse wonder", «вондер»; "add wonder" | One Muse Wonder, on your Muse Code subscription where the Muse Code CLI is installed. Without it the run stops before paying and names the paid ones: "only wonder10" (Meta key) or "only orwonder" (OpenRouter) runs that one |
 | "only kimi" | The run stops and says why: since 1.112.0 the cheap panel has no free Kimi, and the only Kimi it could start is `kimik3` (OpenRouter, paid). "only kimik3" runs it; on the standard panel "only kimi" runs it too |
 | "only gemini 4 cli", «только gemini 4 аргон» | Gemini 4 Argon alone (it is on the standard panel, not the cheap one). "only agy31pro" still starts Gemini 3.1 Pro, off since 1.115.0 (below, «By name only») |
-| "add mimo 2.6 pro", "only mimo 2.6 pro", «добавь мимо 2.6 про» | MiMo v2.6 Pro through OpenRouter (`ormimopro`, paid, ≈ $0.06 a run), with the cheap panel or alone. Since 1.119.3: before, "mimo 2.6 pro" started the retired Gemini 3.1 Pro (it answered to the bare word "pro") and no MiMo Pro. The bare words "pro" and "flash" name nothing |
+| "add mimo 2.6 pro", "only mimo 2.6 pro", "only mimo pro", «добавь мимо 2.6 про», «только мимо про» | MiMo v2.6 Pro through OpenRouter (`ormimopro`, paid, ≈ $0.06 a run), with the cheap panel or alone. Since 1.119.3: before, "mimo 2.6 pro" started the retired Gemini 3.1 Pro (it answered to the bare word "pro") and no MiMo Pro. The bare words "pro" and "flash" name nothing. "mimo pro" and «мимо про» name it since 1.120.1 (before: the older MiMo v2.5 Pro and the free MiMo Flash) |
 | "don't use openrouter" | Everything except the OpenRouter channels |
 
 From a terminal the same is done with flags: `--panel cheap` (the default), `--panel standard`, `--route "only CLI"`, `--only codex`, `--skip openrouter`. You can see the plan before anything is spent, for free: `python routing.py` or `--dry-run`.

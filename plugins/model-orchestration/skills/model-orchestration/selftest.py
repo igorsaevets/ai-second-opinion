@@ -8150,6 +8150,7 @@ def main():
                   suite_r168_i2_api_read_bound,
                   suite_r176_headers_resend,
                   suite_r177_route_model_words,
+                  suite_r178_route_residuals,
                   suite_r179_kit_defaults,
                   suite_r179_i3_go_owner_action,
                   suite_r168_i3_free_transports,
@@ -12704,8 +12705,8 @@ def suite_r141_codex_sol():
     models = base["channels"]["codex"].get("models") or {}
     # ---- (a) the ladders as measured (model page + the server's own 400 text) ----------------
     check((models.get("gpt-6-sol") or {}).get("efforts")
-          == ["none", "low", "medium", "high", "xhigh", "max"],
-          "R141 gpt-6-sol ladder none..max (OpenAI page + live 400 for `minimal`)",
+          == ["low", "medium", "high", "xhigh", "max"],
+          "R141 -> R178 gpt-6-sol ladder low..max (Codex's own catalog of 2026-11-13 lists no none)",
           repr((models.get("gpt-6-sol") or {}).get("efforts")))
     check((models.get("gpt-6.1-sol") or {}).get("efforts")
           == ["low", "medium", "high", "xhigh", "max"],
@@ -12720,8 +12721,8 @@ def suite_r141_codex_sol():
                             ("только codex GPT-6.1 Sol", "gpt-6.1-sol", "max"),
                             ("только codex gpt-6.1-sol", "gpt-6.1-sol", "max"),
                             ("второе мнение только GPT-6.1 Sol", "gpt-6.1-sol", "max"),
-                            ("только codex GPT-5.6 Sol", "gpt-5.6-sol", "xhigh"),
-                            ("только codex 5.6 sol", "gpt-5.6-sol", "xhigh"),
+                            ("только codex GPT-5.6 Sol", "gpt-5.6-sol", "max"),
+                            ("только codex 5.6 sol", "gpt-5.6-sol", "max"),
                             ("только codex 5.5", "gpt-5.5", "xhigh")):
         got = pick(reg, route=text)
         check(got[:3] == (slug, eff, True), "R141 route «%s» -> %s at %s" % (text, slug, eff),
@@ -12754,8 +12755,8 @@ def suite_r141_codex_sol():
     # ---- (e) the clamp on the new ladders ------------------------------------------------------
     check(pick(reg_with("none"), route="только codex 6.1 sol")[1] == "low",
           "R141 6.1 Sol asked for `none` is clamped UP to `low` (the server 400s on none)")
-    check(pick(reg_with("none"), route="только codex 6 sol")[1] == "none",
-          "R141 6 Sol keeps `none` (its ladder has it) - control for the clamp above")
+    check(pick(reg_with("none"), route="только codex 5.5")[1] == "none",
+          "R141 5.5 keeps `none` (its ladder has it) - control for the clamp above (R178: 6 Sol's ladder lost none)")
     check(pick(reg_with("xhigh"), route="только codex 6.1 sol")[1] == "xhigh",
           "R141 kit default (xhigh) reaches 6.1 Sol unchanged")
     # 6 Astra's ladder was written on 09-13 from a max-only probe and carried `none`; the model
@@ -17669,9 +17670,11 @@ def suite_r155_i3_wonder_by_name():
     ov = ovg(base)
     # the set of one-voice words is a PRODUCT pin on purpose: a new member means a new word that starts gated channels
     check(all((chs.get(c) or {}).get("explicit_only") is True for c in W)
-          and ov.get("wonder") == list(W) and "kimi" in ov and set(ov) <= {"wonder", "kimi"}
+          and ov.get("wonder") == list(W) and "kimi" in ov and set(ov) <= {"wonder", "kimi", "mimoflash"}
+          and not any((chs.get(c) or {}).get("explicit_only") for c in ov.get("mimoflash") or [])
           and "wonder 1.0" in ali and "вондер 1.0" in ali and "wonder 1.0" not in mal and "muse-wonder-1.0" in mal,
-          "R155 И-3 (a) the Wonder channels (four since R164) are explicit_only; one-voice groups = wonder + kimi; «wonder 1.0» "
+          "R155 И-3 (a) the Wonder channels (four since R164) are explicit_only; one-voice groups = wonder + kimi + "
+          "mimoflash (R178: the MiMo Flash voice, no explicit_only member, so it opens no gated channel); «wonder 1.0» "
           "is the model's word (the group), not wonder10's model alias",
           repr((sorted(ov), [c for c in W if not (chs.get(c) or {}).get("explicit_only")], mal)))
 
@@ -20735,6 +20738,112 @@ def suite_r176_headers_resend():
     check("R176" in c1 and "twice" not in c1,
           "[resend] R176 (h) diagnose() names a plain headers cut (P300-28's run.log said «no stock diagnosis») "
           "and keeps it apart from the failed re-send", c1[:120])
+
+
+def suite_r178_route_residuals():
+    """R178 (2026-11-13). R177 left phrases that name one model and run another (the source, overlay off,
+    runs/r178-route-residuals/probe_before_off.out): «только мимо про» ran the free MiMo Flash; «only mimo pro» the
+    older, local-only MiMo v2.5 Pro; «только мимо флеш» the PAID mimo CLI copy while the cheap panel's MiMo Flash is
+    the free opencode voice; «только глм 5.3 флеш» / «only glm 5.3 flash» the paid GLM 5.3 - a word after a MODEL alias
+    was never read, a Cyrillic word after a group never. And gpt-5.6-sol's ladder said none..xhigh while Codex itself
+    offers low..max (~/.codex/models_cache.json, codex-cli 0.167.2), so «только codex 5.6 sol» under max was clamped
+    to xhigh. [fix] checks must FAIL on the R177 code (runs/r178-route-residuals/nc_r178.py), [control] pass:
+      (a) [fix] «только мимо про» / «only mimo pro» -> ormimopro alone, «добавь мимо про» = cheap panel + it;
+          [control] «only mimo 2.5 pro» -> mimo25pro;
+      (b) [fix] «только мимо флеш», «only mimo flash», «only mimo 2.6 flash» -> the MiMo Flash voice (ocmimo26flashfree);
+      (c) [fix] without opencode the same words run the OpenRouter copy, labelled paid; [control] «только мимо флеш
+          кли» -> mimov26flash; «добавь мимо флеш» leaves the cheap panel as is;
+      (d) [fix] «только глм 5.3 флеш», «only glm 5.3 flash» -> ocglm53flashfree; [control] «only glm 5.3» -> orglm53;
+      (e) [fix] a model word after a model alias stops the route («only glm-5.3 flash»), and a Cyrillic model word
+          after a group («только глм про»); [control] «только codex 5.6 sol max» stays legal;
+      (f) [fix] gpt-5.6-sol / gpt-6-sol ladders low..max, and under max «только codex 5.6 sol» sends max with no clamp
+          note; [control] gpt-6.1-sol / gpt-6-astra low..max, «только codex 5.5» sends xhigh with the clamp note;
+      (g) [fix] «только кодекс кли» / «only codex cli» = codex alone - they ran codex plus every CLI agent of the cheap
+          panel (7 voices): «кли» / cli is the cli GROUP's word (found by this suite's NC, 2026-11-13).
+    """
+    import copy
+    import routing as r
+    section("R178: Russian model words after a group, a word after a model alias, the codex ladders")
+    reg = r.load_registry(overlay=False)
+
+    def run(route, ready=None, base=None):
+        try:
+            return r.resolve(copy.deepcopy(base or reg), route=route, tier="max", ready=ready), ""
+        except r.RouteError as exc:
+            return None, str(exc)
+
+    def on(plan):
+        return sorted(c for c, v in (plan or {}).items() if v.get("enabled"))
+
+    cheap = on(run("дешёвая панель")[0])
+    for words in ("только мимо про", "only mimo pro"):
+        plan, err = run(words)
+        check(on(plan) == ["ormimopro"] and plan["ormimopro"].get("model") == "xiaomi/mimo-v2.6-pro",
+              "[fix] (a) «%s» runs MiMo v2.6 Pro (ormimopro) alone" % words, err[:200] or ", ".join(on(plan)))
+    plan, err = run("добавь мимо про")
+    check(bool(cheap) and on(plan) == sorted(set(cheap) | {"ormimopro"}),
+          "[fix] (a) «добавь мимо про» = the cheap panel + ormimopro", err[:200] or ", ".join(on(plan)))
+    plan, err = run("only mimo 2.5 pro")
+    check(on(plan) == ["mimo25pro"], "[control] (a) «only mimo 2.5 pro» still names mimo25pro",
+          err[:200] or ", ".join(on(plan)))
+    for words in ("только мимо флеш", "only mimo flash", "only mimo 2.6 flash"):
+        plan, err = run(words)
+        check(on(plan) == ["ocmimo26flashfree"],
+              "[fix] (b) «%s» runs the MiMo Flash voice (the free ocmimo26flashfree), not the paid CLI copy" % words,
+              err[:200] or ", ".join(on(plan)))
+
+    def no_opencode(c):
+        return "binary not found (opencode)" if (reg["channels"].get(c) or {}).get("kind") == "opencode" else True
+
+    plan, err = run("только мимо флеш", ready=no_opencode)
+    why = " ".join(((plan or {}).get("ormimo26flash") or {}).get("why") or [])
+    check(on(plan) == ["ormimo26flash"] and "PAID" in why.upper(),
+          "[fix] (c) without opencode «только мимо флеш» runs the OpenRouter copy and the plan says it is paid",
+          err[:200] or ", ".join(on(plan)) + " | " + why[-160:])
+    plan, err = run("только мимо флеш кли")
+    check(on(plan) == ["mimov26flash"], "[control] (c) «только мимо флеш кли» names the mimo CLI copy",
+          err[:200] or ", ".join(on(plan)))
+    plan, err = run("добавь мимо флеш")
+    check(on(plan) == cheap, "[control] (c) «добавь мимо флеш» leaves the cheap panel as is (its MiMo Flash voice "
+          "is already there)", err[:200] or ", ".join(on(plan)))
+    for words in ("только глм 5.3 флеш", "only glm 5.3 flash"):
+        plan, err = run(words)
+        check(on(plan) == ["ocglm53flashfree"], "[fix] (d) «%s» runs GLM 5.3 Flash, not the paid GLM 5.3" % words,
+              err[:200] or ", ".join(on(plan)))
+    plan, err = run("only glm 5.3")
+    check(on(plan) == ["orglm53"], "[control] (d) «only glm 5.3» still runs GLM 5.3", err[:200] or ", ".join(on(plan)))
+    plan, err = run("only glm-5.3 flash")
+    check(plan is None and "'flash'" in err, "[fix] (e) a model word after a model alias stops the route",
+          err[:200] or ", ".join(on(plan)))
+    plan, err = run("только глм про")
+    check(plan is None and "'glm'" in err and "'про'" in err,
+          "[fix] (e) a Cyrillic model word after a group stops the route", err[:200] or ", ".join(on(plan)))
+    plan, err = run("только codex 5.6 sol max")
+    check(on(plan) == ["codex"] and plan["codex"].get("model") == "gpt-5.6-sol",
+          "[control] (e) an effort word after a model alias stays legal", err[:200] or ", ".join(on(plan)))
+    for words in ("только кодекс кли", "only codex cli"):
+        plan, err = run(words)
+        check(on(plan) == ["codex"], "[fix] (g) «%s» = codex alone, not codex + the cli group" % words,
+              err[:200] or ", ".join(on(plan)))
+    models = reg["channels"]["codex"].get("models") or {}
+    lad = ["low", "medium", "high", "xhigh", "max"]
+    for m in ("gpt-5.6-sol", "gpt-6-sol"):
+        check((models.get(m) or {}).get("efforts") == lad, "[fix] (f) %s ladder = Codex's own low..max" % m,
+              repr((models.get(m) or {}).get("efforts")))
+    for m in ("gpt-6.1-sol", "gpt-6-astra"):
+        check((models.get(m) or {}).get("efforts") == lad, "[control] (f) %s ladder low..max" % m,
+              repr((models.get(m) or {}).get("efforts")))
+    mx = copy.deepcopy(reg)
+    mx["channels"]["codex"]["effort"] = "max"
+    plan, err = run("только codex 5.6 sol", base=mx)
+    slot = (plan or {}).get("codex") or {}
+    check(slot.get("effort") == "max" and not any("NOTE" in w for w in slot.get("why") or []),
+          "[fix] (f) under max «только codex 5.6 sol» sends max, no clamp note", err[:200] or repr(slot.get("effort")))
+    plan, err = run("только codex 5.5", base=mx)
+    slot = (plan or {}).get("codex") or {}
+    check(slot.get("effort") == "xhigh" and any("clamped to 'xhigh'" in w for w in slot.get("why") or []),
+          "[control] (f) under max «только codex 5.5» sends its top (xhigh) with the clamp note",
+          err[:200] or repr(slot.get("effort")))
 
 
 def suite_r179_kit_defaults():

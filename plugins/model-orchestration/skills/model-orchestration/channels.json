@@ -171,6 +171,25 @@
         "иксай"
       ]
     },
+    "mimoflash": {
+      "label": "MiMo v2.6 Flash - one voice, every transport (the cascade runs the first member that is ready)",
+      "channels": [
+        "ocmimo26flashfree",
+        "mimov26flash",
+        "ormimo26flash",
+        "ocmimo26flashgo"
+      ],
+      "_why_r178": "R178 (2026-11-13): «мимо флеш» was the CHANNEL alias of mimov26flash, the PAID mimo CLI copy, while the cheap panel's MiMo Flash is the free opencode voice - «только мимо флеш» ran the paid copy, and 'only mimo flash' / 'mimo 2.6 flash' were refused (no Latin name). A model name now names the VOICE: a group of the MiMo Flash cascade, so the members on by default run and the cascade keeps the first ready one (free opencode first; the OpenRouter copy only where opencode cannot run, labelled paid). The transport names stay: «мимо флеш кли» / mimocli flash (CLI), ormimoflash, mimogo.",
+      "aliases": [
+        "mimo flash",
+        "mimo 2.6 flash",
+        "mimo v2.6 flash",
+        "мимо флеш",
+        "мимо флэш",
+        "мимо 2.6 флеш",
+        "мимо 2.6 флэш"
+      ]
+    },
     "mimo": {
       "label": "every MiMo, all transports",
       "channels": [
@@ -1545,8 +1564,16 @@
           "label": "GLM 5.3 Flash Free (via opencode)",
           "data_policy": "Free relay through opencode's infrastructure (their terms apply) plus Z.ai's model terms. Free at point of use - no API key, no billing.",
           "aliases": [
-            "opencode/glm-5.3-flash-free"
-          ]
+            "opencode/glm-5.3-flash-free",
+            "glm 5.3 flash",
+            "glm-5.3-flash",
+            "glm flash",
+            "глм 5.3 флеш",
+            "глм 5.3 флэш",
+            "глм флеш",
+            "глм флэш"
+          ],
+          "_aliases_r178": "R178 (2026-11-13): GLM 5.3 Flash had no spoken name - «только глм 5.3 флеш» and 'only glm 5.3 flash' ran orglm53's PAID GLM 5.3 («глм 5.3» is its model alias, «флеш» fell through). The name goes to the first member of the GLM 5.3 Flash cascade, this free opencode voice (the operator's backlog of 2026-11-09: GLM 5.3 Flash via opencode first). All three GLM Flash channels are off by default, so a group could not start them."
         }
       },
       "aliases": [
@@ -1781,7 +1808,8 @@
             "high",
             "xhigh"
           ],
-          "_efforts_source": "R113 error: 400 'max' not supported with 'gpt-5.5', supported: none, low, medium, high, xhigh"
+          "_efforts_source": "R113 error: 400 'max' not supported with 'gpt-5.5', supported: none, low, medium, high, xhigh",
+          "_not_in_codex_catalog_r178": "R178 (2026-11-13): absent from Codex's own model list (~/.codex/models_cache.json, codex-cli 0.167.2) - the picker no longer offers it. Whether a pin still reaches this model is not measured; the ladder stays as R113 measured it."
         },
         "gpt-5.6-sol": {
           "label": "GPT-5.6 Sol",
@@ -1795,13 +1823,14 @@
             "5.6-sol"
           ],
           "efforts": [
-            "none",
             "low",
             "medium",
             "high",
-            "xhigh"
+            "xhigh",
+            "max"
           ],
-          "_efforts_source": "Same generation as gpt-5.5, assumed same ladder (not probed)"
+          "_efforts_source": "R178 (2026-11-13): Codex's own catalog - supported_reasoning_levels in ~/.codex/models_cache.json (codex-cli 0.167.2, fetched 2026-11-13T13:34:40Z): low, medium, high, xhigh, max, ultra. Until R178 this ladder said none..xhigh («same generation as gpt-5.5, assumed, not probed»), so a run asked for max was CLAMPED to xhigh (dry run, runs/r178-route-residuals/dry_codex_before.out); the operator saw Max in the Codex CLI and Codex Desktop on 2026-11-09.",
+          "_ultra_r178": "Codex also lists `ultra` for gpt-6.1-sol, gpt-6-astra, gpt-6-sol and gpt-5.6-sol, in its own words «Maximum reasoning with automatic task delegation» - the depth of max plus sub-agents Codex starts by itself. It is not in any `efforts` list, so the harness never sends it: whether a panel voice should delegate is the operator's decision (R178). Settled 2026-11-13 by the owner: «Ultra не включать.» (do not switch Ultra on) - no ladder carries it. No run here has measured it."
         },
         "gpt-6-sol": {
           "label": "GPT-6 Sol",
@@ -1813,14 +1842,13 @@
             "6-sol"
           ],
           "efforts": [
-            "none",
             "low",
             "medium",
             "high",
             "xhigh",
             "max"
           ],
-          "_efforts_source": "R141: OpenAI's model page AND the server's own list in the 400 for `minimal` (2026-10-04)"
+          "_efforts_source": "R141: OpenAI's model page AND the server's own list in the 400 for `minimal` (2026-10-04) gave none..max. R178 (2026-11-13): Codex's own catalog (~/.codex/models_cache.json, codex-cli 0.167.2) lists low..max (+ ultra, see gpt-5.6-sol `_ultra_r178`) and no none - the ladder follows what Codex offers."
         },
         "gpt-6.1-sol": {
           "label": "GPT-6.1 Sol",
@@ -1872,7 +1900,8 @@
             "high",
             "xhigh"
           ],
-          "_efforts_source": "Same generation as gpt-5.5, assumed same ladder (not probed)"
+          "_efforts_source": "Same generation as gpt-5.5, assumed same ladder (not probed)",
+          "_not_in_codex_catalog_r178": "R178 (2026-11-13): absent from Codex's own model list (~/.codex/models_cache.json, codex-cli 0.167.2) - the picker no longer offers it. Whether a pin still reaches this model is not measured."
         }
       },
       "aliases": [
@@ -1883,8 +1912,11 @@
         "gpt",
         "гпт",
         "chatgpt",
-        "чатгпт"
+        "чатгпт",
+        "codex cli",
+        "кодекс кли"
       ],
+      "_aliases_r178": "R178 (2026-11-13): «кли» / cli after a channel name is a word the registry spells models with (мимо кли, квен кли), so the R178 guard would stop «только кодекс кли»; Codex IS a CLI, so the phrase names this channel. «codex cli» used to start codex plus the whole cli GROUP.",
       "_lost_the_openai_alias_2026_08_14": "🔴 This channel used to answer to `openai`, and round 38 moved that word to the new `openai` GROUP the moment a second OpenAI channel (orgpt56terrapro) arrived. Identical reasoning to agy's _lost_the_gemini_aliases_2026_08_07, and deliberately caught BEFORE it could mislead rather than after: a vendor word must name the family, and a channel name must name the transport. `--only openai` now means both OpenAI voices; `--only codex` still means this one.",
       "notes": "Strategic questions and final line-level audits only. Never send it a lookup. Reports no tool telemetry of any kind, so the citation-existence audit is the only instrument that works on it."
     },
@@ -2477,9 +2509,9 @@
           "aliases": [
             "mimo-v2.5-pro",
             "mimo 2.5 pro",
-            "мимо 2.5 про",
-            "mimo pro"
-          ]
+            "мимо 2.5 про"
+          ],
+          "_alias_mimo_pro_moved_r178": "R178 (2026-11-13): «mimo pro» named this OLDER v2.5 model (local-only, off), so 'only mimo pro' ran MiMo v2.5 Pro while the current MiMo Pro is v2.6. Moved to ormimopro beside «мимо про» - a bare model name means the current model, as «mimo 2.6 pro» does since R177."
         }
       },
       "aliases": [
@@ -2620,9 +2652,9 @@
       },
       "aliases": [
         "mimov26flash",
-        "mimocli flash",
-        "мимо флеш"
+        "mimocli flash"
       ],
+      "_alias_mimo_flash_moved_r178": "R178 (2026-11-13): «мимо флеш» moved to the mimoflash group (the MiMo Flash voice, free opencode first); this paid CLI copy answers to its transport names.",
       "_added": "2026-10-04 (R142), the operator: «Потом сделай mimo 2.6 Flash как fallback, модели mimo 2.6 Pro». The run-time fallback of mimov26pro (its `fallback` field) - same mimo CLI and Xiaomi key, the lighter model. Cascade group with ocmimo26flashfree: one Flash voice, two transports.",
       "notes": "MiMo v2.6 Flash via the mimo CLI (direct Xiaomi API, metered). Not a panel seat: it answers when mimov26pro gives no usable answer and the Flash voice did not already answer through ocmimo26flashfree, or when named directly."
     },
@@ -2776,8 +2808,11 @@
             "мимо 2.6 про",
             "mimo 2.6 pro",
             "mimo v2.6 pro",
-            "mimo-v2.6-pro"
+            "mimo-v2.6-pro",
+            "mimo pro",
+            "мимо про"
           ],
+          "_aliases_r178": "R178 (2026-11-13): «только мимо про» ran the free MiMo Flash (the mimo GROUP word; «про» was a Cyrillic word the guard never read) and 'only mimo pro' ran the older v2.5 Pro (mimo25pro). The bare model name is this channel's, as «мимо 2.6 про».",
           "_aliases_r177": "R177 (2026-11-08): the Latin spellings of «мимо 2.6 про». Without them «mimo 2.6 pro» matched only the `mimo` GROUP, which may not start this default-off channel, plus agy31pro's bare «pro». The bare model name stays on this channel - the kit's MiMo Pro, which any install with an OpenRouter key can run; the mimo CLI copy (mimov26pro, local) answers to its own words: mimocli, «мимо кли», «mimo cli v2.6»."
         },
         "xiaomi/mimo-v2.5-pro": {

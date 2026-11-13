@@ -1098,6 +1098,51 @@ def group_members(reg, name):
 
 _FUNCTION_WORDS = frozenset(("or", "and", "a", "an", "the", "to", "of", "in", "on", "at", "by", "no", "not", "и",
                              "а", "но", "или", "в", "на", "с", "к", "у", "о"))
+# R178: words that say HOW DEEP or HOW (a connector), never WHICH model - legal after a model's name («codex 5.6 sol max»).
+_EFFORT_WORDS = frozenset(("none", "low", "medium", "high", "xhigh", "max", "ultra", "макс", "максимум"))
+_CONNECTOR_WORDS = frozenset(("через", "via"))
+
+
+def _alias_words(als):
+    return {w for a in als for w in str(a).lower().replace("ё", "е").split()}
+
+
+def _model_words(reg):
+    """R178: every word the registry spells a channel or a model with (lowercased, ё -> е, a letter in it) - the
+    vocabulary of model names. Such a word, written where no alias matched, names a model the route did not get."""
+    als = []
+    for ch in (reg.get("channels") or {}).values():
+        als += list(ch.get("aliases") or [])
+        for m in (ch.get("models") or {}).values():
+            als += list((m or {}).get("aliases") or [])
+    return {w for w in _alias_words(als) if re.search(r"[a-zа-я]", w)}
+
+
+def _own_words(reg, cname):
+    """R178: the words of one channel's own aliases and of its models' aliases."""
+    ch = (reg.get("channels") or {}).get(cname) or {}
+    als = list(ch.get("aliases") or [])
+    for m in (ch.get("models") or {}).values():
+        als += list((m or {}).get("aliases") or [])
+    return _alias_words(als)
+
+
+def _uncovered_words(t, covered, a, b):
+    """R178: the Latin / Cyrillic / digit runs of t[a:b] that no alias or marker covers, with their positions."""
+    runs, cur, start = [], [], None
+    for j in range(max(0, a), min(len(t), b)):
+        c = t[j]
+        if covered[j] or not re.match(r"[a-z0-9.\-а-я]", c):
+            if cur:
+                runs.append((start, "".join(cur).strip(".-")))
+                cur, start = [], None
+            continue
+        if not cur:
+            start = j
+        cur.append(c)
+    if cur:
+        runs.append((start, "".join(cur).strip(".-")))
+    return [(p, w) for p, w in runs if w]
 
 
 def alias_index(reg):
@@ -1445,6 +1490,8 @@ def _detect_silent_drop(text, stream, alias_idx, reg):
     failure mode this router exists to prevent - the router raises so the user can decide
     rather than guesses.
 
+    [SUPERSEDED in part by R178, 2026-11-13: a Cyrillic word the registry spells models with («про», «флеш») is
+    examined too, and so are the words after a MODEL alias - see the R178 block in the body.]
     Only Latin/digit runs are examined: Cyrillic prose («второе мнение», «остальные модели») is
     not a model-name candidate on purpose - the false positives would train people to disable
     the whole check. A run is "significant" if it either carries a digit AND a letter / . / -
@@ -1473,6 +1520,35 @@ def _detect_silent_drop(text, stream, alias_idx, reg):
             for m in re.finditer(r"(?<![\w\-])" + re.escape(w) + r"(?![\w\-])", t):
                 for j in range(m.start(), m.end()):
                     covered[j] = True
+
+    # 🔴 R178 (2026-11-13): A WORD AFTER A MODEL ALIAS WAS NEVER READ. «только глм 5.3 флеш» and "only glm 5.3 flash" ran
+    # orglm53's PAID GLM 5.3: «глм 5.3» is that channel's model alias, «флеш» fell through, and GLM 5.3 Flash - the model
+    # the human named - did not run (runs/r178-route-residuals/probe_before_off.out). A word right after a model alias
+    # that the registry spells OTHER models with stops the route now; this model's own words and the effort words stay
+    # legal («codex 5.6 sol max», R90).
+    vocab = _model_words(reg)
+    ent_pos = sorted(p for p, k, _ in stream if k == "entity")
+    for mpos, k, v in stream:
+        if k != "entity" or v[0] != "model":
+            continue
+        span = next((len(al) for al, ent in alias_idx if ent == v and t[mpos:mpos + len(al)] == al), 0)
+        nxt = next((p for p in ent_pos if p > mpos), len(t))
+        own = _own_words(reg, v[1])
+        extra = [w for _, w in _uncovered_words(t, covered, mpos + span, nxt)
+                 if w in vocab and w not in own and w not in _EFFORT_WORDS and w not in _FUNCTION_WORDS
+                 and w not in _CONNECTOR_WORDS]
+        if not extra:
+            continue
+        written = t[mpos:mpos + span].strip()
+        head = written.split()[0] if written else ""
+        cands = sorted({al for al, _ in alias_idx if all(w in al.split() for w in extra)})
+        near = [al for al in cands if head and head in al.split()] or cands
+        raise RouteError(
+            "route names the model %r (%s) followed by %s - %s the registry spells other models with. Rather than "
+            "run %s while more was written, the router stops (R178, 2026-11-13: «только глм 5.3 флеш» ran the paid "
+            "GLM 5.3, not GLM 5.3 Flash). Name the model as the registry spells it%s."
+            % (written, v[1], ", ".join("%r" % w for w in extra), "a word" if len(extra) == 1 else "words",
+               v[2] or v[1], (" - for example: " + ", ".join(near[:12])) if near else ""))
 
     channels_in_stream = [(pos, val) for pos, kind, val in stream
                           if kind == "entity" and val[0] == "channel"]
@@ -1519,7 +1595,7 @@ def _detect_silent_drop(text, stream, alias_idx, reg):
         cur_start = None
         for j, c in enumerate(interval):
             pos = chan_end + j
-            if covered[pos] or not re.match(r"[A-Za-z0-9.\-]", c):
+            if covered[pos] or not re.match(r"[A-Za-z0-9.\-а-я]", c):
                 if cur:
                     runs.append((cur_start, "".join(cur)))
                     cur, cur_start = [], None
@@ -1540,6 +1616,12 @@ def _detect_silent_drop(text, stream, alias_idx, reg):
         for pos, w in runs:
             w = w.strip(".-")
             if not w or w in _FUNCTION_WORDS:
+                continue
+            if re.search(r"[а-я]", w):
+                # R178: a Cyrillic word is model-looking only when the registry spells models with it («про», «флеш»);
+                # Cyrillic prose («остальные», «второе мнение») never is. «только мимо про» ran the free MiMo Flash.
+                if (w in alias_words or w in vocab) and w not in _EFFORT_WORDS and w not in _CONNECTOR_WORDS:
+                    significant.append((pos, w))
                 continue
             has_digit = bool(re.search(r"[0-9]", w))
             has_letter = bool(re.search(r"[A-Za-z]", w))

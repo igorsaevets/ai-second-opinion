@@ -2,6 +2,18 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.120.1 — 2026-11-13
+
+Four route phrases now name the model they spell, and a Codex pin to GPT-5.6 Sol may run at max.
+
+- **"mimo pro" / «мимо про» names MiMo v2.6 Pro through OpenRouter** (`ormimopro`, paid, ≈ $0.06 a run), as "mimo 2.6 pro" does since 1.119.3. In 1.120.0 "only mimo pro" started the older MiMo v2.5 Pro (`mimo25pro`) and «только мимо про» the free MiMo v2.6 Flash.
+- **"mimo flash" / «мимо флеш» names the MiMo v2.6 Flash voice of the cheap panel**: a new group, `mimoflash`, holds exactly that voice's channels, so the run takes the same route as the cheap panel (opencode's free copy where opencode runs). "mimo 2.6 flash" and «мимо 2.6 флеш» too. In 1.120.0 «только мимо флеш» started the paid mimo CLI copy (`mimov26flash`), and "only mimo flash" and "only mimo 2.6 flash" were refused.
+- **"glm 5.3 flash" / «глм 5.3 флеш» names GLM 5.3 Flash** (`ocglm53flashfree`, free, through opencode; also "glm-5.3-flash", "glm flash", «глм флеш»). In 1.120.0 it started the paid GLM 5.3 (`orglm53`); "glm 5.3" alone still names GLM 5.3.
+- **"codex cli" / «кодекс кли» names Codex alone.** In 1.120.0 the word "cli" there also named the group of CLI agents, so "only codex cli" ran Codex plus every CLI agent of the cheap panel.
+- **More words are checked.** A word after a model's name that the registry uses to spell another model now stops the route, as a word after a group word does since 1.119.3, and Cyrillic words after a group word or a channel's name are checked too. So "only glm-5.3 flash" (GLM 5.3 in 1.120.0) and «только квен про» (Qwen 3.8 Max in 1.120.0) are refused; the Latin "only qwen pro" still runs Qwen 3.8 Max.
+- **Codex effort ladders follow Codex's own model list.** GPT-5.6 Sol offers low to max (the registry stopped at xhigh), so "only codex 5.6 sol" with `"effort": "max"` in your settings now sends max where 1.120.0 sent xhigh; with the kit's default effort (xhigh) nothing changes. GPT-6 Sol's list lost `none`. Codex's `ultra` (max plus sub-agents Codex starts by itself) is in no list and is never sent. GPT-5.5 and GPT-5.4 are no longer in Codex's list; their pins are kept, unmeasured.
+- New selftest suite `suite_r178_route_residuals` (24 checks).
+
 ## 1.120.0 — 2026-11-13
 
 Both Muse Spark Contributor voices run in the cheap panel, on the OpenCode Go plan where opencode has it and through OpenRouter elsewhere; without agy no paid Gemini 3.8 Flash starts in its place; an OpenCode Go refusal names what the workspace owner must switch on.
@@ -288,31 +300,6 @@ Route fixes from the review panel on 1.112.5. Each sentence below was run on 1.1
 - **No more false stops on** «не исключительно codex, но и grokbuild», «добавь grokbuild и не забудь codex», «don't exclude the codex»: 1.112.5 refused them, they run as written.
 - **A run-time fallback whose model the route replaced stays off.** «grokbuild вместо ocmimo26flashfree» left the metered mimov26flash armed as mimov26pro's fallback, so a mimov26pro failure would have brought the replaced model back, paid. The plan prints why it is off.
 
-## 1.112.5 — 2026-10-17
-
-Route grammar fixes from the review panel on 1.112.4, each reproduced on the code before it was changed (a paid channel in the slot the sentence turns off), and attachments by path for three more CLI kinds.
-
-- **«только не X» and «всё что угодно, только не X» exclude X.** Every release so far started X ALONE: a bare «не» is no instruction word, so «только» kept its meaning. «only not X» and «лишь не X» the same.
-- **English negations exclude.** «don't pick codex», «don't add codex», «never use codex», «doesn't use codex», «won't use codex», and «don’t use codex» typed with a curly apostrophe started the expensive codex; «don't only use codex» ran codex alone. They exclude it now («don't only use codex» adds codex to the panel).
-- **«A -> B», «A, замени на B» and «A replace with B» run B instead of A.** Since 1.112.3 they kept A: «kimik3 -> kimik3free» ran the PAID kimik3 and switched the free one off. With more than one name on a side the run stops and asks for «B вместо A». «замени A на B» and «replace A with B» still stop.
-- **«Y вместо того чтобы использовать X» runs Y.** Since 1.112.4 it ran X («вместо того» was read as «instead of it»). «instead of using» is an instruction word too.
-- **A replaced channel's paid twin stays off when another member of its group is only excluded.** «grokbuild вместо wonder10» with `--skip mcwonder10cont` ran the paid orwonder; the same held for kimik3 and orspark13cont.
-- **«вместо A и B возьми C» replaces A and B.** B used to start.
-- **A negated exclusion includes.** «не без X», «не исключи X», «don't exclude X», «don't skip X» excluded X; with the free Spark that switched the free channel off and the paid spark13cont on.
-- **«только добавь X» adds X to the panel** (1.112.4 ran X alone). «не-используй X» with a hyphen is no longer read as «используй X». «ничего кроме X» means only X (it ran everything except X).
-- **When a free channel you named is not ready here and its paid twin carries the voice, the plan says PAID per call.**
-- **A second check that does not share the grammar.** When a negation word stands right before a channel's name and the route would still run that channel («только grokbuild и не codex», «добавь grokbuild, но не codex» started codex), the run stops and says how to write it. It never changes a plan.
-- **Two readings stop:** «не используй A, B вместо C D» (it ran D and dropped B). Clearer messages for «не используй ничего, только X» and for «вместо него» after two names; «кроме того, …» and «без разницы, …» are connectives, not exclusions.
-- **opencode, MiMo Code and Kimi Code read attached material from disk, like codex, Antigravity and Grok Build.**
-  With `--attach` / `--attach-dir` these three CLI kinds used to receive every file INLINE in one message (they
-  arrived after the rule «CLI agents get paths, not files» and were never added to it), and their working folder
-  held no file, so a reviewer could not open, search or run anything it was given: in a 21-file review the Spark
-  voice got 229K characters of text while codex and Grok Build read and ran the files by path. They now get the
-  absolute paths (of the vetted copy for folders) with the shell-on contract: read only, change nothing. Muse Code
-  (file tools limited to its workspace) and the API channels still get the text inline. The plan line, `--help`,
-  SKILL.md, `references/briefs.md` and AGENTS.md said attachments go inline to every channel and CLI channels get
-  the path as well; the CLI channels get the path only.
-
 ## Older releases
 
-166 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+167 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
