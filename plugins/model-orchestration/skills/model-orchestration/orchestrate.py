@@ -2496,12 +2496,15 @@ def write_handoff(outdir, results, marker=None, brief=None, panel=None, started=
             L += ["🔁 **Fallback:** %s. A channel that ended with no answer had its declared "
                   "`fallback` (another model, channels.json) run the same brief once after the "
                   "round; weigh that file as the fallback's model, not the original's."
-                  % "; ".join(("`%s`%s answered for `%s`%s (`%s`%s)"
-                               % (n, _fbm(n), fr, _fbm(fr), n.upper() + ".md",
-                                  # R157 И-8 (F1): a never_read fallback (Nemotron's own) is not a file to weigh
-                                  ", never_read - do not open it" if results[n].get("never_read") is True else ""))
-                              if results[n].get("ok") else ("`%s`%s ran for `%s`%s and failed too"
-                                                            % (n, _fbm(n), fr, _fbm(fr)))
+                  % "; ".join((("`%s`%s answered for `%s`%s (`%s`%s)"
+                                % (n, _fbm(n), fr, _fbm(fr), n.upper() + ".md",
+                                   # R157 И-8 (F1): a never_read fallback (Nemotron's own) is not a file to weigh
+                                   ", never_read - do not open it" if results[n].get("never_read") is True else ""))
+                               if results[n].get("ok") else ("`%s`%s ran for `%s`%s and failed too"
+                                                             % (n, _fbm(n), fr, _fbm(fr))))
+                              # R181 И-2: a second link names the first link it followed
+                              + (" - the second link, after `%s` failed too" % results[n]["fallback_after"]
+                                 if results[n].get("fallback_after") else "")
                               for n, fr in _fbs), ""]
         # R144 И-7 (H2): three different things, three lines. v1.108.0 printed «resumed once with
         # tools off» for an answer READ BACK from the CLI's log (no resume - a complete review) and
@@ -11162,7 +11165,12 @@ def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, 
     `submit(executor, name)` dispatches one channel (main passes _submit_again); `same_voice(reg,
     name)` is routing.same_voice. The fallback's record carries `fallback_for`; both records get
     a note, so HANDOFF and REPORT say which model answered and why.
+
+    R181 И-2: a first link that ALSO ends with no answer runs its armed second link (the plan's `then`,
+    routing._second_link: only the operator's order subscription -> free -> paid, the same model) once, as soon as that
+    first link ends - every guard above read again at that moment (_second_link_why_not); never a third.
     """
+    from concurrent.futures import wait as _fb_wait, FIRST_COMPLETED as _FB_FIRST
     _fb_jobs = {}
     _refused_by = {}                     # R157 И-5 (F9): quota group -> the first record of this round refused on it
     for _qn, _qr in sorted((results or {}).items()):
@@ -11213,38 +11221,105 @@ def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, 
     if _fb_jobs:
         log("\n" + "-" * 78)
         log("FALLBACK: %s" % ", ".join("%s -> %s" % kv for kv in sorted(_fb_jobs.items())))
-        with ThreadPoolExecutor(max_workers=max(4, len(_fb_jobs))) as _fex:
+        _taken = set(_fb_jobs.values())          # R181 И-2: every channel a link of this wave runs, first or second
+        with ThreadPoolExecutor(max_workers=max(4, 2 * len(_fb_jobs))) as _fex:
             _ffuts = {}
             for cname, fb in sorted(_fb_jobs.items()):
                 _fut = submit(_fex, fb)
                 if _fut is not None:
-                    _ffuts[fb] = (cname, _fut)
+                    _ffuts[_fut] = (cname, fb, None)
                 else:                                       # R142 И-3 (Kimi): never vanish
                     log("  [%s] FALLBACK %s could not be dispatched (no caller for its kind)"
                         % (cname, fb))
                     if isinstance(results.get(cname), dict):
                         results[cname].setdefault("notes", []).append(
                             "FALLBACK %s could not be dispatched (no caller for its kind)." % fb)
-            for fb, (cname, f) in _ffuts.items():
-                try:
-                    _fr = f.result()
-                except BaseException as exc:                # noqa: BLE001 - same as phase 1
-                    log("  [%s] FALLBACK RAISED: %r" % (fb, exc))
-                    _fr = {"ok": False, "error": "fallback raised: %r" % (exc,),
-                           "traceback": traceback.format_exc()}
-                _fr["fallback_for"] = cname
-                _fr.setdefault("notes", []).append(
-                    "FALLBACK for %s, which ended the round with no answer: %s"
-                    % (cname, scrub(str(results[cname].get("error") or "no answer text"))[:160]))
-                results[fb] = _fr
-                results[cname].setdefault("notes", []).append(
-                    "FALLBACK: %s ran the same brief after the round - %s."
-                    % (fb, "it answered (%s)" % (fb.upper() + ".md") if _fr.get("ok")
-                       else "it failed too"))
-                log("  [%s] fallback for %s: %s" % (fb, cname, ("OK - %s bytes" % _fr.get("bytes"))
-                                                    if _fr.get("ok") else "FAILED too"))
+            # R181 И-2: records in the order they land, so a second link starts as soon as ITS first link has ended
+            while _ffuts:
+                _done, _ = _fb_wait(list(_ffuts), return_when=_FB_FIRST)
+                for f in sorted(_done, key=lambda x: _ffuts[x][1]):
+                    cname, fb, after = _ffuts.pop(f)
+                    try:
+                        _fr = f.result()
+                    except BaseException as exc:            # noqa: BLE001 - same as phase 1
+                        log("  [%s] FALLBACK RAISED: %r" % (fb, exc))
+                        _fr = {"ok": False, "error": "fallback raised: %r" % (exc,),
+                               "traceback": traceback.format_exc()}
+                    _fr["fallback_for"] = cname
+                    if after is None:
+                        _fr.setdefault("notes", []).append(
+                            "FALLBACK for %s, which ended the round with no answer: %s"
+                            % (cname, scrub(str(results[cname].get("error") or "no answer text"))[:160]))
+                    else:
+                        _fr["fallback_after"] = after
+                        _fr.setdefault("notes", []).append(
+                            "FALLBACK (second link) for %s, after its first link %s ended with no answer too: %s"
+                            % (cname, after, scrub(str((results.get(after) or {}).get("error")
+                                                       or "no answer text"))[:160]))
+                    results[fb] = _fr
+                    _said = ("it answered (%s)" % (fb.upper() + ".md")) if _fr.get("ok") else "it failed too"
+                    if after is None:
+                        results[cname].setdefault("notes", []).append(
+                            "FALLBACK: %s ran the same brief after the round - %s." % (fb, _said))
+                    else:
+                        results[cname].setdefault("notes", []).append(
+                            "FALLBACK (second link): %s ran the same brief after %s failed too - %s."
+                            % (fb, after, _said))
+                        results[after].setdefault("notes", []).append(
+                            "SECOND LINK: %s ran the same brief after this fallback - %s." % (fb, _said))
+                    log("  [%s] %s for %s: %s" % (fb, "fallback" if after is None else "second link", cname,
+                                                  ("OK - %s bytes" % _fr.get("bytes")) if _fr.get("ok")
+                                                  else "FAILED too"))
+                    if after is not None or _has_answer(_fr):
+                        continue
+                    nxt = ((plan.get(cname) or {}).get("fallback") or {}).get("then")
+                    if not isinstance(nxt, dict) or not nxt.get("channel"):     # R163's list shape: never a chain
+                        continue
+                    fb2 = nxt["channel"]
+                    why2 = _second_link_why_not(fb2, nxt, results, reg, no_fallback, _taken, same_voice)
+                    if why2:
+                        log("  [%s] second link %s not run: %s" % (cname, fb2, why2))
+                        _fr.setdefault("notes", []).append("SECOND LINK %s not run: %s." % (fb2, why2))
+                        results[cname].setdefault("notes", []).append(
+                            "FALLBACK (second link) %s not run: %s." % (fb2, why2))
+                        continue
+                    log("  [%s] ended with no answer too -> SECOND LINK %s runs the same brief once (for %s)"
+                        % (fb, fb2, cname))
+                    _taken.add(fb2)
+                    _fut2 = submit(_fex, fb2)
+                    if _fut2 is not None:
+                        _ffuts[_fut2] = (cname, fb2, fb)
+                    else:
+                        log("  [%s] SECOND LINK %s could not be dispatched (no caller for its kind)" % (cname, fb2))
+                        results[cname].setdefault("notes", []).append(
+                            "FALLBACK (second link) %s could not be dispatched (no caller for its kind)." % fb2)
         log("-" * 78)
-    # R163 И-3: no chain - a fallback that also ends with no answer ends there (routing.apply_fallback says why).
+
+
+def _second_link_why_not(fb2, nxt, results, reg, no_fallback, taken, same_voice):
+    """R181 И-2: why the armed second link `fb2` does not run after its first link ended with no answer, or None - the
+    first wave's guards, read again NOW (the first link's own record counts: its provider.quota closes its group)."""
+    refused = {}
+    for _n, _r in sorted((results or {}).items()):
+        _g = _quota_group(reg, _n)
+        if _g and _quota_refused(_r):
+            refused.setdefault(_g, _n)
+    g2 = _quota_group(reg, fb2)
+    if nxt.get("off"):
+        return "OFF in this run - %s" % nxt["off"]
+    if no_fallback:
+        return "--no-fallback"
+    if g2 in refused:
+        return ("it draws on the same daily allowance (quota group «%s») that refused %s with provider.quota - it "
+                "would be refused too, until 00:00 UTC" % (g2, refused[g2]))
+    if fb2 in results:
+        return "%s already ran in this round" % fb2
+    if fb2 in taken:
+        return "%s is already a fallback of another channel here" % fb2
+    decl = ((reg.get("channels") or {}).get(fb2) or {}).get("same_model_as")
+    kin = list(same_voice(reg, fb2)) + ([decl] + list(same_voice(reg, decl)) if decl else [])
+    voiced = sorted({s for s in kin if s != fb2 and _has_answer(results.get(s))})
+    return ("the same model already answered here through %s" % ", ".join(voiced)) if voiced else None
 
 
 _SNAPSHOT_MONTH_DAYS = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
@@ -14381,7 +14456,8 @@ def main():
 
     # Validate every input BEFORE the dry-run exit, so --dry-run is a real preflight. A mistyped
     # --system used to surface only after the expensive channels had already been launched.
-    _resolve_system(a.system or ("task" if task_mode else "base-depth"))
+    # R180: the resolved file also tells routing which kind of question this run is (only_with_system).
+    _system_file = _resolve_system(a.system or ("task" if task_mode else "base-depth"))
     if not a.brief:
         log("nothing to send: pass --brief <file> for a full round, or --ask \"<question>\" for "
             "a one-shot question on the cheapest channel.")
@@ -14428,7 +14504,7 @@ def main():
             # ready-aware copy that used to sit in this file was never called.
             plan = routing.resolve(reg, route=a.route, only=a.only, skip=a.skip,
                                    sets=a.sets, tier=a.tier, panel=a.panel,
-                                   ready=_cascade_ready(reg))
+                                   ready=_cascade_ready(reg), system=_system_file)
             # R157 И-2: a quota group refused earlier this UTC day is left out (routing.apply_quota_skip).
             _qskips = routing.quota_skips(routing.load_quota_state(routing.quota_state_path()),
                                           datetime.datetime.now(datetime.timezone.utc))

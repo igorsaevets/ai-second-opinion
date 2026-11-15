@@ -3013,13 +3013,48 @@ def apply_fallback(plan, reg, ready=None):
         if not fb or not p.get("enabled"):
             continue
         p["fallback"] = {"channel": fb, "off": _fallback_off(plan, reg, cname, fb, ready)}
-        # R163 И-3 (2026-10-22): ONE fallback, never a chain - R157 И-2's rule again. R163 had added an opt-in
-        # chain (`fallback_depth`) for one user, MiniMax «OpenRouter :free -> Go -> Zen free»; OpenRouter ended that
-        # :free variant on 2026-10-22 at 12:00 UTC, Igor dropped the channel («Тогда openrouter M3.1 не
-        # добавляем»), and the chain was left with no registry user and three defects its panel found (a link's
-        # answer reported one link at a time, chain lines with no timeout, `fallback_depth` 0 / "2" silently 1).
-        # Taken out rather than repaired for nobody; selftest R163 И-3 pins that the key arms nothing more.
+        # R163 И-3 (2026-10-22) took out an opt-in chain (`fallback_depth`) that had no registry user and three defects
+        # its panel found (a link's answer reported one link at a time, chain lines with no timeout, `fallback_depth`
+        # 0 / "2" silently 1). R181 И-2 (2026-11-15) adds ONE second link for ONE order - the operator: «Модели по
+        # дефолту делает по подписке opencode go, а если не работает подписка, то fallback на free, а если не работает
+        # free, то оплата по api»: a SUBSCRIPTION voice whose fallback is a FREE copy of the same model gets that free
+        # copy's own fallback - a PAID copy of the same model - as `then`. No knob and no depth: `then` is one dict,
+        # the plan prints it with its timeout, and the second link's own fallback is never read (never a third).
+        if not p["fallback"]["off"]:
+            nxt = _second_link(plan, reg, cname, fb, ready)
+            if nxt:
+                p["fallback"]["then"] = nxt
     return plan
+
+
+# R181 И-2: the one order in which a fallback takes a second step - (primary, first link); the second link is PAID.
+SECOND_LINK_ORDER = ("subscription", "free")
+
+
+def same_model(reg, a, b):
+    """R181 И-2: True when channel `b` carries channel `a`'s model - `a`'s cascade group (same_voice), or `b` declares
+    `same_model_as` naming `a` or a member of `a`'s group: an operator's own transport of the model that the shipped
+    cascades cannot list (his DeepSeek API copy through opencode, overlay-only)."""
+    if b in same_voice(reg, a):
+        return True
+    decl = ((reg.get("channels") or {}).get(b) or {}).get("same_model_as")
+    return bool(decl) and (decl == a or decl in same_voice(reg, a))
+
+
+def _second_link(plan, reg, cname, fb, ready):
+    """R181 И-2: {"channel": the second link, "off": None | reason} for `cname`, whose first link `fb` is armed, or None
+    when the order is not the operator's (SECOND_LINK_ORDER, then a paid channel) or a step changes the model."""
+    chans = reg.get("channels") or {}
+    fb2 = (chans.get(fb) or {}).get("fallback")
+
+    def cost(n):
+        return (chans.get(n) or {}).get("cost")
+    if (not fb2 or (cost(cname), cost(fb)) != SECOND_LINK_ORDER or not cost(fb2) or cost(fb2) in _NON_PAID_COSTS
+            or not same_model(reg, cname, fb) or not same_model(reg, fb, fb2)):
+        return None
+    if fb2 == cname:
+        return {"channel": fb2, "off": "it is the channel the first link stands in for (no cycle)"}
+    return {"channel": fb2, "off": _fallback_off(plan, reg, cname, fb2, ready)}
 
 
 def _fallback_off(plan, reg, cname, fb, ready):
@@ -3138,11 +3173,54 @@ def apply_quota_skip(plan, reg, skips, named=()):
         fg = quota_group(reg, fbk["channel"]) if fbk else None
         if p.get("enabled") and fbk and not fbk.get("off") and fg in skips:
             fbk["off"] = "it draws on quota group «%s», refused earlier today until 00:00 UTC" % fg
+        nxt = (fbk or {}).get("then")                                   # R181 И-2: the second link, the same rule
+        ng = quota_group(reg, nxt["channel"]) if isinstance(nxt, dict) and nxt.get("channel") else None
+        if p.get("enabled") and ng in skips and not nxt.get("off"):
+            nxt["off"] = "it draws on quota group «%s», refused earlier today until 00:00 UTC" % ng
+    return plan
+
+
+def system_preset_name(system):
+    """R180: the --system PRESET NAME a run carries - the file name without its extension, lower-case, however it was
+    spelled ('legal-research', 'systems/legal-research.md', an absolute Windows or POSIX path); None for no system."""
+    if not system:
+        return None
+    base = str(system).replace(chr(92), "/").rstrip("/").rsplit("/", 1)[-1]
+    name = os.path.splitext(base)[0].strip().lower()
+    return name or None
+
+
+def apply_system_gate(plan, reg, system, named):
+    """
+    R180 (2026-11-13): a channel with `only_with_system` (a list of --system preset names) is a voice for ONE kind of
+    question. The operator 2026-11-09: «Добавить модель https://openrouter.ai/z-ai/glm-5.3-flashx-legal если вопрос
+    юридический» - GLM 5.3 FlashX Legal. The harness already marks a legal question: every legal brief runs with
+    `--system legal-research` (the source-verification framing, SKILL.md §7.0), so the gate keys on the run's system
+    preset name. Off in every other run, with the reason in its plan line; a channel named by its own name runs anyway
+    (a name is an instruction - the explicit_only rule); a group word does not start it. Called beside the
+    explicit_only gate: after every selection path, before the cascade and the fallbacks.
+    """
+    chans = reg.get("channels") or {}
+    sysid = system_preset_name(system)
+    for c, p in plan.items():
+        want = (chans.get(c) or {}).get("only_with_system")
+        if not want or not p.get("enabled"):
+            continue
+        want = [str(w).strip().lower() for w in (want if isinstance(want, list) else [want])]
+        if sysid in want:
+            p["why"].append("only_with_system: this run's --system is %s" % sysid)
+        elif c in (named or ()):
+            p["why"].append("only_with_system: named in this run, so it runs without --system %s" % " / ".join(want))
+        else:
+            p["enabled"] = False
+            p["why"].append("only_with_system: runs only in a run with --system %s (%s); name %s to run it anyway"
+                            % (" / ".join(want), ("this run's system is %s" % sysid) if sysid else "this run has none",
+                               c))
     return plan
 
 
 def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=None,
-            ready=None):
+            ready=None, system=None):
     # Before anything else: the reserved name points OUTSIDE this registry, so its
     # answer must not depend on what the registry contains (or whether it has panels).
     if panel == PREMIUM_PANEL_NAME:
@@ -3152,6 +3230,7 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
     # route is re-scanned there rather than passed through, because extract_panel is about to
     # rewrite it and the panel word is not a channel name.
     named_directly = explicitly_named(reg, route=route, only=only, sets=sets)
+    named_by_name = set(named_directly)          # R180: the system gate counts names only, never a family word
     reg["_tier_asked"] = tier
     tier = canon_tier(reg, tier)
     reg["_tier_chosen"] = tier
@@ -3237,6 +3316,7 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
     named_directly = named_directly | family_absent_from_panel(plan, reg, route=route, only=only,
                                                                named=named_directly, ready=ready)
     plan = apply_explicit_only(plan, reg, named_directly)
+    plan = apply_system_gate(plan, reg, system, named_by_name)   # R180: a voice for one kind of question
     was_on = [c for c, p in plan.items() if p["enabled"]]
     plan = _twins_of_excluded(plan, reg, named_directly)      # R153 И-8: before the cascade picks the voices
     if was_on and not any(p["enabled"] for p in plan.values()):
@@ -3985,6 +4065,18 @@ def format_plan(plan, reg):
                             "bytes)" % (" or ".join(sib), SUBSTANTIAL_BYTES)
                             if sib else "- the same model as this channel, over another transport"
                             if c in _same else "- nothing else here carries that model"))
+            # R181 И-2: the second link (routing._second_link) - printed with its price word and its time, like the first
+            nxt = fbk.get("then") if isinstance(fbk.get("then"), dict) else None
+            if nxt and nxt.get("off"):
+                lines.append("           - second link %s: OFF in this run - %s" % (nxt["channel"], nxt["off"]))
+            elif nxt:
+                nslot = plan.get(nxt["channel"]) or {}
+                nreg = reg["channels"].get(nxt["channel"]) or {}
+                lines.append("           - second link: if %s fails too (no answer), %s (%s, PAID per call - %s) runs "
+                             "the same brief once more, after it (up to %s more) - the operator's order Go -> free -> "
+                             "paid API (2026-11-15); never a third"
+                             % (fbk["channel"], nxt["channel"], nslot.get("model_label") or nslot.get("model"),
+                                nreg.get("cost", "?"), nslot.get("timeout") or nreg.get("timeout") or "its own timeout"))
         # 🔴 THE PRICE LINE USED TO KEY ON THE WORD `expensive`, WHICH ONLY CODEX CARRIES - so the
         # channel that actually ran away printed nothing at all. Measured 2026-08-14: orgpt56terrapro
         # is tagged `metered`, the same word as a $0.10 channel, and billed $12.08 in one round while

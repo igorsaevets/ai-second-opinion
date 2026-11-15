@@ -2,6 +2,21 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.121.0 — 2026-11-15
+
+GLM 5.3 Flash joins the cheap panel, and three Flash models run on the OpenCode Go plan first, then free, then paid.
+
+- **GLM 5.3 Flash (Z.ai) is a cheap-panel voice** (8 models, was 7): the OpenCode Go plan copy where `opencode models` lists `opencode-go/glm-5.3-flash`, else opencode's free copy, else NVIDIA's free endpoint with `NVIDIA_NIM_API_KEY`, else OpenRouter, paid (`orglm53flash`, $0.0399 / $0.0784 per 1M on 2026-11-15, a $0.50 ceiling per run). "CLI only" 7 (was 5), the standard panel 14 (was 13), "CLI only, standard panel" 9 (was 7). Where opencode has no Go plan, MiMo v2.6 Flash and GLM 5.3 Flash are the two voices on opencode's free daily allowance.
+- **The OpenCode Go plan first, then free, then paid** for MiMo v2.6 Flash, DeepSeek V4.1 Flash and GLM 5.3 Flash (the owner's order of 2026-11-15). MiMo and DeepSeek gained their Go copies as the first transport (`ocmimo26flashgo`, `ocdeepseekv41flashgo`; each ready only where `opencode models` lists it). A free voice that ends without an answer is answered once by the paid OpenRouter copy of the same model (1.120.1: the Go copy for MiMo, GLM 5.3 Flash on NVIDIA for DeepSeek). On a Go plan the free copy answers first and the paid copy is the **second link**, printed in the plan («second link: … PAID per call - metered … never a third»): one more step, only in this order and only for one model. Each step runs only after the one before it ran and ended with no answer.
+- **New: DeepSeek V4.1 Flash through OpenRouter** (`ordeepseekv41flash`, paid, $0.0507 / $0.2028 per 1M on 2026-11-15, xhigh, a $0.50 ceiling per run): the voice where opencode is missing and there is no NVIDIA key, and the paid step after NVIDIA's free copy.
+- **"deepseek flash" / «дипсик флеш» names the DeepSeek V4.1 Flash voice** (new group `deepseekflash`; 1.120.1 refused it), and **"glm 5.3 flash" / «глм 5.3 флеш» names the GLM voice** on the first transport your machine has (new group `glmflash`; 1.120.1 always started opencode's free copy, also where opencode is missing).
+- **"CLI only" can reach an API call through a fallback**: DeepSeek's NVIDIA copy, or a paid OpenRouter copy, printed PAID in the plan. Add `--no-fallback` for a run with no fallback and no paid request.
+- Known gaps: on a machine with opencode but neither the Go plan nor an NVIDIA key the cheap panel has no DeepSeek voice (the paid copy stands in only where opencode is missing; name `ordeepseekv41flash` to pay for it), and where the free step cannot run (no NVIDIA key, or the free allowance refused earlier today) nothing runs after a Go voice that ends without an answer.
+- The plugin's homepage is https://secondai.net (plugin.json and the marketplace entry; a fork's build keeps its own repository URL), and the marketplace has a description.
+- Prices re-read from OpenRouter on 2026-11-15 in the standard panel's table: Kimi K3 $0.192 / $16.00, DeepSeek V4 Pro $0.90 / $1.50, GLM 5.3 $0.084 / $3.60 per 1M (the per-run figures were measured at the earlier prices).
+- GLM 5.3 FlashX Legal (it runs only with `--system legal-research`) and Hy4 are in the registry for the maintainer's machine and ship switched off.
+- New selftest suites `suite_r180_new_voices`, `suite_r181_go_first`, `suite_r181_i2_second_link`; 24 older checks re-stated in the world each was written for.
+
 ## 1.120.1 — 2026-11-13
 
 Four route phrases now name the model they spell, and a Codex pin to GPT-5.6 Sol may run at max.
@@ -284,22 +299,6 @@ Muse Wonder starts only when you name it. Measured on 1.112.6: a standard panel 
 - **The «Muse Code is not signed in» hint names `--only wonder10` / `--only orwonder`.** It sent you to `--skip`, which since this version starts no other Wonder.
 - **The way back:** `{"channels": {"mcwonder10cont": {"explicit_only": false}}}` in `~/.claude/model-orchestration.local.json` seats Wonder in the standard panel again, on the subscription.
 
-## 1.112.6 — 2026-10-17
-
-Route fixes from the review panel on 1.112.5. Each sentence below was run on 1.112.5 with a paid channel in the slot it turns off, and started a channel the speaker had excluded or never named.
-
-- **«X вместо A и B» replaces both.** «grokbuild вместо kimik3 и codex» started codex; on the standard panel «grokbuild вместо codex и kimik3» ran the paid kimik3. An infix «вместо» joins only the names linked to it by «и» / «and» / a comma; after a comma, «вместо» starts a new clause.
-- **The English word «or» no longer selects a channel group.** «only codex or grokbuild» started three paid OpenRouter channels: «or» was an alias of the `openrouter` group. A function word (or, and, the, no, not, и, а, но, или, в, на, с, …) never names a channel or a group.
-- **Negations after the name, far from it, or in words the grammar did not list are caught.** «codex не нужен, возьми grokbuild», «добавь grokbuild, codex не трогай», «а codex пропусти», «codex в сторону», «запрети codex», «никакого codex», «за исключением codex», «don't ever use codex», «don't you dare use codex», «codex запрещён», «use neither codex nor grokbuild» and «не‐используй codex» (a Unicode hyphen) all started codex. «за исключением», «исключая», «excluding», «пропусти», «не нужен» are exclusions now; for the other shapes the second check reads the whole clause, also the words after the name, and stops the run with the way to write it. That check still never changes a plan.
-- **A replaced channel takes every paid twin of its group with it, also the ones before it.** «grokbuild вместо orspark13cont» with the free Spark not ready ran the paid spark13cont; «grokbuild вместо orwonder, не используй mcwonder10cont» ran wonder10. Twins whose cost is `mid`, `cheap`, `metered` or `expensive` count as paid, so «codex вместо orgemini38flash» also leaves agy38flash off.
-- **A free channel you name that is not ready here STOPS the run** instead of handing its voice to its paid twin with a PAID line («добавь kimik3free» without its key ran the paid kimik3). Name the paid channel to pay for it, or leave the free one out.
-- **«why not skip codex» excludes codex.** 1.112.5 added it: the double-negation rule read «not skip» as «use». «почему бы не» the same.
-- **«только не: codex», «only not: codex», «только не? codex» exclude codex.** Punctuation after «не» made 1.112.5 run codex ALONE.
-- **Every n't form excludes:** «shan't use codex», «hasn't», «mightn't», «ain't», «isn't to use codex» added codex.
-- **«no one but X», «nobody but X» and «ничего — кроме X» (with a dash) mean only X.** They ran the panel without X (the paid kimik3 then carried the Kimi voice). «without excluding X» keeps X (it dropped the free Spark and ran the paid spark13cont).
-- **No more false stops on** «не исключительно codex, но и grokbuild», «добавь grokbuild и не забудь codex», «don't exclude the codex»: 1.112.5 refused them, they run as written.
-- **A run-time fallback whose model the route replaced stays off.** «grokbuild вместо ocmimo26flashfree» left the metered mimov26flash armed as mimov26pro's fallback, so a mimov26pro failure would have brought the replaced model back, paid. The plan prints why it is off.
-
 ## Older releases
 
-167 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+168 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).

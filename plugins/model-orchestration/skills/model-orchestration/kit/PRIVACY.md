@@ -42,7 +42,10 @@ before anything is sent.** Both are free.
 | `MODEL_API_KEY` | Meta, over HTTPS |
 | the Codex CLI | OpenAI, through the CLI you already have installed |
 | the Antigravity CLI | Google, through the CLI you already have installed |
-| `OPENROUTER_API_KEY` | **OpenRouter, which forwards to the model's owner** — which company depends on the channel's model id (Meta, Moonshot, Alibaba, Google and others); the resolved plan names the one that applies before anything is sent |
+| the Grok Build CLI | xAI, through the CLI you already have installed |
+| the opencode CLI | **opencode, which forwards to the model's provider**: its free models run on opencode Zen, `opencode-go/` models on the OpenCode Go plan; the plan names the channel and its model id before anything is sent |
+| `OPENROUTER_API_KEY` | **OpenRouter, which forwards to the model's owner** — which company depends on the channel's model id (Meta, Moonshot, Alibaba, Google, Xiaomi, Z.ai, DeepSeek and others); the resolved plan names the one that applies before anything is sent |
+| `NVIDIA_NIM_API_KEY` | NVIDIA, over HTTPS (its free API endpoint) |
 | `GEMINI_API_KEY` | Google, directly through their API |
 | `XAI_API_KEY` | xAI, directly through their API |
 | `MIMO_API_KEY` | Xiaomi, directly through their API |
@@ -50,6 +53,11 @@ before anything is sent.** Both are free.
 Note the OpenRouter row carefully: it is a **reseller**, so enabling one key can route your brief to
 any of several separate companies. Which one is decided by the channel's model id, and it is
 printed in the plan.
+
+Since 1.121.0 one model can reach up to three of these in one run: MiMo v2.6 Flash, DeepSeek V4.1 Flash and
+GLM 5.3 Flash run on the OpenCode Go plan first, then on a free copy (opencode Zen, or NVIDIA), then on a paid
+copy through OpenRouter (`ormimo26flash`, `ordeepseekv41flash`, `orglm53flash`) - each step only after the one
+before it ended with no answer. The plan prints every step before anything is sent.
 
 Each vendor's own privacy policy and retention rules apply to what you send them. This tool cannot
 and does not change them. **Once a brief has been sent it cannot be recalled.** If you enable no

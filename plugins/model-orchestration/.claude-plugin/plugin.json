@@ -1,11 +1,11 @@
 {
   "name": "model-orchestration",
   "description": "Run one brief past every configured external reviewer model in parallel - the API and CLI channels declared in channels.json - and verify each one actually did the work.",
-  "version": "1.120.1",
+  "version": "1.121.0",
   "author": {
     "name": "igorsaevets"
   },
-  "homepage": "https://github.com/igorsaevets/ai-second-opinion",
+  "homepage": "https://secondai.net",
   "repository": "https://github.com/igorsaevets/ai-second-opinion",
   "license": "MIT",
   "keywords": [

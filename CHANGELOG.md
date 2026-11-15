@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.121.0 — 2026-11-15
+
+GLM 5.3 Flash joins the cheap panel, and three Flash models run on the OpenCode Go plan first, then free, then paid.
+
+- **GLM 5.3 Flash (Z.ai) is a cheap-panel voice** (8 models, was 7): the OpenCode Go plan copy where `opencode models` lists `opencode-go/glm-5.3-flash`, else opencode's free copy, else NVIDIA's free endpoint with `NVIDIA_NIM_API_KEY`, else OpenRouter, paid (`orglm53flash`, $0.0399 / $0.0784 per 1M on 2026-11-15, a $0.50 ceiling per run). "CLI only" 7 (was 5), the standard panel 14 (was 13), "CLI only, standard panel" 9 (was 7). Where opencode has no Go plan, MiMo v2.6 Flash and GLM 5.3 Flash are the two voices on opencode's free daily allowance.
+- **The OpenCode Go plan first, then free, then paid** for MiMo v2.6 Flash, DeepSeek V4.1 Flash and GLM 5.3 Flash (the owner's order of 2026-11-15). MiMo and DeepSeek gained their Go copies as the first transport (`ocmimo26flashgo`, `ocdeepseekv41flashgo`; each ready only where `opencode models` lists it). A free voice that ends without an answer is answered once by the paid OpenRouter copy of the same model (1.120.1: the Go copy for MiMo, GLM 5.3 Flash on NVIDIA for DeepSeek). On a Go plan the free copy answers first and the paid copy is the **second link**, printed in the plan («second link: … PAID per call - metered … never a third»): one more step, only in this order and only for one model. Each step runs only after the one before it ran and ended with no answer.
+- **New: DeepSeek V4.1 Flash through OpenRouter** (`ordeepseekv41flash`, paid, $0.0507 / $0.2028 per 1M on 2026-11-15, xhigh, a $0.50 ceiling per run): the voice where opencode is missing and there is no NVIDIA key, and the paid step after NVIDIA's free copy.
+- **"deepseek flash" / «дипсик флеш» names the DeepSeek V4.1 Flash voice** (new group `deepseekflash`; 1.120.1 refused it), and **"glm 5.3 flash" / «глм 5.3 флеш» names the GLM voice** on the first transport your machine has (new group `glmflash`; 1.120.1 always started opencode's free copy, also where opencode is missing).
+- **"CLI only" can reach an API call through a fallback**: DeepSeek's NVIDIA copy, or a paid OpenRouter copy, printed PAID in the plan. Add `--no-fallback` for a run with no fallback and no paid request.
+- Known gaps: on a machine with opencode but neither the Go plan nor an NVIDIA key the cheap panel has no DeepSeek voice (the paid copy stands in only where opencode is missing; name `ordeepseekv41flash` to pay for it), and where the free step cannot run (no NVIDIA key, or the free allowance refused earlier today) nothing runs after a Go voice that ends without an answer.
+- The plugin's homepage is https://secondai.net (plugin.json and the marketplace entry; a fork's build keeps its own repository URL), and the marketplace has a description.
+- Prices re-read from OpenRouter on 2026-11-15 in the standard panel's table: Kimi K3 $0.192 / $16.00, DeepSeek V4 Pro $0.90 / $1.50, GLM 5.3 $0.084 / $3.60 per 1M (the per-run figures were measured at the earlier prices).
+- GLM 5.3 FlashX Legal (it runs only with `--system legal-research`) and Hy4 are in the registry for the maintainer's machine and ship switched off.
+- New selftest suites `suite_r180_new_voices`, `suite_r181_go_first`, `suite_r181_i2_second_link`; 24 older checks re-stated in the world each was written for.
+
 ## 1.120.1 — 2026-11-13
 
 Four route phrases now name the model they spell, and a Codex pin to GPT-5.6 Sol may run at max.

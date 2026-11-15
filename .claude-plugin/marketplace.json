@@ -4,12 +4,14 @@
     "name": "igorsaevets",
     "url": "https://github.com/igorsaevets"
   },
+  "description": "Run one brief past every configured external reviewer model in parallel - the API and CLI channels declared in channels.json - and verify each one actually did the work.",
   "plugins": [
     {
       "name": "model-orchestration",
       "source": "./plugins/model-orchestration",
       "description": "Run one brief past every configured external reviewer model in parallel - the API and CLI channels declared in channels.json - and verify each one actually did the work.",
-      "version": "1.120.1"
+      "version": "1.121.0",
+      "homepage": "https://secondai.net"
     }
   ]
 }
