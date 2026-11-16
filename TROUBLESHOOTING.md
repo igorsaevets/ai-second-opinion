@@ -190,7 +190,10 @@ The free allowance that MiMo v2.6 Flash, GLM 5.3 Flash and DeepSeek V4.1 Flash s
 earlier this UTC day: a run on this machine got `provider.quota`. The allowance is counted per
 network address, so runs from other machines on your network spend it too. Every run until 00:00
 UTC would be refused in seconds, so the plan leaves them out and says how long is left. Nothing is
-wrong with your install, and nothing is billed. To try anyway, name the channel - its name, an
+wrong with your install. Since 1.122.0 each of those voices goes on to the next transport your
+machine has: GLM to NVIDIA's free copy with `NVIDIA_NIM_API_KEY`, else MiMo and GLM to their paid
+OpenRouter copies where `OPENROUTER_API_KEY` is set (printed PAID in the plan; 1.121.0 left the
+voices out); `--skip ormimo26flash orglm53flash ordeepseekv41flash` keeps such a day free. To try anyway, name the channel - its name, an
 alias, its model id or a `--set` pin: `--only ocmimo26flashfree` or "only ocmimo26flashfree"; a
 group word such as "only opencode" does not count. To forget the refusal, delete
 `~/.claude/model-orchestration.quota-state.json`; the next run starts the voice again (and

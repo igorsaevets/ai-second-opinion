@@ -2873,7 +2873,11 @@ def _apply_cascade(plan, reg, ready=None, named=None):
                 verdict[c] = True if ready is None else ready(c)
             except Exception:                            # noqa: BLE001 - see the docstring
                 verdict[c] = True
-        winner = next((c for c in members if verdict[c] is True), members[0])
+        winner = next((c for c in members if verdict[c] is True), None)
+        if winner is None:
+            # R181 И-4: nothing is ready - a member refused only TODAY keeps the voice, so apply_quota_skip leaves it out
+            # with its [skip] line until 00:00 UTC (as before R181 И-4), rather than a member that would fail at start
+            winner = next((c for c in members if isinstance(verdict[c], _RefusedToday)), members[0])
         unready = [c for c in members[:members.index(winner)] if verdict[c] is not True]
         chans = reg.get("channels") or {}
         lacks = "; ".join("%s: %s" % (c, verdict[c] if isinstance(verdict[c], str) and verdict[c]
@@ -2881,8 +2885,10 @@ def _apply_cascade(plan, reg, ready=None, named=None):
         if verdict[winner] is not True:
             # R168 И-3 (D4): nothing in this group can run here - the voice that runs says what each member lacks, so
             # the plan names what would bring the voice back (a kit install without opencode or a key).
-            plan[winner]["why"].append("cascade: no member of this group is ready here (%s); %s runs first so that "
-                                       "its preflight says it" % (lacks, winner))
+            plan[winner]["why"].append(("cascade: no member of this group can run here today (%s); %s keeps this "
+                                        "voice for the day's refusal rule" if isinstance(verdict[winner], _RefusedToday)
+                                        else "cascade: no member of this group is ready here (%s); %s runs first so "
+                                        "that its preflight says it") % (lacks, winner))
         if unready and (chans.get(winner) or {}).get("cost") not in _NON_PAID_COSTS:
             # R153 И-11: «добавь kimik3free» where it is not ready ran the paid kimik3 and no line said PAID (r153i9
             # MiMo Pro P4; old). 🔴 R153 И-12 (r153i11 agy AB): a line is not a choice - the family word already
@@ -2927,6 +2933,17 @@ def _twin_only_gate(plan, reg, ready=None, named=None):
     free (or subscription) member before it in its cascade group can run on this machine - whatever this run selects,
     excludes or refuses - or when it is named by its own name. Without `ready` (routing.py alone, the selftest tables)
     every member counts as able to run, so the paid copy stays off.
+
+    🔴 R181 И-4 (2026-11-15; the operator's order «по подписке opencode go, а если не работает подписка, то fallback на
+    free, а если не работает free, то оплата по api» and his word of the same day «модели очень дешёвые, ничего
+    страшного»): two members no longer count as able to run. (1) A member SWITCHED OFF in this install (`enabled`
+    false, past `valid_through`, or `explicit_only`) that this run does not name never carries the voice - kit 1.121.0
+    counted ocdeepseekv41flashfree (off since the operator's 2026-10-30 word) on every machine with opencode, so a
+    machine with neither the Go plan nor an NVIDIA key had NO DeepSeek voice (kit world W3). (2) A member whose free
+    allowance was REFUSED earlier today is not ready today (resolve folds `quota_skips` into `ready`), so on a refused
+    day the paid copy carries the voice - in round the refusal already started it (R172 / R181 И-2), and the next round
+    of the same day used to lose the voice. KEPT: an exclusion or a selection of this run is not «cannot run» - with a
+    free twin that can run here, `--skip <it>`, `--only openrouter` or «без opencode» still never start the paid copy.
     """
     chans = reg.get("channels") or {}
     for group in reg.get("_cascade_groups") or []:
@@ -2937,8 +2954,11 @@ def _twin_only_gate(plan, reg, ready=None, named=None):
                     or (chans.get(c) or {}).get("twin_only") is not True):
                 continue
             free = [m for m in group[:group.index(c)] if (chans.get(m) or {}).get("cost") in _NON_PAID_COSTS]
+            off_here = [m for m in free if m not in (named or ()) and not _switched_on(chans.get(m) or {})]
             can = []
             for m in free:
+                if m in off_here:                        # R181 И-4 (1): switched off here, never this voice
+                    continue
                 try:
                     v = True if ready is None else ready(m)
                 except Exception:                        # noqa: BLE001 - a bad predicate keeps the paid copy off
@@ -2949,9 +2969,49 @@ def _twin_only_gate(plan, reg, ready=None, named=None):
                 plan[c]["enabled"] = False
                 plan[c]["why"].append(
                     "twin_only: %s is the PAID copy for a machine where %s cannot run; %s can run here, so %s does not "
-                    "take this voice when that one is left out of the run (excluded, not selected or refused today) - "
-                    "name %s to pay for it" % (c, " / ".join(free), can[0], c, c))
+                    "take this voice when that one is left out of the run (excluded or not selected) - "
+                    "name %s to pay for it" % (c, " / ".join(m for m in free if m not in off_here), can[0], c, c))
+            elif off_here:
+                plan[c]["why"].append(
+                    "twin_only: %s %s switched off in this install, so %s does not hold this PAID copy back (R181 "
+                    "И-4)" % (" / ".join(off_here), "is" if len(off_here) == 1 else "are",
+                              "it" if len(off_here) == 1 else "they"))
     return plan
+
+
+def _switched_on(ch):
+    """R181 И-4: True when this install lets the channel run without its own name - `enabled`, not past
+    `valid_through`, not `explicit_only`. A member that fails this carries no voice unless a run names it."""
+    return bool(ch.get("enabled", True)) and not _valid_through_expired(ch) and not ch.get("explicit_only")
+
+
+class _RefusedToday(str):
+    """R181 И-4: the `ready` verdict of a member whose quota group was refused earlier today - a reason like any other,
+    which _apply_cascade tells from a missing key or CLI by its TYPE (a member that can run tomorrow)."""
+
+
+def _quota_ready(ready, reg, skips, named):
+    """R181 И-4 (2026-11-15): the cascade's `ready` with today's quota refusals folded in (`skips` from quota_skips):
+    a member of a group refused earlier today is not ready today unless this run names it (R157: a name still starts
+    it). The cascade then hands the voice to the next transport of the same model - a free one first, else the paid
+    copy, which _twin_only_gate now lets through - and a Go voice whose free fallback was refused goes on to its paid
+    step (apply_fallback). The same verdict the round itself reaches: a refusal in round starts the paid copy at once
+    (R172 / R181 И-2), and until 1.121.0 the next round of that day had no voice of the model at all. Without `skips`
+    the predicate is `ready` itself."""
+    if not skips:
+        return ready
+
+    def _r(c):
+        try:
+            base = True if ready is None else ready(c)
+        except Exception:                                # noqa: BLE001 - the cascade's rule: a raise counts as ready
+            base = True
+        g = quota_group(reg, c)
+        if base is True and g in skips and c not in (named or ()):     # its CLI and key are here; only today refuses
+            return _RefusedToday("its quota group «%s» was refused earlier today (provider.quota), until 00:00 UTC; "
+                                 "name it to run it anyway" % g)
+        return base
+    return _r
 
 
 def same_voice(reg, name):
@@ -3024,6 +3084,18 @@ def apply_fallback(plan, reg, ready=None):
             nxt = _second_link(plan, reg, cname, fb, ready)
             if nxt:
                 p["fallback"]["then"] = nxt
+        elif not _fallback_off(plan, reg, cname, fb, None):
+            # R181 И-4 (2026-11-15): the first link is off ONLY because it cannot run on this machine (its key or CLI
+            # is missing, or its free allowance was refused earlier today) - the operator's order goes on to its paid
+            # step («если не работает free, то оплата по api»; «модели очень дешёвые, ничего страшного»). Kit 1.121.0
+            # considered a second link only after its first link RAN, so nothing followed a failed Go voice on a
+            # machine without an NVIDIA key (W7) or on a refused day. The paid copy becomes the fallback itself,
+            # printed with the skipped step before anything is spent; still never a third. A first link the human
+            # excluded, or one that runs as its own voice, keeps its OFF line (no promotion).
+            nxt = _second_link(plan, reg, cname, fb, ready)
+            if nxt and not nxt.get("off"):
+                p["fallback"] = {"channel": nxt["channel"], "off": None,
+                                 "skipped": {"channel": fb, "why": p["fallback"]["off"]}}
     return plan
 
 
@@ -3220,7 +3292,7 @@ def apply_system_gate(plan, reg, system, named):
 
 
 def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=None,
-            ready=None, system=None):
+            ready=None, system=None, quota_skips=None):
     # Before anything else: the reserved name points OUTSIDE this registry, so its
     # answer must not depend on what the registry contains (or whether it has panels).
     if panel == PREMIUM_PANEL_NAME:
@@ -3231,6 +3303,7 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
     # rewrite it and the panel word is not a channel name.
     named_directly = explicitly_named(reg, route=route, only=only, sets=sets)
     named_by_name = set(named_directly)          # R180: the system gate counts names only, never a family word
+    ready = _quota_ready(ready, reg, quota_skips, named_by_name)   # R181 И-4: a group refused today is not ready today
     reg["_tier_asked"] = tier
     tier = canon_tier(reg, tier)
     reg["_tier_chosen"] = tier
@@ -3700,9 +3773,12 @@ def _web_line(p):
                 "domain, resolved to real URLs by the citation audit"
                 % ", ".join(p.get("tools") or ["google_search", "url_context"]))
     if kind == "xai":
+        # R182 И-2: the bound on the vendor's loop is printed with the plan, before anything is spent.
+        turns = ("at most %d turns (max_turns)" % int(p["max_turns"]) if p.get("max_turns")
+                 else "as many turns as the server's own unpublished cap allows")
         return ("web: xAI Agent Tools (%s) on /v1/responses - the vendor runs the loop and OPENS "
-                "pages itself; chat/completions has had no search since live_search went 410"
-                % ", ".join(p.get("tools") or ["web_search"]))
+                "pages itself, %s; chat/completions has had no search since live_search went 410"
+                % (", ".join(p.get("tools") or ["web_search"]), turns))
     if kind == "http":
         return ("web: the vendor's web_search tool is granted on every call - but a grant is "
                 "PERMISSION, not instruction; the search count in the run log is the only proof "
@@ -4030,6 +4106,10 @@ def format_plan(plan, reg):
             lines.append("           - fallback %s: OFF in this run - %s"
                          % (fbk["channel"], fbk["off"]))
         elif fbk:
+            if isinstance(fbk.get("skipped"), dict):   # R181 И-4: the free step cannot run here, the paid one stands in
+                lines.append("           - %s, so the free step is skipped and this channel's fallback is the PAID "
+                             "copy directly - the operator's order Go -> free -> paid API (2026-11-15)"
+                             % (fbk["skipped"].get("why") or "%s cannot run here" % fbk["skipped"].get("channel")))
             fslot = plan.get(fbk["channel"]) or {}
             # R163 И-3 (A2, panel r163): the fallback's same-model siblings OTHER than this channel. When this channel
             # is one of them (Step 5 on NVIDIA with its Go copy as the fallback), the line says so, instead of R163's

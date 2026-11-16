@@ -8178,6 +8178,9 @@ def main():
                   suite_r180_new_voices,
                   suite_r181_go_first,
                   suite_r181_i2_second_link,
+                  suite_r181_i4_paid_where_free_cannot,
+                  suite_r182_grok420_cheap,
+                  suite_r182_i2_grok420_bounds,
                   suite_r168_i3_free_transports,
                   suite_r168_i4_panel_fixes,
                   suite_r169_agy_argon,
@@ -17696,15 +17699,16 @@ def suite_r155_i3_wonder_by_name():
     # the set of one-voice words is a PRODUCT pin on purpose: a new member means a new word that starts gated channels
     check(all((chs.get(c) or {}).get("explicit_only") is True for c in W)
           and ov.get("wonder") == list(W) and "kimi" in ov
-          and set(ov) <= {"wonder", "kimi", "mimoflash", "glmflash", "deepseekflash"}
+          and set(ov) <= {"wonder", "kimi", "mimoflash", "glmflash", "deepseekflash", "grok420voice"}
           and not any((chs.get(c) or {}).get("explicit_only") for c in ov.get("mimoflash") or [])
           and not any((chs.get(c) or {}).get("explicit_only") for c in ov.get("glmflash") or [])
           and not any((chs.get(c) or {}).get("explicit_only") for c in ov.get("deepseekflash") or [])
+          and not any((chs.get(c) or {}).get("explicit_only") for c in ov.get("grok420voice") or [])
           and "wonder 1.0" in ali and "вондер 1.0" in ali and "wonder 1.0" not in mal and "muse-wonder-1.0" in mal,
           "R155 И-3 (a) the Wonder channels (four since R164) are explicit_only; one-voice groups = wonder + kimi + "
           "mimoflash (R178: the MiMo Flash voice, no explicit_only member, so it opens no gated channel) + glmflash "
           "(R180 И-2: the GLM 5.3 Flash voice, the same guard) + deepseekflash (R181: the DeepSeek V4.1 Flash voice, "
-          "the same guard); «wonder 1.0» "
+          "the same guard) + grok420voice (R182: the Grok 4.20 Reasoning voice, the same guard); «wonder 1.0» "
           "is the model's word (the group), not wonder10's model alias",
           repr((sorted(ov), [c for c in W if not (chs.get(c) or {}).get("explicit_only")], mal)))
 
@@ -21382,6 +21386,380 @@ def suite_r181_i2_second_link():
           repr((t1, t2)))
 
 
+def suite_r181_i4_paid_where_free_cannot():
+    """R181 И-4 (2026-11-15). The operator's order «по подписке opencode go, а если не работает подписка, то fallback на
+    free, а если не работает free, то оплата по api» and his word «модели очень дешёвые, ничего страшного» reach the
+    paid step where the free step cannot run here. [fix] = fails on the 1.121.0 code; [guard] = holds before and after.
+    (a) W3 (opencode without Go, OpenRouter, no NVIDIA key): a DeepSeek V4.1 Flash voice - the paid copy;
+    (b) W7 (Go, no NVIDIA key): the Go DeepSeek voice's fallback is the paid copy directly, printed with the skipped
+        free step; run_fallbacks runs it once;
+    (c) a day opencode's free allowance was refused: the next transport carries the voice (NVIDIA free first, else the
+        paid copy), a Go voice's fallback goes on to its paid step; orchestrate passes the refusals to resolve;
+    (d) KEPT: R168 И-4 (an exclusion or a selection never starts the paid copy while its free twin can run here), R157
+        (a refused channel named in the run still starts), 1.121.0's lines where nothing can run at all.
+    """
+    import copy as _copy
+    import datetime as _dt
+    import inspect as _insp
+    import routing as rt
+    import orchestrate as o
+    section("R181 И-4: the paid step where the free step cannot run here (switched off, no key, refused today)")
+    reg = rt.load_registry(overlay=False)
+    for _c in reg["channels"].values():                    # the kit's shape: `local` channels ship off
+        if isinstance(_c, dict) and _c.get("distribution") == "local":
+            _c["enabled"] = False
+    ch = reg["channels"]
+    now = _dt.datetime.now(_dt.timezone.utc)
+    sk = rt.quota_skips({"opencode-free": {"date": now.strftime("%Y%m%d"), "at": "00:01:00Z",
+                                           "channel": "ocmimo26flashfree"}}, now)
+    has_q = "quota_skips" in _insp.signature(rt.resolve).parameters
+
+    def world(go=True, nv=True, oc=True, orkey=True):
+        def ready(n):
+            c = ch.get(n) or {}
+            if str(c.get("model") or "").startswith("opencode-go/") and not (oc and go):
+                return "stub: the OpenCode Go plan does not list it"
+            if c.get("kind") == "opencode" and not oc:
+                return "stub: opencode is not installed"
+            if n.startswith("nv") and not nv:
+                return "stub: NVIDIA_NIM_API_KEY not set"
+            if c.get("kind") == "openrouter" and not orkey:
+                return "stub: OPENROUTER_API_KEY not set"
+            return True
+        return ready
+
+    def plan_of(ready, skips=None, **kw):
+        """orchestrate.main's order: resolve (with today's refusals where it takes them), then apply_quota_skip."""
+        r = _copy.deepcopy(reg)
+        kw.setdefault("panel", "cheap")
+        try:
+            p = (rt.resolve(r, tier="max", ready=ready, quota_skips=skips, **kw) if has_q
+                 else rt.resolve(r, tier="max", ready=ready, **kw))
+        except rt.RouteError as exc:
+            return {"_err": {"enabled": False, "why": [str(exc)]}}
+        return rt.apply_quota_skip(p, r, skips or {}, rt.explicitly_named(r, route=kw.get("route"),
+                                                                          only=kw.get("only"), sets=None))
+
+    def on(p):
+        return sorted(c for c, s in p.items() if (s or {}).get("enabled"))
+
+    def why(p, c):
+        return " ".join(str(w) for w in (p.get(c) or {}).get("why") or [])
+
+    w3 = world(go=False, nv=False)
+    p3 = plan_of(w3)
+    ds = [c for c in on(p3) if "deepseekv41flash" in c]
+    o3 = [on(plan_of(w3, only=["deepseek"])), on(plan_of(w3, route="только дипсик флеш"))]
+    check(ds == ["ordeepseekv41flash"] and "ocdeepseekv41flashfree is switched off" in why(p3, "ordeepseekv41flash")
+          and o3 == [["ordeepseekv41flash"], ["ordeepseekv41flash"]],
+          "[fix] (a) W3 (opencode without Go, OpenRouter, no NVIDIA key): DeepSeek V4.1 Flash's voice is the paid copy, "
+          "its plan line says the switched-off free copy does not hold it back; `--only deepseek` and «только дипсик "
+          "флеш» run it (1.121.0: no voice, RouteError «Run the free one»)", repr((ds, o3)))
+
+    p7 = plan_of(world(nv=False))
+    f7 = (p7.get("ocdeepseekv41flashgo") or {}).get("fallback") or {}
+    t7 = [ln.strip() for ln in rt.format_plan(p7, reg).splitlines() if "so the free step is skipped" in ln]
+    check(f7.get("channel") == "ordeepseekv41flash" and not f7.get("off") and "then" not in f7
+          and (f7.get("skipped") or {}).get("channel") == "nvdeepseekv41flash"
+          and len(t7) == 1 and "PAID" in t7[0] and "NVIDIA_NIM_API_KEY" in t7[0],
+          "[fix] (b) W7 (Go, no NVIDIA key): the Go DeepSeek voice's fallback is the paid copy directly, the plan prints "
+          "the skipped free step and its reason before the spend, never a third (1.121.0: first link OFF, nothing "
+          "after a failed Go voice)", repr((f7, t7[:1])))
+
+    dead = {"ok": False, "error": "TIMEOUT after 2400", "text": "", "warnings": []}
+    good = {"ok": True, "text": "x" * 4000, "bytes": 4000}
+    calls = []
+
+    def submit(ex, name):
+        calls.append(name)
+        return ex.submit(lambda: dict(good if name == "ordeepseekv41flash" else dead))
+    res = {"ocdeepseekv41flashgo": dict(dead)}
+    o.run_fallbacks(res, p7, reg, {"ocdeepseekv41flashgo"}, submit=submit, same_voice=rt.same_voice)
+    gn = res["ocdeepseekv41flashgo"].get("notes") or []
+    check(calls == ["ordeepseekv41flash"] and (res.get("ordeepseekv41flash") or {}).get("fallback_for")
+          == "ocdeepseekv41flashgo" and any("PAID step" in n for n in gn),
+          "[fix] (b2) run_fallbacks: the Go DeepSeek voice dies -> the paid copy runs ONCE; the Go record says the free "
+          "step was skipped", repr((calls, gn[-1:])))
+
+    w2 = world(go=False)
+    pr2 = plan_of(w2, sk)
+    on2 = on(pr2)
+    check("nvglm53flash" in on2 and "orglm53flash" not in on2 and "ormimo26flash" in on2
+          and "ocmimo26flashfree" not in on2 and "refused earlier today" in why(pr2, "ocmimo26flashfree"),
+          "[fix] (c1) refused day, W2 (opencode without Go, NVIDIA + OpenRouter keys): GLM 5.3 Flash goes to NVIDIA's "
+          "FREE copy, MiMo v2.6 Flash to its paid copy, the free copy's line names the refusal (1.121.0: neither voice)",
+          repr(on2))
+
+    pr1 = plan_of(world(), sk)
+    f1 = {g: (pr1.get(g) or {}).get("fallback") or {} for g in ("ocmimo26flashgo", "ocglm53flashgo",
+                                                                  "ocdeepseekv41flashgo")}
+    check(all(f1[g].get("channel") == paid and not f1[g].get("off") and (f1[g].get("skipped") or {}).get("channel")
+              == free for g, free, paid in (("ocmimo26flashgo", "ocmimo26flashfree", "ormimo26flash"),
+                                             ("ocglm53flashgo", "ocglm53flashfree", "orglm53flash")))
+          and f1["ocdeepseekv41flashgo"].get("channel") == "nvdeepseekv41flash"
+          and (f1["ocdeepseekv41flashgo"].get("then") or {}).get("channel") == "ordeepseekv41flash",
+          "[fix] (c2) refused day, every transport ready: the Go MiMo / GLM voices' fallback is their paid copy directly "
+          "(the refused free step skipped); DeepSeek keeps Go -> NVIDIA free -> paid (1.121.0: first link OFF)",
+          repr(f1))
+
+    src = open(o.__file__, encoding="utf-8").read()
+    i = src.find("plan = routing.resolve(reg, route=a.route")
+    check(i > 0 and "quota_skips=_qskips" in src[i:i + 400] and -1 < src.find("_qskips = routing.quota_skips(") < i,
+          "[fix] (c3) orchestrate.main reads today's refusals BEFORE resolve and passes them to it (the dispatcher's own "
+          "call, not a copy of it)", repr(src[i:i + 120] if i > 0 else "resolve call not found"))
+
+    check("ocmimo26flashfree" in on(plan_of(w2)) and "ormimo26flash" not in on(plan_of(w2))
+          and "ormimo26flash" not in on(plan_of(w2, skip=["ocmimo26flashfree"]))
+          and "ormimo26flash" not in on(plan_of(w2, only=["openrouter"])),
+          "[guard] (d1) R168 И-4 kept: where the free MiMo copy can run here, `--skip ocmimo26flashfree` and `--only "
+          "openrouter` never start its paid copy")
+    nm = plan_of(w2, sk, only=["ocmimo26flashfree"])
+    check(on(nm) == ["ocmimo26flashfree"],
+          "[guard] (d2) R157 kept: a refused free channel named in the run still starts; its paid copy does not",
+          repr(on(nm)))
+    p6 = plan_of(world(go=False, nv=False, orkey=False), sk)
+    p4 = plan_of(world(go=False, oc=False), sk, only=["cli"])
+    check(not any("mimo26flash" in c or "glm53flash" in c for c in on(p6))
+          and "refused earlier today" in why(p6, "ocmimo26flashfree")
+          and "ocmimo26flashgo" in on(p4) and "refused" not in why(p4, "ocmimo26flashfree"),
+          "[guard] (d3) nothing can run at all keeps 1.121.0's lines: opencode without Go or keys on a refused day leaves "
+          "the refused free copy out with its [skip] (no Go copy started to fail); with no opencode at all the reason "
+          "stays the missing CLI, never the refusal", repr((on(p6), on(p4))))
+
+
+def suite_r182_grok420_cheap():
+    """R182 (2026-11-15). The operator: «добавим вот эту модель в cheap панель не через cli, а по api ... В моей
+    локальной сделай через x напрямую, а в kit для всех через openrouter ... По дефолту включена». Grok 4.20 Reasoning
+    is ONE cheap-panel voice: grok420 (xAI direct, `local`) where it is on and ready, else orgrok420 (OpenRouter,
+    paid - the kit's). [fix] = fails on the registry before R182; [guard] = holds before and after.
+    (a) both channels ON in the cheap panel (grok420 ships OFF: `local`), orgrok420 with a spend guard;
+    (b) the cascade [grok420, orgrok420] and the one-voice group grok420voice (the model's words);
+    (c) the operator's shape: grok420 carries the voice, orgrok420 skipped by the cascade;
+    (d) the kit's shape: orgrok420 carries it, and the model's words in both languages reach it;
+    (e) KEPT: «только CLI» starts no API Grok (R116), «только грок 4.7» pins grok-4.7 on grokbuild.
+    """
+    import copy as _copy
+    import routing as rt
+    section("R182: Grok 4.20 Reasoning in the cheap panel - xAI direct where it can run, OpenRouter in the kit")
+    base = rt.load_registry(overlay=False)
+    chs = base["channels"]
+    shipped = os.path.isfile(os.path.join(HERE, "VERSION"))
+    g, orc = chs.get("grok420") or {}, chs.get("orgrok420") or {}
+    check(orc.get("enabled") is True and orc.get("panel") == "cheap" and orc.get("kind") == "openrouter"
+          and (orc.get("spend_guard") or {}).get("max_usd_per_review") == 2.0,
+          "[fix] (a) orgrok420 (OpenRouter) is ON in the cheap panel with a $2.00 spend guard - the kit's Grok 4.20 "
+          "voice", repr((orc.get("enabled"), orc.get("panel"), orc.get("spend_guard"))))
+    check(g.get("distribution") == "local" and g.get("kind") == "xai" and g.get("panel") == "cheap"
+          and g.get("enabled") == (not shipped),
+          "[fix] (a) grok420 (xAI direct) is ON in the source and ships OFF (`local`) - this is the %s tree"
+          % ("shipped" if shipped else "source"), repr((g.get("enabled"), g.get("distribution"))))
+    casc = [list(x) for x in base.get("_cascade_groups") or []]
+    grp = (base.get("groups") or {}).get("grok420voice") or {}
+    ovg = rt.one_voice_groups(base)
+    check(["grok420", "orgrok420"] in casc and grp.get("channels") == ["grok420", "orgrok420"]
+          and "grok420voice" in ovg,
+          "[fix] (b) cascade [grok420, orgrok420] and the one-voice group grok420voice (the model's words)",
+          repr((["grok420", "orgrok420"] in casc, grp.get("channels"), "grok420voice" in ovg)))
+
+    def shape(direct_on):
+        r = _copy.deepcopy(base)
+        for c in r["channels"].values():
+            if isinstance(c, dict) and c.get("distribution") == "local":
+                c["enabled"] = False              # what package.py does to a `local` channel
+        if direct_on:
+            r["channels"]["grok420"]["enabled"] = True
+        return r
+
+    def plan_of(r, **kw):
+        kw.setdefault("panel", "cheap")
+        try:
+            return rt.resolve(_copy.deepcopy(r), tier="max", ready=lambda n: True, **kw)
+        except rt.RouteError as exc:
+            return {"_err": {"enabled": False, "why": [str(exc)]}}
+
+    def grok_on(p):
+        return sorted(c for c, s in p.items() if (s or {}).get("enabled") and c in ("grok420", "orgrok420", "grokbuild"))
+
+    def why(p, c):
+        return " ".join(str(w) for w in (p.get(c) or {}).get("why") or [])
+
+    op, kit = shape(True), shape(False)
+    p = plan_of(op)
+    check(grok_on(p) == ["grok420", "grokbuild"] and "cascade" in why(p, "orgrok420"),
+          "[fix] (c) the operator's cheap panel: grok420 carries the Grok 4.20 voice, orgrok420 is skipped by the "
+          "cascade (one voice, one bill)", repr((grok_on(p), why(p, "orgrok420")[-140:])))
+    p = plan_of(kit)
+    check(grok_on(p) == ["grokbuild", "orgrok420"],
+          "[fix] (d) the kit's cheap panel: orgrok420 carries the Grok 4.20 voice", repr(grok_on(p)))
+    for words in ("только грок 4.20", "only grok 4.20", "only grok 4.20 reasoning"):
+        p = plan_of(kit, route=words)
+        check(grok_on(p) == ["orgrok420"],
+              "[fix] (d) kit: «%s» runs the OpenRouter copy (grok420 ships OFF and needs an XAI key)" % words,
+              why(p, "_err")[:160] or repr(grok_on(p)))
+    p = plan_of(op, route="только грок 4.20")
+    check(grok_on(p) == ["grok420"], "[guard] (c) the operator: «только грок 4.20» runs the direct channel",
+          why(p, "_err")[:160] or repr(grok_on(p)))
+    p = plan_of(op, skip=["grok420voice"])
+    check("_err" not in p and grok_on(p) == ["grokbuild"],
+          "[fix] (c) `--skip grok420voice` drops the Grok 4.20 voice on both transports, the rest of the panel runs",
+          why(p, "_err")[:160] or repr(grok_on(p)))
+    for tag, r in (("operator", op), ("kit", kit)):
+        p = plan_of(r, only=["cli"])
+        check(not set(grok_on(p)) & {"grok420", "orgrok420"},
+              "[guard] (e) %s: `--only cli` starts no API Grok (the R116 «только CLI» incident)" % tag,
+              repr(grok_on(p)))
+        p = plan_of(r, route="только грок 4.7")
+        check(grok_on(p) == ["grokbuild"] and (p.get("grokbuild") or {}).get("model") == "grok-4.7",
+              "[guard] (e) %s: «только грок 4.7» pins grok-4.7 on grokbuild (the operator's comparison)" % tag,
+              repr((grok_on(p), (p.get("grokbuild") or {}).get("model"))))
+
+
+def suite_r182_i2_grok420_bounds():
+    """R182 И-2 (2026-11-15). The cheap panel's reading of R182 (9 answers): the direct Grok 4.20 channel - the one the
+    operator's machine runs by default - had no bound on xAI's server-side tool loop (no spend guard reaches the xai
+    kind, no `max_turns`); the R182 suite never ran a channel-level skip or a member that is not ready; two notes
+    stated the levers wrongly. [fix] = fails on the R182 code; [guard] = holds before and after.
+    (a) grok420 sends `max_turns` 10: registry -> plan slot -> printed plan -> request body (EXECUTED) -> both
+        dispatch sites;
+    (b) readiness: the operator's machine without an XAI key gives the voice to orgrok420, and the plan says PAID;
+    (c) there `--skip grok420` MOVES the voice to orgrok420 (plan says PAID), `--skip orgrok420` keeps grok420;
+    (d) every word of the group grok420voice reaches orgrok420 in the kit and grok420 on the operator's machine;
+    (e) free text «только CLI» starts no API Grok (the R116 incident's own words, not only `--only cli`);
+    (f) the wire shape «он должен искать в вебе» rests on: grok420 asks for web_search only (no x_search, billed per
+        item since 2026-09-21); orgrok420 keeps the web plugin and a reasoning budget (OpenRouter's default is OFF)
+        and no reasoning_effort;
+    (g) the notes: the direct channel's context is xAI's 1,000,000; orgrok420's note says which skip does what.
+    """
+    import copy as _copy
+    import json as _json
+    import re as _re
+    import tempfile as _tempfile
+    import orchestrate as o
+    import routing as rt
+    section("R182 И-2: Grok 4.20 - a bound on the direct channel's loop, readiness, skips, wire shape")
+    base = rt.load_registry(overlay=False)
+    chs = base["channels"]
+    g, orc = chs.get("grok420") or {}, chs.get("orgrok420") or {}
+    check(g.get("max_turns") == 10,
+          "[fix] (a) grok420 carries max_turns 10 (xAI: turns, not calls; its deep-research band starts at 10)",
+          repr(g.get("max_turns")))
+
+    def shape(direct_on):
+        r = _copy.deepcopy(base)
+        for c in r["channels"].values():
+            if isinstance(c, dict) and c.get("distribution") == "local":
+                c["enabled"] = False              # what package.py does to a `local` channel
+        if direct_on:
+            r["channels"]["grok420"]["enabled"] = True
+        return r
+
+    def plan_of(r, ready=lambda n: True, **kw):
+        kw.setdefault("panel", "cheap")
+        try:
+            return rt.resolve(_copy.deepcopy(r), tier="max", ready=ready, **kw)
+        except rt.RouteError as exc:
+            return {"_err": {"enabled": False, "why": [str(exc)]}}
+
+    def on(p):
+        return sorted(c for c, s in p.items()
+                      if (s or {}).get("enabled") and c in ("grok420", "orgrok420", "grokbuild"))
+
+    def why(p, c):
+        return " ".join(str(w) for w in (p.get(c) or {}).get("why") or [])
+
+    op, kit = shape(True), shape(False)
+    p = plan_of(op)
+    slot = p.get("grok420") or {}
+    check(slot.get("max_turns") == 10, "[fix] (a) the plan slot of grok420 carries max_turns 10",
+          repr(slot.get("max_turns")))
+    wl = rt._web_line(slot) if slot else ""
+    check("at most 10 turns" in wl, "[fix] (a) the printed plan names the bound on xAI's loop", wl[:200])
+
+    sent = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_open(rq, timeout, name):
+        sent["body"] = _json.loads(rq.data.decode("utf-8"))
+        raise _Stop("captured")
+
+    saved = (o._urlopen_transient_retry, o._env_key)
+    tmp = _tempfile.mkdtemp(prefix="r182i2-")
+    bodies = {}
+    o._urlopen_transient_retry = fake_open
+    o._env_key = lambda k: "x" * 24               # a dummy: the fake opener never sends it
+    try:
+        for mt in (10, None):
+            sent.clear()
+            try:
+                o.call_xai_responses("brief", "END-R182I2", os.path.join(tmp, "out.md"), name="grok420",
+                                     max_turns=mt)
+            except Exception:
+                pass
+            bodies[mt] = dict(sent.get("body") or {})
+    finally:
+        o._urlopen_transient_retry, o._env_key = saved
+    check(bodies[10].get("max_turns") == 10 and bodies[None].get("model") and "max_turns" not in bodies[None],
+          "[fix] (a) EXECUTED: call_xai_responses puts max_turns into the request body (absent when unset)",
+          repr((bodies[10].get("max_turns"), sorted(bodies[None])[:8])))
+    src = (HERE / "orchestrate.py").read_text(encoding="utf-8")
+    sites = _re.findall(r"call_xai_responses, cbrief(.*?)\)\n", src, _re.S)
+    check(len(sites) >= 2 and all('max_turns=p.get("max_turns")' in s for s in sites),
+          "[fix] (a) every dispatch site of call_xai_responses passes the slot's max_turns (%d site(s))" % len(sites),
+          repr([('max_turns=p.get("max_turns")' in s) for s in sites]))
+
+    p = plan_of(op, ready=lambda n: n != "grok420")
+    check(on(p) == ["grokbuild", "orgrok420"] and "PAID" in why(p, "orgrok420"),
+          "[guard] (b) the operator's machine without an XAI key: orgrok420 carries the voice and the plan says PAID",
+          repr((on(p), why(p, "orgrok420")[-160:])))
+    p = plan_of(op, skip=["grok420"])
+    check(on(p) == ["grokbuild", "orgrok420"] and "PAID" in why(p, "orgrok420"),
+          "[guard] (c) operator: `--skip grok420` MOVES the voice to orgrok420 and the plan says PAID first "
+          "(one voice, the next transport carries it); `--skip grok420voice` is the word that drops it",
+          repr((on(p), why(p, "orgrok420")[-160:])))
+    p = plan_of(op, skip=["orgrok420"])
+    check(on(p) == ["grok420", "grokbuild"],
+          "[guard] (c) operator: `--skip orgrok420` leaves grok420 carrying the voice", repr(on(p)))
+
+    words = list(((base.get("groups") or {}).get("grok420voice") or {}).get("aliases") or [])
+    bad = []
+    for w in words:
+        lead = "только " if _re.search("[а-яё]", w.lower()) else "only "
+        for tag, r, want in (("kit", kit, ["orgrok420"]), ("operator", op, ["grok420"])):
+            q = plan_of(r, route=lead + w)
+            if on(q) != want:
+                bad.append((tag, lead + w, on(q), why(q, "_err")[:90]))
+    check(len(words) >= 5 and not bad,
+          "[guard] (d) every word of grok420voice (%d) reaches orgrok420 in the kit and grok420 on the operator's "
+          "machine" % len(words), repr(bad[:3]))
+
+    for tag, r in (("operator", op), ("kit", kit)):
+        p = plan_of(r, route="только CLI")
+        check("_err" not in p and "grokbuild" in on(p) and not set(on(p)) & {"grok420", "orgrok420"},
+              "[guard] (e) %s: free text «только CLI» starts no API Grok (R116's own words)" % tag,
+              why(p, "_err")[:160] or repr(on(p)))
+
+    rs = orc.get("reasoning") or {}
+    check(list(g.get("tools") or []) == ["web_search"],
+          "[guard] (f) grok420 asks xAI for web_search only - no x_search (billed per returned item since 2026-09-21)",
+          repr(g.get("tools")))
+    check((orc.get("web") or {}).get("enabled") is True and int(rs.get("max_tokens") or 0) > 0
+          and "effort" not in rs and "reasoning_effort" not in orc,
+          "[guard] (f) orgrok420 keeps the web plugin and a reasoning budget (OpenRouter's default is OFF), no "
+          "reasoning_effort (not a parameter of this model there)",
+          repr(((orc.get("web") or {}).get("enabled"), rs)))
+
+    notes = str(g.get("notes") or "")
+    check("1,000,000 context" in notes and not notes.startswith("2,000,000"),
+          "[fix] (g) grok420's notes give xAI's own context window (1,000,000), not OpenRouter's 2,000,000",
+          notes[:90])
+    en = orc.get("_enabled_r182")
+    check(en is None or ("moves the voice" in en.lower() and "--skip grok420voice" in en),
+          "[fix] (g) orgrok420's note says which skip does what on which machine (or the shipped tree dropped notes)",
+          (en or "")[-160:])
+
+
 def suite_r179_kit_defaults():
     """R179 (2026-11-09). Igor: «Так же в kit spark 1.2 contributor и spark 1.3 contributor должны по дефолту оба
     работать, в начале opencode, если нету, то fallback openrouter.» and «У тех, у кого нет agy, то Gemini 3.8 Flash
@@ -22306,12 +22684,16 @@ def suite_r168_i3_free_transports():
           and "nvstep5preview: NVIDIA_NIM_API_KEY not set" in s5,
           "R168 И-3 (g) [code] nothing ready: the voice that runs names what each member of its group lacks",
           repr((mm[:200], s5[:200])))
-    p3 = rt.resolve(copy.deepcopy(reg), panel="cheap", ready=lambda c: True)
-    p3 = rt.apply_quota_skip(p3, reg, {"opencode-free": "quota group «opencode-free» was refused earlier today"})
+    _sk3 = {"opencode-free": "quota group «opencode-free» was refused earlier today"}
+    p3 = rt.resolve(copy.deepcopy(reg), panel="cheap", ready=lambda c: True, quota_skips=_sk3)   # main's flow, R181 И-4
+    p3 = rt.apply_quota_skip(p3, reg, _sk3)
     check("ormimo26flash" in ch and not (p3.get("ormimo26flash") or {}).get("enabled")
-          and not (p3.get("ocmimo26flashfree") or {}).get("enabled"),
-          "R168 И-3 (h) [reg] the Zen group refused today: the free MiMo is skipped and its PAID OpenRouter copy does "
-          "not start in its place", repr(((p3.get("ormimo26flash") or {}).get("enabled"),
+          and not (p3.get("ocmimo26flashfree") or {}).get("enabled")
+          and ((p3.get("ocmimo26flashgo") or {}).get("fallback") or {}).get("channel") == "ormimo26flash",
+          "R168 И-3 (h) [reg] the Zen group refused today, every transport ready: the Go copy carries the MiMo voice, "
+          "the free MiMo is skipped and the PAID copy is no second voice - it is the Go copy's fallback (SUPERSEDED "
+          "2026-11-15, R181 И-4: without Go a refused day DOES start the paid copy - the operator's order; "
+          "suite_r181_i4 (c1))", repr(((p3.get("ormimo26flash") or {}).get("enabled"),
                                          (p3.get("ocmimo26flashfree") or {}).get("why"))))
     p4 = rt.resolve(copy.deepcopy(reg), panel="cheap", ready=lambda c: True)
     f4 = (p4.get("ocstep5previewnv") or {}).get("fallback") or {}
@@ -22380,10 +22762,11 @@ def suite_r168_i4_panel_fixes():
     pd = _plan(panel="cheap", skip=["opencode"], ready=_all)
     check(not _on(pd), "R168 И-4 (d) [code] every member ready, --skip opencode: the PAID MiMo copy does not start",
           _why(pd)[-160:])
-    pe = rt.apply_quota_skip(_plan(panel="cheap", skip=["ocmimo26flashfree"], ready=_all), fx,
-                             {"opencode-free": "quota group «opencode-free» was refused earlier today"})
-    check(not _on(pe), "R168 И-4 (e) [code] Zen refused today + --skip ocmimo26flashfree: no PAID MiMo around it",
-          _why(pe)[-160:])
+    _ske = {"opencode-free": "quota group «opencode-free» was refused earlier today"}
+    pe = rt.apply_quota_skip(_plan(panel="cheap", skip=["ocmimo26flashfree"], ready=_all, quota_skips=_ske), fx, _ske)
+    check(not _on(pe), "R168 И-4 (e) [code] Zen refused today + --skip ocmimo26flashfree, every transport ready: no "
+          "PAID MiMo voice beside the Go copy (SUPERSEDED 2026-11-15, R181 И-4: a refused day without Go DOES start "
+          "the paid copy - suite_r181_i4 (c1))", _why(pe)[-160:])
     pf = _plan(panel="cheap", ready=_no_oc)
     check(_on(pf) and "PAID" in _why(pf).upper(),
           "R168 И-4 (f) [guard] no opencode here: the PAID copy carries the MiMo voice, printed PAID", _why(pf)[-160:])
@@ -22655,11 +23038,13 @@ def suite_r171_nvidia_deepseek():
         fb_nk = ds_nk.get("fallback") or {}
     except Exception as exc:  # noqa: BLE001
         ds_nk, fb_nk = {"err": repr(exc)}, {}
-    check(ds_nk.get("enabled") and fb_nk.get("channel") == "nvdeepseekv41flash" and fb_nk.get("off")
-          and "cannot run" in str(fb_nk.get("off", "")) and "then" not in fb_nk,
-          "R171 (f) when both NVIDIA channels are not ready, DeepSeek still appears in the plan (its Go copy since R181) "
-          "and its NVIDIA fallback is marked OFF with a reason naming that it cannot run - no second link behind an OFF "
-          "first one", repr((ds_nk.get("enabled"), fb_nk)))
+    check(ds_nk.get("enabled") and fb_nk.get("channel") == "ordeepseekv41flash" and not fb_nk.get("off")
+          and (fb_nk.get("skipped") or {}).get("channel") == "nvdeepseekv41flash"
+          and "cannot run" in str((fb_nk.get("skipped") or {}).get("why", "")) and "then" not in fb_nk,
+          "R171 (f) when both NVIDIA channels are not ready, DeepSeek still appears in the plan (its Go copy since R181); "
+          "its NVIDIA step cannot run, so the fallback is the PAID copy directly, the skipped step named with its "
+          "reason, never a third (SUPERSEDED 2026-11-15, R181 И-4: was «NVIDIA fallback OFF, nothing behind it» - the "
+          "kit world W7)", repr((ds_nk.get("enabled"), fb_nk)))
 
 
 def suite_r172_lapsed_plan_diagnoses():

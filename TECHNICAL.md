@@ -293,6 +293,13 @@ with one quota group, as in this registry, that is one extra start at worst; wit
 stale write can also bring back a refusal another round had just cleared, and that group then
 skips until 00:00 UTC.
 
+### What 1.122.0 changed in a run
+
+- **Grok 4.20 Reasoning, one voice on two transports** (R182): cascade `[grok420, orgrok420]` + the one-voice group `grok420voice` (the model's words moved off `grok420`'s aliases). `orgrok420` (OpenRouter `x-ai/grok-4.20`, `distribution both`, reasoning budget 90,000, web plugin on, `spend_guard` $2.00) is ON, so every kit run with `OPENROUTER_API_KEY` starts it; `grok420` (xAI `/v1/responses`, server-side `web_search`) is `local` and ships OFF. Measured on the build against the published 1.121.0, seven simulated machines: cheap 8 → 9 (one machine 7 → 9, below), standard 14 → 15, `--only cli` and `--ask` unchanged; `--only grok` / "only grok" / «только грок» 1 → 2 (Grok Build + the paid OpenRouter copy); «только грок 4.20» → `orgrok420` (1.121.0: `grok420`, which fails at preflight without `XAI_API_KEY`), "only grok 4.20" → `orgrok420` (1.121.0: a route error); `--skip grok420voice` drops the voice, `--skip grok420` does not (the cascade's next member runs). Known gap: "only grok 4.6" and "only grok 4.5" also start `orgrok420`; «только грок 4.6», "only grokbuild" and «только грок билд» start Grok Build alone.
+- **`max_turns` on the direct xAI channel** (R182 И-2): `grok420` sends `max_turns: 10` (`call_xai_responses`, both dispatch sites; the plan prints «at most 10 turns (max_turns)»). xAI runs the search loop server-side, so the spend guard cannot stop it inside a call; xAI answers 422 «expected i32» to a non-integer value, so the field is parsed, not ignored.
+- **The paid step where the free step cannot run here** (R181 И-4): `routing._twin_only_gate` no longer counts a free member switched off in this install (`_switched_on`: enabled, valid_through, explicit_only) as a twin that can run, so on a machine with opencode, no Go plan and no NVIDIA key the paid `ordeepseekv41flash` carries the DeepSeek voice (1.121.0: no DeepSeek voice, `--only deepseek` stopped); `resolve(..., quota_skips=)` folds a refusal of today into `ready` (`_quota_ready`, `_RefusedToday` only where the member could otherwise run), so on a refused day the next transport carries the voice (NVIDIA free first, else the paid copy); `apply_fallback` gives a Go voice whose free first link cannot run here its paid second link directly, printed with the skipped step. Kept: an exclusion or a selection never starts the paid copy while its free twin can run (R168 И-4); a named refused channel runs (R157); never a third link.
+- New selftest suites `suite_r181_i4_paid_where_free_cannot`, `suite_r182_grok420_cheap`, `suite_r182_i2_grok420_bounds`; R171 (f), R168 И-3 (h), R168 И-4 (e) re-stated (SUPERSEDED labels); the one-voice-group pin (R155 И-3 (a)) extended with `grok420voice`.
+
 ### What 1.121.0 changed in a run
 
 - **GLM 5.3 Flash cascade** (R180): `[ocglm53flashgo, ocglm53flashfree, nvglm53flash, orglm53flash]`, all on; the Go copy `distribution both` (ready only where `opencode models` lists it, R179), `orglm53flash` `twin_only` with a $0.50 `spend_guard`. Measured on the kit-shaped source in seven simulated worlds (in-process, no model called): the cheap panel plans 8 voices where 1.120.1 planned 7, except on a machine with opencode, no Go plan and no NVIDIA key, where it plans 7 (no DeepSeek voice: `_twin_only_gate` counts the switched-off `ocdeepseekv41flashfree` as a free twin that can run there).
@@ -396,9 +403,10 @@ skips until 00:00 UTC.
   build.nvidia.com)», «OPENROUTER_API_KEY not set») and the first member's preflight says it again.
 - **A PAID copy that stands in for a free one is `twin_only`** (`ormimo26flash`): it takes the voice only
   where no free or subscription member before it in its group can run on this machine, or when it is
-  named. Skipping the free copy, `--only openrouter`, "without opencode" or a day opencode's free
-  allowance is spent never moves the voice to the paid copy where opencode is installed
-  (`routing._twin_only_gate`; a route that leaves nothing else to run stops with an error).
+  named. Skipping the free copy, `--only openrouter` or "without opencode" never moves the voice to the
+  paid copy where opencode is installed and the free copy can run there (`routing._twin_only_gate`; a route
+  that leaves nothing else to run stops with an error). Since 1.122.0 a free copy that cannot run here -
+  switched off in this install, or refused earlier today - no longer holds the paid copy back (R181 И-4).
 - **opencode on NVIDIA**: the provider reads `NVIDIA_API_KEY`; the harness copies `NVIDIA_NIM_API_KEY`
   into that name in the opencode child's environment only (yours, if set, wins) and runs it
   `--standalone`; without the key the channel is refused before it starts. Its billing line names

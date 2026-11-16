@@ -2,6 +2,17 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.122.0 — 2026-11-16
+
+Grok 4.20 Reasoning joins the cheap panel as a voice paid on your OpenRouter key, and a voice whose free step cannot run on your machine now goes on to its paid copy instead of being lost.
+
+- **Grok 4.20 Reasoning (xAI) is a cheap-panel voice, PAID on every run** (9 models, was 8): `orgrok420` through OpenRouter on your `OPENROUTER_API_KEY`, ≈ $0.10 a review in our first call ($0.0981 provider-reported: 66,862 tokens in, 3,343 out, 22.8 s), a spending ceiling of $2.00 per review, web search on (xAI's own search through OpenRouter's web plugin, $0.005 a search); $1.25 / $2.50 per 1M (OpenRouter, 2026-11-16). The standard panel is 15 models (was 14). Leave it out with `--skip grok420voice` for one run, or `{"channels": {"orgrok420": {"enabled": false}}}` in your settings file. Without `OPENROUTER_API_KEY` the plan lists it and it ends at once (one more preflight line, nothing spent). The same model through xAI's own API (`grok420`, `XAI_API_KEY`) ships off; switched on, it carries the voice instead (one voice, never both) and ends xAI's search loop after 10 turns (`max_turns`).
+- **New and changed words:** "only grok 4.20" / «только грок 4.20» run Grok 4.20 Reasoning alone through OpenRouter (1.121.0: «только грок 4.20» started the direct xAI copy, which ends at once without `XAI_API_KEY`, and "only grok 4.20" was refused). "only grok" / «только грок» / `--only grok` now start two Grok voices, Grok Build (your xAI account or plan) and the paid Grok 4.20 (1.121.0: Grok Build alone); for Grok Build alone say "only grokbuild" or «только грок билд». Known gap: "only grok 4.6" and "only grok 4.5" start the paid Grok 4.20 too (the plan prints it PAID); «только грок 4.6» does not.
+- **The paid step where the free step cannot run** (closes 1.121.0's known gaps; the owner's order «Go plan → free → paid API»): on a machine with opencode but neither the Go plan nor an NVIDIA key DeepSeek V4.1 Flash is a voice again, through its paid OpenRouter copy (`ordeepseekv41flash`; there the cheap panel is 9, was 7, Grok included; `--only deepseek` and "deepseek flash" run it, 1.121.0 stopped). Where a Go voice's free step cannot run (no NVIDIA key for DeepSeek, or opencode's free allowance refused earlier today), its fallback is the paid copy directly, printed with the skipped step (1.121.0: nothing ran after the Go voice). On a day opencode's free allowance was refused, MiMo v2.6 Flash and GLM 5.3 Flash go on to the next transport — GLM to NVIDIA's free copy with an NVIDIA key, else both to their paid copies (1.121.0: two voices fewer that day; measured without the Go plan: with an NVIDIA key the cheap panel 6 → 9, without one 5 → 9, Grok included). `--skip ormimo26flash orglm53flash ordeepseekv41flash` keeps such a run free. `--ask` is unchanged (5 channels, 4 on such a day; no paid copy, no Grok).
+- DeepSeek V4.1 Flash on OpenRouter costs $0.14 / $0.42 per 1M in the catalogue on 2026-11-16 (it was $0.0507 / $0.2028 on 2026-11-15; a call pays the price of the provider OpenRouter routes it to). MiMo v2.6 Flash ($0.14 / $0.28) and GLM 5.3 Flash ($0.0399 / $0.0784) unchanged.
+- The README says that DeepSeek V4.1 Flash on the OpenCode Go plan also needs Global under Regions in the workspace's Privacy settings (opencode.ai/docs/go), and INSTALL's two-transport table no longer claims X search for the direct Grok 4.20 copy (it sends `web_search` only).
+- New selftest suites `suite_r181_i4_paid_where_free_cannot`, `suite_r182_grok420_cheap`, `suite_r182_i2_grok420_bounds`; R171 (f), R168 И-3 (h) and R168 И-4 (e) re-stated with SUPERSEDED labels, the one-voice-group pin extended with `grok420voice`.
+
 ## 1.121.0 — 2026-11-15
 
 GLM 5.3 Flash joins the cheap panel, and three Flash models run on the OpenCode Go plan first, then free, then paid.
@@ -11,7 +22,7 @@ GLM 5.3 Flash joins the cheap panel, and three Flash models run on the OpenCode 
 - **New: DeepSeek V4.1 Flash through OpenRouter** (`ordeepseekv41flash`, paid, $0.0507 / $0.2028 per 1M on 2026-11-15, xhigh, a $0.50 ceiling per run): the voice where opencode is missing and there is no NVIDIA key, and the paid step after NVIDIA's free copy.
 - **"deepseek flash" / «дипсик флеш» names the DeepSeek V4.1 Flash voice** (new group `deepseekflash`; 1.120.1 refused it), and **"glm 5.3 flash" / «глм 5.3 флеш» names the GLM voice** on the first transport your machine has (new group `glmflash`; 1.120.1 always started opencode's free copy, also where opencode is missing).
 - **"CLI only" can reach an API call through a fallback**: DeepSeek's NVIDIA copy, or a paid OpenRouter copy, printed PAID in the plan. Add `--no-fallback` for a run with no fallback and no paid request.
-- Known gaps: on a machine with opencode but neither the Go plan nor an NVIDIA key the cheap panel has no DeepSeek voice (the paid copy stands in only where opencode is missing; name `ordeepseekv41flash` to pay for it), and where the free step cannot run (no NVIDIA key, or the free allowance refused earlier today) nothing runs after a Go voice that ends without an answer.
+- Known gaps (closed in 1.122.0): on a machine with opencode but neither the Go plan nor an NVIDIA key the cheap panel has no DeepSeek voice (the paid copy stands in only where opencode is missing; name `ordeepseekv41flash` to pay for it), and where the free step cannot run (no NVIDIA key, or the free allowance refused earlier today) nothing runs after a Go voice that ends without an answer.
 - The plugin's homepage is https://secondai.net (plugin.json and the marketplace entry; a fork's build keeps its own repository URL), and the marketplace has a description.
 - Prices re-read from OpenRouter on 2026-11-15 in the standard panel's table: Kimi K3 $0.192 / $16.00, DeepSeek V4 Pro $0.90 / $1.50, GLM 5.3 $0.084 / $3.60 per 1M (the per-run figures were measured at the earlier prices).
 - GLM 5.3 FlashX Legal (it runs only with `--system legal-research`) and Hy4 are in the registry for the maintainer's machine and ship switched off.
@@ -287,18 +298,6 @@ The README opens with what one run returns. Until now a first-time visitor read 
 - **What leaves your machine is said on the first screen:** sending your document to the vendors you pick is the whole point, and the tool itself has no server and collects nothing (PRIVACY.md).
 - No code changed.
 
-## 1.113.0 — 2026-10-17
-
-Muse Wonder starts only when you name it. Measured on 1.112.6: a standard panel without the Muse Code CLI ran the paid `wonder10` (Meta key, no per-run ceiling) or `orwonder` in every round; «only muse», «only openrouter» and «CLI only» pulled Wonder in; «only wonder 1.0» ran the paid `wonder10` even where the Muse Code subscription was ready.
-
-- **No panel, default, «все» or broader group runs Muse Wonder.** `mcwonder10cont`, `wonder10` and `orwonder` are `explicit_only`; the standard panel has 11 models.
-- **The model's word starts ONE Wonder, subscription first.** «вондер», «only wonder», «muse wonder», «wonder 1.0», «add wonder» start `mcwonder10cont` where the Muse Code CLI is installed. Where it is not, the run stops before paying and names the paid ones; «only wonder10» or «only orwonder» runs that one. A group whose channels are exactly one cascade (`wonder`) names that model; a broader group (a vendor, `cli`, `openrouter`, a panel) starts none of them, and a member that is also `enabled: false` still needs its own name.
-- **«wonder 1.0» / «вондер 1.0» name the model, not the paid API channel.** They were model aliases of `wonder10`; «muse-wonder-1.0», the API's own id, still names `wonder10`.
-- **The plan prints one 🔴 line per Wonder family left out**, with the words that start it.
-- **INSTALL's Muse Code check is a real call**: `orchestrate.py --ask "Reply with the word OK" --only mcwonder10cont`. The old check, `muse model-profile show`, printed a profile for any id, an invented one too.
-- **The «Muse Code is not signed in» hint names `--only wonder10` / `--only orwonder`.** It sent you to `--skip`, which since this version starts no other Wonder.
-- **The way back:** `{"channels": {"mcwonder10cont": {"explicit_only": false}}}` in `~/.claude/model-orchestration.local.json` seats Wonder in the standard panel again, on the subscription.
-
 ## Older releases
 
-168 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+169 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).

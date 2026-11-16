@@ -10103,7 +10103,7 @@ XAI_RESPONSES_URL = os.environ.get("XAI_BASE", "https://api.x.ai/v1/responses")
 
 
 def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=2400,
-                       name="grok420", tools=None, max_tokens=None):
+                       name="grok420", tools=None, max_tokens=None, max_turns=None):
     """
     Grok through xAI's own Agent Tools API - /v1/responses, not /chat/completions.
 
@@ -10140,6 +10140,14 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
 
     No harness `fetch_url` here, for the same reason goog36flash has none: two fetchers on one
     channel make "who opened this page" ambiguous, and that answer is what this channel is for.
+
+    `max_turns` (R182 И-2, 2026-11-15) is the ONLY bound on the server-side loop: the harness cannot
+    stop it mid-response and `spend_guard` acts between OpenRouter rounds only. xAI: it limits
+    assistant TURNS, not tool calls (one turn may call several tools); unset = the server's own
+    unpublished cap; at the cap the agent stops calling tools and answers from what it has. PROBED:
+    `max_turns: "ten"` -> 422 «invalid type: string "ten", expected i32» (an invented field returns
+    200), so the server parses it; the response does not echo it. A client-side tool would reset
+    the count (docs.x.ai advanced-usage) - one more reason there is no `fetch_url` here.
     """
     key = _env_key("XAI_API_KEY")
     if not key:
@@ -10157,9 +10165,12 @@ def call_xai_responses(brief, marker, outfile, model=None, system=None, timeout=
             "max_output_tokens": sent_budget,
             "tools": [{"type": t} for t in tools],
             "stream": True}
+    if max_turns:
+        body["max_turns"] = int(max_turns)    # R182 И-2: bounds the server-side loop (docstring)
     headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
-    log("  [%s] xAI Agent Tools: %s - the VENDOR opens the pages, so this channel reports "
-        "vendor_opened and never fetched_by_us" % (name, ", ".join(tools)))
+    log("  [%s] xAI Agent Tools: %s, max_turns=%s - the VENDOR opens the pages, so this channel "
+        "reports vendor_opened and never fetched_by_us"
+        % (name, ", ".join(tools), body.get("max_turns", "the server's own cap")))
 
     text_parts, rchars, resp_obj = [], 0, {}
     xai_cut = {}                      # R168 И-2: set when the harness closed the read at the deadline
@@ -11215,8 +11226,13 @@ def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, 
                 log("  [%s] fallback %s not run: %s" % (cname, fb, why_not))
                 r.setdefault("notes", []).append("FALLBACK %s not run: %s." % (fb, why_not))
                 continue
-            log("  [%s] ended with no answer (%s) -> FALLBACK %s runs the same brief once"
-                % (cname, scrub(str(failed))[:160], fb))
+            _skp = fbk.get("skipped") if isinstance(fbk.get("skipped"), dict) else None   # R181 И-4
+            log("  [%s] ended with no answer (%s) -> FALLBACK %s runs the same brief once%s"
+                % (cname, scrub(str(failed))[:160], fb,
+                   (" (the PAID step: the free step %s was skipped)" % _skp.get("channel")) if _skp else ""))
+            if _skp:
+                r.setdefault("notes", []).append("FALLBACK %s is the PAID step: the free step was skipped - %s."
+                                                 % (fb, _skp.get("why")))
             _fb_jobs[cname] = fb
     if _fb_jobs:
         log("\n" + "-" * 78)
@@ -14502,12 +14518,14 @@ def main():
             reg = routing.load_registry()
             # R140 И-3: the cascade asks THIS machine which member can run (key, CLI). The
             # ready-aware copy that used to sit in this file was never called.
-            plan = routing.resolve(reg, route=a.route, only=a.only, skip=a.skip,
-                                   sets=a.sets, tier=a.tier, panel=a.panel,
-                                   ready=_cascade_ready(reg), system=_system_file)
-            # R157 И-2: a quota group refused earlier this UTC day is left out (routing.apply_quota_skip).
+            # R157 И-2: a quota group refused earlier this UTC day is left out (routing.apply_quota_skip). R181 И-4:
+            # read BEFORE resolve, which folds it into the cascade's `ready` - the next transport of that model carries
+            # the voice today (a free one first, else the paid copy), and a Go voice's fallback goes on to its paid step.
             _qskips = routing.quota_skips(routing.load_quota_state(routing.quota_state_path()),
                                           datetime.datetime.now(datetime.timezone.utc))
+            plan = routing.resolve(reg, route=a.route, only=a.only, skip=a.skip,
+                                   sets=a.sets, tier=a.tier, panel=a.panel,
+                                   ready=_cascade_ready(reg), system=_system_file, quota_skips=_qskips)
             plan = routing.apply_quota_skip(
                 plan, reg, _qskips,
                 routing.explicitly_named(reg, route=a.route, only=getattr(a, "ask_named", a.only), sets=a.sets))
@@ -15097,7 +15115,7 @@ def main():
                 model=p.get("model"), system=_system_for(system, p),
                 name=cname, tools=p.get("tools"),
                 timeout=_seconds(p.get("timeout"), 2400),
-                max_tokens=p.get("max_tokens"))
+                max_tokens=p.get("max_tokens"), max_turns=p.get("max_turns"))
         elif kind == "gemini":
             return _rex.submit(
                 call_gemini_direct, cbrief, a.marker, outfile,
@@ -15278,7 +15296,8 @@ def main():
                                         model=p.get("model"), system=_system_for(system, p),
                                         name=cname, tools=p.get("tools"),
                                         timeout=_seconds(p.get("timeout"), 2400),
-                                        max_tokens=p.get("max_tokens"))
+                                        max_tokens=p.get("max_tokens"),
+                                        max_turns=p.get("max_turns"))
             elif kind == "gemini":
                 jobs[cname] = ex.submit(call_gemini_direct, cbrief, a.marker, outfile,
                                         model=p.get("model"), system=_system_for(system, p),

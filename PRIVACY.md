@@ -44,7 +44,7 @@ before anything is sent.** Both are free.
 | the Antigravity CLI | Google, through the CLI you already have installed |
 | the Grok Build CLI | xAI, through the CLI you already have installed |
 | the opencode CLI | **opencode, which forwards to the model's provider**: its free models run on opencode Zen, `opencode-go/` models on the OpenCode Go plan; the plan names the channel and its model id before anything is sent |
-| `OPENROUTER_API_KEY` | **OpenRouter, which forwards to the model's owner** — which company depends on the channel's model id (Meta, Moonshot, Alibaba, Google, Xiaomi, Z.ai, DeepSeek and others); the resolved plan names the one that applies before anything is sent |
+| `OPENROUTER_API_KEY` | **OpenRouter, which forwards to the model's owner** — which company depends on the channel's model id (Meta, Moonshot, Alibaba, Google, Xiaomi, Z.ai, DeepSeek, xAI and others); the resolved plan names the one that applies before anything is sent |
 | `NVIDIA_NIM_API_KEY` | NVIDIA, over HTTPS (its free API endpoint) |
 | `GEMINI_API_KEY` | Google, directly through their API |
 | `XAI_API_KEY` | xAI, directly through their API |
@@ -57,7 +57,13 @@ printed in the plan.
 Since 1.121.0 one model can reach up to three of these in one run: MiMo v2.6 Flash, DeepSeek V4.1 Flash and
 GLM 5.3 Flash run on the OpenCode Go plan first, then on a free copy (opencode Zen, or NVIDIA), then on a paid
 copy through OpenRouter (`ormimo26flash`, `ordeepseekv41flash`, `orglm53flash`) - each step only after the one
-before it ended with no answer. The plan prints every step before anything is sent.
+before it ended with no answer. The plan prints every step before anything is sent. Since 1.122.0, where the free
+step cannot run on a machine (no NVIDIA key, or opencode's free allowance refused that day), the paid copy is the
+next step directly.
+
+Since 1.122.0 the cheap panel also sends every brief to xAI through OpenRouter where `OPENROUTER_API_KEY` is set:
+Grok 4.20 Reasoning (`orgrok420`). `--skip grok420voice` leaves it out of a run; switching `orgrok420` off in your
+settings file leaves it out of every run.
 
 Each vendor's own privacy policy and retention rules apply to what you send them. This tool cannot
 and does not change them. **Once a brief has been sent it cannot be recalled.** If you enable no
