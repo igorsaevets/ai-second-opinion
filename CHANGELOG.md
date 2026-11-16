@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.123.0 — 2026-11-16
+
+Grok 4.20 Reasoning leaves the cheap and standard panels: it runs only when you name it.
+
+- **No paid Grok 4.20 Reasoning on every run.** Since 1.122.0 every cheap and standard panel ran Grok 4.20 Reasoning through OpenRouter on your key (`orgrok420`, ≈ $0.10 a review, at most $2.00); the maintainer switched it off by default as too expensive through OpenRouter. It now starts only when named: "only grok 4.20" / «только грок 4.20» (it alone), "add grok 4.20" / «добавь грок 4.20» (the cheap panel plus it) or `--only orgrok420` - still **paid** (OpenRouter, 2026-11-16: $1.25 / $2.50 per 1M tokens, each web search $0.005). No panel, "all models" or group word starts it; the plan of such a run prints «🔴 grok420voice was NOT started (orgrok420): it starts only when named ...».
+- **Who runs**, measured on the build against 1.122.2 on seven simulated machines: the cheap panel 9 → 8 models, the standard panel 15 → 14; "only grok" / «только грок» → Grok Build alone (was Grok Build + the paid Grok 4.20); `--only openrouter` no longer includes Grok 4.20; "CLI only" and `--ask` unchanged.
+- **Back into every panel:** `{"channels": {"orgrok420": {"explicit_only": false}}}` in your settings file, then once `python routing.py --accept-settings`.
+- The plan no longer prints «grok420voice was NOT started» where the direct xAI copy (`grok420`) carried the voice, and prints the model's words once. Where `grok420` is switched on but `XAI_API_KEY` is missing, the voice no longer moves to the paid OpenRouter copy by itself.
+
 ## 1.122.2 — 2026-11-16
 
 A timed-out opencode voice stops working on opencode's side, and MiMo v2.6 Flash gets the time a review takes.

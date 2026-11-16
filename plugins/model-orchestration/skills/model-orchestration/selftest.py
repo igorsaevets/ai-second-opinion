@@ -157,8 +157,11 @@ def suite_routing():
     _RAW = json.load(open(HERE / "channels.json", encoding="utf-8"))
     _DEFAULT_INCLUDES = set(_RAW["panels"][_RAW["default_panel"]]["includes"])
     ENABLED_ANY_PANEL = {k for k, v in _CHANS.items() if v.get("enabled", True)}
+    # R185 (2026-11-16): an explicit_only channel never runs unless named, so it is not part of «every enabled channel
+    # runs». Until R185 no default-panel channel was explicit_only; orgrok420 (cheap) is, and in the kit (grok420
+    # ships OFF) the cascade carried it into the expectation - R60's shipped run went red on that.
     ALL = {k for k, v in _CHANS.items()
-           if v.get("enabled", True) and v.get("panel") in _DEFAULT_INCLUDES}
+           if v.get("enabled", True) and v.get("panel") in _DEFAULT_INCLUDES and not v.get("explicit_only")}
 
     def panel_set(name):
         """Enabled channels a NAMED panel admits - for cases whose route names one in prose."""
@@ -799,8 +802,9 @@ def suite_dispatch():
         # without it, flipping default_panel makes this compare 17 against 13 and call correct
         # code broken.
         "_inc = set(reg['panels'][reg['default_panel']]['includes'])\n"
+        # R185: an explicit_only channel never starts unless named (orgrok420 in the kit)
         "_en = set(c for c, ch in reg['channels'].items()\n"
-        "         if ch.get('enabled', True) and ch.get('panel') in _inc)\n"
+        "         if ch.get('enabled', True) and ch.get('panel') in _inc and not ch.get('explicit_only'))\n"
         # R180: o.main() above carries no --system and names no channel, so a voice for one kind of question
         # (`only_with_system`) stays off in it - the router's own gate decides, no second copy of the rule.
         "_pl = {c: {'enabled': True, 'why': []} for c in _en}\n"
@@ -866,7 +870,7 @@ def suite_dispatch():
         _inc = set(_reg_raw["panels"][_reg_raw["default_panel"]]["includes"])
         _panel_en = {c for c, ch in _reg_raw["channels"].items()
                      if not c.startswith("_") and ch.get("enabled", True)
-                     and ch.get("panel") in _inc}
+                     and ch.get("panel") in _inc and not ch.get("explicit_only")}     # R185: an explicit_only channel never starts unless named (orgrok420 in the kit)
         import routing as _rt_d                       # R180: the run carried no --system (the probe above)
         _panel_en = {c for c, p in _rt_d.apply_system_gate({c: {"enabled": True, "why": []} for c in _panel_en},
                                                             _reg_raw, None, ()).items() if p["enabled"]}
@@ -2921,9 +2925,13 @@ def suite_max_depth_and_explicit_only():
             for how, got in (("--only %r" % word, enabled(only=[word])),
                              ("route 'только %s'" % word, enabled(route="только %s" % word))):
                 if fam:
-                    check(len(set(expl) & got) == 1 and set(expl) & got <= fam,
-                          "%s starts exactly ONE channel of its one-voice family %r and nothing else gated (R155)"
-                          % (how, gname), repr(sorted(set(expl) & got)))
+                    # R185 (2026-11-16): a one-voice group may hold an UNGATED member too (grok420voice: grok420
+                    # carries the voice where it runs, orgrok420 is explicit_only) - so «exactly ONE gated channel»
+                    # became «exactly ONE channel of the family, and nothing gated outside it». Wonder: unchanged.
+                    check(len(got & fam) == 1 and set(expl) & got <= fam,
+                          "%s starts exactly ONE channel of its one-voice family %r and nothing else gated (R155; "
+                          "R185: an ungated member of the family counts)" % (how, gname),
+                          repr((sorted(got & fam), sorted(set(expl) & got))))
                 else:
                     check(not (set(expl) & got), "%s does not start an explicit_only channel" % how)
 
@@ -3512,7 +3520,8 @@ def suite_panels():
     check(route_err("дешевая панель, без грокк"),
           "a marker with no channel behind it is refused even after a panel word")
     p = _r.resolve(_r.load_registry(), route="запусти на дешевой")
-    _panel_expect = {c for c in _r.panel_members(reg, "cheap") if CH[c].get("enabled", True)}
+    _panel_expect = {c for c in _r.panel_members(reg, "cheap")
+                     if CH[c].get("enabled", True) and not CH[c].get("explicit_only")}     # R185: an explicit_only channel never starts unless named (orgrok420 in the kit)
     # R180: a route with no --system leaves a voice for one kind of question (only_with_system) off - the router's gate
     _panel_expect = {c for c, v in _r.apply_system_gate({c: {"enabled": True, "why": []} for c in _panel_expect},
                                                         reg, None, ()).items() if v["enabled"]}
@@ -8183,6 +8192,7 @@ def main():
                   suite_r182_i2_grok420_bounds,
                   suite_r182_i4_grok_version_words,
                   suite_r184_i2_opencode_stop,
+                  suite_r185_grok420_kit_off,
                   suite_r168_i3_free_transports,
                   suite_r168_i4_panel_fixes,
                   suite_r169_agy_argon,
@@ -17705,12 +17715,15 @@ def suite_r155_i3_wonder_by_name():
           and not any((chs.get(c) or {}).get("explicit_only") for c in ov.get("mimoflash") or [])
           and not any((chs.get(c) or {}).get("explicit_only") for c in ov.get("glmflash") or [])
           and not any((chs.get(c) or {}).get("explicit_only") for c in ov.get("deepseekflash") or [])
-          and not any((chs.get(c) or {}).get("explicit_only") for c in ov.get("grok420voice") or [])
+          # R185 (2026-11-16): orgrok420 became explicit_only ON PURPOSE (the operator: «Grok 4.20 Reasoning отключаем
+          # для Kit по дефолту») - the model's words open it, no panel or other group does; grok420 stays ungated.
+          and [c for c in ov.get("grok420voice") or [] if (chs.get(c) or {}).get("explicit_only")] == ["orgrok420"]
           and "wonder 1.0" in ali and "вондер 1.0" in ali and "wonder 1.0" not in mal and "muse-wonder-1.0" in mal,
           "R155 И-3 (a) the Wonder channels (four since R164) are explicit_only; one-voice groups = wonder + kimi + "
           "mimoflash (R178: the MiMo Flash voice, no explicit_only member, so it opens no gated channel) + glmflash "
           "(R180 И-2: the GLM 5.3 Flash voice, the same guard) + deepseekflash (R181: the DeepSeek V4.1 Flash voice, "
-          "the same guard) + grok420voice (R182: the Grok 4.20 Reasoning voice, the same guard); «wonder 1.0» "
+          "the same guard) + grok420voice (R182: the Grok 4.20 Reasoning voice; R185: its OpenRouter copy orgrok420 is "
+          "explicit_only on purpose - the model's words open it); «wonder 1.0» "
           "is the model's word (the group), not wonder10's model alias",
           repr((sorted(ov), [c for c in W if not (chs.get(c) or {}).get("explicit_only")], mal)))
 
@@ -21537,7 +21550,9 @@ def suite_r182_grok420_cheap():
     (a) both channels ON in the cheap panel (grok420 ships OFF: `local`), orgrok420 with a spend guard;
     (b) the cascade [grok420, orgrok420] and the one-voice group grok420voice (the model's words);
     (c) the operator's shape: grok420 carries the voice, orgrok420 skipped by the cascade;
-    (d) the kit's shape: orgrok420 carries it, and the model's words in both languages reach it;
+    (d) the kit's shape: orgrok420 carries it, and the model's words in both languages reach it - SUPERSEDED in
+        part by R185 (2026-11-16): orgrok420 is explicit_only, so the kit's panel has no Grok 4.20 voice and only
+        the words (and its own name) start it (suite_r185_grok420_kit_off);
     (e) KEPT: «только CLI» starts no API Grok (R116), «только грок 4.7» pins grok-4.7 on grokbuild.
     """
     import copy as _copy
@@ -21550,7 +21565,7 @@ def suite_r182_grok420_cheap():
     check(orc.get("enabled") is True and orc.get("panel") == "cheap" and orc.get("kind") == "openrouter"
           and (orc.get("spend_guard") or {}).get("max_usd_per_review") == 2.0,
           "[fix] (a) orgrok420 (OpenRouter) is ON in the cheap panel with a $2.00 spend guard - the kit's Grok 4.20 "
-          "voice", repr((orc.get("enabled"), orc.get("panel"), orc.get("spend_guard"))))
+          "voice (since R185 explicit_only: it starts only when named)", repr((orc.get("enabled"), orc.get("panel"), orc.get("spend_guard"))))
     check(g.get("distribution") == "local" and g.get("kind") == "xai" and g.get("panel") == "cheap"
           and g.get("enabled") == (not shipped),
           "[fix] (a) grok420 (xAI direct) is ON in the source and ships OFF (`local`) - this is the %s tree"
@@ -21587,12 +21602,18 @@ def suite_r182_grok420_cheap():
 
     op, kit = shape(True), shape(False)
     p = plan_of(op)
-    check(grok_on(p) == ["grok420", "grokbuild"] and "cascade" in why(p, "orgrok420"),
-          "[fix] (c) the operator's cheap panel: grok420 carries the Grok 4.20 voice, orgrok420 is skipped by the "
-          "cascade (one voice, one bill)", repr((grok_on(p), why(p, "orgrok420")[-140:])))
+    # SUPERSEDED in part by R185 (2026-11-16): orgrok420 is explicit_only, so a panel holds it back by that rule
+    # before the cascade sees it - one voice, one bill either way.
+    check(grok_on(p) == ["grok420", "grokbuild"] and ("cascade" in why(p, "orgrok420")
+                                                      or "explicit_only" in why(p, "orgrok420")),
+          "[fix] (c) the operator's cheap panel: grok420 carries the Grok 4.20 voice, orgrok420 is skipped (the "
+          "cascade; since R185 its explicit_only rule) - one voice, one bill", repr((grok_on(p), why(p, "orgrok420")[-140:])))
     p = plan_of(kit)
-    check(grok_on(p) == ["grokbuild", "orgrok420"],
-          "[fix] (d) the kit's cheap panel: orgrok420 carries the Grok 4.20 voice", repr(grok_on(p)))
+    # SUPERSEDED by R185 (2026-11-16; the operator: «Grok 4.20 Reasoning отключаем для Kit по дефолту, слишком дорого обходится через openrouter»):
+    # orgrok420 is explicit_only - the kit's cheap panel has no Grok 4.20 voice; the words below still start it.
+    check(grok_on(p) == ["grokbuild"],
+          "[fix] (d) SUPERSEDED by R185: the kit's cheap panel has no Grok 4.20 voice (orgrok420 starts only when "
+          "named)", repr(grok_on(p)))
     for words in ("только грок 4.20", "only grok 4.20", "only grok 4.20 reasoning"):
         p = plan_of(kit, route=words)
         check(grok_on(p) == ["orgrok420"],
@@ -21625,6 +21646,8 @@ def suite_r182_i2_grok420_bounds():
         dispatch sites;
     (b) readiness: the operator's machine without an XAI key gives the voice to orgrok420, and the plan says PAID;
     (c) there `--skip grok420` MOVES the voice to orgrok420 (plan says PAID), `--skip orgrok420` keeps grok420;
+    (b) and (c) SUPERSEDED by R185 (2026-11-16: orgrok420 is explicit_only - the operator: «Grok 4.20 Reasoning отключаем для Kit по дефолту, слишком дорого обходится через openrouter»): the voice never moves to the paid copy by itself any more - without
+        an XAI key grok420 keeps the slot (its preflight names the missing key), `--skip grok420` drops the voice;
     (d) every word of the group grok420voice reaches orgrok420 in the kit and grok420 on the operator's machine;
     (e) free text «только CLI» starts no API Grok (the R116 incident's own words, not only `--only cli`);
     (f) the wire shape «он должен искать в вебе» rests on: grok420 asks for web_search only (no x_search, billed per
@@ -21712,13 +21735,15 @@ def suite_r182_i2_grok420_bounds():
           repr([('max_turns=p.get("max_turns")' in s) for s in sites]))
 
     p = plan_of(op, ready=lambda n: n != "grok420")
-    check(on(p) == ["grokbuild", "orgrok420"] and "PAID" in why(p, "orgrok420"),
-          "[guard] (b) the operator's machine without an XAI key: orgrok420 carries the voice and the plan says PAID",
-          repr((on(p), why(p, "orgrok420")[-160:])))
+    # SUPERSEDED by R185 (2026-11-16: orgrok420 is explicit_only - the operator: «Grok 4.20 Reasoning отключаем для Kit по дефолту, слишком дорого обходится через openrouter»):
+    # no silent move to the paid OpenRouter copy - grok420 keeps the slot and its preflight names the missing key.
+    check(on(p) == ["grok420", "grokbuild"] and "explicit_only" in why(p, "orgrok420"),
+          "[fix] (b) SUPERSEDED by R185: the operator's machine without an XAI key - the voice does not move to the "
+          "paid OpenRouter copy (orgrok420 waits to be named)", repr((on(p), why(p, "orgrok420")[-160:])))
     p = plan_of(op, skip=["grok420"])
-    check(on(p) == ["grokbuild", "orgrok420"] and "PAID" in why(p, "orgrok420"),
-          "[guard] (c) operator: `--skip grok420` MOVES the voice to orgrok420 and the plan says PAID first "
-          "(one voice, the next transport carries it); `--skip grok420voice` is the word that drops it",
+    check(on(p) == ["grokbuild"] and "explicit_only" in why(p, "orgrok420"),
+          "[fix] (c) SUPERSEDED by R185: operator: `--skip grok420` drops the Grok 4.20 voice - orgrok420 starts "
+          "only when named, so the skip no longer moves the voice to the paid copy",
           repr((on(p), why(p, "orgrok420")[-160:])))
     p = plan_of(op, skip=["orgrok420"])
     check(on(p) == ["grok420", "grokbuild"],
@@ -21939,6 +21964,94 @@ def suite_r184_i2_opencode_stop():
           "in the operator's store took 7-94 min; the 40-min TIMEOUT threw away 6 of 6 on 2026-11-15)", repr(mins))
 
 
+def suite_r185_grok420_kit_off():
+    """R185 (2026-11-16). The operator: «Grok 4.20 Reasoning отключаем для Kit по дефолту, слишком дорого обходится
+    через openrouter». orgrok420 (OpenRouter, paid) becomes `explicit_only`: no panel, default or broader group starts
+    it; the model's words (the one-voice group grok420voice) or its own name still do. grok420 (xAI direct, `local`)
+    keeps the voice on the operator's machine. [fix] = fails on the registry before R185; [guard] = holds before and
+    after; (f)'s operator line is the routing fix's own check (red with the R185 registry on the pre-R185 routing).
+    (a) registry: orgrok420 explicit_only, still ON and shipped (`both`) with its $2.00 guard;
+    (b) the kit: the cheap and standard panels start no Grok 4.20 voice, Grok Build stays;
+    (c) the kit: the model's words / --only orgrok420 / --only grok420voice start orgrok420 alone;
+    (d) «только грок», --only grok, --only openrouter start no orgrok420 (kit and operator);
+    (e) the operator: the cheap and standard panels keep grok420 + grokbuild, «только грок 4.20» runs grok420;
+    (f) the plan text: the kit's names the model's word once; the operator's (grok420 started) has no false
+        «grok420voice was NOT started» line.
+    """
+    import copy as _copy
+    import re as _re
+    import routing as rt
+    section("R185: Grok 4.20 Reasoning off in the kit by default - orgrok420 starts only when named")
+    base = rt.load_registry(overlay=False)
+    orc = base["channels"].get("orgrok420") or {}
+    check(orc.get("explicit_only") is True and orc.get("enabled") is True and orc.get("distribution") == "both"
+          and (orc.get("spend_guard") or {}).get("max_usd_per_review") == 2.0,
+          "[fix] (a) orgrok420 is explicit_only, ON and shipped (`both`) with its $2.00 spend guard",
+          repr((orc.get("explicit_only"), orc.get("enabled"), orc.get("distribution"), orc.get("spend_guard"))))
+
+    def shape(direct_on):
+        r = _copy.deepcopy(base)
+        for c in r["channels"].values():
+            if isinstance(c, dict) and c.get("distribution") == "local":
+                c["enabled"] = False              # what package.py does to a `local` channel
+        if direct_on:
+            r["channels"]["grok420"]["enabled"] = True
+        return r
+
+    def run(r, **kw):
+        kw.setdefault("panel", "cheap")
+        rr = _copy.deepcopy(r)
+        try:
+            return rt.resolve(rr, tier="max", ready=lambda n: True, **kw), rr
+        except rt.RouteError as exc:
+            return {"_err": {"enabled": False, "why": [str(exc)]}}, rr
+
+    def grok_on(p):
+        return sorted(c for c, s in p.items() if (s or {}).get("enabled") and c in ("grok420", "orgrok420", "grokbuild"))
+
+    def err(p):
+        return " ".join(str(w) for w in (p.get("_err") or {}).get("why") or [])[:160]
+
+    op, kit = shape(True), shape(False)
+    for panel in ("cheap", "standard"):
+        p, _ = run(kit, panel=panel)
+        check("_err" not in p and grok_on(p) == ["grokbuild"],
+              "[fix] (b) kit, %s panel: no Grok 4.20 voice, Grok Build stays" % panel, err(p) or repr(grok_on(p)))
+    for how, kw in (("«только грок 4.20»", {"route": "только грок 4.20"}),
+                    ("«only grok 4.20»", {"route": "only grok 4.20"}),
+                    ("--only orgrok420", {"only": ["orgrok420"]}), ("--only grok420voice", {"only": ["grok420voice"]})):
+        p, _ = run(kit, **kw)
+        check(grok_on(p) == ["orgrok420"], "[guard] (c) kit: %s starts orgrok420 alone (paid, named)" % how,
+              err(p) or repr(grok_on(p)))
+    for tag, r in (("kit", kit), ("operator", op)):
+        for how, kw in (("«только грок»", {"route": "только грок"}), ("--only grok", {"only": ["grok"]}),
+                        ("--only openrouter", {"only": ["openrouter"]})):
+            p, _ = run(r, **kw)
+            lab = "[fix]" if tag == "kit" or how == "--only openrouter" else "[guard]"
+            check("_err" not in p and "orgrok420" not in grok_on(p),
+                  "%s (d) %s: %s starts no orgrok420" % (lab, tag, how), err(p) or repr(grok_on(p)))
+    for panel in ("cheap", "standard"):
+        p, _ = run(op, panel=panel)
+        check(grok_on(p) == ["grok420", "grokbuild"],
+              "[guard] (e) operator, %s panel: grok420 carries the Grok 4.20 voice, Grok Build stays" % panel,
+              err(p) or repr(grok_on(p)))
+    p, _ = run(op, route="только грок 4.20")
+    check(grok_on(p) == ["grok420"], "[guard] (e) operator: «только грок 4.20» runs the direct channel",
+          err(p) or repr(grok_on(p)))
+    p, rr = run(kit)
+    lines = [ln for ln in rt.format_plan(p, rr).splitlines() if "grok420voice was NOT started" in ln]
+    m = _re.search(r"model's word \(([^)]*)\)", lines[0]) if lines else None
+    items = [x.strip() for x in m.group(1).split("/")] if m else []
+    check(len(lines) == 1 and "grok 4.20" in items and len(items) == len(set(items)),
+          "[fix] (f) kit: the plan says how to start the Grok 4.20 voice - by the model's word, each word once",
+          repr(lines)[:220])
+    p, rr = run(op)
+    bad = [ln for ln in rt.format_plan(p, rr).splitlines() if "grok420voice was NOT started" in ln]
+    check(not bad and grok_on(p) == ["grok420", "grokbuild"],
+          "[guard] (f) operator: grok420 started, so the plan prints no «grok420voice was NOT started» line",
+          repr(bad)[:220])
+
+
 def suite_r182_i4_grok_version_words():
     """R182 И-4 (2026-11-16). On 1.122.0 "only grok 4.6" / "only grok 4.5" / "only grok 4.7" also started the paid
     Grok 4.20 voice: the scan read the English phrase as the group word `grok` (every ON member - Grok Build and the
@@ -21989,8 +22102,16 @@ def suite_r182_i4_grok_version_words():
                     for al in (m or {}).get("aliases") or []:
                         if _re.fullmatch(r"\d+(?:\.\d+)+", al):
                             rows.append((gname, al, c, mname))
-        check(("grok", "4.6", "grokbuild", "grok-4.6") in rows,
-              "[guard] (a) %s: the derived rows hold «only grok 4.6» (the class is not empty)" % tag, repr(rows)[:200])
+        if tag == "kit":
+            # SUPERSEDED by R185 (2: the kit's `grok` group has ONE startable member (grok420 ships OFF,
+            # orgrok420 is explicit_only), so the class «a group word + a bare version» is empty there; (b) still runs.
+            check(not [x for x in rows if x[0] == "grok"],
+                  "[fix] (a) SUPERSEDED by R185: kit: the grok group has one startable member - no derived "
+                  "«grok <version>» row", repr(rows)[:200])
+        else:
+            check(("grok", "4.6", "grokbuild", "grok-4.6") in rows,
+                  "[guard] (a) %s: the derived rows hold «only grok 4.6» (the class is not empty)" % tag,
+                  repr(rows)[:200])
         for gname, al, c, mname in rows:
             p = plan_of(r, route="only %s %s" % (gname, al))
             check(on(p) == [c] and (p.get(c) or {}).get("model") == mname,
@@ -22008,8 +22129,13 @@ def suite_r182_i4_grok_version_words():
         voice = ["orgrok420"] if tag == "kit" else ["grok420"]
         for words in ("only grok", "только грок"):
             p = plan_of(r, route=words)
-            check(on(p) == sorted(["grokbuild"] + voice),
-                  "[guard] (c) %s: «%s» starts Grok Build and the Grok 4.20 voice (1.122.0)" % (tag, words),
+            # SUPERSEDED in part by R185 (2026-11-16): in the kit the family word no longer starts the Grok 4.20
+            # voice (orgrok420 is explicit_only, grok420 ships OFF) - Grok Build alone; the operator is unchanged.
+            want = ["grokbuild"] if tag == "kit" else sorted(["grokbuild"] + voice)
+            check(on(p) == want,
+                  "%s (c) %s: «%s» starts %s" % ("[fix]" if tag == "kit" else "[guard]", tag, words,
+                                                "Grok Build alone (R185: the Grok 4.20 voice only when named)"
+                                                if tag == "kit" else "Grok Build and the Grok 4.20 voice (1.122.0)"),
                   err(p) or repr(on(p)))
         p = plan_of(r, route="only grok 4.20")
         check(on(p) == voice, "[guard] (c) %s: «only grok 4.20» starts the Grok 4.20 voice alone" % tag,

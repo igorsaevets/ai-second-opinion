@@ -2,6 +2,15 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.123.0 — 2026-11-16
+
+Grok 4.20 Reasoning leaves the cheap and standard panels: it runs only when you name it.
+
+- **No paid Grok 4.20 Reasoning on every run.** Since 1.122.0 every cheap and standard panel ran Grok 4.20 Reasoning through OpenRouter on your key (`orgrok420`, ≈ $0.10 a review, at most $2.00); the maintainer switched it off by default as too expensive through OpenRouter. It now starts only when named: "only grok 4.20" / «только грок 4.20» (it alone), "add grok 4.20" / «добавь грок 4.20» (the cheap panel plus it) or `--only orgrok420` - still **paid** (OpenRouter, 2026-11-16: $1.25 / $2.50 per 1M tokens, each web search $0.005). No panel, "all models" or group word starts it; the plan of such a run prints «🔴 grok420voice was NOT started (orgrok420): it starts only when named ...».
+- **Who runs**, measured on the build against 1.122.2 on seven simulated machines: the cheap panel 9 → 8 models, the standard panel 15 → 14; "only grok" / «только грок» → Grok Build alone (was Grok Build + the paid Grok 4.20); `--only openrouter` no longer includes Grok 4.20; "CLI only" and `--ask` unchanged.
+- **Back into every panel:** `{"channels": {"orgrok420": {"explicit_only": false}}}` in your settings file, then once `python routing.py --accept-settings`.
+- The plan no longer prints «grok420voice was NOT started» where the direct xAI copy (`grok420`) carried the voice, and prints the model's words once. Where `grok420` is switched on but `XAI_API_KEY` is missing, the voice no longer moves to the paid OpenRouter copy by itself.
+
 ## 1.122.2 — 2026-11-16
 
 A timed-out opencode voice stops working on opencode's side, and MiMo v2.6 Flash gets the time a review takes.
@@ -283,17 +292,6 @@ The plugin directory's automatic check stopped the plugin on one finding: «Secr
 - **A selftest keeps it so:** `suite_prd003_no_credential_shapes` scans every shipped code, doc and registry file for credential shapes; on 1.113.3 it finds all seven.
 - No behaviour changed.
 
-## 1.113.3 — 2026-10-18
-
-opencode stopped serving its free Muse Spark on 2026-10-17, so in 1.113.2 the Spark line of every first run failed. Three other free opencode models join the cheap panel, and the docs say that Spark now costs money.
-
-- **Three free opencode voices in the cheap panel**, no key and no account: Nemotron 3 Ultra (`ocnemotron3ultrafree`), GLM 5.3 Flash (`ocglm53flashfree`) and DeepSeek V4.1 Flash (`ocdeepseekv41flashfree`). Run live together with MiMo v2.6 Flash on 2026-10-18: four of four answered and refuted the planted claim, quoting the docstring. GLM and DeepSeek run at effort max (their reasoning tokens at low and at max do not overlap, n=2) with a 65,536-token output limit, as MiMo Flash has; Nemotron takes no effort level, so none is sent.
-- **The free Spark is off.** `ocspark13free` (`opencode/muse-spark-1.3-contributor-free`) answers «provider.no-route» and is gone from `opencode models`; it ships switched off. The cheap panel's Spark voice is now `spark13cont` (Meta key) or `orspark13cont` (OpenRouter), $0.10 / $0.20 per 1M tokens (the plan marks the OpenRouter route PAID); our first OpenRouter run cost $0.002.
-- **`ocspark13go` has no fallback.** It fell back to the free Spark; a fallback that starts paying on its own is not one we ship.
-- **One Nemotron voice.** The opencode Nemotron and `ornemotron3ultra` (OpenRouter) are one cascade: opencode first, OpenRouter only where opencode is missing (standard panel).
-- **Hints.** `provider.no-route` has its own now: the model is no longer served, or the effort variant is not one it takes; free models come and go; check `opencode models`. The `provider.quota` hint no longer promises the free Spark, and the `--ask` list line names cascade twins as one voice.
-- **Docs.** README and README.ru: the setup table, «There is no free Muse Spark any more», the «How to ask» counts (cheap 8, CLI only 6, standard 13, CLI only standard 7, for a reader who did steps 1-4, plus Codex for the standard rows), both panel tables, the fallback list, the Go paragraph, the data-terms paragraph. INSTALL, PRIVACY and SECURITY follow; INSTALL no longer says that every `opencode/` model is free.
-
 ## Older releases
 
-171 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+172 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).

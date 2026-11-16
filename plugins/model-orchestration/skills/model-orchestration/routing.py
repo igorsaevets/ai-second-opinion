@@ -4028,8 +4028,15 @@ def format_plan(plan, reg):
             if not hit:
                 continue
             shown.update(hit)
+            # 🔴 R185 (2026-11-16): orgrok420 became explicit_only while grok420 - the same model, xAI direct - stays
+            # in the operator's panel. Where another member of the model's group STARTED in this run the voice is
+            # there and «was NOT started» would be false; the held-back copy says why in its own [skip] line.
+            if any((plan.get(c) or {}).get("enabled") for c in members if c not in hit):
+                continue
             al = [str(a) for a in ((reg.get("groups") or {}).get(gname) or {}).get("aliases") or []]
-            words = [gname] + [a for a in al if a != gname][:1] + [a for a in al if " " in a][:1]
+            # R185: the first alias and the first spaced alias can be the same phrase («grok 4.20» twice)
+            words = list(dict.fromkeys([gname] + [a for a in al if a != gname][:1]
+                                       + [a for a in al if " " in a][:1]))
             lines.append("  🔴 %s was NOT started (%s): it starts only when named - by the model's word (%s) or"
                          % (gname, ", ".join(hit), " / ".join(words)))
             lines.append("     by a channel's own name; never through another group, a panel or a default. The "

@@ -160,7 +160,7 @@
       "_membership_r180": "R180: orglm53flash and orglm53flashxlegal spend OPENROUTER_API_KEY."
     },
     "grok420voice": {
-      "label": "Grok 4.20 Reasoning - one voice: xAI direct on the operator's machine (grok420 is `local`, so the kit ships it OFF; without XAI_API_KEY it is not ready), else OpenRouter; the cascade runs the first member that is ready",
+      "label": "Grok 4.20 Reasoning - one voice: xAI direct on the operator's machine (grok420 is `local`, so the kit ships it OFF; without XAI_API_KEY it is not ready), else OpenRouter; the cascade runs the first member that is ready. R185 (2026-11-16): orgrok420 is explicit_only - the kit (grok420 ships OFF) has no Grok 4.20 voice in any panel, the model's words start the OpenRouter copy",
       "_added": "R182 (2026-11-15): the model's words were aliases of grok420 alone, so on a kit install (grok420 ships OFF, no XAI key) «только грок 4.20» started a channel that fails at preflight and «only grok 4.20» was a route error; as a group equal to the cascade they name the voice and the cascade picks the transport.",
       "channels": [
         "grok420",
@@ -3145,6 +3145,8 @@
       "vendor": "xai",
       "provider": "openrouter",
       "enabled": true,
+      "explicit_only": true,
+      "_explicit_only_r185": "the operator, R185 (2026-11-16): «Grok 4.20 Reasoning отключаем для Kit по дефолту, слишком дорого обходится через openrouter». ON and shipped (`both`), but no panel, default or broader group (grok, openrouter, all) starts it any more: the model's words (the one-voice group grok420voice) or its own name do, with the plan printed first. On the operator's machine grok420 (xAI direct) keeps the cheap panel's Grok 4.20 voice; in the kit grok420 ships OFF (`local`), so the kit's panels have no Grok 4.20 voice unless it is named. Way back into a kit panel: the settings file `orgrok420.explicit_only: false` (a sharp field: run routing.py --accept-settings once).",
       "_enabled_r182": "the operator, R182 (2026-11-15): «добавим вот эту модель в cheap панель не через cli, а по api ... В моей локальной сделай через x напрямую, а в kit для всех через openrouter ... По дефолту включена» and «Он должен и искать в вебе». ON again as the KIT's Grok 4.20 Reasoning voice in the cheap panel; on the operator's machine the cascade [grok420, orgrok420] gives the voice to the direct channel. PAID per call on the user's OPENROUTER_API_KEY: $1.25/M in, $2.50/M out, $0.20/M cached, web search $0.005 per search, all DOUBLE above a 200K-token prompt (OpenRouter /api/v1/models, read 2026-11-15) - `spend_guard` caps a review. A user without the key gets the preflight line naming it and `--skip orgrok420`, as every channel missing its key does. Which word drops the voice depends on the machine (R182 И-2, probed): in the kit `--skip orgrok420` drops it (grok420 is OFF there); on the operator's machine `--skip orgrok420` changes nothing (grok420 carries the voice) and `--skip grok420` MOVES the voice here, paid on OpenRouter (the cascade's rule: one voice, the next transport carries it - the plan prints «PAID» before the run); `--skip grok420voice` drops it on every machine.",
       "spend_guard": {
         "max_usd_per_review": 2.0

@@ -471,7 +471,7 @@ capability, measured, not assumed:
 |---|---|---|
 | Gemini 3.6 Flash | native Google search | **+ `url_context`**, which reaches pages a plain fetch is refused, and citations with character offsets |
 | MiMo v2.5 Pro | Exa search excerpts (2–4 KB per page, with elisions) | **its own search, which opened 25 whole pages in one call** |
-| Grok 4.20 | xAI's own search through OpenRouter's web plugin ($0.005 a search); OpenRouter lists a 2M context. The cheap panel's Grok 4.20 voice since 1.122.0 | **xAI's own search loop, which opened 3 pages after 3 searches in our first call**, at most 10 turns (`max_turns`, since 1.122.0); xAI's own model page lists a 1M context; `cost_in_usd_ticks` — the call's actual price. X search exists in xAI's API; this channel does not send it |
+| Grok 4.20 | xAI's own search through OpenRouter's web plugin ($0.005 a search); OpenRouter lists a 2M context. The cheap panel's Grok 4.20 voice in 1.122.0–1.122.2; since 1.123.0 it runs only when named ("only grok 4.20") | **xAI's own search loop, which opened 3 pages after 3 searches in our first call**, at most 10 turns (`max_turns`, since 1.122.0); xAI's own model page lists a 1M context; `cost_in_usd_ticks` — the call's actual price. X search exists in xAI's API; this channel does not send it |
 
 To turn one on: set the key, then put it in **your own settings file** — not in `channels.json`,
 which is replaced on every update:

@@ -61,9 +61,9 @@ before it ended with no answer. The plan prints every step before anything is se
 step cannot run on a machine (no NVIDIA key, or opencode's free allowance refused that day), the paid copy is the
 next step directly.
 
-Since 1.122.0 the cheap panel also sends every brief to xAI through OpenRouter where `OPENROUTER_API_KEY` is set:
-Grok 4.20 Reasoning (`orgrok420`). `--skip grok420voice` leaves it out of a run; switching `orgrok420` off in your
-settings file leaves it out of every run.
+In 1.122.0-1.122.2 the cheap panel also sent every brief to xAI through OpenRouter where `OPENROUTER_API_KEY` was
+set: Grok 4.20 Reasoning (`orgrok420`). Since 1.123.0 a brief goes that way only in a run that names the model
+("only grok 4.20", "add grok 4.20", `--only orgrok420`); the plan names it before anything is sent.
 
 Each vendor's own privacy policy and retention rules apply to what you send them. This tool cannot
 and does not change them. **Once a brief has been sent it cannot be recalled.** If you enable no
