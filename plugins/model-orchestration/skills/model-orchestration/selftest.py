@@ -8181,6 +8181,7 @@ def main():
                   suite_r181_i4_paid_where_free_cannot,
                   suite_r182_grok420_cheap,
                   suite_r182_i2_grok420_bounds,
+                  suite_r182_i4_grok_version_words,
                   suite_r168_i3_free_transports,
                   suite_r168_i4_panel_fixes,
                   suite_r169_agy_argon,
@@ -21758,6 +21759,83 @@ def suite_r182_i2_grok420_bounds():
     check(en is None or ("moves the voice" in en.lower() and "--skip grok420voice" in en),
           "[fix] (g) orgrok420's note says which skip does what on which machine (or the shipped tree dropped notes)",
           (en or "")[-160:])
+
+
+def suite_r182_i4_grok_version_words():
+    """R182 И-4 (2026-11-16). On 1.122.0 "only grok 4.6" / "only grok 4.5" / "only grok 4.7" also started the paid
+    Grok 4.20 voice: the scan read the English phrase as the group word `grok` (every ON member - Grok Build and the
+    Grok 4.20 cascade) + the bare version, while «грок 4.6» is one model alias. 1.121.0 hid it (one ON member).
+    [fix] = fails on the 1.122.0 registry; [guard] = holds before and after.
+    (a) derived from the registry: in a group whose ON members share one vendor (>= 2 of them), «only <group> <bare
+        version of a member's model>» starts that member alone, pinned to that model - kit and operator shape;
+    (b) every Grok Build model by its English and Russian words (case, hyphen, «build») starts Grok Build alone;
+    (c) KEPT from 1.122.0: «only grok» / «только грок» start Grok Build + the Grok 4.20 voice, «only grok 4.20» the voice.
+    """
+    import copy as _copy
+    import re as _re
+    import routing as rt
+    section("R182 И-4: a Grok model version starts that model alone (\"only grok 4.6\" ran the paid Grok 4.20 too)")
+    base = rt.load_registry(overlay=False)
+
+    def shape(direct_on):
+        r = _copy.deepcopy(base)
+        for c in r["channels"].values():
+            if isinstance(c, dict) and c.get("distribution") == "local":
+                c["enabled"] = False              # what package.py does to a `local` channel
+        if direct_on:
+            r["channels"]["grok420"]["enabled"] = True
+        return r
+
+    def plan_of(r, **kw):
+        kw.setdefault("panel", "cheap")
+        try:
+            return rt.resolve(_copy.deepcopy(r), tier="max", ready=lambda n: True, **kw)
+        except rt.RouteError as exc:
+            return {"_err": {"enabled": False, "why": [str(exc)]}}
+
+    def on(p):
+        return sorted(c for c, s in p.items() if c != "_err" and (s or {}).get("enabled"))
+
+    def err(p):
+        return " ".join(str(w) for w in (p.get("_err") or {}).get("why") or [])[:160]
+
+    for tag, r in (("kit", shape(False)), ("operator", shape(True))):
+        rows = []
+        for gname in sorted(r.get("groups") or {}):
+            live = [c for c in rt.group_members(r, gname) or []
+                    if (r["channels"].get(c) or {}).get("enabled") and not (r["channels"].get(c) or {}).get("explicit_only")]
+            if len(live) < 2 or len({rt.channel_vendor(r, c) for c in live}) != 1:
+                continue
+            for c in live:
+                for mname, m in ((r["channels"][c].get("models") or {}).items()):
+                    for al in (m or {}).get("aliases") or []:
+                        if _re.fullmatch(r"\d+(?:\.\d+)+", al):
+                            rows.append((gname, al, c, mname))
+        check(("grok", "4.6", "grokbuild", "grok-4.6") in rows,
+              "[guard] (a) %s: the derived rows hold «only grok 4.6» (the class is not empty)" % tag, repr(rows)[:200])
+        for gname, al, c, mname in rows:
+            p = plan_of(r, route="only %s %s" % (gname, al))
+            check(on(p) == [c] and (p.get(c) or {}).get("model") == mname,
+                  "[fix] (a) %s: \"only %s %s\" starts %s alone, pinned to %s" % (tag, gname, al, c, mname),
+                  err(p) or repr((on(p), (p.get(c) or {}).get("model"))))
+        for mname in sorted((r["channels"]["grokbuild"].get("models") or {})):
+            ver = mname.split("-", 1)[1]
+            for words, label in (("only grok %s" % ver, "[fix]"), ("Only Grok %s" % ver, "[fix]"),
+                                 ("только грок %s" % ver, "[guard]"), ("only grok-%s" % ver, "[guard]"),
+                                 ("only grok build %s" % ver, "[guard]"), ("только грок билд %s" % ver, "[guard]")):
+                p = plan_of(r, route=words)
+                check(on(p) == ["grokbuild"] and (p.get("grokbuild") or {}).get("model") == mname,
+                      "%s (b) %s: «%s» starts Grok Build alone on %s" % (label, tag, words, mname),
+                      err(p) or repr((on(p), (p.get("grokbuild") or {}).get("model"))))
+        voice = ["orgrok420"] if tag == "kit" else ["grok420"]
+        for words in ("only grok", "только грок"):
+            p = plan_of(r, route=words)
+            check(on(p) == sorted(["grokbuild"] + voice),
+                  "[guard] (c) %s: «%s» starts Grok Build and the Grok 4.20 voice (1.122.0)" % (tag, words),
+                  err(p) or repr(on(p)))
+        p = plan_of(r, route="only grok 4.20")
+        check(on(p) == voice, "[guard] (c) %s: «only grok 4.20» starts the Grok 4.20 voice alone" % tag,
+              err(p) or repr(on(p)))
 
 
 def suite_r179_kit_defaults():

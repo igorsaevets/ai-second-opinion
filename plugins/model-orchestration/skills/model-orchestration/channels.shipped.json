@@ -3363,6 +3363,7 @@
       "_no_memory": "--no-memory is passed because the CLI otherwise keeps cross-session memory (11 files already under ~/.grok/memory). A review brief is not ours to leave on disk for an unrelated later session to reuse.",
       "_prompt_file_not_dash_p": "The brief goes through --prompt-file. A review brief is routinely tens of KB and the Windows command line is not - the same trap agy documents, avoided here before it could be hit.",
       "_usd": "The CLI reports total_cost_usd (~$0.008-0.012 on the probe calls). What that means on a session-authenticated subscription is UNVERIFIED, so it is printed with that word attached and deliberately kept OUT of the round's spend total. A made-up zero would be worse than an absence.",
+      "_aliases_r182i4": "R182 И-4 (2026-11-16): the Latin «grok 4.7» / «grok 4.6» / «grok 4.5» join the Cyrillic «грок 4.x». Without them 'only grok 4.6' was read as the group word `grok` + the bare version, and every ON member of the group ran - since 1.122.0 (Grok 4.20 ON) the paid Grok 4.20 voice too (orgrok420 in the kit, grok420 on the operator's machine). The longer alias wins the scan, so the phrase names this model alone, as «только грок 4.6» did. A new model here takes its Latin and Cyrillic «<name> <version>» words together (suite_r182_i4_grok_version_words derives the class from the registry).",
       "models": {
         "grok-4.7": {
           "label": "Grok 4.7",
@@ -3370,6 +3371,7 @@
           "data_policy": "xAI subscription through the Grok Build CLI, session-authenticated. This project has NOT verified xAI's consumer-subscription data terms, which are not necessarily the API terms - read them before sending client material.",
           "aliases": [
             "grok-4.7",
+            "grok 4.7",
             "грок 4.7",
             "4.7"
           ],
@@ -3385,6 +3387,7 @@
           "data_policy": "xAI subscription through the Grok Build CLI, session-authenticated. This project has NOT verified xAI's consumer-subscription data terms, which are not necessarily the API terms - read them before sending client material.",
           "aliases": [
             "grok-4.6",
+            "grok 4.6",
             "грок 4.6",
             "4.6"
           ],
@@ -3399,6 +3402,7 @@
           "label": "Grok 4.5",
           "aliases": [
             "grok-4.5",
+            "grok 4.5",
             "грок 4.5",
             "4.5"
           ],
