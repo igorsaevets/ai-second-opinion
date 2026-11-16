@@ -1131,8 +1131,9 @@
       },
       "_opencode_limit": "R153 И-2 (2026-10-15): opencode's catalogue gives this free model limit.output 32000, and reasoning counts against it: in Page2AI T107 it reasoned 32 002 tokens and wrote nothing (store finish: length; 8 of 88 sessions since 10-01). call_opencode sends this block as the run's OPENCODE_CONFIG_CONTENT with `run --standalone` (a private server started with the run's env; on a local stand-in max_completion_tokens followed it: 32000 -> 131072). Free gateway, live (runs/r153-t107-kimi-mimo/i2/cap_probe_live_131072.log): LIFTED - one step 86 562 tokens (output 84 901 + reasoning 1 661), finish=stop, 16 001 lines, 962 s with the limit at 131072; 65536 chosen to leave input room in the 200K window. context = the catalogue's 200000.",
       "_effort": "Variants are UNAVAILABLE on this free model. Live tested 2026-10-02: opencode/mimo-v2.6-flash-free#xhigh, #high, #minimal all return 'Variant unavailable'. The model runs at opencode's default reasoning level. call_opencode() skips the #variant suffix when effort is null (if effort: guard, line 3435).",
-      "timeout": "40m",
+      "timeout": "100m",
       "_timeout": "Same rationale as ocspark13free: opencode CLI has no built-in timeout, caller-side via subprocess.run.",
+      "_timeout_r184": "R184 И-2 (2026-11-15): 40m -> 100m, as ocmimo26flashgo (same model, same work): it is the first link where the Go plan is missing, and its 2026-11-15 runs were cut at 36-39 min of work. A timed-out --standalone run's suspended row is now deleted (orchestrate.py _opencode_forget), else opencode's next server start resumes it (anomalyco/opencode #55076).",
       "models": {
         "opencode/mimo-v2.6-flash-free": {
           "label": "MiMo v2.6 Flash Free (via opencode)",
@@ -1513,8 +1514,9 @@
       "effort": null,
       "_effort": "Null like the free twin (same model): opencode's free copy rejects every #variant ('Variant unavailable'), and the Go copy is unprobed - so no suffix is sent. Re-probe if the model gains variants.",
       "_effort_r181": "R181 2026-11-15 (D:/Claude Code/runs/r181-go-free-api/go_variants_r181.out, go_variants_r181_mimo.out): opencode-go/mimo-v2.6-flash #max, #xhigh, #high, #medium, #low and #minimal -> «Variant unavailable»; no variant answered (3.6 s). The Go copy has no variant either: effort stays null.",
-      "timeout": "40m",
+      "timeout": "100m",
       "_timeout": "Same rationale as ocmimo26flashfree: opencode CLI has no built-in timeout, caller-side via subprocess.run.",
+      "_timeout_r184": "R184 И-2 (2026-11-15): 40m -> 100m. MiMo v2.6 Flash makes ~32-35 tokens/s through opencode (DeepSeek V4.1 Flash 84-99, GLM 5.3 Flash 67-71) and reasons the most; in opencode's store on the operator's machine 37 of 38 marker-ended Go reviews took 7-94 min (one 183), 10 of them over 40 min, and the WEB to MD panels of 2026-11-15 threw away 6 of 6 finished Go answers at the 40-min TIMEOUT, then paid an OpenRouter copy that read 0 pages. A round waits for its slowest voice; the other cheap voices ended by ~26 min there. At the timeout the session is now stopped on opencode's side (orchestrate.py _opencode_stop).",
       "models": {
         "opencode-go/mimo-v2.6-flash": {
           "label": "MiMo v2.6 Flash (via opencode, OpenCode Go plan)",

@@ -5644,6 +5644,122 @@ def _opencode_store_merge(raw, tokens, cost, note):
     return out, cost2, "opencode store"
 
 
+# R184 И-2 (2026-11-15, opencode 2.3.0 on Windows; D:/Claude Code/runs/r184-mimo-orphan/i2/): a TIMED-OUT opencode
+# session must not keep working - now or later. _run_tree kills the client's process tree, and then:
+# - without --standalone the session runs inside opencode's shared background service (`opencode serve --service`),
+#   which carried it on: 6 of 6 MiMo Go reviews of the WEB to MD panels of 2026-11-15 worked to their end 0-54 min
+#   past the harness's TIMEOUT, shell tools included (E-644: one ran `ssh` 20 min after the round had given up).
+#   `opencode api session.interrupt --param sessionID=<id>` stops it: {"interrupted":true} in 0.1 s, the row turns
+#   idle (outcome "interrupted") and is no longer suspended. A command the agent had already started can outlive it
+#   on Windows (the probe's `ping` did: its shell died, the grandchild ran to its own end).
+# - with --standalone the private server dies with the tree, but the session row stays SUSPENDED, and an opencode
+#   server that starts resumes every suspended row (anomalyco/opencode #55076, open; the query is `time_suspended IS
+#   NOT NULL`, no switch - #56032 open): 39 harness sessions here came back 14 h - 5 days after their kill and worked
+#   14-104 min (844 model turns). interrupt does nothing there ({"interrupted":false}); `opencode session delete <id>`
+#   removes the row (measured), so it runs AFTER the store's totals were read.
+OC_STOP_WAIT = 10.0                                      # s for an interrupted service session to turn idle
+
+
+def _opencode_tree_state(sid):
+    """{"root", "rows", "open"} of the session tree of `sid` in opencode's store, read-only: rows = how many rows the
+    tree has, open = the ids that are not idle. None when there is no store or it cannot be read."""
+    path = _opencode_store_path()
+    if not sid or not os.path.isfile(path):
+        return None
+    try:
+        import sqlite3
+        import urllib.parse
+        uri = "file:%s?mode=ro" % urllib.parse.quote(path.replace("\\", "/"), safe="/:")
+        con = sqlite3.connect(uri, uri=True, timeout=2)
+        try:
+            root = _opencode_root_id(con, sid)
+            rows = con.execute("WITH RECURSIVE tree(id) AS (SELECT ? UNION ALL SELECT s.id FROM session_v2 s "
+                               "JOIN tree t ON s.parent_id = t.id) SELECT id, time_idle FROM session_v2 "
+                               "WHERE id IN tree LIMIT 32", (root,)).fetchall()
+        finally:
+            con.close()
+    except Exception:                                     # noqa: BLE001 - never costs the round
+        return None
+    return {"root": root, "rows": len(rows), "open": [r[0] for r in rows if r[1] is None]}
+
+
+def _opencode_first_line(p, fallback):
+    for s in (getattr(p, "stderr", None), getattr(p, "stdout", None)):
+        lines = [x.strip() for x in (s or "").splitlines() if x.strip()]
+        if lines:
+            return lines[0][:160]
+    return fallback
+
+
+def _opencode_stop(binary, raw, standalone, env=None, cwd=None):
+    """R184 И-2: after a TIMEOUT, what the run left on opencode's side (see the comment above). None when nothing is
+    left: no session id in the stream, no store, or the whole session tree idle. Else {"root", "line", "bad",
+    "forget"}: a service session is interrupted here and waited for; a --standalone one is only marked "forget" - the
+    caller reads the store's totals first, then calls _opencode_forget."""
+    m = _OC_SESSION_RE.search(raw or "")
+    st = _opencode_tree_state(m.group(1) if m else None)
+    if not st or not st["open"]:
+        return None
+    root = st["root"]
+    if standalone:
+        return {"root": root, "line": None, "bad": False, "forget": True}
+    said, asked = [], 0
+    for sid in st["open"][:16]:
+        try:
+            p = subprocess.run([binary, "api", "session.interrupt", "--param", "sessionID=%s" % sid],
+                               capture_output=True, text=True, encoding="utf-8", errors="replace",
+                               timeout=30, env=env, cwd=cwd)
+            if getattr(p, "returncode", 1) == 0 and (getattr(p, "stdout", "") or "").lstrip().startswith("{"):
+                asked += 1
+            else:
+                said.append(_opencode_first_line(p, "exit %s" % getattr(p, "returncode", "?")))
+        except (OSError, subprocess.SubprocessError) as exc:
+            said.append(type(exc).__name__)
+    deadline = time.time() + (OC_STOP_WAIT if asked else 0)
+    while True:
+        now = _opencode_tree_state(root)
+        if now is None or not now["open"] or time.time() >= deadline:
+            break
+        time.sleep(0.5)
+    if now is not None and not now["open"]:
+        return {"root": root, "bad": False, "forget": False,
+                "line": ("its session ..%s was still working on opencode's background service after the timeout "
+                         "(opencode 2.x `run` executes there and outlives its client): stopped with `opencode api "
+                         "session.interrupt`; a command it had already started may still run to its own end "
+                         "(R184 И-2)" % root[-6:])}
+    n_open = len((now or st)["open"])
+    return {"root": root, "bad": True, "forget": False,
+            "line": ("its session ..%s may still be working on opencode's background service after this timeout, "
+                     "with its tools on this machine (%d session(s) of its tree not idle%s) - stop it: `opencode api "
+                     "session.interrupt --param sessionID=%s` (R184 И-2)"
+                     % (root[-6:], n_open, "; " + "; ".join(sorted(set(said))) if said else "", root))}
+
+
+def _opencode_forget(binary, stop, env=None, cwd=None):
+    """R184 И-2: delete a timed-out --standalone run's SUSPENDED session row - the next opencode server start would
+    resume it (see the comment above). Called after the store's totals were read; fills stop["line"]."""
+    root, why = stop["root"], ""
+    try:
+        p = subprocess.run([binary, "session", "delete", root], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=60, env=env, cwd=cwd)
+        if getattr(p, "returncode", 1) != 0:
+            why = _opencode_first_line(p, "exit %s" % getattr(p, "returncode", "?"))
+    except (OSError, subprocess.SubprocessError) as exc:
+        why = type(exc).__name__
+    st = _opencode_tree_state(root)
+    if st is not None and st["rows"] == 0:
+        stop["line"] = ("its session ..%s ended with its private server (--standalone) at the timeout; its row was "
+                        "deleted (`opencode session delete`), because an opencode server that starts resumes every "
+                        "suspended session (anomalyco/opencode #55076) (R184 И-2)" % root[-6:])
+        return stop
+    stop["bad"] = True
+    stop["line"] = ("its session ..%s ended with its private server (--standalone) at the timeout, but its row stays "
+                    "suspended, and the next opencode server start will resume it with its tools (anomalyco/opencode "
+                    "#55076)%s - remove it: `opencode session delete %s` (R184 И-2)"
+                    % (root[-6:], " (%s)" % why if why else "", root))
+    return stop
+
+
 _OC_STANDALONE = {}
 
 
@@ -6059,7 +6175,9 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
         # the `opencode.CMD` shim's cmd.exe - and then waits for the pipes, which opencode.exe and its private
         # server keep open until the model ends: ocstep5previewnv held the round 3 980 s against its 1 200 and
         # nothing after it ran. _run_tree stops the whole tree at the timeout and keeps what was printed.
-        p = _run_tree(cmd, capture_output=True, text=True, encoding="utf-8",
+        # R184 И-2: errors="replace" - after a kill a console line in the OEM code page on stderr raised
+        # UnicodeDecodeError in subprocess's reader thread (probe 2026-11-15) and the stderr was lost.
+        p = _run_tree(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
                       input=text_in, cwd=ncwd, env=_task_child_env(env),
                       timeout=_seconds(timeout, 2400))
     except FileNotFoundError:
@@ -6067,10 +6185,19 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     except subprocess.TimeoutExpired as exc:
         rec = _cli_timeout(name, exc, outfile, t0, timeout, model, effort)
         _raw = exc.stdout.decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else exc.stdout
+        # R184 И-2: what the run left on opencode's side is stopped FIRST, so that the store's totals read below are
+        # the session's final ones; a --standalone row is deleted only after they were read.
+        _cenv = _task_child_env(env)
+        stop = _opencode_stop(binary, _raw, oc_info["standalone"], env=_cenv, cwd=ncwd)
         _tk = {"input": rec.get("in_tokens"), "output": rec.get("out_tokens"),
                "reasoning": rec.get("reasoning_tokens"), "cache": {"read": rec.get("cached_in_tokens")}}
         _tk, _usd, rec["tokens_source"] = _opencode_store_merge(_raw, _tk, rec.get("usd"),
                                                                 rec["notes"])
+        if stop and stop["forget"]:
+            _opencode_forget(binary, stop, env=_cenv, cwd=ncwd)
+        if stop and stop["line"]:
+            (rec["warnings"] if stop["bad"] else rec["notes"]).append(stop["line"])
+            log("  [%s] %s" % (name, stop["line"]))
         rec.update(in_tokens=_tk.get("input"), out_tokens=_tk.get("output"),
                    reasoning_tokens=_tk.get("reasoning"),
                    cached_in_tokens=(_tk.get("cache") or {}).get("read"),

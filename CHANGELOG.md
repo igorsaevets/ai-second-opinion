@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.122.2 — 2026-11-16
+
+A timed-out opencode voice stops working on opencode's side, and MiMo v2.6 Flash gets the time a review takes.
+
+- **A timed-out opencode voice no longer keeps working.** opencode 2.x `run` executes the session in opencode's shared background service, so stopping the `opencode run` process at the voice's timeout left the session working there with its tools: on 2026-11-15 all 6 MiMo reviews on the Go plan timed out at 40 minutes and then finished inside the service, 40-94 minutes after they started; on 2026-11-05 one ran a shell command 20 minutes after its timeout. Now the harness interrupts that session and its sub-agents (`opencode api session.interrupt`) before it reads the run's token totals, so the record's tokens are final, and the record's notes say so. A `--standalone` run (a private server, used when the voice needs its own key or output limit) ends with its server, but opencode keeps its session as suspended and resumes every suspended session the next time an opencode server starts - a service restart, a reboot, hours or days later (anomalyco/opencode #55076; 39 such sessions came back on the maintainer's machine 14 hours to 5 days after their stop and worked 14-104 minutes each). Now that row is deleted (`opencode session delete`) after its totals are read. If either step fails, the record carries a 🔴 warning naming the command to run. Not covered: a command the agent had already started may run to its own end on Windows; stopping the harness itself (Ctrl+C) skips this step.
+- **MiMo v2.6 Flash waits up to 100 minutes on opencode** (`ocmimo26flashgo`, `ocmimo26flashfree`; was 40). Through opencode it writes about 33 tokens a second: 10 of 38 finished Go-plan reviews on the maintainer's machine took longer than 40 minutes (37 of the 38 took 7-94 min, one 183), and at 40 minutes the finished answer was thrown away and the paid copy filled the seat. A cheap panel waits for its slowest voice, so a round can now take up to about 100 minutes; when MiMo does not finish in 100 minutes, the free copy and then the paid copy follow (at most 100 + 100 + 20 min). A shorter `timeout` for these channels is one line in your settings file.
+- An opencode run's output is decoded with `errors="replace"`: after a stop, a console line in the OEM code page on stderr raised `UnicodeDecodeError` in the reader thread.
+
 ## 1.122.1 — 2026-11-16
 
 A Grok model named by its version runs that model alone.

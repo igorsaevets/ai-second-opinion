@@ -255,6 +255,16 @@ If a free voice ended without an answer and nothing fell back for it, the in-rou
 
 ---
 
+### "An opencode voice timed out — is it still working?"
+
+Before 1.122.2, often yes: opencode 2.x runs a session in its shared background service, and the harness stopped only the `opencode run` process, so the session went on there with its tools for up to an hour. Since 1.122.2 the voice's notes in `diagnostics.json` say what happened at the timeout: «stopped with `opencode api session.interrupt`» (the shared service) or «its row was deleted (`opencode session delete`)» (a `--standalone` run). A 🔴 warning instead - «may still be working» or «the next opencode server start will resume it» - means that step failed: run the command it names. A command the agent had already started may still run to its own end.
+
+The second effect comes from opencode itself: a session whose private server (`--standalone`) was stopped stays suspended, and the next opencode server that starts - a restart of its background service, a reboot, an update - resumes it, even days later (anomalyco/opencode #55076). Sessions left by earlier versions of this kit are listed by `opencode session list` run inside the folder the harness gives opencode (`orchestrate-neutral-cwd` in your temporary folder); one is removed, with its sub-agents, by
+
+    opencode session delete <session id>
+
+`opencode session export <session id> > backup.json` keeps a copy first; `opencode session import backup.json` brings it back.
+
 ## Verifying the tool itself
 
 ```

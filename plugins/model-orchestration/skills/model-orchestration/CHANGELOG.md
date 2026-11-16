@@ -2,6 +2,14 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.122.2 — 2026-11-16
+
+A timed-out opencode voice stops working on opencode's side, and MiMo v2.6 Flash gets the time a review takes.
+
+- **A timed-out opencode voice no longer keeps working.** opencode 2.x `run` executes the session in opencode's shared background service, so stopping the `opencode run` process at the voice's timeout left the session working there with its tools: on 2026-11-15 all 6 MiMo reviews on the Go plan timed out at 40 minutes and then finished inside the service, 40-94 minutes after they started; on 2026-11-05 one ran a shell command 20 minutes after its timeout. Now the harness interrupts that session and its sub-agents (`opencode api session.interrupt`) before it reads the run's token totals, so the record's tokens are final, and the record's notes say so. A `--standalone` run (a private server, used when the voice needs its own key or output limit) ends with its server, but opencode keeps its session as suspended and resumes every suspended session the next time an opencode server starts - a service restart, a reboot, hours or days later (anomalyco/opencode #55076; 39 such sessions came back on the maintainer's machine 14 hours to 5 days after their stop and worked 14-104 minutes each). Now that row is deleted (`opencode session delete`) after its totals are read. If either step fails, the record carries a 🔴 warning naming the command to run. Not covered: a command the agent had already started may run to its own end on Windows; stopping the harness itself (Ctrl+C) skips this step.
+- **MiMo v2.6 Flash waits up to 100 minutes on opencode** (`ocmimo26flashgo`, `ocmimo26flashfree`; was 40). Through opencode it writes about 33 tokens a second: 10 of 38 finished Go-plan reviews on the maintainer's machine took longer than 40 minutes (37 of the 38 took 7-94 min, one 183), and at 40 minutes the finished answer was thrown away and the paid copy filled the seat. A cheap panel waits for its slowest voice, so a round can now take up to about 100 minutes; when MiMo does not finish in 100 minutes, the free copy and then the paid copy follow (at most 100 + 100 + 20 min). A shorter `timeout` for these channels is one line in your settings file.
+- An opencode run's output is decoded with `errors="replace"`: after a stop, a console line in the OEM code page on stderr raised `UnicodeDecodeError` in the reader thread.
+
 ## 1.122.1 — 2026-11-16
 
 A Grok model named by its version runs that model alone.
@@ -286,24 +294,6 @@ opencode stopped serving its free Muse Spark on 2026-10-17, so in 1.113.2 the Sp
 - **Hints.** `provider.no-route` has its own now: the model is no longer served, or the effort variant is not one it takes; free models come and go; check `opencode models`. The `provider.quota` hint no longer promises the free Spark, and the `--ask` list line names cascade twins as one voice.
 - **Docs.** README and README.ru: the setup table, «There is no free Muse Spark any more», the «How to ask» counts (cheap 8, CLI only 6, standard 13, CLI only standard 7, for a reader who did steps 1-4, plus Codex for the standard rows), both panel tables, the fallback list, the Go paragraph, the data-terms paragraph. INSTALL, PRIVACY and SECURITY follow; INSTALL no longer says that every `opencode/` model is free.
 
-## 1.113.2 — 2026-10-17
-
-The first screen says what its sample run does and does not show. Nine reviewers read 1.113.1's new section: all nine caught the same arithmetic slip, and seven saw that a «dead links» column alone hid how many links were never confirmed.
-
-- **README and README.ru, «What a real run found»** (was «What one run returns», too close to «What one run looks like» further down). A Live column beside Dead, with one line on what each means; † on the three routes the published version leaves off, and the intro says the seven are not the default panel. «26 min 31 s, 15 seconds more than the slowest voice» replaces «27 minutes, the time of its slowest voice», which the table's own 26 min contradicted. The awesome-claude-code rule is quoted whole, with its exception, and linked; MiMo Flash's quote is marked as cut; Spark's two dead links are named as one real page cited twice. The default panel's cost and `--dry-run` close the section, with a link to the console sample.
-- **The data-flow sentence** names what the tool does on its own: a version check against GitHub at most once a week, as PRIVACY.md says.
-- **The hallucination check** is described as what it checks: dead links, links cited without being opened, quiet refusals.
-- The English README's terminal example says `--route "only CLI"` (it was the Russian phrase; both give the same plan); the tagline reads «Every AI model knows different things»; the Russian twin is reworded in eight places.
-- No code changed.
-
-## 1.113.1 — 2026-10-17
-
-The README opens with what one run returns. Until now a first-time visitor read the promise and then, as the first section, a table of accounts, keys and CLIs: nothing on the page showed a run's output above that cost.
-
-- **README and README.ru: «What one run returns», right below the tagline.** A real run of 1.113.0 (2026-10-17, seven CLI agents asked where this tool should be listed): time and the citation check per model, a rule our own notes had missed, a disagreement, and the gap between links cited and pages opened. It names the three of the seven that ran through channels the published version leaves off.
-- **What leaves your machine is said on the first screen:** sending your document to the vendors you pick is the whole point, and the tool itself has no server and collects nothing (PRIVACY.md).
-- No code changed.
-
 ## Older releases
 
-169 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+171 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).

@@ -8182,6 +8182,7 @@ def main():
                   suite_r182_grok420_cheap,
                   suite_r182_i2_grok420_bounds,
                   suite_r182_i4_grok_version_words,
+                  suite_r184_i2_opencode_stop,
                   suite_r168_i3_free_transports,
                   suite_r168_i4_panel_fixes,
                   suite_r169_agy_argon,
@@ -21759,6 +21760,183 @@ def suite_r182_i2_grok420_bounds():
     check(en is None or ("moves the voice" in en.lower() and "--skip grok420voice" in en),
           "[fix] (g) orgrok420's note says which skip does what on which machine (or the shipped tree dropped notes)",
           (en or "")[-160:])
+
+
+def suite_r184_i2_opencode_stop():
+    """R184 И-2 (2026-11-15). A TIMED-OUT opencode run leaves nothing working on opencode's side, now or later.
+    Measured on opencode 2.3.0 (D:/Claude Code/runs/r184-mimo-orphan/i2/): without --standalone the session runs in
+    opencode's shared background service and went on after the harness killed its client (6 of 6 MiMo Go reviews of
+    2026-11-15); `opencode api session.interrupt` stopped it in 0.1 s. With --standalone the row stays SUSPENDED and the
+    next opencode server start resumes it (anomalyco/opencode #55076; 39 harness sessions on the operator's machine);
+    only `opencode session delete` removes it. [fix] = red on the pre-R184 code (NC); [guard] = green on both.
+    """
+    import sqlite3 as _sq
+    import subprocess as _sp
+    import tempfile as _tf
+    import time as _t
+    import orchestrate as o
+    import routing as rt
+    section("R184 И-2: a timed-out opencode session is stopped (service) or deleted (--standalone)")
+    home = _tf.mkdtemp(prefix="r184i2-xdg-")
+    dbp = os.path.join(home, "opencode", "opencode.db")
+    os.makedirs(os.path.dirname(dbp))
+    calls, mode = [], {"api": "ok", "delete": "ok", "stream": None}
+
+    def db(rows):
+        if os.path.exists(dbp):
+            os.remove(dbp)
+        con = _sq.connect(dbp)
+        con.execute("create table session_v2 (id text primary key, parent_id text, tokens_input int, "
+                    "tokens_output int, tokens_reasoning int, tokens_cache_read int, tokens_cache_write int, "
+                    "cost real, time_idle int)")
+        con.executemany("insert into session_v2 values (?,?,?,?,?,?,?,?,?)", rows)
+        con.commit()
+        con.close()
+
+    def sql(q, args=()):
+        con = _sq.connect(dbp)
+        try:
+            out = con.execute(q, args).fetchall()
+            con.commit()
+        finally:
+            con.close()
+        return out
+
+    open_tree = [("ses_R184ROOT", None, 10, 5, 0, 0, 0, 0.0, None),
+                 ("ses_R184KID", "ses_R184ROOT", 20, 7, 0, 0, 0, 0.0, None),
+                 ("ses_R184OTHER", None, 999, 999, 0, 0, 0, 0.0, None)]
+    stream = ('{"type":"step_start","sessionID":"ses_R184KID","part":{"type":"step-start"}}\n'
+              '{"type":"text","sessionID":"ses_R184KID","part":{"type":"text","text":"partial review"}}\n')
+
+    class _P:
+        def __init__(self, rc=0, out="", err=""):
+            self.returncode, self.stdout, self.stderr = rc, out, err
+
+    def fake(cmd, *a, **kw):
+        cmd = list(cmd)
+        calls.append((cmd[1:], dict(kw)))
+        if cmd[1:2] == ["run"]:
+            raise _sp.TimeoutExpired(cmd, kw.get("timeout"), output=mode["stream"])
+        if cmd[1:3] == ["api", "session.interrupt"]:
+            if mode["api"] != "ok":
+                return _P(1, "", "Unknown command: api\n")
+            sid = cmd[-1].split("=", 1)[1]
+            sql("update session_v2 set time_idle = 1, tokens_output = tokens_output + 100 where id = ?", (sid,))
+            return _P(0, '{"interrupted":true}\n')
+        if cmd[1:3] == ["session", "delete"]:
+            if mode["delete"] != "ok":
+                return _P(1, "", "Error: service unavailable\n")
+            sql("delete from session_v2 where id = ? or parent_id = ?", (cmd[3], cmd[3]))
+            return _P(0, "Session %s deleted\n" % cmd[3])
+        return _P(1, "", "not faked")
+
+    def run(name, model):
+        del calls[:]
+        t = _t.time()
+        r = o.call_opencode("brief", "R184-END", os.path.join(home, name + ".md"), model=model, timeout=60, name=name)
+        return r, _t.time() - t, [c[0] for c in calls if c[0][:1] != ["run"] and c[0][:1] != ["--version"]]
+
+    saved = (o.subprocess.run, o.log, o._opencode_supports_standalone, o._opencode_store_totals,
+             dict(getattr(o, "_OC_VERSION", {})), os.environ.get("XDG_DATA_HOME"), getattr(o, "OC_STOP_WAIT", None))
+    real_tot = o._opencode_store_totals
+    try:
+        os.environ["XDG_DATA_HOME"] = home
+        o.subprocess.run = fake
+        o.log = lambda *a, **k: None
+        o._opencode_store_totals = lambda raw, settle=3.0: real_tot(raw, settle=0.2)
+        if saved[6] is not None:
+            o.OC_STOP_WAIT = 2.0
+
+        # (a) the shared background service: interrupt every open session of the stream's tree, then read the totals
+        o._opencode_supports_standalone = lambda b: False
+        db(open_tree)
+        mode.update(api="ok", stream=stream)
+        r, secs, extra = run("ocmimo26flashgo", "opencode-go/mimo-v2.6-flash")
+        idle = dict(sql("select id, time_idle from session_v2"))
+        notes = " ".join(r.get("notes") or [])
+        check(sorted(c[3] for c in extra if c[:2] == ["api", "session.interrupt"]) ==
+              ["sessionID=ses_R184KID", "sessionID=ses_R184ROOT"] and idle.get("ses_R184OTHER") is None
+              and idle.get("ses_R184ROOT") == 1 and "stopped with `opencode api session.interrupt`" in notes
+              and not any("may still be working" in w for w in r.get("warnings") or []),
+              "R184 И-2 (a) [fix] a timed-out run on opencode's background service: the stream's session tree (root "
+              "+ sub-agent) is interrupted, a neighbour is not, and the record says so",
+              "%r %r %r" % (extra, idle, notes[-300:]))
+        check(r.get("out_tokens") == 212 and r.get("tokens_source") == "opencode store",
+              "R184 И-2 (a) [fix] its tokens are the store's FINAL totals, read after the stop (212 = 5 + 7 + 2 x 100 "
+              "the fake service wrote at the interrupt)", repr(r.get("out_tokens")))
+
+        # (b) --standalone: no interrupt (the service does not own it); the suspended row is deleted AFTER the read
+        o._opencode_supports_standalone = lambda b: True
+        db(open_tree)
+        mode.update(delete="ok")
+        r, secs, extra = run("ocmimo26flashfree", "opencode/mimo-v2.6-flash-free")
+        rows = [x[0] for x in sql("select id from session_v2")]
+        runs = [c for c in calls if c[0][:1] == ["run"]]
+        check(extra == [["session", "delete", "ses_R184ROOT"]] and rows == ["ses_R184OTHER"]
+              and bool(runs) and "--standalone" in runs[0][0] and r.get("out_tokens") == 12
+              and "row was deleted" in " ".join(r.get("notes") or []),
+              "R184 И-2 (b) [fix] a timed-out --standalone run: its suspended row (+ child) is deleted after the "
+              "store's totals were read (out 12), never interrupted, the neighbour kept",
+              "%r rows=%r out=%r" % (extra, rows, r.get("out_tokens")))
+
+        # (c) the interrupt is not available (an opencode without `api`): a loud line, no wait
+        o._opencode_supports_standalone = lambda b: False
+        db(open_tree)
+        mode.update(api="fail")
+        r, secs, extra = run("ocmimo26flashgo", "opencode-go/mimo-v2.6-flash")
+        warn = " ".join(r.get("warnings") or [])
+        check("may still be working" in warn and "sessionID=ses_R184ROOT" in warn and secs < 5,
+              "R184 И-2 (c) [fix] the interrupt fails: the record WARNS that the session may still be working and "
+              "names the command, without waiting", "%.1f s %r" % (secs, warn[-300:]))
+
+        # (d) a --standalone row that cannot be deleted: a loud line naming the delete command
+        o._opencode_supports_standalone = lambda b: True
+        db(open_tree)
+        mode.update(delete="fail")
+        r, secs, extra = run("ocmimo26flashfree", "opencode/mimo-v2.6-flash-free")
+        warn = " ".join(r.get("warnings") or [])
+        check("will resume it" in warn and "opencode session delete ses_R184ROOT" in warn,
+              "R184 И-2 (d) [fix] the delete fails: the record warns that the next opencode server start resumes it",
+              warn[-300:])
+
+        # (e) nothing left: the tree is idle already, or the stream carried no session id - no call at all
+        o._opencode_supports_standalone = lambda b: False
+        db([(x[0], x[1], 10, 5, 0, 0, 0, 0.0, 1) for x in open_tree])
+        mode.update(api="ok", delete="ok", stream=stream)
+        r1, _s, extra1 = run("ocmimo26flashgo", "opencode-go/mimo-v2.6-flash")
+        db(open_tree)
+        mode.update(stream="")
+        r2, _s, extra2 = run("ocmimo26flashgo", "opencode-go/mimo-v2.6-flash")
+        check(extra1 == [] and extra2 == [] and not any("R184" in n for n in (r1.get("notes") or []) +
+                                                        (r2.get("notes") or []))
+              and r1.get("error", "").startswith("TIMEOUT") and r2.get("error", "").startswith("TIMEOUT"),
+              "R184 И-2 (e) [guard] nothing to stop (tree already idle / no session id in the stream): no extra call, "
+              "the TIMEOUT record as before", "%r %r" % (extra1, extra2))
+
+        # (f) a cmd.exe line in the console code page on stderr no longer kills the reader thread
+        runs = [c for c in calls if c[0][:1] == ["run"]]
+        check(bool(runs) and runs[-1][1].get("errors") == "replace",
+              "R184 И-2 (f) [fix] the opencode run decodes its pipes with errors='replace' (a stray OEM byte on "
+              "stderr raised UnicodeDecodeError in the reader thread, probe 2026-11-15)",
+              repr(runs[-1][1].get("errors") if runs else None))
+    finally:
+        (o.subprocess.run, o.log, o._opencode_supports_standalone, o._opencode_store_totals) = saved[:4]
+        if hasattr(o, "_OC_VERSION"):
+            o._OC_VERSION.clear()
+            o._OC_VERSION.update(saved[4])
+        if saved[5] is None:
+            os.environ.pop("XDG_DATA_HOME", None)
+        else:
+            os.environ["XDG_DATA_HOME"] = saved[5]
+        if saved[6] is not None:
+            o.OC_STOP_WAIT = saved[6]
+
+    # (g) the registry: MiMo Flash's opencode copies wait long enough for a measured review
+    reg = rt.load_registry(overlay=False)["channels"]
+    mins = {n: o._seconds(reg[n].get("timeout"), 0) / 60 for n in ("ocmimo26flashgo", "ocmimo26flashfree")}
+    check(all(m >= 95 for m in mins.values()),
+          "R184 И-2 (g) [fix] MiMo Flash's opencode copies time out at >= 95 min (37 of 38 marker-ended Go reviews "
+          "in the operator's store took 7-94 min; the 40-min TIMEOUT threw away 6 of 6 on 2026-11-15)", repr(mins))
 
 
 def suite_r182_i4_grok_version_words():
