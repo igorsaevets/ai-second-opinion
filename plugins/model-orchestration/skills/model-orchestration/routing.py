@@ -3027,6 +3027,11 @@ def same_voice(reg, name):
 # orchestrate.SUBSTANTIAL_BYTES is the same number (selftest pins them equal).
 SUBSTANTIAL_BYTES = 2000
 
+# R186: a stopped run of these kinds keeps its streamed text - the agent's narration between tool calls - so one
+# stopped before its end marker has no answer, whatever its size; orchestrate.TIMEOUT_CUT_KINDS is the same tuple
+# (selftest pins them equal).
+TIMEOUT_CUT_KINDS = ("opencode", "mimocli")
+
 
 def _replaced_twin(plan, reg, fb):
     """R153 И-13 (G10): (the member of fb's cascade group that THIS route replaced, its why) or (None, "").
@@ -4152,6 +4157,11 @@ def format_plan(plan, reg):
                             "bytes)" % (" or ".join(sib), SUBSTANTIAL_BYTES)
                             if sib else "- the same model as this channel, over another transport"
                             if c in _same else "- nothing else here carries that model"))
+            # R186 (2026-11-16): the size rule above does not hold for a stopped run of these kinds
+            if p.get("kind") in TIMEOUT_CUT_KINDS:
+                lines.append("             - stopped at its %s limit before its end marker = no answer, "
+                             "whatever its size (R186)"
+                             % (p.get("timeout") or (reg["channels"].get(c) or {}).get("timeout") or "time"))
             # R181 И-2: the second link (routing._second_link) - printed with its price word and its time, like the first
             nxt = fbk.get("then") if isinstance(fbk.get("then"), dict) else None
             if nxt and nxt.get("off"):

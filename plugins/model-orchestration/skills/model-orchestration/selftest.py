@@ -8193,6 +8193,8 @@ def main():
                   suite_r182_i4_grok_version_words,
                   suite_r184_i2_opencode_stop,
                   suite_r185_grok420_kit_off,
+                  suite_r186_glm_timeout_cut,
+                  suite_r187_sparks_wonder,
                   suite_r168_i3_free_transports,
                   suite_r168_i4_panel_fixes,
                   suite_r169_agy_argon,
@@ -14408,9 +14410,9 @@ def suite_r146_i3_spark_go():
     # 🔴 R154 И-3 (2026-10-18): the free Spark left opencode (provider.no-route since 2026-10-17), so the product
     # checks below say «no fallback» now; (e) keeps the run-time fallback MECHANISM on a fixture registry.
     check(ch.get("kind") == "opencode" and ch.get("model") == "opencode-go/muse-spark-1.3-contributor"
-          and ch.get("effort") == "xhigh" and ch.get("distribution") == "kit"   # R179: local -> kit
+          and ch.get("effort") == "xhigh" and ch.get("distribution") == "both"   # R179: local -> kit; R187: both
           and ch.get("fallback") is None and ch.get("panel") == "cheap",
-          "R146 И-3 (a) ocspark13go = opencode, opencode-go/muse-spark-1.3-contributor #xhigh, kit (R179), "
+          "R146 И-3 (a) ocspark13go = opencode, opencode-go/muse-spark-1.3-contributor #xhigh, both (R187), "
           "cheap; no run-time fallback since R154 И-3 (the free Spark is gone)")
     # R164 (2026-10-22): the Go Spark is Spark 1.2 Contributor now (ocspark12go); ocspark13go is off, by name only.
     grp = next((g for g in reg.get("_cascade_groups") or [] if "ocspark12go" in g), [])
@@ -14431,11 +14433,13 @@ def suite_r146_i3_spark_go():
           "fallback", repr(fb))
     pc = rt.resolve(rt.load_registry(), panel="cheap", ready=yes)
     if ((reg.get("channels") or {}).get("ocspark12go") or {}).get("enabled"):
-        want13 = not (pc.get("mcspark13") or {}).get("enabled")   # R179: the 1.3 Go Spark where mcspark13 is off
+        # R187: the 1.3 Go Spark is a voice of its own beside mcspark13 - it runs wherever this tree enables
+        # it (R179 had tied it to mcspark13 being off).
+        want13 = bool(((reg.get("channels") or {}).get("ocspark13go") or {}).get("enabled"))
         check(pc["ocspark12go"]["enabled"] and not pc["ocspark13free"]["enabled"]
               and bool(pc["ocspark13go"]["enabled"]) == want13,
               "R146 И-3 (b) this tree's cheap panel runs the Go Spark (ocspark12go since R164), not the free "
-              "one; the 1.3 Go Spark exactly where mcspark13 does not run (R179)")
+              "one; the 1.3 Go Spark wherever this tree enables it, beside mcspark13 (R187)")
     else:
         keyed = [c for c in ("spark12cont", "orspark12cont") if (pc.get(c) or {}).get("enabled")]
         check(not pc["ocspark13free"]["enabled"] and not pc["ocspark12go"]["enabled"] and len(keyed) == 1,
@@ -20461,7 +20465,8 @@ def suite_r164_muse_spark():
         "orspark12cont": dict(model="meta/muse-spark-1.2-contributor", contributor=True, enabled=True),
         # R179 (Igor 2026-11-09): the kit runs BOTH Contributor Sparks - Spark 1.3 through opencode's Go plan, else
         # OpenRouter (Meta's-key copy spark13cont stays off); ocspark12go ships on (distribution both).
-        "ocspark13go": dict(enabled=True, distribution="kit"), "spark13cont": dict(enabled=False),
+        # R187: ocspark13go kit -> both (both Go Contributor Sparks in parallel on the author's machine too)
+        "ocspark13go": dict(enabled=True, distribution="both"), "spark13cont": dict(enabled=False),
         "orspark13cont": dict(enabled=True, distribution="kit")}
     if (HERE / "VERSION").is_file():   # R160: a BUILT kit tree (R60's shipped run, CI) - package.py turns local off
         want["mcspark13"]["enabled"] = False
@@ -20471,11 +20476,12 @@ def suite_r164_muse_spark():
           "the 1.3 Contributor channels as R179 set them (Go plan + OpenRouter on, Meta's key off)", "; ".join(bad))
     cas = [c for c in reg.get("_cascade_groups") or [] if isinstance(c, list)]
     ok_b = (["ocspark12go", "mcspark12", "spark12cont", "orspark12cont"] in cas
-            and any(c[:1] == ["mcspark13"] and "spark13cont" in c for c in cas)
+            and ["ocspark13go", "ocspark13free", "spark13cont", "orspark13cont"] in cas   # R187
+            and not any("mcspark13" in c for c in cas)   # R187: mcspark13 is a voice of its own
             and any(c[:1] == ["mcwonder10"] and "mcwonder10cont" in c for c in cas)
             and (reg.get("ask_default") or [None])[0] == "ocspark12go"
             and not {"ocspark13go", "spark13cont", "orspark13cont"} & set(reg.get("ask_default") or []))
-    check(ok_b, "R164 (b) the Spark 1.2 cascade, mcspark13 / mcwonder10 first in theirs, --ask leads with ocspark12go",
+    check(ok_b, "R164 (b) the Spark 1.2 cascade, the Spark 1.3 Contributor cascade without mcspark13 (R187), mcwonder10 first in Wonder's, --ask leads with ocspark12go",
           "cascades=%s ask_default=%s" % ([c for c in cas if "mcspark13" in c or "ocspark12go" in c
                                            or "mcwonder10" in c], reg.get("ask_default")))
     try:
@@ -20495,11 +20501,12 @@ def suite_r164_muse_spark():
         else:
             ok_c = ("mcspark13" in on and "ocspark12go" in on and fb.get("channel") == "mcspark12"
                     and fb.get("off") is None and "ocspark12go" in sv
-                    and not {"ocspark13go", "spark13cont", "orspark13cont", "mcspark12"} & set(on))
+                    and "ocspark13go" in on   # R187: the 1.3 Go Spark is a voice of its own beside mcspark13
+                    and not {"spark13cont", "orspark13cont", "mcspark12"} & set(on))
         why_c = "kit=%s on=%s fallback=%s same_voice(mcspark12)=%s" % (shipped, on, fb, sv)
     except Exception as exc:                              # noqa: BLE001
         ok_c, why_c = False, "RAISED " + repr(exc)[:200]
-    check(ok_c, "R164 (c) the cheap plan runs mcspark13 AND ocspark12go, arms mcspark12, and counts it the same voice "
+    check(ok_c, "R164 (c) the cheap plan runs mcspark13 AND ocspark12go (AND ocspark13go since R187), arms mcspark12, and counts it the same voice "
           "as ocspark12go (a built kit since R179: ocspark12go + ocspark13go, Muse Code off)", why_c)
     seen = []
     old = (o._run_tree, o._musecode_usage, o.muse_bin)
@@ -21964,6 +21971,253 @@ def suite_r184_i2_opencode_stop():
           "in the operator's store took 7-94 min; the 40-min TIMEOUT threw away 6 of 6 on 2026-11-15)", repr(mins))
 
 
+def suite_r187_sparks_wonder():
+    """R187 (2026-11-17), Igor: both Go Contributor Sparks in parallel on his machine and in the kit («И пусть на всякий
+    случай у меня и в kit будет 2 паралельно spark contributor по подписке go»), plus Spark 1.3 max on his Muse Code
+    subscription, plus Wonder in his standard panel on the subscription only («в идеале конечно что бы работал только по
+    подписке, а не напрямую, если подписка закончилась»).
+    (a) [fix] mcspark13 is in no cascade; the Spark 1.3 Contributor cascade is [ocspark13go, ocspark13free, spark13cont,
+        orspark13cont]; ocspark13go is on with distribution both.
+    (b) [fix] this tree with everything ready, cheap panel: the source runs mcspark13 AND ocspark12go AND ocspark13go
+        (three Spark voices); a built kit (VERSION present) runs ocspark12go AND ocspark13go and no mcspark13.
+    (c) [guard] a kit-shaped copy (local channels off): both Go Sparks when opencode is ready; with neither opencode nor
+        a Meta key, the two OpenRouter copies (R179's order, unchanged).
+    (d) [guard] Wonder through an overlay that clears explicit_only on mcwonder10cont (the operator's local setting since
+        R187): the standard panel runs it and no other Wonder channel; the cheap panel runs none.
+    (e) [guard] the same overlay with Muse Code missing: no paid Wonder copy (wonder10 / orwonder) takes the seat, and
+        mcwonder10cont carries no run-time fallback.
+    """
+    import copy as _copy
+    print("\n-- R187: three Spark voices on the author's machine, two in the kit; Wonder on the subscription only")
+    import routing as rt
+    reg = rt.load_registry(overlay=False)
+    ch = reg.get("channels") or {}
+    cas = [c for c in reg.get("_cascade_groups") or [] if isinstance(c, list)]
+    o13 = ch.get("ocspark13go") or {}
+    check(not any("mcspark13" in c for c in cas)
+          and ["ocspark13go", "ocspark13free", "spark13cont", "orspark13cont"] in cas
+          and o13.get("enabled") is True and o13.get("distribution") == "both",
+          "[fix] R187 (a) mcspark13 in no cascade; Spark 1.3 Contributor = [ocspark13go, ocspark13free, spark13cont, "
+          "orspark13cont]; ocspark13go on, distribution both",
+          repr(([c for c in cas if "ocspark13go" in c or "mcspark13" in c], o13.get("enabled"),
+                o13.get("distribution"))))
+
+    def yes(c):
+        return True
+    sparks = {"mcspark13", "mcspark12", "ocspark12go", "ocspark13go", "ocspark13free", "spark12cont", "spark13cont",
+              "orspark12cont", "orspark13cont"}
+
+    def on(plan, names):
+        return {c for c in names if (plan.get(c) or {}).get("enabled")}
+    shipped = (HERE / "VERSION").is_file()
+    got = on(rt.resolve(_copy.deepcopy(reg), panel="cheap", ready=yes), sparks)
+    want = {"ocspark12go", "ocspark13go"} | (set() if shipped else {"mcspark13"})
+    check(got == want, "[fix] R187 (b) this tree, everything ready, cheap: %s" % (
+          "a built kit runs both Go Sparks" if shipped else "mcspark13 AND both Go Sparks - three Spark voices"),
+          repr(sorted(got)))
+    kit = _copy.deepcopy(reg)
+    for c in kit["channels"].values():
+        if isinstance(c, dict) and c.get("distribution") == "local":
+            c["enabled"] = False
+    gk = on(rt.resolve(_copy.deepcopy(kit), panel="cheap", ready=yes), sparks)
+    no_oc = on(rt.resolve(_copy.deepcopy(kit), panel="cheap",
+                          ready=lambda c: not str(c).startswith("oc") and c not in ("spark12cont", "spark13cont")),
+               sparks)
+    check(gk == {"ocspark12go", "ocspark13go"} and no_oc == {"orspark12cont", "orspark13cont"},
+          "[guard] R187 (c) kit-shaped: both Go Contributor Sparks in parallel; without opencode or a Meta key the two "
+          "OpenRouter copies", repr((sorted(gk), sorted(no_oc))))
+    wonders = {"mcwonder10", "mcwonder10cont", "wonder10", "orwonder"}
+    w = _copy.deepcopy(reg)
+    w["channels"]["mcwonder10cont"]["explicit_only"] = False
+    gs = on(rt.resolve(_copy.deepcopy(w), panel="standard", ready=yes), wonders)
+    gc = on(rt.resolve(_copy.deepcopy(w), panel="cheap", ready=yes), wonders)
+    check(gs == {"mcwonder10cont"} and not gc,
+          "[guard] R187 (d) Wonder through the operator's overlay (explicit_only off on mcwonder10cont): the standard "
+          "panel runs it and no other Wonder channel; the cheap panel runs none", repr((sorted(gs), sorted(gc))))
+    pm = rt.resolve(_copy.deepcopy(w), panel="standard", ready=lambda c: c not in ("mcwonder10", "mcwonder10cont"))
+    gm = on(pm, wonders)
+    fbm = (pm.get("mcwonder10cont") or {}).get("fallback") or {}
+    check(not (gm - {"mcwonder10cont"}) and not (ch.get("mcwonder10cont") or {}).get("fallback")
+          and not fbm.get("channel"),
+          "[guard] R187 (e) Muse Code missing: no paid Wonder copy (wonder10 / orwonder) takes the subscription's "
+          "seat, and mcwonder10cont has no run-time fallback", repr((sorted(gm), fbm)))
+
+
+def suite_r186_glm_timeout_cut():
+    """R186 (2026-11-16). GLM 5.3 Flash on the OpenCode Go plan: a review that needs more than 40 minutes.
+    WEB to MD T261 (2026-11-15): ocglm53flashgo was stopped at its 40-min limit with 2 339 B kept - all of it the agent's
+    narration between tool calls («Let me install ...», «Strong first results ...»), no line of the review - and
+    SUBSTANTIAL_BYTES (2 000) called that an answer, so no fallback ran; opencode finished the 12 217-char answer in its
+    background service at 73 min. Now the GLM opencode copies wait 100 min (as MiMo Flash since R184 И-2), and a run
+    stopped at its limit before its end marker has no answer, whatever its size (orchestrate._timeout_cut).
+    [fix] = red on the pre-R186 code (NC); [guard] = green on both.
+    """
+    import concurrent.futures as cf
+    import copy as _copy
+    import inspect as _insp
+    import json as _json
+    import sqlite3 as _sq
+    import subprocess as _sp
+    import tempfile as _tf
+    import time as _t
+    import orchestrate as o
+    import routing as rt
+    section("R186: GLM 5.3 Flash Go - 100 min, and a TIMEOUT before the end marker is no answer")
+    MARK = "R186-END"
+    home = _tf.mkdtemp(prefix="r186-xdg-")
+    dbp = os.path.join(home, "opencode", "opencode.db")
+    os.makedirs(os.path.dirname(dbp))
+    con = _sq.connect(dbp)
+    con.execute("create table session_v2 (id text primary key, parent_id text, tokens_input int, "
+                "tokens_output int, tokens_reasoning int, tokens_cache_read int, tokens_cache_write int, "
+                "cost real, time_idle int)")
+    con.execute("insert into session_v2 values ('ses_R186ROOT', NULL, 10, 5, 0, 0, 0, 0.0, NULL)")
+    con.commit()
+    con.close()
+    narr = ["I'll start by setting up a scratch environment and checking what I can verify.",
+            "Installed. Let me verify the shipped code matches the diff, then start the first experiments.",
+            "Strong first results. Let me dig into the call sites and run the next candidates."] * 12
+
+    def stream(parts):
+        out = ['{"type":"step_start","sessionID":"ses_R186ROOT","part":{"type":"step-start"}}']
+        for x in parts:
+            out.append(_json.dumps({"type": "text", "sessionID": "ses_R186ROOT", "part": {"type": "text", "text": x}}))
+            out.append('{"type":"tool_use","sessionID":"ses_R186ROOT","part":{"type":"tool","tool":"bash"}}')
+        return "\n".join(out) + "\n"
+
+    class _P:
+        def __init__(self, rc=0, out="", err=""):
+            self.returncode, self.stdout, self.stderr = rc, out, err
+
+    mode = {"stream": None}
+
+    def fake(cmd, *a, **kw):
+        cmd = list(cmd)
+        if cmd[1:2] == ["run"]:
+            raise _sp.TimeoutExpired(cmd, kw.get("timeout"), output=mode["stream"])
+        if cmd[1:3] == ["api", "session.interrupt"]:
+            return _P(0, '{"interrupted":true}\n')
+        return _P(1, "", "not faked")
+
+    def run(parts):
+        mode["stream"] = stream(parts)
+        return o.call_opencode("brief", MARK, os.path.join(home, "OCGLM53FLASHGO.md"),
+                               model="opencode-go/glm-5.3-flash", timeout=60, name="ocglm53flashgo")
+
+    rec_a = {}
+    saved = (o.subprocess.run, o.log, o._opencode_supports_standalone, o._opencode_store_totals,
+             dict(getattr(o, "_OC_VERSION", {})), os.environ.get("XDG_DATA_HOME"), getattr(o, "OC_STOP_WAIT", None))
+    real_tot = o._opencode_store_totals
+    try:
+        os.environ["XDG_DATA_HOME"] = home
+        o.subprocess.run = fake
+        o.log = lambda *a, **k: None
+        o._opencode_store_totals = lambda raw, settle=3.0: real_tot(raw, settle=0.2)
+        if saved[6] is not None:
+            o.OC_STOP_WAIT = 2.0
+        o._opencode_supports_standalone = lambda b: False
+
+        # (a) T261's shape through the real opencode timeout path: ~2.7 KB of narration, no end marker
+        r = run(narr)
+        rec_a = _copy.deepcopy(r)
+        kept = len((r.get("text") or "").strip().encode("utf-8"))
+        check(kept >= o.SUBSTANTIAL_BYTES and "TIMEOUT" in (r.get("warnings") or [])
+              and r.get("cut_at_timeout") is True and not o._has_answer(r)
+              and any("CUT AT THE TIME LIMIT" in n for n in (r.get("notes") or [])),
+              "R186 (a) [fix] an opencode run stopped at its limit with %d B of narration and no end marker has NO "
+              "answer (T261: 2 339 B kept, so no fallback ran)" % kept,
+              "kept=%d cut=%r has_answer=%r" % (kept, r.get("cut_at_timeout"), o._has_answer(r)))
+        check(r.get("text") and os.path.isfile(os.path.join(home, "OCGLM53FLASHGO.md")),
+              "R186 (a2) [guard] the text a stopped run kept stays in the record and in its file for the reader")
+        # (b) an answer printed with its end marker, then the run hung until the limit: still the reader's answer
+        r = run(narr + ["## Findings\n" + "finding " * 60 + "\n" + MARK])
+        check(not r.get("cut_at_timeout") and o._has_answer(r),
+              "R186 (b) [guard] a run stopped AFTER its end marker was printed keeps its answer - no fallback",
+              "cut=%r has_answer=%r" % (r.get("cut_at_timeout"), o._has_answer(r)))
+        # (c) the marker anywhere counts as reached (E-73: complete answers put it in backticks or before a post-script)
+        r = run(narr + ["Review done. `%s` - and one more note after it." % MARK])
+        check(not r.get("cut_at_timeout") and o._has_answer(r),
+              "R186 (c) [guard] the end marker anywhere in the kept text counts as reached (E-73)",
+              "cut=%r" % r.get("cut_at_timeout"))
+        # (d) under SUBSTANTIAL_BYTES and no marker: no answer, before and after
+        r = run(narr[:2])
+        check(not o._has_answer(r), "R186 (d) [guard] a short narration at the limit is no answer (as before)")
+    finally:
+        (o.subprocess.run, o.log, o._opencode_supports_standalone, o._opencode_store_totals) = saved[:4]
+        if hasattr(o, "_OC_VERSION"):
+            o._OC_VERSION.clear()
+            o._OC_VERSION.update(saved[4])
+        if saved[5] is None:
+            os.environ.pop("XDG_DATA_HOME", None)
+        else:
+            os.environ["XDG_DATA_HOME"] = saved[5]
+        if saved[6] is not None:
+            o.OC_STOP_WAIT = saved[6]
+
+    # (e) the run-time fallback: T261's record now runs the GLM voice's fallback once, after the round
+    reg = rt.load_registry(overlay=False)
+
+    def yes(_n):
+        return True
+
+    plan = rt.resolve(reg, only=["ocglm53flashgo"], ready=yes)
+    fb = ((plan.get("ocglm53flashgo") or {}).get("fallback") or {}).get("channel")
+    calls = []
+
+    def fake_submit(_ex, name):
+        calls.append(name)
+        f = cf.Future()
+        f.set_result({"ok": True, "text": "fallback answer\n" + MARK, "bytes": 25})
+        return f
+
+    res = {"ocglm53flashgo": _copy.deepcopy(rec_a)}
+    o.run_fallbacks(res, plan, reg, ["ocglm53flashgo"], submit=fake_submit, same_voice=rt.same_voice)
+    check(bool(fb) and calls[:1] == [fb] and (res.get(fb) or {}).get("fallback_for") == "ocglm53flashgo",
+          "R186 (e) [fix] T261's record (a timeout, narration only) runs the GLM fallback %s once after the round" % fb,
+          "fallback=%r calls=%r" % (fb, calls))
+    # (f) a run that ENDED without its marker keeps the size rule (E-73: a complete answer, marker misplaced)
+    del calls[:]
+    e73 = {"ok": False, "text": "## Review\n" + "y" * 3000, "bytes": 3010, "notes": [],
+           "warnings": ["END MARKER NOT ON LAST LINE - output is partial, do not parse it"]}
+    res = {"ocglm53flashgo": e73}
+    o.run_fallbacks(res, plan, reg, ["ocglm53flashgo"], submit=fake_submit, same_voice=rt.same_voice)
+    check(o._has_answer(e73) and calls == [],
+          "R186 (f) [guard] a run that ENDED without its marker still answers by size (E-73) - no fallback",
+          "calls=%r" % calls)
+
+    # (g) the registry: GLM 5.3 Flash's opencode copies wait long enough for a measured review
+    chs = reg["channels"]
+    mins = {n: o._seconds(chs[n].get("timeout"), 0) / 60 for n in ("ocglm53flashgo", "ocglm53flashfree")}
+    check(all(m >= 95 for m in mins.values()),
+          "R186 (g) [fix] GLM 5.3 Flash's opencode copies time out at >= 95 min (17 Go reviews since 2026-11-01 in "
+          "the operator's store: median 16 min, one 73 min - T261, stopped at 40)", repr(mins))
+
+    # (h) one tuple of kinds in orchestrate and routing
+    kinds = (getattr(o, "TIMEOUT_CUT_KINDS", None), getattr(rt, "TIMEOUT_CUT_KINDS", None))
+    check(kinds[0] == kinds[1] == ("opencode", "mimocli"),
+          "R186 (h) [fix] the kinds whose stopped run is judged by its end marker: the same tuple in orchestrate "
+          "and routing", repr(kinds))
+
+    # (i) the shared CLI timeout record (opencode AND mimo) judges the marker; call_mimocli hands it the marker
+    exc = _sp.TimeoutExpired(["mimo"], 60, output=stream(narr))
+    try:
+        rm = o._cli_timeout("mimov26flash", exc, os.path.join(home, "MIMO.md"), _t.time(), "40m", "m", marker=MARK)
+    except TypeError as e:
+        rm = {"_err": repr(e)}
+    src_mimo = _insp.getsource(o.call_mimocli)
+    check(rm.get("cut_at_timeout") is True and not o._has_answer(rm)
+          and "effort, marker=marker)" in src_mimo,
+          "R186 (i) [fix] _cli_timeout marks a stop before the marker for mimo too, and call_mimocli passes it",
+          repr(rm.get("_err")))
+
+    # (j) the printed plan states the rule and the new limit
+    txt = rt.format_plan(plan, reg)
+    blk = txt[txt.find("ocglm53flashgo"):]
+    check("stopped at its 100m limit before its end marker = no answer" in blk and "(up to 100m more)" in blk,
+          "R186 (j) [fix] the plan of the GLM Go voice prints the 100m limit and the stop-before-the-marker rule",
+          blk[:200])
+
+
 def suite_r185_grok420_kit_off():
     """R185 (2026-11-16). The operator: «Grok 4.20 Reasoning отключаем для Kit по дефолту, слишком дорого обходится
     через openrouter». orgrok420 (OpenRouter, paid) becomes `explicit_only`: no panel, default or broader group starts
@@ -22176,7 +22430,7 @@ def suite_r179_kit_defaults():
     def g(n):
         return ch.get(n) or {}
     want = {"ocspark12go": dict(enabled=True, distribution="both"),
-            "ocspark13go": dict(enabled=True, distribution="kit"),
+            "ocspark13go": dict(enabled=True, distribution="both"),   # R187: kit -> both
             "orspark13cont": dict(enabled=True, distribution="kit"),
             "orgemini38flash": dict(distribution="local"),
             "spark13cont": dict(enabled=False)}
@@ -22299,11 +22553,11 @@ def suite_r179_kit_defaults():
     if shipped:
         ok_h = {"ocspark12go", "ocspark13go", "agy38flash"} <= hn and "mcspark13" not in hn
     else:
-        ok_h = ({"mcspark13", "ocspark12go", "agy38flash"} <= hn
-                and not {"ocspark13go", "orspark13cont", "orgemini38flash"} & hn)
+        ok_h = ({"mcspark13", "ocspark12go", "ocspark13go", "agy38flash"} <= hn   # R187: + ocspark13go
+                and not {"orspark13cont", "orgemini38flash"} & hn)
     check(ok_h, "R179 (h) this tree with everything ready: %s" % (
           "a built kit runs both Go Sparks + agy38flash" if shipped else
-          "the author's plan - mcspark13 leads Spark 1.3, ocspark12go Spark 1.2, agy38flash Gemini"),
+          "the author's plan - mcspark13 AND both Go Sparks (R187), agy38flash Gemini"),
           repr(sorted(hn & (sp | {"mcspark13"}))))
     # (i) R179 И-2: `--only cli` on a kit machine without the Go plan runs ocspark12go / ocspark13go; the preflight must
     # say the plan is missing instead of «counted against the plan's limits».

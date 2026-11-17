@@ -265,6 +265,8 @@ The second effect comes from opencode itself: a session whose private server (`-
 
 `opencode session export <session id> > backup.json` keeps a copy first; `opencode session import backup.json` brings it back.
 
+Since 1.124.0 what such a voice printed before the stop counts as its answer only when it holds the brief's end marker. Without it the voice has no answer whatever its size (an agent's notes between tool calls used to pass once they reached 2000 bytes), its fallback runs, and the voice's file keeps the text. The plan prints the rule under the voice: «stopped at its 100m limit before its end marker = no answer, whatever its size (R186)».
+
 ## Verifying the tool itself
 
 ```

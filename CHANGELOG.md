@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.124.0 — 2026-11-17
+
+GLM 5.3 Flash gets the time a review takes on opencode, and a voice stopped at its time limit before its end marker no longer counts as an answer.
+
+- **GLM 5.3 Flash waits up to 100 minutes on opencode** (`ocglm53flashgo`, `ocglm53flashfree`; was 40), as MiMo v2.6 Flash since 1.122.2. On the maintainer's machine 17 finished Go-plan GLM reviews took a median 16 minutes (90th percentile 26) and 73 at most; a review that needed longer than 40 was cut there and the panel lost the voice.
+- **A voice stopped at its time limit before its end marker has no answer, whatever it printed** (opencode and the MiMo CLI). What such a run leaves is mostly the agent's notes between tool calls - in the case that started this, 2 339 bytes and not one line of the review - and from 2000 bytes on it counted as the voice's answer, so no fallback ran. Now the fallback runs (the free copy, then the paid OpenRouter copy) and the voice's file keeps the text. The end marker anywhere in the text counts, so an answer printed before a hang is still the answer. The plan prints the rule under the voice: «stopped at its 100m limit before its end marker = no answer, whatever its size (R186)».
+- **The same rule for MiMo v2.6 Flash and DeepSeek V4.1 Flash on opencode** (one code path): where a stopped run of theirs used to keep a long text as its answer, their fallback now runs. **The tail grows:** with the Go plan GLM's worst case is 100 + 100 + 20 = 220 minutes (was 40 + 40 + 20 = 100), as MiMo's; DeepSeek's stays 40 + 61 + 20. A cheap panel waits for its slowest voice. A shorter `timeout` for these channels is one line in your settings file; `--no-fallback` turns every fallback off for a run.
+- **Who runs is unchanged**, measured on the build against 1.123.0 on seven simulated machines, a normal and a refused day: every plan starts the same channels, Muse Spark included (both Contributor voices through the OpenCode Go plan where `opencode models` lists it, both OpenRouter copies otherwise). If your settings file turns on `mcspark13` (Muse Spark 1.3 Max through Muse Code), it now runs beside `ocspark13go` instead of taking its seat.
+- New selftest suites `suite_r186_glm_timeout_cut` and `suite_r187_sparks_wonder`; checks of R146 И-3, R164 and R179 follow the new Spark 1.3 cascade.
+
 ## 1.123.0 — 2026-11-16
 
 Grok 4.20 Reasoning leaves the cheap and standard panels: it runs only when you name it.

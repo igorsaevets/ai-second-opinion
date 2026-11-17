@@ -5511,13 +5511,19 @@ def _cli_error_lines(rc, text, raw, stderr, marker, warn, note, finished=None):
                        "; opencode's own store does NOT record a finished last step - read the answer's end"))
 
 
-def _cli_timeout(name, exc, outfile, t0, timeout, model, effort=None):
+def _cli_timeout(name, exc, outfile, t0, timeout, model, effort=None, marker=None):
     """R142 И-2 (Grok's finding): a TIMEOUT keeps what the CLI had already printed.
 
     subprocess.run hands it over on the exception - on Windows the whole decoded stdout, on POSIX
     the bytes read so far. The record used to say text "" with no tokens: a timed-out metered run
     reported no spend at all (E-137), and an answer already printed was dropped while the fallback
     was billed for another. `ok` stays False; the fallback trigger judges the text it kept.
+
+    R186 (2026-11-16): what an opencode / mimo stream holds before its end is the agent's narration between
+    its tool calls, joined (_cli_ndjson) - WEB to MD T261's GLM 5.3 Flash kept 2 339 B of «Let me install ...»
+    at its 40-min TIMEOUT and no line of the review, and SUBSTANTIAL_BYTES called that an answer, so no
+    fallback ran. With the brief's `marker` given, a stop before it is `cut_at_timeout` (_timeout_cut): no
+    answer, whatever the size.
     """
     raw = exc.stdout or ""
     if isinstance(raw, bytes):
@@ -5527,13 +5533,36 @@ def _cli_timeout(name, exc, outfile, t0, timeout, model, effort=None):
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
     cache = tokens.get("cache") or {}
-    return {"channel": name, "ok": False, "text": text,
-            "seconds": round(time.time() - t0, 1), "bytes": len(text.encode("utf-8")),
-            "error": "TIMEOUT after %s" % (timeout or "2400s"), "model": model, "effort": effort,
-            "in_tokens": tokens.get("input"), "out_tokens": tokens.get("output"),
-            "reasoning_tokens": tokens.get("reasoning"), "cached_in_tokens": cache.get("read"),
-            "usd": cost if cost and cost > 0 else None,
-            "warnings": ["TIMEOUT"], "notes": []}
+    return _timeout_cut({"channel": name, "ok": False, "text": text,
+                         "seconds": round(time.time() - t0, 1), "bytes": len(text.encode("utf-8")),
+                         "error": "TIMEOUT after %s" % (timeout or "2400s"), "model": model,
+                         "effort": effort,
+                         "in_tokens": tokens.get("input"), "out_tokens": tokens.get("output"),
+                         "reasoning_tokens": tokens.get("reasoning"), "cached_in_tokens": cache.get("read"),
+                         "usd": cost if cost and cost > 0 else None,
+                         "warnings": ["TIMEOUT"], "notes": []}, marker)
+
+
+# R186: the kinds whose stopped run keeps its streamed text - the two callers of _cli_timeout. The plan names
+# the rule for them (routing.TIMEOUT_CUT_KINDS is the same tuple; selftest pins them equal).
+TIMEOUT_CUT_KINDS = ("opencode", "mimocli")
+
+
+def _timeout_cut(rec, marker):
+    """R186 (2026-11-16): `rec` - a record of a run the harness STOPPED at its time limit - gets `cut_at_timeout`
+    when its kept text never reached the end marker; _has_answer then says no answer whatever the size, so the
+    run-time fallback runs (T261: 2 339 B of narration, no fallback). The marker ANYWHERE in the text counts as
+    reached (E-73: complete answers put it in backticks or before a post-script), so an answer printed before a
+    hang stays the reader's; no marker given, or no text: unchanged. The text stays in the record and its file.
+    """
+    t = rec.get("text") or ""
+    if marker and t.strip() and marker not in t:
+        rec["cut_at_timeout"] = True
+        rec.setdefault("notes", []).append(
+            "CUT AT THE TIME LIMIT before the end marker: the %d bytes kept are what the agent printed while it "
+            "worked (its narration between tool calls, or the start of an answer) - no answer, whatever the size, "
+            "so the fallback runs (R186)." % len(t.strip().encode("utf-8")))
+    return rec
 
 
 def _opencode_store_path():
@@ -6183,7 +6212,7 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
     except subprocess.TimeoutExpired as exc:
-        rec = _cli_timeout(name, exc, outfile, t0, timeout, model, effort)
+        rec = _cli_timeout(name, exc, outfile, t0, timeout, model, effort, marker=marker)
         _raw = exc.stdout.decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else exc.stdout
         # R184 И-2: what the run left on opencode's side is stopped FIRST, so that the store's totals read below are
         # the session's final ones; a --standalone row is deleted only after they were read.
@@ -6319,7 +6348,7 @@ def call_mimocli(brief, marker, outfile, model=None, effort=None, system=None,
     except FileNotFoundError:
         return {"channel": name, "ok": False, "error": "binary not found: " + binary}
     except subprocess.TimeoutExpired as exc:
-        return _cli_timeout(name, exc, outfile, t0, timeout, model, effort)
+        return _cli_timeout(name, exc, outfile, t0, timeout, model, effort, marker=marker)
 
     secs = time.time() - t0
     raw = (p.stdout or "").strip()
@@ -11097,12 +11126,17 @@ SUBSTANTIAL_BYTES = 2000
 
 
 def _has_answer(r):
-    """R142 И-2: did this result leave an answer for the reader - `ok`, or SUBSTANTIAL_BYTES+ of text?"""
+    """R142 И-2: did this result leave an answer for the reader - `ok`, or SUBSTANTIAL_BYTES+ of text?
+    R186: never a run stopped at its time limit before its end marker (`cut_at_timeout`, _timeout_cut)."""
     r = r or {}
     t = r.get("text")
     # R146: decoder garbage is no answer, whatever its size or `ok` (iron P304: 2 054 bytes of it
     # counted as one, so nothing behind the channel was ever asked).
     if r.get("corrupted_output") or corrupted_output(t):
+        return False
+    # R186: nor a run stopped at its time limit before its end marker (_timeout_cut) - T261's GLM 5.3 Flash kept
+    # 2 339 B of narration and no line of the review, and the size rule below counted it: no fallback ran.
+    if r.get("cut_at_timeout"):
         return False
     if r.get("ok"):
         return True
@@ -11295,7 +11329,9 @@ def run_fallbacks(results, plan, reg, want, no_fallback=False, task_mode=False, 
     file, twice). Not when the fallback's VOICE already answered here (routing.same_voice: its
     cascade group; `ok` or SUBSTANTIAL_BYTES+ of text), so no round pays twice for one voice;
     not for a substantial partial answer (E-73: the
-    end-marker check flags whole answers too - the reader judges those); after the auto-retry,
+    end-marker check flags whole answers too - the reader judges those), but a run stopped at its time limit
+    before its end marker has none, whatever its size (R186, _timeout_cut: its kept stream is narration); after
+    the auto-retry,
     so a transient death is retried on the primary first; never in --task mode; never into a fallback of the same
     `quota_group` after a `provider.quota` (R157 И-2: one allowance, so it would be refused too) - R157 И-5 (F9): nor
     into a quota group that ANY record of this round was refused on, whoever's fallback it is.

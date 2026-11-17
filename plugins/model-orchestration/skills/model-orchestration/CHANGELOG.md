@@ -2,6 +2,16 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.124.0 — 2026-11-17
+
+GLM 5.3 Flash gets the time a review takes on opencode, and a voice stopped at its time limit before its end marker no longer counts as an answer.
+
+- **GLM 5.3 Flash waits up to 100 minutes on opencode** (`ocglm53flashgo`, `ocglm53flashfree`; was 40), as MiMo v2.6 Flash since 1.122.2. On the maintainer's machine 17 finished Go-plan GLM reviews took a median 16 minutes (90th percentile 26) and 73 at most; a review that needed longer than 40 was cut there and the panel lost the voice.
+- **A voice stopped at its time limit before its end marker has no answer, whatever it printed** (opencode and the MiMo CLI). What such a run leaves is mostly the agent's notes between tool calls - in the case that started this, 2 339 bytes and not one line of the review - and from 2000 bytes on it counted as the voice's answer, so no fallback ran. Now the fallback runs (the free copy, then the paid OpenRouter copy) and the voice's file keeps the text. The end marker anywhere in the text counts, so an answer printed before a hang is still the answer. The plan prints the rule under the voice: «stopped at its 100m limit before its end marker = no answer, whatever its size (R186)».
+- **The same rule for MiMo v2.6 Flash and DeepSeek V4.1 Flash on opencode** (one code path): where a stopped run of theirs used to keep a long text as its answer, their fallback now runs. **The tail grows:** with the Go plan GLM's worst case is 100 + 100 + 20 = 220 minutes (was 40 + 40 + 20 = 100), as MiMo's; DeepSeek's stays 40 + 61 + 20. A cheap panel waits for its slowest voice. A shorter `timeout` for these channels is one line in your settings file; `--no-fallback` turns every fallback off for a run.
+- **Who runs is unchanged**, measured on the build against 1.123.0 on seven simulated machines, a normal and a refused day: every plan starts the same channels, Muse Spark included (both Contributor voices through the OpenCode Go plan where `opencode models` lists it, both OpenRouter copies otherwise). If your settings file turns on `mcspark13` (Muse Spark 1.3 Max through Muse Code), it now runs beside `ocspark13go` instead of taking its seat.
+- New selftest suites `suite_r186_glm_timeout_cut` and `suite_r187_sparks_wonder`; checks of R146 И-3, R164 and R179 follow the new Spark 1.3 cascade.
+
 ## 1.123.0 — 2026-11-16
 
 Grok 4.20 Reasoning leaves the cheap and standard panels: it runs only when you name it.
@@ -273,25 +283,6 @@ From the panel on 1.113.5 (eight voices, six complete answers) and from Anthropi
 - **Registry notes name the vendor page instead of copying a price.** OpenRouter's Exa search is $0.007 per request on 2026-10-18 (nine notes said $0.005); Meta's Spark 1.3 Contributor allows 150 requests a minute against Standard's 3,000 (the notes said 100 and «30x»); the OpenRouter Spark spend guard's arithmetic names its Standard 1.3 fallback; the OpenCode Go Spark note no longer promises a run-time fall-through that does not exist (a cascade picks one member when the plan is made).
 - **Anthropic's plugin directory.** `.gitattributes` no longer asks for CRLF on `*.ps1`: the directory refused the repository before scanning for that rule (PowerShell 5.1 and 7 both run the scripts with LF endings). The plugin folder's `CHANGELOG.md` is now a trimmed copy, the newest releases up to 64 KiB and then a pointer to this full file, because the directory holds for a reviewer every non-image file of 256 KiB or more and named this one (410 KB); `update_check.py` still finds there the section of the version it just installed. The build prints the plugin files that are still 256 KiB or more (the code and the registry).
 
-## 1.113.5 — 2026-10-18
-
-From the first full panel of the three new free opencode voices: seven of eight answers were complete, and the report counted four.
-
-- **«opencode» names the opencode voices.** The word was the alias of `ocspark13free`, whose free model left opencode on 2026-10-17, so «only opencode» / `--only opencode` ran only that dead model and «without opencode» excluded nothing. It is now a group of every opencode channel: «only opencode» runs the ones that are on (in the kit the four free voices), «without opencode» drops them, and a switched-off member starts only by its own name. «опенкод» works too.
-- **A complete opencode answer after a recovered error is graded complete.** opencode exits 1 after a mid-run transport error (ECONNRESET) even when it retried and the model finished; three complete reviews were graded FAILED. When opencode's own store records the last step as finished (`stop`) and the end marker is on the last line, the answer is now graded ok, with a ⚠ note naming the error. Anything less stays FAILED.
-- **The agy retry keeps both attempts.** When agy's second attempt replaced the first (a plan instead of the review, or sources cited and none opened), the round wrote the second answer over the first while the note said the first was kept. The first now moves to `<CHANNEL>.first.md`, the note names it, and HANDOFF.md lists both attempt files instead of calling the retry file an orphan.
-- **Docs and printed text:** Muse Spark's automatic Standard fallback costs $1.25 / $4.25 per 1M tokens (README, INSTALL); the `--ask` line names an extra whose web searches bill (`ornemotron3ultra`) instead of saying a second opinion costs nothing; INSTALL no longer says the opencode CLI decides which channel answers `--ask` first; without opencode the cheap panel runs four models (README); two stale registry notes.
-- **Known, not fixed here:** opencode v2 resumes an interrupted session when a later opencode server starts on the same store («The server restarted while you were working»); in that panel a free voice's brief ran again 23 and 93 minutes later, with nobody collecting the answer. A private data folder per free run was measured to work (a free model answered from a fresh folder in 6 s, the shared store untouched); it ships once its side effects (MCP sign-ins, tool downloads) are measured.
-
-## 1.113.4 — 2026-10-18
-
-The plugin directory's automatic check stopped the plugin on one finding: «Secret in a shipped file» in `doctor.py`. There is no real key in the kit; the finding was the fake key shapes `doctor.py` feeds to the secrets gate to prove it catches them, written out in full. A scanner cannot tell a fake key from a real one, so the kit no longer spells any.
-
-- **`doctor.py` and `selftest.py`:** the seven fake credential values (a bearer header, a private-key header, an AWS-style key id, a Slack-style token, a long `MODEL_API_KEY` test value) are each written as two joined fragments. The values the gate sees are byte-identical, and `doctor.py` still reports every detector live with no false positive.
-- **`hooks/hooks.json`:** the three `_doc…` keys, which Claude Code ignores and the directory flags as unknown, are replaced by the documented `description` key; the design notes stay out of the shipped file.
-- **A selftest keeps it so:** `suite_prd003_no_credential_shapes` scans every shipped code, doc and registry file for credential shapes; on 1.113.3 it finds all seven.
-- No behaviour changed.
-
 ## Older releases
 
-172 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+174 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).

@@ -809,6 +809,7 @@
       "enabled": false,
       "_restored_2026_10_29": "Back to true 2026-10-29: a 19:45 build artifact had flipped this and ocspark12go to the kit values (distribution=local off) in the source tree; intent (R164 + local overlay) is on.",
       "fallback": "mcspark12",
+      "_r187": "R187 (2026-11-17): no longer first in the Spark 1.3 Contributor cascade - a voice of its own beside ocspark13go and ocspark12go (the operator: «А у меня плюс еще spark 1.3 max через muse подписку»). Its fallback stays mcspark12 on the same subscription: a spent plan never falls through to a key.",
       "distribution": "local",
       "label": "Muse Code Spark 1.3",
       "cost": "subscription",
@@ -884,10 +885,11 @@
       "panel": "cheap",
       "vendor": "meta",
       "enabled": true,
-      "_off_r164": "R164 (2026-10-22), the operator: «У меня и в kit spark 1.3 contributor заменить на 1.2 contributor и тоже сделать дефольно активной. Пулочается у меня будет чеерз muse 1.3 max а через opencode 1.2 cont» Off; the Spark Contributor voice is 1.2 now (ocspark12go / spark12cont / orspark12cont). Starts only by name.",
-      "_r179": "R179 (2026-11-09): on, distribution local -> kit - the kit's Spark 1.3 Contributor voice through opencode's Go plan, orspark13cont where that plan is missing (the operator's sentence: ocspark12go's _r179). On the operator's machine mcspark13 leads this cascade, so his plan does not change.",
-      "distribution": "kit",
-      "_distribution": "LOCAL ONLY: it runs on the operator's own OpenCode Go subscription (opencode's own login for the opencode-go provider). package.py flips enabled to false in the kit tree, so an employee's Spark voice stays ocspark13free.",
+      "_off_r164": "SUPERSEDED 2026-11-17 by R187 (both Go Contributor Sparks in parallel, on his machine and in the kit). R164 (2026-10-22), the operator: «У меня и в kit spark 1.3 contributor заменить на 1.2 contributor и тоже сделать дефольно активной. Пулочается у меня будет чеерз muse 1.3 max а через opencode 1.2 cont» Off; the Spark Contributor voice is 1.2 now (ocspark12go / spark12cont / orspark12cont). Starts only by name.",
+      "_r179": "R179 (2026-11-09): on, distribution local -> kit - the kit's Spark 1.3 Contributor voice through opencode's Go plan, orspark13cont where that plan is missing (the operator's sentence: ocspark12go's _r179). [SUPERSEDED 2026-11-17 by R187: mcspark13 left this cascade; on the operator's machine ocspark13go runs beside it] On the operator's machine mcspark13 leads this cascade, so his plan does not change.",
+      "distribution": "both",
+      "_r187": "R187 (2026-11-17), the operator: «И пусть на всякий случай у меня и в kit будет 2 паралельно spark contributor по подписке go. Просто если посмотреть бенчмарк по Legal вопросам spark 1.2 лучше чем 1.3 А 1.3 лучше чем 1.2 по ИТ вопросам. ... А стоит contributor дешево, поэтому пусть оба паралельно работают. А у меня плюс еще spark 1.3 max через muse подписку и Wonder в стандартной панели, в идеале конечно что бы работал только по подписке, а не напрямую, если подписка закончилась.» distribution kit -> both: the Spark 1.3 Contributor voice on his machine too, beside ocspark12go and his Muse Code mcspark13 (which left this cascade). A Go failure still does not fall through to a paid copy at run time.",
+      "_distribution": "SUPERSEDED 2026-11-17 (R187: distribution both). LOCAL ONLY: it runs on the operator's own OpenCode Go subscription (opencode's own login for the opencode-go provider). package.py flips enabled to false in the kit tree, so an employee's Spark voice stays ocspark13free.",
       "label": "OC Spark 1.3 (OpenCode Go)",
       "cost": "subscription",
       "_cost": "OpenCode Go plan, not a charge per call: Muse Spark 1.3 Contributor counts $0.10 in / $0.20 out / $0.002 cached read per 1M tokens against the plan's limits - per 5 hours 20%, per week 50%, per month 100% of the monthly amount, $60 for this model (opencode.ai/docs/go, read 2026-10-08). opencode's store records that figure as the session cost (R146 И-3: $0.0015-0.0019 per one-line call, ~14-18K tokens of opencode's own prompt). With the console's «Use balance» option ON, usage past the limits is charged to the Zen balance instead of being refused (same page).",
@@ -1593,8 +1595,9 @@
       "model": "opencode-go/glm-5.3-flash",
       "effort": "max",
       "_effort": "R180 2026-11-13 (D:/Claude Code/runs/r180-new-voices/go_variants_r180.out): opencode-go/glm-5.3-flash#max and #high both answered a one-line call (3.5 s / 2.8 s) - the Go plan accepts the free twin's top variant; its depth effect is not measured (n=1, no meter).",
-      "timeout": "40m",
+      "timeout": "100m",
       "_timeout": "Same rationale as ocmimo26flashfree: opencode CLI has no built-in timeout, caller-side via subprocess.run.",
+      "_timeout_r186": "R186 (2026-11-16): 40m -> 100m, as ocmimo26flashgo (R184 И-2). In opencode's store on the operator's machine 17 Go reviews since 2026-11-01 took a median 16 min, one 73 min (WEB to MD T261, 2026-11-15): stopped at 40 min, it kept 2 339 B of the agent's narration and no line of the review, while opencode finished the 12 217-char answer in its background service. A round already waits up to 100 min for the MiMo Flash copies. A run stopped at its limit before its end marker has no answer now, whatever its size (orchestrate.py _timeout_cut), so the fallback runs.",
       "models": {
         "opencode-go/glm-5.3-flash": {
           "label": "GLM 5.3 Flash (via opencode, OpenCode Go plan)",
@@ -1866,8 +1869,9 @@
         "output": 65536
       },
       "_opencode_limit": "R154 И-3: catalogue output 32 000 (models.dev 2026-10-18) and reasoning counts against it - the ocmimo26flashfree case (R153 И-2, finish=length with no text); raised the same way: call_opencode sends this block as the run's OPENCODE_CONFIG_CONTENT with `run --standalone`. 65536 leaves input room in the 200K window.",
-      "timeout": "40m",
+      "timeout": "100m",
       "_timeout": "Same rationale as ocmimo26flashfree: opencode CLI has no built-in timeout, caller-side via subprocess.run.",
+      "_timeout_r186": "R186 (2026-11-16): 40m -> 100m, as ocglm53flashgo (same model, same work) and ocmimo26flashfree: it is the first link where the Go plan is missing, and a free voice gets no fallback after its first 25 min (the operator's rule of 2026-10-31), so its own limit is its whole chance to finish.",
       "models": {
         "opencode/glm-5.3-flash-free": {
           "label": "GLM 5.3 Flash Free (via opencode)",
@@ -3632,7 +3636,6 @@
       "orspark12cont"
     ],
     [
-      "mcspark13",
       "ocspark13go",
       "ocspark13free",
       "spark13cont",
@@ -3694,6 +3697,7 @@
       "cgptseat"
     ]
   ],
+  "_cascade_groups_r187": "R187 (2026-11-17), the operator: «И пусть на всякий случай у меня и в kit будет 2 паралельно spark contributor по подписке go. Просто если посмотреть бенчмарк по Legal вопросам spark 1.2 лучше чем 1.3 А 1.3 лучше чем 1.2 по ИТ вопросам. ... А стоит contributor дешево, поэтому пусть оба паралельно работают. А у меня плюс еще spark 1.3 max через muse подписку и Wonder в стандартной панели, в идеале конечно что бы работал только по подписке, а не напрямую, если подписка закончилась.» mcspark13 (Spark 1.3 in Standard mode at max on his Muse Code subscription) left the Spark 1.3 Contributor cascade it had led since R164: on his machine it is a voice of its own BESIDE ocspark13go (Spark 1.3 Contributor on the OpenCode Go plan, xhigh) and ocspark12go (Spark 1.2 Contributor on the Go plan) - three Spark voices. Same weights, a different mode, depth and transport: the pairing he asked for. A kit has no mcspark13 (distribution local), so the kit's Spark 1.3 cascade and plan do not change.",
   "_cascade_groups_doc": "Panel cascade: when several channels carry the SAME model through different transports, only the first READY one runs; the rest are skipped. Order matters - cheapest/free first. The panel runs independent VOICES in parallel; paying three transports for one voice is waste, not breadth. Added 2026-09-04 (the operator: 'незачем у одних и тех же моделей спрашивать'). R143 И-3 (2026-10-05): a group may span panels. kimik3 (standard, OpenRouter, paid) is the last member of nvkimik3's group; members are only the channels already in THIS run's plan, so a cheap run never pulls kimik3 in, and a standard run gets one Kimi - nvkimik3 when its CLI and key are here, else kimik3.",
   "_ask_default_doc": "Added 2026-08-30 (R69). The order --ask resolves its channel when --ask-channel is not passed: the FIRST entry that is enabled AND whose transport key is actually present in the environment wins; if none has a key, the first enabled entry runs and its preflight explains what is missing. Until R69 the default was the argparse literal `spark12cont`, which for a kit user holding only an OPENROUTER_API_KEY pointed the one-shot path at the one channel they cannot run - degradation was graceful, but the default was wrong for exactly the user the kit exists for. the operator's 2026-08-08 instruction «--ask по умолчанию идёт на spark12cont - оставляем на нем» is preserved by the ORDER: spark12cont is first, so any machine with a MODEL_API_KEY behaves exactly as before. Names here must be CHANNEL names - not groups, not aliases - and selftest enforces that.",
   "panels": {
