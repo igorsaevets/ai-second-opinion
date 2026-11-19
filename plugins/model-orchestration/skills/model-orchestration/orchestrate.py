@@ -3323,11 +3323,15 @@ def channel_may_read_keys(name, reg):
     unknown channel is NO. Why it matters beyond the keys: while Grok has ANY Read deny rule, its own
     checker refuses a shell command whose files it cannot tell (9 of 1,125 calls since its 1.0.62
     auto-update, memory r165-grok-turn-ended) - a channel allowed to read keys gets no such rule.
+
+    R190 И-4: NO also for `keys_hidden: true` - an asale.ai channel, a P2P market whose sellers see every prompt
+    and tool output (Igor 2026-11-18: «Ничего страшного, главное защиту от api ключей и паролей поставить»).
     """
     slot = (reg or {}).get("channels", {}).get(name)
     if not slot:
         return False
-    return str(slot.get("cost") or "").strip().lower() != "free" and slot.get("contributor") is not True
+    return (str(slot.get("cost") or "").strip().lower() != "free" and slot.get("contributor") is not True
+            and slot.get("keys_hidden") is not True)
 
 
 # 🔴 THE PANEL COMPARED "MODEL + HIDDEN PROMPT" WHILE CLAIMING TO COMPARE MODELS.
@@ -5834,6 +5838,49 @@ def _opencode_supports_standalone(binary):
     return False
 
 
+_OC_ARCHIVED = {}
+
+
+def _opencode_supports_archived(binary):
+    """True when this opencode has `run --archived` (2.2.6+, PR #61270): the session is created ARCHIVED, so it stays
+    out of the session lists the user's TUI and app show. R190 И-4, read from opencode 2.3.1's own code (the binary's
+    embedded JS, `runs/r190-asale-wokey-models/i4/oc_archived_scan_i4.py`): every list the TUI / app builds asks the
+    server for `archived: false` (the project picker, the recent-sessions list, `--continue`'s pick), while the CLI's
+    `opencode session list` omits the filter and prints archived rows too (seen in R190 И-3). Same reading as
+    _opencode_supports_standalone - the flag's help sentence in the binary, no subprocess - and False on any doubt."""
+    cands = [os.path.realpath(binary or "")]
+    oc = os.path.join(os.path.dirname(cands[0]), "node_modules", "@opencode")
+    try:
+        pkgs = ["cli"] + sorted(n for n in os.listdir(oc) if n.startswith("cli-"))
+    except OSError:
+        pkgs = ["cli"]
+    cands += [os.path.join(oc, pkg, "bin", n) for pkg in pkgs for n in ("opencode.exe", "opencode")]
+    for c in cands:
+        try:
+            st = os.stat(c)
+        except OSError:
+            continue
+        if st.st_size < 1000000:
+            continue
+        key = (c, st.st_size, st.st_mtime)
+        if key not in _OC_ARCHIVED:
+            ok = False
+            try:
+                import mmap
+                with open(c, "rb") as f:
+                    mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+                    try:
+                        ok = mm.find(b"Create the session archived so it stays out of session lists") != -1
+                    finally:
+                        mm.close()
+            except (OSError, ValueError):
+                ok = False
+            _OC_ARCHIVED[key] = ok
+        if _OC_ARCHIVED[key]:
+            return True
+    return False
+
+
 _OC_VERSION = {}
 
 
@@ -6124,7 +6171,7 @@ def _opencode_store_finished(raw):
 
 
 def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
-                  timeout=2400, name="ocspark13free"):
+                  timeout=2400, name="ocspark13free", relay=None):
     """opencode CLI (opencode.ai) — Spark 1.3 Contributor: FREE (`opencode/...-free`, no API key) or
     on Igor's OpenCode Go plan (`opencode-go/...`, opencode's own login, counted against the plan's
     limits; R146 И-3 - its plan-limit death arrives as `provider.quota`, like the free quota's).
@@ -6174,6 +6221,9 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
     # R153 И-2: PWD, no self-update, the channel's output limit (see _opencode_child_env).
     ncwd = neutral_cwd()
     env, oc_info = _opencode_child_env(name, base_model, binary, ncwd)
+    if relay:                                            # R190 И-4: the provider comes from THIS run's own config,
+        env = _relay_child_env(env, relay)               # which only a private server reads (call_relay_agent)
+        oc_info["standalone"] = True
     if oc_info.get("key_missing"):                       # R168 И-3 (D4): before opencode's own 5-s provider.no-route
         log("  [%s] %s - not started" % (name, oc_info["key_missing"]))
         return {"channel": name, "ok": False, "error": oc_info["key_missing"] + " - not started"}
@@ -6188,14 +6238,22 @@ def call_opencode(brief, marker, outfile, model=None, effort=None, system=None,
                                                                  oc_info["limit"]["output"]))
         if oc_info.get("key"):
             why.append("%s in the child env only" % oc_info["key"])
+        if relay:
+            why.append("the relay meter's provider %s/ from this run's config" % RELAY_AGENT_PID)
         log("  [%s] %s -> a private server (--standalone)" % (name, "; ".join(why)))
     elif oc_info["note"]:
         log("  [%s] %s" % (name, oc_info["note"]))
+    # R190 И-4 (Igor 18.11: «особенно у opencode много чатов и потом когда я пользуюсь opencode сложно найти чат»):
+    # every session this harness starts is created ARCHIVED - out of every list the TUI / app shows (they ask for
+    # `archived: false`), still in the store (the answer recovery of R184 reads it) and in `opencode session list`
+    # - and titled with the channel, so it is told apart there; a title also spares opencode its title-model call.
+    if not v1_note and _opencode_supports_archived(binary):
+        cmd += ["--archived", "--title", "second-opinion:" + name]
 
     # R146 И-3: the opencode-go/ provider is Igor's OpenCode Go plan, not the free tier. R158 И-2: and a provider of
     # the user's own opencode config (wokey.ai) is PAID per call - the phrase comes from the model's provider and
     # the registry's `cost` (routing.opencode_billing), never from the kind.
-    how = _opencode_billing_line(name, base_model)
+    how = relay["how"] if relay else _opencode_billing_line(name, base_model)
     log("  [%s] opencode CLI v2, %s; brief via stdin (%d chars), model=%s"
         % (name, how, len(text_in), base_model))
     t0 = time.time()
@@ -8047,6 +8105,86 @@ def _musecode_usage(binary, sid, env, cwd, timeout=90):
         _drop_file(path)
 
 
+_MUSE_NOLOG = {}
+
+
+def _muse_supports_no_session_log(binary):
+    """True when this Muse Code can run WITHOUT a session log and still report the run's tokens (R190 И-7).
+
+    Igor 2026-11-19: «что бы диалоги из второго мнения не сохранялись» - a harness run must not leave its dialog in
+    Muse's session store (`~/.local/share/muse/sessions/<date>/<id>/` + `session-index.db`), where the harness's runs
+    sat beside his own (~540 files, ~375 MB by 2026-11-18). `muse exec --no-session-log` («Do not persist session
+    event logs to disk») is a flag on THIS run's command line only - his own Muse sessions and settings are not
+    touched. It also ends the durable log that `muse export` read the token counts from (_musecode_usage), so the
+    flag is used only where the run's own `--json` stream reports them: the `exec.usage` / `run_usage` record
+    (measured on 1.4.23-R8977.1, runs/r190-asale-wokey-models/i7/: equal to the export's sums, n=2 - one and two
+    model responses; with the flag the sessions folder and session-index.db stayed unchanged, the settings folder
+    too). Both are read from the binary's strings - the flag's help sentence and the record kind - with no
+    subprocess, cached per (path, size, mtime), as _opencode_supports_archived; False on any doubt (a launcher
+    shim, an older Muse Code): the run then keeps its log and `muse export` gives the tokens, as before."""
+    path = os.path.realpath(binary or "")
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    if st.st_size < 1000000:
+        return False
+    key = (path, st.st_size, st.st_mtime)
+    if key not in _MUSE_NOLOG:
+        ok = False
+        try:
+            import mmap
+            with open(path, "rb") as f:
+                mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+                try:
+                    ok = (mm.find(b"Do not persist session event logs to disk") != -1
+                          and mm.find(b"run_usage") != -1)
+                finally:
+                    mm.close()
+        except (OSError, ValueError):
+            ok = False
+        _MUSE_NOLOG[key] = ok
+    return _MUSE_NOLOG[key]
+
+
+def _musecode_stream_usage(raw):
+    """Token totals of one run from its own `muse exec --json` stream, or {} - numbers only (R190 И-7).
+
+    Muse Code 1.4.23 ends the stream with an `exec.usage` record, payload kind `run_usage`, whose `models` list
+    holds each model's input / output / reasoning / cached tokens for the WHOLE run (measured equal to the session
+    export's sums over every model response, n=2). The last such record wins; its models are summed. R149's «the
+    `--json` stream carries no usage» was true of 1.4.7."""
+    last = None
+    for line in (raw or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{") or "run_usage" not in line:
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        pl = ev.get("payload") if isinstance(ev, dict) and isinstance(ev.get("payload"), dict) else {}
+        if pl.get("kind") == "run_usage" and isinstance(pl.get("models"), list):
+            last = pl["models"]
+    tot = {}
+    for m in last or []:
+        if isinstance(m, dict):
+            for k in ("input_tokens", "output_tokens", "reasoning_tokens", "cached_tokens", "cache_read_tokens"):
+                v = m.get(k)
+                if isinstance(v, int) and not isinstance(v, bool):
+                    tot[k] = tot.get(k, 0) + v
+    return tot
+
+
+def _musecode_session_log_line(binary):
+    """The plan's line for a Muse Code channel: does its run keep a session log here (R190 И-7)."""
+    if _muse_supports_no_session_log(binary):
+        return ("off - `muse exec --no-session-log`: the dialog is not saved in Muse Code's session store; "
+                "the tokens come from the run's own stream")
+    return ("kept - this Muse Code cannot run without a session log and still report its tokens (no "
+            "`--no-session-log` + `run_usage`); the dialog stays in its session store, as before")
+
+
 def _musecode_stderr(stderr):
     """The CLI's own error lines: stderr minus its start-up banner (workspace root, skills, delegation)."""
     keep = [ln for ln in (stderr or "").splitlines() if ln.strip()
@@ -8106,10 +8244,15 @@ def call_musecode(brief, marker, outfile, model=None, effort=None, system=None, 
     if max_steps:
         cmd += ["--max-model-steps", str(int(max_steps))]
     cmd += ["-c", "run.toolset=" + json.dumps(list(MUSECODE_TOOLSET))]
+    # R190 И-7 (Igor 2026-11-19: «что бы диалоги из второго мнения не сохранялись»): no session log where this Muse
+    # Code can still report the tokens on its stream - a flag of this run only; see _muse_supports_no_session_log.
+    nolog = _muse_supports_no_session_log(binary)
+    if nolog:
+        cmd.append("--no-session-log")
     log("  [%s] Muse Code CLI on the subscription login (no API key in its env); prompt via file "
-        "(%d chars), model=%s, effort=%s, contributor mode %s, %s, tools: %s"
+        "(%d chars), model=%s, effort=%s, contributor mode %s, %s, tools: %s, session log %s"
         % (name, len(text_in), model, effort or "default", cmode, " ".join(MUSECODE_POSTURE),
-           ", ".join(MUSECODE_TOOLSET)))
+           ", ".join(MUSECODE_TOOLSET), "off (--no-session-log)" if nolog else "kept"))
     t0 = time.time()
     try:
         try:
@@ -8122,7 +8265,7 @@ def call_musecode(brief, marker, outfile, model=None, effort=None, system=None, 
             if isinstance(raw, bytes):
                 raw = raw.decode("utf-8", "replace")
             text, served, sid, _term, _err = _musecode_parse(raw)
-            u = _musecode_usage(binary, sid, env, ncwd)
+            u = _musecode_stream_usage(raw) or ({} if nolog else _musecode_usage(binary, sid, env, ncwd))
             if text:
                 with open(outfile, "w", encoding="utf-8") as f:
                     f.write(text)
@@ -8140,7 +8283,8 @@ def call_musecode(brief, marker, outfile, model=None, effort=None, system=None, 
     secs = time.time() - t0
     raw = p.stdout or ""
     text, served, sid, terminal, err = _musecode_parse(raw)
-    u = _musecode_usage(binary, sid, env, ncwd)
+    # R190 И-7: the run's own stream first (`run_usage`); the session export only where a log was kept
+    u = _musecode_stream_usage(raw) or ({} if nolog else _musecode_usage(binary, sid, env, ncwd))
     warn, note = [], []
     # R149 И-3: ok only when the run says so - a `run_terminal` record with terminal "completed" AND
     # exit 0. 1.111.0 warned only for (exit != 0 and no text) or a non-completed terminal it SAW, so a
@@ -8158,7 +8302,8 @@ def call_musecode(brief, marker, outfile, model=None, effort=None, system=None, 
     elif err:
         note.append("Muse Code reported an error mid-run and still finished: %s" % scrub(err)[:300])
     if sid and not u:
-        note.append("no token counts: `muse export --session` gave nothing usable for this run")
+        note.append("no token counts: the run's stream carried no usage record (session log off - nothing to export)"
+                    if nolog else "no token counts: `muse export --session` gave nothing usable for this run")
     if text:
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
@@ -8175,7 +8320,8 @@ def call_musecode(brief, marker, outfile, model=None, effort=None, system=None, 
             "in_tokens": u.get("input_tokens"), "out_tokens": u.get("output_tokens"),
             "reasoning_tokens": u.get("reasoning_tokens"),
             "cached_in_tokens": u.get("cache_read_tokens") or u.get("cached_tokens"),
-            "usd": None, "session_id": sid, "warnings": warn, "notes": note}
+            "usd": None, "session_id": sid, "session_log": "off" if nolog else "kept",
+            "warnings": warn, "notes": note}
 
 
 def call_hermes(brief, marker, outfile, model=None, toolsets=None, system=None, timeout=2400):
@@ -8324,8 +8470,472 @@ OAI_PROVIDERS = {
         # started it streams (GLM: < 3 s). 300 s with no data frame after that is a dead stream. A net: no
         # incident of this shape is measured yet (r160i2's hour was reasoning deltas - the deadline's case).
         "stall_s": 300,
+        "effort_default": "high",    # R190: what effort_field sent when a channel declared none (unchanged here)
+    },
+    # R190 (2026-11-17), the operator: «asale стоит после подписок, но до openrouter в pipeline fallback. если у asale
+    # цена ниже wokey, то asale ставим до wokey». Two OpenAI-compatible RELAYS, reached by this loop (not opencode)
+    # because here the depth reaches the model. MEASURED 2026-11-17 (runs/r190-asale-wokey-models/meter_effort_r190*.json,
+    # n >= 2, disjoint ranges): wokey forwards top-level `reasoning_effort` on /chat/completions - gpt-6.1-sol completion
+    # 188-197 (low) vs 270-307 (max), grok-4.6 reasoning 728-761 vs 1109-1703 (high; its top is xhigh, `max` is a 400),
+    # glm-5.3 reasoning 176-185 vs 592-655 (high); asale for gpt-6.1-sol 66-81 vs 195-211. An invented value is a 400
+    # (wokey) / 502 «upstream 400» (asale): validated upstream. Neither reports `usage.cost`: a channel's
+    # `price_per_m` (list price, USD per 1M tokens) gives its spend ceiling an ESTIMATE (call_oai_reviewer). No search on
+    # either: the voice gets the brief plus our fetch_url tool. No `stall_s`: a reasoning model may send no frame for
+    # minutes before its first token.
+    "wokey": {
+        "label": "wokey.ai (relay, fixed prices)",
+        "url": os.environ.get("WOKEY_BASE", "https://api.wokey.ai/v1") + "/chat/completions",
+        "key_env": "WOKEY_API_KEY",
+        "key_hint": "a prepaid key: wokey.ai",
+        "headers": {},
+        "depth": "effort_field",     # body["reasoning_effort"] = reasoning.effort; nothing when the channel has none
+        "search": "none",
+        "usage_request": "openai",   # body["stream_options"] = {"include_usage": True}
+        "streaming": True,
+    },
+    # 🔴 asale.ai is a P2P TOKEN MARKET: a request runs on another user's subscription capacity and the seller sees the
+    # prompt (the operator 2026-11-18: «Ничего страшного, главное защиту от api ключей и паролей поставить» - the
+    # secrets gate refuses a brief holding a key or a password for every channel); the price is the list price x a
+    # ratio of 5-100 % recalculated every minute; an account holds at most TWO requests at once (503 tooManyConcurrent,
+    # measured 2026-11-17: 5 of 15 parallel calls). `max_concurrent` makes a third request of a run WAIT for a slot
+    # instead of drawing that 503. «gateway at capacity» / «no supply for model» 503s arrive in < 1 s: the door retry
+    # (2 s, 4 s), then the channel's run-time fallback.
+    "asale": {
+        "label": "asale.ai (P2P relay, floating price)",
+        "url": os.environ.get("ASALE_BASE", "https://gw.asale.ai/v1") + "/chat/completions",
+        "key_env": "ASALE_API_KEY",
+        "key_hint": "a key: asale.ai",
+        "headers": {},
+        "depth": "effort_field",
+        "search": "none",
+        "usage_request": "openai",
+        # 🔴 UNSTREAMED, MEASURED 2026-11-18 (R190 И-2, runs/r190-asale-wokey-models/i2/): streamed, gemini-4-argon
+        # died at 60 s with an SSE error event «no frame from the publisher for 30s [code PUBLISHER_STALLED]» (2/2) -
+        # asale's gateway drops a seller that sends nothing for 30 s, and a model thinking at its ceiling sends nothing
+        # (GPT streams no reasoning either). Unstreamed the same call answered (372.6 s, one 502 retried at the door).
+        "streaming": False,
+        "max_concurrent": 2,
     },
 }
+
+
+# R190 (2026-11-17): a provider's `max_concurrent` (asale.ai: 2 requests per ACCOUNT) is a slot count shared by every
+# channel of that provider in this process (one run = one process). A request that finds the slots taken WAITS, logged
+# once, instead of drawing a 503. Another process - a parallel panel - is not counted: its 503 meets the door retry.
+_PROVIDER_SLOTS = {}
+_PROVIDER_SLOTS_LOCK = threading.Lock()
+
+
+def _provider_slot(prov):
+    n = (prov or {}).get("max_concurrent")
+    if not n:
+        return None
+    with _PROVIDER_SLOTS_LOCK:
+        sem = _PROVIDER_SLOTS.get(prov["url"])
+        if sem is None:
+            sem = _PROVIDER_SLOTS[prov["url"]] = threading.BoundedSemaphore(int(n))
+    return sem
+
+
+# --- R190 И-4: a relay voice as an AGENT in opencode, through a local relay meter -----------------------------------
+# Igor 2026-11-18: «Получается мы можем дать моделям харнес opencode. Просто я считаю, что таким моделям лучше давать
+# доступ, т.к. через наш скрипт как агенты они мало что смогут сделать, к примеру не смогут эффективно изучить код,
+# протестировать его, использовать MCP.» A relay channel (asale.ai / wokey.ai) that declares `agent: "opencode"` runs
+# as an opencode AGENT (files, shell, MCP) where this opencode reads a provider from the run's own config (2.2.6+:
+# `run --standalone` + `--archived`); anywhere else - a kit user without opencode - it runs this harness's loop.
+# opencode never talks to the relay itself. It talks to a METER this process serves on 127.0.0.1, which
+#   - holds the relay key (opencode gets a one-run token; the agent's shell never sees the key),
+#   - records the wire fields of every request (reasoning_effort, max_completion_tokens, stream, tools): the proof
+#     that the channel's depth reached the relay (R190 И-3 proved opencode SENDS it on a stand-in only),
+#   - keeps the channel's spend ceiling with the loop's estimate (the relay's `usage.cost`, else list price x the
+#     tokens it reports) and refuses the next request once the ceiling is in reach,
+#   - asks a relay whose provider is unstreamed (asale: its gateway drops a seller silent for 30 s, R190 И-2)
+#     UNSTREAMED and hands opencode the answer as a stream; holds asale's two slots per account (_provider_slot,
+#     shared with the loop in this process),
+#   - removes secret-shaped values (SECRET_PATTERNS + this machine's key values) from the messages that leave for a
+#     channel that may not read keys (channel_may_read_keys: an asale channel, whose sellers see every prompt and
+#     tool output - Igor 2026-11-18: «главное защиту от api ключей и паролей поставить»).
+RELAY_AGENT_PID = "aso-relay"        # the provider id injected into opencode - never the user's own `wokey` / `Asale`
+RELAY_AGENT_PROVIDERS = ("wokey", "asale")
+RELAY_AGENT_CONTEXT = 128000         # opencode compacts the conversation before this; no relay channel serves less
+
+
+def _relay_cost(usage, price):
+    """USD of one relay answer: the relay's own `usage.cost`, else the list-price estimate (call_oai_reviewer's rule)."""
+    if not isinstance(usage, dict):
+        return None
+    if usage.get("cost") is not None:
+        try:
+            return float(usage["cost"])
+        except (TypeError, ValueError):
+            return None
+    try:
+        pin, pout = float(price["in"]), float(price["out"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    t_in, t_out = usage.get("prompt_tokens") or 0, usage.get("completion_tokens") or 0
+    if not (t_in or t_out):
+        return None
+    return t_in * pin / 1e6 + t_out * pout / 1e6
+
+
+def _relay_scrub(messages, values):
+    """(messages, n): every string in the messages with SECRET_PATTERNS runs and this machine's key VALUES replaced by
+    a labelled placeholder (re.sub - never a truncation). Names only: no value is returned or logged."""
+    n = [0]
+
+    def s(t):
+        if not isinstance(t, str) or not t:
+            return t
+        for kind, rx in SECRET_PATTERNS:
+            t, k = rx.subn("[REDACTED:%s]" % kind, t)
+            n[0] += k
+        for nm, vs in (values or {}).items():
+            for v in vs:
+                if v and v in t:
+                    n[0] += t.count(v)
+                    t = t.replace(v, "[REDACTED:%s]" % nm)
+        return t
+
+    def walk(o):
+        if isinstance(o, dict):
+            return {k: walk(v) for k, v in o.items()}
+        if isinstance(o, list):
+            return [walk(v) for v in o]
+        return s(o)
+    return walk(messages), n[0]
+
+
+def _relay_sse(data):
+    """An OpenAI chat.completion (an unstreamed relay answer) as the SSE stream opencode reads: one delta with the
+    reasoning (strings only - a non-string delta.reasoning aborts an opencode session, #61523), the text and the tool
+    calls (each with its index), then the finish reason with the usage, then [DONE]."""
+    c0 = (data.get("choices") or [{}])[0] or {}
+    msg = c0.get("message") or {}
+    base = {"id": data.get("id") or "aso-relay", "object": "chat.completion.chunk",
+            "created": data.get("created") or int(time.time()), "model": data.get("model")}
+    delta = {"role": "assistant"}
+    reas = msg.get("reasoning_content") if isinstance(msg.get("reasoning_content"), str) else msg.get("reasoning")
+    if isinstance(reas, str) and reas:
+        delta["reasoning_content"] = reas
+    if isinstance(msg.get("content"), str) and msg["content"]:
+        delta["content"] = msg["content"]
+    tcs = [dict(tc, index=i) for i, tc in enumerate(msg.get("tool_calls") or []) if isinstance(tc, dict)]
+    if tcs:
+        delta["tool_calls"] = tcs
+    out = [dict(base, choices=[{"index": 0, "delta": delta, "finish_reason": None}]),
+           dict(base, choices=[{"index": 0, "delta": {},
+                                "finish_reason": c0.get("finish_reason") or ("tool_calls" if tcs else "stop")}],
+                usage=data.get("usage"))]
+    return "".join("data: %s\n\n" % json.dumps(x) for x in out) + "data: [DONE]\n\n"
+
+
+class _RelayMeter:
+    """One local endpoint per process (127.0.0.1, a free port), one ROUTE per agent run: /r/<token>/v1/chat/completions,
+    the token doubling as the API key opencode sends (Bearer). Started by the first agent run, a daemon thread."""
+
+    def __init__(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        meter = self
+        self.routes, self.lock = {}, threading.Lock()
+
+        class H(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.0"                # the body ends at close: a stream needs no chunked framing
+
+            def log_message(self, *a):
+                return
+
+            def do_GET(self):
+                self.reply(404, {"error": {"message": "not found"}})
+
+            def do_POST(self):
+                try:
+                    meter.handle(self)
+                except Exception as exc:                 # noqa: BLE001 - a meter bug must not hang opencode
+                    self.reply(500, {"error": {"message": "relay meter error: %s" % exc.__class__.__name__}})
+
+            def reply(self, code, obj, ctype="application/json"):
+                b = obj if isinstance(obj, bytes) else json.dumps(obj).encode("utf-8")
+                try:
+                    self.send_response(code)
+                    self.send_header("Content-Type", ctype)
+                    self.send_header("Content-Length", str(len(b)))
+                    self.end_headers()
+                    self.wfile.write(b)
+                except OSError:
+                    pass
+
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.srv.daemon_threads = True
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, name="relay-meter", daemon=True).start()
+
+    def add(self, **kw):
+        r = dict(kw, token=os.urandom(16).hex(), wire=[], usd=0.0, usd_max=0.0, stopped=False, t0=time.time())
+        with self.lock:
+            self.routes[r["token"]] = r
+        return r
+
+    def base(self, r):
+        return "http://127.0.0.1:%d/r/%s/v1" % (self.port, r["token"])
+
+    def close(self, r):
+        with self.lock:
+            self.routes.pop(r["token"], None)
+
+    def handle(self, h):
+        # The body is read BEFORE any answer: a 401 / 404 sent while the client was still writing its body aborted
+        # that client on Windows (WSAECONNABORTED 10053 - the R190 И-4 suite inside the full selftest).
+        try:
+            n = int(h.headers.get("Content-Length") or 0)
+            raw = h.rfile.read(n) if n else b""
+        except (ValueError, OSError):
+            return h.reply(400, {"error": {"message": "unreadable request"}})
+        parts = h.path.split("?")[0].strip("/").split("/")
+        r = self.routes.get(parts[1]) if len(parts) >= 3 and parts[0] == "r" else None
+        if r is None or parts[-2:] != ["chat", "completions"]:
+            return h.reply(404, {"error": {"message": "unknown relay route"}})
+        if (h.headers.get("Authorization") or "") != "Bearer " + r["token"]:
+            return h.reply(401, {"error": {"message": "bad relay token"}})
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except ValueError:
+            return h.reply(400, {"error": {"message": "unreadable request"}})
+        if not isinstance(body, dict):
+            return h.reply(400, {"error": {"message": "the request is not a JSON object"}})
+        w = {"t": round(time.time() - r["t0"], 1), "reasoning_effort": body.get("reasoning_effort"),
+             "max_completion_tokens": body.get("max_completion_tokens"), "max_tokens": body.get("max_tokens"),
+             "stream": body.get("stream"), "tools": len(body.get("tools") or []),
+             "messages": len(body.get("messages") or [])}
+        names = sorted({str(((t or {}).get("function") or {}).get("name")) for t in body.get("tools") or []
+                        if isinstance(t, dict)})
+        called = {str(((tc or {}).get("function") or {}).get("name")) for m in body.get("messages") or []
+                  if isinstance(m, dict) and m.get("role") == "assistant"
+                  for tc in (m.get("tool_calls") or []) if isinstance(tc, dict)}
+        with self.lock:
+            r["wire"].append(w)
+            r.setdefault("tool_names", set()).update(names)       # what opencode offered the model (MCP included)
+            r.setdefault("tools_called", set()).update(called)    # what the agent CALLED (the history it re-sends)
+            ceil, spent, step = r.get("ceiling"), r["usd"], r["usd_max"]
+        if ceil is not None and spent + step > ceil:
+            r["stopped"] = True
+            w["status"] = 402
+            return h.reply(402, {"error": {"type": "spend_ceiling", "message": (
+                "SPEND CEILING: $%.4f spent (estimate) and the largest request cost $%.4f - the next one would pass "
+                "this channel's $%.2f ceiling, so the harness stopped this agent" % (spent, step, ceil))}})
+        if r.get("scrub") and isinstance(body.get("messages"), list):
+            body["messages"], nred = _relay_scrub(body["messages"], r.get("secret_values"))
+            if nred:
+                w["redacted"] = nred
+        want_stream = bool(body.get("stream"))
+        stream_up = want_stream and r["prov"].get("streaming", True) is not False
+        up = dict(body, model=r["model"], stream=stream_up)
+        if stream_up:
+            up["stream_options"] = {"include_usage": True}
+        else:
+            up.pop("stream_options", None)
+        w["stream_up"] = stream_up
+        hdrs = dict(r["prov"].get("headers") or {})
+        hdrs.update({"Content-Type": "application/json", "Authorization": "Bearer " + r["key"]})
+        req = urllib.request.Request(r["prov"]["url"], data=json.dumps(up).encode("utf-8"), headers=hdrs,
+                                     method="POST")
+        slot = _provider_slot(r["prov"])
+        if slot is not None:
+            slot.acquire()
+        t1 = time.time()
+        try:
+            try:
+                resp = urllib.request.urlopen(req, timeout=r["req_timeout"])
+            except urllib.error.HTTPError as e:
+                data = e.read() or b""
+                w.update(status=e.code, secs=round(time.time() - t1, 1))
+                return h.reply(e.code, data or {"error": {"message": "relay HTTP %d" % e.code}})
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                w.update(status=502, secs=round(time.time() - t1, 1), error=e.__class__.__name__)
+                return h.reply(502, {"error": {"message": "relay unreachable: %s" % e.__class__.__name__}})
+            usage = {}
+            if stream_up:
+                try:
+                    h.send_response(200)
+                    h.send_header("Content-Type", "text/event-stream")
+                    h.send_header("Cache-Control", "no-cache")
+                    h.end_headers()
+                    for line in resp:
+                        h.wfile.write(line)
+                        h.wfile.flush()
+                        s = line.strip()
+                        if s.startswith(b"data:") and b'"usage"' in s:
+                            try:
+                                u = json.loads(s[5:].decode("utf-8")).get("usage")
+                            except (ValueError, AttributeError):
+                                u = None
+                            if isinstance(u, dict):
+                                usage = u
+                except OSError:
+                    w["cut"] = True
+            else:
+                raw = resp.read()
+                try:
+                    data = json.loads(raw.decode("utf-8"))
+                except ValueError:
+                    w.update(status=502, secs=round(time.time() - t1, 1))
+                    return h.reply(502, {"error": {"message": "the relay's answer is not JSON"}})
+                usage = (data.get("usage") if isinstance(data, dict) else None) or {}
+                if want_stream and isinstance(data, dict):
+                    h.reply(200, _relay_sse(data).encode("utf-8"), "text/event-stream")
+                else:
+                    h.reply(200, raw)
+            w.update(status=200, secs=round(time.time() - t1, 1),
+                     usage={k: usage.get(k) for k in ("prompt_tokens", "completion_tokens") if k in usage})
+            c = _relay_cost(usage, r.get("price"))
+            if c is not None:
+                with self.lock:
+                    r["usd"] += c
+                    r["usd_max"] = max(r["usd_max"], c)
+        finally:
+            if slot is not None:
+                slot.release()
+
+
+_RELAY_METER = []
+_RELAY_METER_LOCK = threading.Lock()
+
+
+def _relay_meter():
+    with _RELAY_METER_LOCK:
+        if not _RELAY_METER:
+            _RELAY_METER.append(_RelayMeter())
+        return _RELAY_METER[0]
+
+
+def _relay_child_env(env, relay):
+    """The opencode child env of an agent run: the meter's provider merged into OPENCODE_CONFIG_CONTENT (a value the
+    user set there is kept), the one-run token, and - for a channel that may not read keys - no secret-named
+    variable at all (the agent's shell would print it to the relay)."""
+    try:
+        cfg = json.loads(env.get("OPENCODE_CONFIG_CONTENT") or "{}")
+    except ValueError:
+        cfg = {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    provs = cfg.get("providers") if isinstance(cfg.get("providers"), dict) else {}
+    provs[RELAY_AGENT_PID] = relay["provider"]
+    cfg["providers"] = provs
+    env["OPENCODE_CONFIG_CONTENT"] = json.dumps(cfg)
+    if relay.get("scrub_env"):
+        for k in [k for k in env if _SECRET_ENV_NAME.search(k)]:
+            env.pop(k, None)
+    env["ASO_RELAY_TOKEN"] = relay["token"]
+    return env
+
+
+def _relay_agent_plan(cname, provider=None, reg=None):
+    """{"run": bool, "line": str | None}: whether this channel runs as an AGENT in opencode HERE, and the plan's line
+    naming the transport that runs and why. None-line = not an agent-capable channel (the loop, as always)."""
+    try:
+        if reg is None:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import routing
+            reg = routing.load_registry()
+        ch = (reg.get("channels") or {}).get(cname) or {}
+    except Exception:                                     # noqa: BLE001 - a plan line never kills a run
+        return {"run": False, "line": None}
+    if ch.get("agent_harness") != "opencode":            # not `agent`: agy's channels name their agy agent there
+        return {"run": False, "line": None}
+    prov = provider or ch.get("provider")
+    loop = "our own loop (the brief + fetch_url: no files, shell or MCP)"
+    if prov not in RELAY_AGENT_PROVIDERS or prov not in OAI_PROVIDERS:
+        return {"run": False, "line": "%s - `agent` is set, but %r is not a relay the meter serves" % (loop, prov)}
+    binary = opencode_bin()
+    if not binary or not (os.path.isfile(binary) or shutil.which(binary)):
+        return {"run": False, "line": loop + " - opencode is not installed here"}
+    ver = _opencode_version(binary)
+    if not ver or ver[0] < 2 or not _opencode_supports_standalone(binary) or not _opencode_supports_archived(binary):
+        return {"run": False, "line": "%s - this opencode (%s) has no `run --standalone` + `--archived` (2.2.6+)"
+                % (loop, ".".join(map(str, ver)) if ver else "version unknown")}
+    p = OAI_PROVIDERS[prov]
+    how = ("asks %s UNSTREAMED (its gateway drops a seller silent for 30 s), %s requests at a time per account"
+           % (prov, p.get("max_concurrent") or "any") if p.get("streaming") is False else "streams %s through" % prov)
+    eff = (ch.get("reasoning") or {}).get("effort")
+    keys = "" if channel_may_read_keys(cname, reg) else "; key-shaped values removed from what leaves"
+    return {"run": True, "line": "an AGENT in opencode %s (files, shell, MCP), reasoning_effort=%s, through the "
+            "harness's local relay meter (holds the key and the $ ceiling, %s%s)"
+            % (".".join(map(str, ver)), eff or "none", how, keys)}
+
+
+def call_relay_agent(brief, marker, outfile, name, model=None, system=None, timeout=2400, reasoning=None,
+                     max_tokens=None, provider=None, spend_guard=None, price_per_m=None, served_as=None, **_more):
+    """One relay channel as an opencode agent (R190 И-4): a meter route, opencode with the meter's provider injected
+    (2.x `providers` shape - a v1 `variants` array drops the whole provider, #63338), the channel's effort as the
+    variant's body (proven on the wire in R190 И-3), call_opencode for the run, the meter's facts into the record."""
+    prov = OAI_PROVIDERS.get(provider) or {}
+    key = _env_key(prov.get("key_env") or "")
+    if not key:
+        return {"channel": name, "ok": False, "error": "%s not set%s - not started"
+                % (prov.get("key_env"), _key_hint_for(prov.get("key_env") or ""))}
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import routing
+        reg = routing.load_registry()
+    except Exception:                                     # noqa: BLE001
+        reg = {}
+    may_keys = channel_may_read_keys(name, reg)
+    effort = (reasoning or {}).get("effort")
+    ceil = (spend_guard or {}).get("max_usd_per_review")
+    secs = _seconds(timeout, 2400)
+    meter = _relay_meter()
+    r = meter.add(channel=name, model=model, prov=prov, key=key, price=price_per_m,
+                  ceiling=float(ceil) if ceil is not None else None, scrub=not may_keys,
+                  secret_values=None if may_keys else _known_secret_values(), req_timeout=min(secs, 1800))
+    wait_ms = (min(secs, 1800) + 60) * 1000              # the meter answers an unstreamed relay only at its end
+    mdef = {"name": model, "capabilities": {"tools": True, "input": ["text"], "output": ["text"]},
+            "limit": {"context": RELAY_AGENT_CONTEXT, "output": int(max_tokens or 32000)}}
+    if effort:
+        mdef["variants"] = [{"id": effort, "body": {"reasoning_effort": effort}}]
+    relay = {"provider": {"name": "ai-second-opinion relay meter (%s)" % provider,
+                          "package": "@ai-sdk/openai-compatible", "env": ["ASO_RELAY_TOKEN"],
+                          "settings": {"baseURL": meter.base(r), "headerTimeout": wait_ms, "chunkTimeout": wait_ms},
+                          "models": {model: mdef}},
+             "token": r["token"], "scrub_env": not may_keys,
+             "how": "PAID per call on %s through the harness's relay meter (an agent: files, shell, MCP)"
+                    % (prov.get("label") or provider)}
+    try:
+        rec = call_opencode(brief, marker, outfile, model="%s/%s" % (RELAY_AGENT_PID, model), effort=effort,
+                            system=system, timeout=timeout, name=name, relay=relay)
+    finally:
+        meter.close(r)
+    rec = rec if isinstance(rec, dict) else {"channel": name, "ok": False, "error": "no record"}
+    wire = list(r["wire"])
+    warn, note = rec.setdefault("warnings", []), rec.setdefault("notes", [])
+    efforts = sorted({str(x.get("reasoning_effort")) for x in wire})
+    reds = sum(x.get("redacted") or 0 for x in wire)
+    rec.update(provider=provider, model=model, effort=effort, transport="opencode-agent",
+               wire={"requests": len(wire), "reasoning_effort": efforts,
+                     "stream_up": sorted({str(x.get("stream_up")) for x in wire}),
+                     "max_completion_tokens": sorted({str(x.get("max_completion_tokens")) for x in wire}),
+                     "tools_offered": max([x.get("tools") or 0 for x in wire] or [0]),
+                     "tool_names": sorted(r.get("tool_names") or []),
+                     "tools_called": sorted(r.get("tools_called") or []),
+                     "statuses": sorted({str(x.get("status")) for x in wire}), "redacted": reds})
+    if r["usd"]:
+        rec.update(usd=round(r["usd"], 6), usd_estimated=True)
+    if served_as:
+        rec["served_as"] = served_as
+    note.append("transport: an agent in opencode through the relay meter - %d request(s), reasoning_effort on the "
+                "wire %s, stream to the relay %s%s" % (len(wire), "/".join(efforts) or "-",
+                                                       "/".join(rec["wire"]["stream_up"]) or "-",
+                                                       ", %d key-shaped value(s) removed" % reds if reds else ""))
+    if not wire:
+        warn.append("opencode never reached the relay meter (0 requests) - the agent did not run")
+    elif effort and efforts != [effort] and r["stopped"] is False:
+        warn.append("reasoning_effort on the wire was %s, the channel declares %s" % ("/".join(efforts), effort))
+    if r["stopped"]:
+        rec["spend_stopped"] = True
+        warn.append("SPEND CEILING: the meter refused a request at $%.4f (estimate) of the $%.2f ceiling"
+                    % (r["usd"], float(ceil)))
+    if warn:
+        rec["ok"] = False
+    return rec
 
 
 FETCH_TOOL_SCHEMA = {
@@ -8813,7 +9423,8 @@ def call_gemini_direct(brief, marker, outfile, model=None, system=None, timeout=
 def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2400,
                       web=None, name="kimi", reasoning=None, max_tokens=None,
                       fetch_tool=None, provider="openrouter", provider_route=None,
-                      spend_guard=None, fallback_models=None, headers_resends=0):
+                      spend_guard=None, fallback_models=None, headers_resends=0, price_per_m=None,
+                      served_as=None, agent=None):
     """
     Any OpenAI-protocol model over /chat/completions, DIRECTLY - no CLI in between.
 
@@ -8859,6 +9470,28 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     used when the provider supports it; Moonshot is not on OpenRouter's native-search list, so
     this falls back to Exa.
     """
+    # R190 И-4: a relay channel the DISPATCHER found agent-capable here (_relay_agent_plan) runs as an opencode agent.
+    # Only the dispatcher passes `agent`, so a direct call (every test of this loop) stays the loop. An agent that
+    # dies at its start (no answer within 120 s, not a ceiling stop) hands the channel to the loop once, said so.
+    if agent and agent.get("run"):
+        rec = call_relay_agent(brief, marker, outfile, name=name, model=model, system=system, timeout=timeout,
+                               reasoning=reasoning, max_tokens=max_tokens, provider=provider,
+                               spend_guard=spend_guard, price_per_m=price_per_m, served_as=served_as)
+        if (rec.get("ok") or (rec.get("text") or "").strip() or (rec.get("seconds") or 0) > 120
+                or rec.get("spend_stopped") or rec.get("timed_out")):
+            return rec
+        why = rec.get("error") or "; ".join(rec.get("warnings") or []) or "no answer"
+        log("  [%s] the opencode agent failed at its start (%s) - this channel runs our own loop instead"
+            % (name, why[:240]))
+        rec2 = call_oai_reviewer(brief, marker, outfile, model=model, system=system, timeout=timeout, web=web,
+                                 name=name, reasoning=reasoning, max_tokens=max_tokens, fetch_tool=fetch_tool,
+                                 provider=provider, provider_route=provider_route, spend_guard=spend_guard,
+                                 fallback_models=fallback_models, headers_resends=headers_resends,
+                                 price_per_m=price_per_m, served_as=served_as)
+        if isinstance(rec2, dict):
+            rec2.setdefault("notes", []).append("the opencode agent failed at its start (%s): this run is our own "
+                                                "loop's (R190 И-4)" % why[:240])
+        return rec2
     prov = OAI_PROVIDERS.get(provider)
     if prov is None:
         return {"channel": name, "ok": False,
@@ -8960,7 +9593,9 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         # R162: NVIDIA NIM takes the effort as a TOP-LEVEL field (`reasoning_effort`) and an optional token cap on the
         # trace (`reasoning_budget`, NVIDIA's default 16384 when absent). Measured: see OAI_PROVIDERS["nvidia"].
         r = reasoning if isinstance(reasoning, dict) else {}
-        body["reasoning_effort"] = r.get("effort") or "high"
+        _eff = r.get("effort") or prov.get("effort_default")   # R190: no invented default on a relay
+        if _eff:
+            body["reasoning_effort"] = _eff
         if r.get("budget") is not None:
             body["reasoning_budget"] = int(r["budget"])
     if (web or {}).get("enabled") and prov.get("search") == "none":
@@ -9241,6 +9876,32 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
     # The most expensive single round SO FAR, used as the estimate of what the next one will cost.
     # Measured, not derived from a price table - same rule as the ceiling itself.
     usd_max_round = 0.0
+    # R190: a relay that reports no `usage.cost` (wokey.ai, asale.ai) gets an ESTIMATE from the channel's list price
+    # (`price_per_m`: {"in": USD per 1M input tokens, "out": per 1M output}), so its spend ceiling arms; the record says
+    # `usd_estimated`. asale's real price is 5-100 % of its list, so there the estimate is a ceiling, not a bill.
+    _pin = _pout = None
+    if isinstance(price_per_m, dict):
+        try:
+            _pin, _pout = float(price_per_m["in"]), float(price_per_m["out"])
+        except (KeyError, TypeError, ValueError):
+            _pin = _pout = None
+    usd_estimated = False
+
+    def _round_cost(use):
+        nonlocal usd_estimated
+        c = (use or {}).get("cost")
+        if c is not None:
+            try:
+                return float(c)
+            except (TypeError, ValueError):
+                return None
+        if _pin is None:
+            return None
+        t_in, t_out = (use or {}).get("prompt_tokens") or 0, (use or {}).get("completion_tokens") or 0
+        if not (t_in or t_out):
+            return None
+        usd_estimated = True
+        return t_in * _pin / 1e6 + t_out * _pout / 1e6
     sg = spend_guard or {}
     usd_ceiling = sg.get("max_usd_per_review")
     # 🔴 `is not None`, NOT truthiness. agy31pro, reviewing this diff the day it was written:
@@ -9335,7 +9996,18 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         while True:
             err_base, cite_base = len(stream_error), len(vendor_cites)
             try:
-                out = _stream_once(b)
+                _slot = _provider_slot(prov)               # R190: asale.ai's 2 requests per account
+                if _slot is None:
+                    out = _stream_once(b)
+                else:
+                    if not _slot.acquire(blocking=False):
+                        log("  [%s] waiting for a free %s slot (%d requests at once per account)"
+                            % (name, prov["label"], int(prov["max_concurrent"])))
+                        _slot.acquire()
+                    try:
+                        out = _stream_once(b)
+                    finally:
+                        _slot.release()
             except APIReadCut as e:
                 # R176: the one in-call re-send of a request whose headers never came (headers_resends above). A
                 # `deadline` or `stall` cut is never re-sent: the budget is gone, or the stream had started.
@@ -9394,15 +10066,11 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                 in_tot += use_.get("prompt_tokens") or 0
                 cached_tot += ((use_.get("prompt_tokens_details") or {})
                                .get("cached_tokens") or 0)
-                _dc = use_.get("cost")
+                _dc = _round_cost(use_)                    # R190: the vendor's cost, else the list-price estimate
                 if _dc is not None:
-                    try:
-                        _dc = float(_dc)
-                        usd_tot += _dc
-                        usd_max_round = max(usd_max_round, _dc)
-                        usd_seen = True
-                    except (TypeError, ValueError):
-                        pass
+                    usd_tot += _dc
+                    usd_max_round = max(usd_max_round, _dc)
+                    usd_seen = True
                 retries_left -= 1
                 retries_used += 1
                 wait = 2 ** (2 - retries_left)
@@ -9442,15 +10110,11 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                            .get("cached_tokens") or 0)
             reas_tot += (((use or {}).get("completion_tokens_details") or {})
                          .get("reasoning_tokens") or 0)
-            _c = (use or {}).get("cost")
+            _c = _round_cost(use)                          # R190: the vendor's cost, else the list-price estimate
             if _c is not None:
-                try:
-                    _c = float(_c)
-                    usd_tot += _c
-                    usd_max_round = max(usd_max_round, _c)
-                    usd_seen = True
-                except (TypeError, ValueError):
-                    pass
+                usd_tot += _c
+                usd_max_round = max(usd_max_round, _c)
+                usd_seen = True
             usage = use or usage
             if chunk:
                 text_parts.append(chunk)
@@ -9590,15 +10254,11 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
                                    .get("cached_tokens") or 0)
                     reas_tot += (((use_f or {}).get("completion_tokens_details") or {})
                                  .get("reasoning_tokens") or 0)
-                    _c_f = (use_f or {}).get("cost")
+                    _c_f = _round_cost(use_f)              # R190: the vendor's cost, else the list-price estimate
                     if _c_f is not None:
-                        try:
-                            _c_f = float(_c_f)
-                            usd_tot += _c_f
-                            usd_max_round = max(usd_max_round, _c_f)
-                            usd_seen = True
-                        except (TypeError, ValueError):
-                            pass
+                        usd_tot += _c_f
+                        usd_max_round = max(usd_max_round, _c_f)
+                        usd_seen = True
                     usage = use_f or usage
                     if chunk_f:
                         text_parts.append(chunk_f)
@@ -9853,7 +10513,12 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
         # 2026-10-06), and this check graded 22-63 KB answers FAILED for it on 09-14, 09-18 and
         # 09-24 - which R143 then counted as «0 of 8» in the public README. Only `<model>-<a real
         # date>` passes (R144 И-7, H8); `-preview`, another family or size still warns.
-        if all(_is_dated_snapshot(model, m) for m in served):
+        if served_as and all(m in set(served_as) for m in served):
+            # R190: the relay's own name for this very model (wokey answers "k3" for kimi-k3), declared in the
+            # registry's `served_as` - not a substitution, and not a request change (fallback_models would be one).
+            fallback_notes.append("SERVED AS: we asked for %r and the relay reports %s - its own name for the same "
+                                  "model (the registry's served_as)." % (model, ", ".join(repr(m) for m in served)))
+        elif all(_is_dated_snapshot(model, m) for m in served):
             fallback_notes.append(
                 "ALIAS SNAPSHOT: we asked for %r and the provider served a dated id of it, %s - "
                 "normally the snapshot that alias points to; the served id is kept here so you can "
@@ -10197,6 +10862,7 @@ def call_oai_reviewer(brief, marker, outfile, model=None, system=None, timeout=2
             # 2026-08-14 - see the usd_tot comment above for the OpenRouter log that proves the
             # under-report factor was 2.3x on qwen38max and infinite on the channel that 403'd.
             "usd": round(usd_tot, 6) if usd_seen else None,
+            "usd_estimated": usd_estimated,       # R190: list price x tokens (a relay that reports no cost)
             "usd_rounds": rounds_done if usd_seen else None,
             "spend_stopped": True if spend_stop else None,
             "time_stopped": True if time_stop else None,      # R163 И-3 (A8)
@@ -11977,6 +12643,12 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
             if _gp and _gp.startswith("the OpenCode Go plan"):
                 yield ("%s: %s. This channel will fail; set the plan up in opencode, or exclude the channel with "
                        "--skip %s." % (c, _gp, c))
+            elif _gp and _gp.startswith(_OC_WOKEY_NOT_SET):
+                # R189 (2026-11-17): a wokey.ai model named on a machine whose opencode has no `wokey` provider.
+                yield ("%s: %s. This channel will fail; add the wokey provider to your opencode config (see INSTALL), "
+                       "or exclude the channel with --skip %s." % (c, _gp, c))
+            elif _gp and _ocm.startswith(_OC_WOKEY_PREFIXES):
+                yield "%s: could not check opencode's wokey.ai provider: %s." % (c, _gp)
             elif _gp:
                 yield "%s: could not check the OpenCode Go plan: %s." % (c, _gp)
     for c in sorted(by_kind.get("claudecli", [])):
@@ -11993,8 +12665,14 @@ def channel_preflight(want, outdir, kinds=None, plan=None):
         # claudecli / opencode style with the specific install command.
         b = qwen_bin()
         if os.path.isfile(b) or shutil.which(b):
-            yield ("%s: Qwen Code CLI present (%s); Alibaba Token Plan subscription "
-                   "(BAILIAN_TOKEN_PLAN_API_KEY in ~/.qwen/settings.json)" % (c, b))
+            # R189 (2026-11-17): the kit ships this channel; a binary proves no subscription for ITS model.
+            _qp = _qwen_model_problem(((plan or {}).get(c) or {}))
+            if _qp:
+                yield ("%s: Qwen Code CLI present (%s), but %s. This channel will fail; declare the model in your Qwen "
+                       "Code settings (see INSTALL), or exclude the channel with --skip %s." % (c, b, _qp, c))
+            else:
+                yield ("%s: Qwen Code CLI present (%s); its settings declare the model - your Qwen subscription "
+                       "(e.g. Alibaba Model Studio Token Plan / Coding Plan) pays" % (c, b))
         else:
             yield ("%s: Qwen Code CLI NOT FOUND. Install: npm install -g "
                    "@qwen-code/qwen-code (or Alibaba install script at "
@@ -13263,6 +13941,12 @@ def _print_ask_answers(results, reg, ask_channel, marker, outdir, voice_label=No
 
 
 _OC_GO_PREFIX = "opencode-go/"
+# R189 (2026-11-17): a wokey.ai model runs through a provider of the USER'S OWN opencode config (`wokey`, or
+# `wokey-anthropic` for the Claude models); `opencode models` lists such a model only where that provider is declared, so
+# the binary alone proves nothing - the same test as the Go plan's. The operator for the kit's standard panel: «Kimi K3
+# тоже в начале wokey.ai», «glm53 wokey.ai если нет то openrouter», «Qwen 3.8 Max по подписке, если нет то ключ wokey.ai».
+_OC_WOKEY_PREFIXES = ("wokey/", "wokey-anthropic/")
+_OC_WOKEY_NOT_SET = "the wokey.ai provider is not set up"
 
 
 def _oc_listed_models(binary):
@@ -13283,11 +13967,13 @@ def _oc_listed_models(binary):
 
 def _oc_go_problem(ch, memo=None):
     """R179: None when `ch` is not an OpenCode Go model (opencode-go/...) or this machine's opencode lists it; else
-    why it cannot run here. `memo` (one dict per plan) keeps ONE listing per binary for every member the cascade
+    why it cannot run here. R189 (2026-11-17): a wokey.ai model (wokey/..., wokey-anthropic/...) takes the same test - it
+    runs only where the user's own opencode config declares that provider, which `opencode models` shows. `memo` (one dict per plan) keeps ONE listing per binary for every member the cascade
     asks about. Igor 2026-11-09, for the kit: the Contributor Sparks «в начале opencode, если нету, то fallback
     openrouter» - in opencode they exist only on the Go plan, so opencode without that plan counts as «нету»."""
     model = str(ch.get("model") or "").split("#", 1)[0]
-    if not model.startswith(_OC_GO_PREFIX):
+    wokey = model.startswith(_OC_WOKEY_PREFIXES)         # R189: the same test for the user's own wokey.ai provider
+    if not (model.startswith(_OC_GO_PREFIX) or wokey):
         return None
     b = opencode_bin()
     memo = {} if memo is None else memo
@@ -13298,7 +13984,43 @@ def _oc_go_problem(ch, memo=None):
         return got
     if model in got:
         return None
+    if wokey:
+        return ("%s in opencode here (`opencode models` lists no %s; add a provider named `%s` to your opencode config)"
+                % (_OC_WOKEY_NOT_SET, model, model.split("/", 1)[0]))
     return ("the OpenCode Go plan is not set up in opencode here (`opencode models` lists no %s)" % model)
+
+
+def _qwen_settings_path():
+    """R189: the Qwen Code settings file the user's own `qwen` reads - QWEN_HOME (qwen's resolveQwenHome, R130) or
+    ~/.qwen. The harness's panel home (_qwencli_panel_home) links this same file."""
+    return os.path.join(os.environ.get("QWEN_HOME") or os.path.expanduser("~/.qwen"), "settings.json")
+
+
+def _qwen_model_problem(ch, memo=None):
+    """R189 (2026-11-17): None when this machine's Qwen Code settings name the channel's model; else why the qwen CLI
+    cannot serve it. The operator for the kit: «Qwen 3.8 Max по подписке, если нет то ключ wokey.ai если нет то
+    openrouter» - a qwen binary alone proves no subscription: a user signed in another way (another provider, another
+    model) would win the cascade and fail, and the Qwen voice would be lost although wokey.ai / OpenRouter could carry it.
+    The test is the model id as a JSON string anywhere in settings.json (a `modelProviders` id, `model.name`). The file
+    is read in memory for that one token and dropped: no value of it is printed, logged or kept (it also holds the
+    user's key). `memo` (one dict per plan) keeps the verdict, never the text."""
+    model = str(ch.get("model") or "").split("#", 1)[0].strip()
+    if not model:
+        return None
+    path = _qwen_settings_path()
+    memo = {} if memo is None else memo
+    key = ("qwen-model", path, model)
+    if key not in memo:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                found = ('"%s"' % model) in f.read()
+        except OSError:
+            memo[key] = ("the qwen CLI here has no settings file (%s), so no Qwen subscription is set up for %s"
+                         % (path, model))
+        else:
+            memo[key] = None if found else (
+                "the qwen CLI's settings here do not declare the model %s (no Qwen subscription is set up for it)" % model)
+    return memo[key]
 
 
 def _channel_key_ready(ch, memo=None):
@@ -13333,7 +14055,9 @@ def _channel_key_ready(ch, memo=None):
         return bool(os.path.isfile(b) or shutil.which(b))
     if kind == "qwencli":
         b = qwen_bin()
-        return bool(os.path.isfile(b) or shutil.which(b))
+        if not (os.path.isfile(b) or shutil.which(b)):
+            return False
+        return _qwen_model_problem(ch, memo) is None     # R189: the CLI must also declare the channel's model
     if kind == "kimicli":
         b = kimi_bin()
         if not (os.path.isfile(b) or shutil.which(b)):
@@ -13427,6 +14151,13 @@ def _not_ready_reason(ch, memo=None):
         if k and not (_env_key(k["env"]) or _env_key(k["from"])):
             return "%s not set%s" % (k["from"], _key_hint_for(k["from"]))
         prob = _oc_go_problem(ch, memo)                  # R179: the Go plan's login
+        if prob:
+            return prob
+    if kind == "qwencli":                                # R189: the CLI, then the model in its settings
+        b = qwen_bin()
+        if not (os.path.isfile(b) or shutil.which(b)):
+            return "qwen CLI not found"
+        prob = _qwen_model_problem(ch, memo)
         if prob:
             return prob
     if kind in ("openrouter", "oai"):
@@ -15080,6 +15811,16 @@ def main():
     preflight = list(channel_preflight(want, a.out, kinds, plan))
     for problem in preflight:
         log("  [preflight] " + problem)
+    # R190 И-4: which transport each agent-capable relay channel takes HERE, and why (dry run and real run alike).
+    for c in want:
+        if kinds.get(c) in ("oai", "openrouter"):
+            _ag = _relay_agent_plan(c, ((plan or {}).get(c) or {}).get("provider"), reg)
+            if _ag["line"]:
+                log("  [transport] %s: %s" % (c, _ag["line"]))
+    # R190 И-7: whether each Muse Code run keeps its dialog in Muse's session store here (dry run and real run alike).
+    for c in want:
+        if kinds.get(c) == "musecode":
+            log("  [session log] %s: %s" % (c, _musecode_session_log_line(muse_bin())))
 
     # Warn when the brief references a repo URL but no files are attached — API channels
     # will only see the brief text and fetch_tool (limited calls, wrong paths = 404).
@@ -15271,6 +16012,8 @@ def main():
                 spend_guard=p.get("spend_guard"),
                 fallback_models=p.get("fallback_models"),
                 headers_resends=_headers_resends(reg, cname),
+                price_per_m=p.get("price_per_m"), served_as=p.get("served_as"),
+                agent=_relay_agent_plan(cname, p.get("provider"), reg),
                 timeout=_seconds(p.get("timeout"), 2400))
         elif kind == "xai":
             return _rex.submit(
@@ -15445,6 +16188,8 @@ def main():
                                         spend_guard=p.get("spend_guard"),
                                         fallback_models=p.get("fallback_models"),
                                         headers_resends=_headers_resends(reg, cname),
+                                        price_per_m=p.get("price_per_m"), served_as=p.get("served_as"),
+                                        agent=_relay_agent_plan(cname, p.get("provider"), reg),
                                         timeout=_seconds(p.get("timeout"), 2400))
             elif kind == "xai":
                 # 🔴 THE TIER TIMEOUT WAS NEVER PASSED HERE, and the plan claimed otherwise.

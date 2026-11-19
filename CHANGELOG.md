@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.125.0 — 2026-11-19
+
+The standard panel's big models take the cheapest route your machine has, two paid relays join as that route, and the relay voices work as agents.
+
+- **Each big standard-panel model runs on the first route you have**: GPT-6.1 Sol — Codex, then asale.ai, then wokey.ai; Gemini 4 Argon — agy, then wokey.ai, then asale.ai; Kimi K3 — asale.ai, wokey.ai, OpenRouter; Qwen 3.8 Max — the Qwen Code CLI (where your Qwen Code settings name `qwen3.8-max`), wokey.ai, OpenRouter; GLM 5.3 — wokey.ai, OpenRouter. In the cheap panel Grok 4.6 gets a wokey.ai copy where Grok Build is missing. Without the relay keys these voices keep their 1.124.0 routes (OpenRouter for Kimi, Qwen and GLM), except Qwen 3.8 Max, which now takes the Qwen Code CLI first.
+- **wokey.ai and asale.ai relays** (optional keys `WOKEY_API_KEY`, `ASALE_API_KEY`): fixed prices on wokey (4-5x below OpenRouter's for Kimi K3 and Qwen 3.8 Max), a floating market price on asale. **On asale a seller serves the request and can see it**: its channels never read key files, and key-shaped values are removed from what goes there. Their spend is estimated at list price for the per-run ceiling.
+- **The relay voices run as opencode agents** where opencode 2.2.6+ is installed (files, shell, your opencode MCP servers), through a meter on 127.0.0.1 that holds the key and keeps the ceiling; else a plain API call. `"agent_harness": null` in your settings keeps the plain call.
+- **Panels:** cheap 9 (Hy4 joins, on the OpenCode Go plan; Nemotron 3 Ultra takes OpenRouter's free copy where no NVIDIA key is set), standard 14 = cheap + GPT-6.1 Sol, Gemini 4 Argon, Kimi K3, Qwen 3.8 Max, GLM 5.3. **DeepSeek V4 Pro runs only when named.** GLM 5.3 FlashX Legal joins runs started with `--system legal-research`.
+- **A channel you name by its own name wins over another copy of the same model** («add kimik3» runs the OpenRouter copy, marked PAID), and «only glm 5.3» / «only gemini 4 argon» now name the voice.
+- **Fewer saved dialogs:** Muse Code runs with `--no-session-log` where it reports usage in its stream; every opencode session of the harness is archived and titled «second-opinion:<channel>». Codex, Qwen Code, Grok Build and agy keep theirs (the harness reads them, or the CLI has no switch) — TROUBLESHOOTING lists each. Nothing is deleted.
+- New selftest suites `suite_r189_kit_panels`, `suite_r190_relays`, `suite_r190_i4_relay_agent`, `suite_r190_i7_no_session_log`; older checks that pinned the 1.124.0 panels follow the new ones.
+
 ## 1.124.0 — 2026-11-17
 
 GLM 5.3 Flash gets the time a review takes on opencode, and a voice stopped at its time limit before its end marker no longer counts as an answer.

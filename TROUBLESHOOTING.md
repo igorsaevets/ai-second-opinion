@@ -267,6 +267,32 @@ The second effect comes from opencode itself: a session whose private server (`-
 
 Since 1.124.0 what such a voice printed before the stop counts as its answer only when it holds the brief's end marker. Without it the voice has no answer whatever its size (an agent's notes between tool calls used to pass once they reached 2000 bytes), its fallback runs, and the voice's file keeps the text. The plan prints the rule under the voice: «stopped at its 100m limit before its end marker = no answer, whatever its size (R186)».
 
+### A relay voice (wokey.ai / asale.ai) ended without an answer (1.125.0)
+
+- **«WOKEY_API_KEY not set» / «ASALE_API_KEY not set»** in the plan: that relay copy cannot run here; the voice takes its next route. Nothing is spent.
+- **asale `503` («no supply», capacity)**: no seller was serving that model at that moment; the next route answers after the round. A third request on one asale account waits for one of its 2 slots.
+- **«estimate past the ceiling» / HTTP 402 from the local meter**: the run reached its spending ceiling, estimated at LIST price (asale's real price floats below it). Raise `spend_guard.max_usd_per_review` for that channel in your settings file if you mean to.
+- **The voice ran as a plain API call although opencode is installed**: the dry run's `[transport]` line names the reason (opencode older than 2.2.6, or `"agent_harness": null` in your settings).
+
+### Qwen 3.8 Max runs through wokey / OpenRouter although Qwen Code is installed (1.125.0)
+
+The harness uses the Qwen Code CLI only when your user settings file names `qwen3.8-max` (`model.name`, or an `id` under `modelProviders`, in `~/.qwen/settings.json` or `$QWEN_HOME/settings.json`); the plan prints why it skipped the CLI. A model declared only in Qwen Code's system-level settings is not read.
+
+### Where do the reviewers' dialogs go?
+
+The harness deletes nothing. Since 1.125.0, per CLI:
+
+| CLI | Kept in its own history? | Why |
+|---|---|---|
+| Claude Code | no | `--no-session-persistence` |
+| Muse Code | no, where `muse exec` has `--no-session-log` and reports usage in its stream (1.4.23 has both); yes on an older Muse Code | the token counts come from the run's own stream; an older one keeps its log, which `muse export` reads for them |
+| opencode | yes, archived and titled «second-opinion:<channel>» | no per-run switch; archived sessions stay out of opencode's TUI and app lists, but `opencode session list`, run in the harness's folder `orchestrate-neutral-cwd` inside your temp folder, still prints them; `opencode session delete <id>` removes one (the database shrinks only after a VACUUM with opencode stopped) |
+| Codex | yes | the harness reads the run's record for the weekly quota and for why a run died; `codex resume` lists these runs only with `--include-non-interactive` |
+| Qwen Code | yes (`--chat-recording`) | the budget salvage resumes the session |
+| Grok Build | yes | no per-run switch; the harness names the session and reads its events during the run |
+| agy (Antigravity) | yes | no per-run switch. agy itself appears to keep only its newest 500 conversations ([issue #1417](https://github.com/google-antigravity/antigravity-cli/issues/1417)), so on a machine that runs many panels a run may push out your oldest agy conversation (not observed directly) |
+| Kimi Code CLI, MiMo CLI (both off by default) | yes | no per-run switch |
+
 ## Verifying the tool itself
 
 ```

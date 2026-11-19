@@ -202,6 +202,10 @@ write yourself: a hostile document can steer a bypassed reviewer's write tools, 
 safety prompt and the tripwire are documented failures under that threat model — read them and
 decide.
 
+## The relay voices run as opencode agents (1.125.0)
+
+Where opencode 2.2.6+ is installed, the wokey.ai / asale.ai voices run through `opencode run --standalone --auto` like the other opencode voices: the model may read files, run commands and call your opencode MCP servers in the run's neutral folder, with permission prompts answered yes. The relay key never reaches opencode: a meter on 127.0.0.1 inside the harness holds it, checks a per-run token opencode presents, keeps the spending ceiling (it answers 402 past it) and records each request. The asale channels additionally get no secret-named variable in their environment and key-shaped values are removed from what they send. To run a relay voice without tools, set `"agent_harness": null` for its channel in your settings file.
+
 ## Treat model output as untrusted input
 
 A cited URL is model-generated text. `citecheck.py` refuses to fetch non-public hosts (localhost,

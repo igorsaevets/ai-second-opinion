@@ -2675,7 +2675,9 @@ def family_absent_from_panel(plan, reg, route=None, only=None, named=None, ready
                                     else "not on the %r panel" % chosen)
         # 🔴 R153 И-6: once an exclusion inside «только <family>» holds, the human can exclude every voice of the
         # family that could start; that used to be an unexplained «running 0 channel(s)». Say which and why.
-        if not picked and any(plan[c].get("_user_off") for c in members):
+        # R189 И-2: «can» rather than «picked» - where wokey.ai is not set up, kit «только кими, не используй kimik3»
+        # picked wkkimik3 (not ready) and ran it into its preflight: a dead round instead of this stop.
+        if not can and any(plan[c].get("_user_off") for c in members):
             raise RouteError(
                 "%r names a family, and this run excludes or leaves off every voice of it that could start in "
                 "the %r round: %s. Nothing of %r would run - drop the word, or name a member that can run here."
@@ -2873,7 +2875,17 @@ def _apply_cascade(plan, reg, ready=None, named=None):
                 verdict[c] = True if ready is None else ready(c)
             except Exception:                            # noqa: BLE001 - see the docstring
                 verdict[c] = True
-        winner = next((c for c in members if verdict[c] is True), None)
+        # 🔴 R189 И-2 (2026-11-17): A MEMBER THE HUMAN NAMED BY ITS OWN NAME WINS OVER AN EARLIER READY ONE. With wokey.ai
+        # ready, «стандартная панель, добавь кими опенроутер» ran wkkimik3 and dropped the OpenRouter copy the words asked
+        # for (likewise orglm53 -> wkglm53, qwen38max -> qwen38maxcli, orspark12cont -> ocspark12go): a route that names
+        # one transport of a voice chose that transport (R153 И-6: «a member the human NAMED starts»). `named` never holds
+        # a member reached through a group word alone (explicitly_named), and a family word adds every member it picks.
+        winner = next((c for c in members if c in (named or ()) and verdict[c] is True), None)
+        displaced = []
+        if winner is not None:
+            displaced = [c for c in members[:members.index(winner)] if verdict[c] is True]
+        else:
+            winner = next((c for c in members if verdict[c] is True), None)
         if winner is None:
             # R181 И-4: nothing is ready - a member refused only TODAY keeps the voice, so apply_quota_skip leaves it out
             # with its [skip] line until 00:00 UTC (as before R181 И-4), rather than a member that would fail at start
@@ -2902,11 +2914,19 @@ def _apply_cascade(plan, reg, ready=None, named=None):
                         winner, (chans.get(winner) or {}).get("cost"), winner, ", ".join(asked)))
             plan[winner]["why"].append("cascade: %s not ready here, so %s carries this voice - %s"
                                        % (", ".join(unready), winner, _paid_label(winner, plan, chans)))
+        if displaced:
+            plan[winner]["why"].append(
+                "cascade: you named %s, so it carries this voice instead of %s (ready here)%s"
+                % (winner, ", ".join(displaced), (" - " + _paid_label(winner, plan, chans))
+                   if (chans.get(winner) or {}).get("cost") not in _NON_PAID_COSTS else ""))
         for c in members:
             if c == winner:
                 continue
             plan[c]["enabled"] = False
-            if verdict[c] is not True and members.index(c) < members.index(winner):
+            if c in displaced:
+                plan[c]["why"].append("cascade: %s is named in this route, so it carries this voice (same model)"
+                                      % winner)
+            elif verdict[c] is not True and members.index(c) < members.index(winner):
                 plan[c]["why"].append(
                     "cascade: not ready here (%s), so %s runs instead (same model)"
                     % (verdict[c] if isinstance(verdict[c], str) and verdict[c]
@@ -3296,6 +3316,48 @@ def apply_system_gate(plan, reg, system, named):
     return plan
 
 
+# R190 (2026-11-17): the kinds that run on the user's own PLAN (a login, no per-token key), plus the OpenCode Go plan.
+_SUBSCRIPTION_KINDS = frozenset(("codex", "agy", "grokcli", "musecode", "qwencli", "claudecli", "chatseat", "uiaseat"))
+
+
+def is_subscription_channel(ch):
+    """R190: True for a channel that runs on a subscription - `cost: subscription`, a plan CLI kind, or opencode on the
+    Go plan (`opencode-go/...`)."""
+    ch = ch or {}
+    if ch.get("cost") == "subscription" or ch.get("kind") in _SUBSCRIPTION_KINDS:
+        return True
+    return ch.get("kind") == "opencode" and str(ch.get("model") or "").startswith("opencode-go/")
+
+
+def apply_subscription_gate(plan, reg, ready, named):
+    """
+    R190 (2026-11-17): a channel with `only_with_subscription: true` runs only where a subscription can carry the run.
+    The operator, after the R189 tables: «Если подписки нет у меня то, + standard: DeepSeek V4 Pro │ ordeepseekv4pro -
+    не запускаем.» - his settings file sets it on ordeepseekv4pro. «A subscription can run» = some channel of the
+    registry that runs on a plan (is_subscription_channel), enabled there, is READY on this machine today (`ready`, the
+    quota refusals of the day included); with no `ready` callback (a plan without a machine) it is assumed. A channel
+    named by its own name runs anyway (a name is an instruction - the explicit_only rule); a group word does not.
+    """
+    chans = reg.get("channels") or {}
+    gated = [c for c, p in plan.items() if p.get("enabled") and (chans.get(c) or {}).get("only_with_subscription")]
+    if not gated:
+        return plan
+    subs = [c for c, ch in chans.items() if isinstance(ch, dict) and ch.get("enabled", True)
+            and is_subscription_channel(ch)]
+    can = [c for c in subs if ready is None or ready(c) is True]
+    for c in gated:
+        p = plan[c]
+        if can:
+            p["why"].append("only_with_subscription: a subscription voice can run here (%s)" % ", ".join(can[:3]))
+        elif c in (named or ()):
+            p["why"].append("only_with_subscription: named in this run, so it runs although no subscription voice can")
+        else:
+            p["enabled"] = False
+            p["why"].append("only_with_subscription: no subscription voice can run on this machine today (%s); name "
+                            "%s to run it anyway" % ("none of %d is ready" % len(subs) if subs else "none is set up", c))
+    return plan
+
+
 def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=None,
             ready=None, system=None, quota_skips=None):
     # Before anything else: the reserved name points OUTSIDE this registry, so its
@@ -3403,6 +3465,7 @@ def resolve(reg, route=None, only=None, skip=None, sets=None, tier=None, panel=N
     plan = _apply_cascade(plan, reg, ready, named_directly)   # R140 И-3: `ready` from orchestrate.py
     on_before_gate = [c for c, p in plan.items() if p["enabled"]]
     plan = _twin_only_gate(plan, reg, ready, named_directly)  # R168 И-4: a PAID stand-in only where its twin cannot run
+    plan = apply_subscription_gate(plan, reg, ready, named_by_name)   # R190: the operator's ordeepseekv4pro
     if on_before_gate and not any(p["enabled"] for p in plan.values()):
         raise RouteError("everything left to run is a PAID copy meant for a machine where its free twin cannot run "
                          "(%s), and that twin can run here. Run the free one, or name the paid one to pay for it."
@@ -3680,7 +3743,10 @@ def _decorate(plan, reg):
         for extra in ("reasoning", "max_tokens", "toolsets", "role", "fetch_tool", "tools",
                       "provider", "provider_route", "prompt_suffix", "distribution",
                       "thinking_level", "thinking_levels", "fallback_models",
-                      "fallback_model", "supported_efforts", "max_turns", "max_tool_calls"):
+                      "fallback_model", "supported_efforts", "max_turns", "max_tool_calls",
+                      "price_per_m", "served_as"):
+            # R190: price_per_m (a relay's list price) feeds call_oai_reviewer's spend ESTIMATE - added with the
+            # dispatcher's p.get("price_per_m") in the same commit (this list's dead-field history above).
             # 🔴 max_tool_calls (R144 И-4): qwen38maxcli declared 50 since R128-F and nothing read
             # it - call_qwencli hard-coded the same 50. The fifth field found dead at this list.
             if ch.get(extra) is not None:
@@ -3771,6 +3837,10 @@ def _web_line(p):
             add = ("harness page-fetch tool, up to %s pages (WE run these, so they are the only "
                    "grounding this channel can prove)" % (ft.get("max_calls") or 8))
             base = base + " + " + add if base else "web: " + add
+        if p.get("agent_harness") == "opencode":         # R190 И-4: a relay voice that runs as an opencode agent
+            base = ("web: as an AGENT in opencode where opencode 2.2.6+ runs (the run's [transport] line says which) "
+                    "- opencode's own web fetch + your opencode MCP servers; in our own loop - %s"
+                    % (base[5:] if base else "none"))
         return base
     if kind == "gemini":
         return ("web: Google's own retrieval - %s. url_context reaches pages a plain fetch is "

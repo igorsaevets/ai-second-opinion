@@ -93,6 +93,15 @@ those channels cost almost nothing. If a brief should not be trained on, drop th
 
 Assume retention on those tiers is permanent.
 
+## The relays: wokey.ai and asale.ai (since 1.125.0)
+
+Both are optional and start only where you set their key (`WOKEY_API_KEY`, `ASALE_API_KEY`). Each receives the brief, and when the voice runs as an opencode agent, also the files and tool output the model reads.
+
+- **asale.ai is a peer-to-peer market.** Your request is served through a seller's account, so the seller can see what you send. Treat it as published to a stranger. For that reason the asale channels never read key files (`*.env`, keys, tokens), and the harness removes key-shaped values, including the values of the keys it knows on your machine, from every message it sends to asale; no key variable is passed to that agent.
+- **wokey.ai** relays to the vendors' APIs at fixed prices; its own terms govern what it keeps.
+- The secrets gate applies to both as to every channel: a brief holding a key or a password is not sent.
+- To keep a document away from them, run without their keys, or `--skip asale` / `--skip wokey`.
+
 ## The premium batch panel (`premium/`)
 
 The optional premium panel is a **separate script** (`premium/premium_panel.py`) and its flows

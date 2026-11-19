@@ -2,6 +2,18 @@
 
 This copy inside the plugin holds the newest releases only: Anthropic's plugin directory does not inspect a file of 256 KiB or more, and the whole history is larger. The full file is `CHANGELOG.md` at the repository root: https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md
 
+## 1.125.0 — 2026-11-19
+
+The standard panel's big models take the cheapest route your machine has, two paid relays join as that route, and the relay voices work as agents.
+
+- **Each big standard-panel model runs on the first route you have**: GPT-6.1 Sol — Codex, then asale.ai, then wokey.ai; Gemini 4 Argon — agy, then wokey.ai, then asale.ai; Kimi K3 — asale.ai, wokey.ai, OpenRouter; Qwen 3.8 Max — the Qwen Code CLI (where your Qwen Code settings name `qwen3.8-max`), wokey.ai, OpenRouter; GLM 5.3 — wokey.ai, OpenRouter. In the cheap panel Grok 4.6 gets a wokey.ai copy where Grok Build is missing. Without the relay keys these voices keep their 1.124.0 routes (OpenRouter for Kimi, Qwen and GLM), except Qwen 3.8 Max, which now takes the Qwen Code CLI first.
+- **wokey.ai and asale.ai relays** (optional keys `WOKEY_API_KEY`, `ASALE_API_KEY`): fixed prices on wokey (4-5x below OpenRouter's for Kimi K3 and Qwen 3.8 Max), a floating market price on asale. **On asale a seller serves the request and can see it**: its channels never read key files, and key-shaped values are removed from what goes there. Their spend is estimated at list price for the per-run ceiling.
+- **The relay voices run as opencode agents** where opencode 2.2.6+ is installed (files, shell, your opencode MCP servers), through a meter on 127.0.0.1 that holds the key and keeps the ceiling; else a plain API call. `"agent_harness": null` in your settings keeps the plain call.
+- **Panels:** cheap 9 (Hy4 joins, on the OpenCode Go plan; Nemotron 3 Ultra takes OpenRouter's free copy where no NVIDIA key is set), standard 14 = cheap + GPT-6.1 Sol, Gemini 4 Argon, Kimi K3, Qwen 3.8 Max, GLM 5.3. **DeepSeek V4 Pro runs only when named.** GLM 5.3 FlashX Legal joins runs started with `--system legal-research`.
+- **A channel you name by its own name wins over another copy of the same model** («add kimik3» runs the OpenRouter copy, marked PAID), and «only glm 5.3» / «only gemini 4 argon» now name the voice.
+- **Fewer saved dialogs:** Muse Code runs with `--no-session-log` where it reports usage in its stream; every opencode session of the harness is archived and titled «second-opinion:<channel>». Codex, Qwen Code, Grok Build and agy keep theirs (the harness reads them, or the CLI has no switch) — TROUBLESHOOTING lists each. Nothing is deleted.
+- New selftest suites `suite_r189_kit_panels`, `suite_r190_relays`, `suite_r190_i4_relay_agent`, `suite_r190_i7_no_session_log`; older checks that pinned the 1.124.0 panels follow the new ones.
+
 ## 1.124.0 — 2026-11-17
 
 GLM 5.3 Flash gets the time a review takes on opencode, and a voice stopped at its time limit before its end marker no longer counts as an answer.
@@ -271,18 +283,6 @@ From the free voices' HTTP 429s of 2026-10-18 and the panel that studied them.
 - **Nemotron 3 Ultra through opencode carries the same reading note as through OpenRouter.** `ocnemotron3ultrafree` now has `ornemotron3ultra`'s `reading_note`, and `read_order` 3 instead of 1: the note follows the model, not one channel name.
 - **Docs (EN + RU).** README «You say» rows and panel tables, INSTALL's opencode section, PRIVACY (the state file), TECHNICAL (the mechanism), TROUBLESHOOTING («A free opencode voice shows `[skip]`»).
 
-## 1.113.6 — 2026-10-18
-
-From the panel on 1.113.5 (eight voices, six complete answers) and from Anthropic's plugin directory.
-
-- **agy's grounding retry has to deliver.** When Gemini's first answer opened no page, the harness asks once more; the second answer now replaces the first only when it opened a page AND delivered a review (text, not the plan, the end marker on its last line). Otherwise the first answer is kept, the run is marked failed, and the record says «RE-RUN OPENED N SOURCE(S) BUT DID NOT DELIVER A REVIEW» with the reason. A first-attempt file that cannot be moved aside (Windows: another process holds it) is copied instead; the attempt files listed are only this call's; a won retry's own `.retry.md` is named as the answer's copy.
-- **opencode answers are graded by the root session and by the part after the last error.** Both readers of opencode's own store walk up to the stream's root session, so a sub-agent's session no longer stands for the run. When opencode reports an error and then recovers, the stream is split at the LAST error frame: with nothing before it the run is ok as in 1.113.5; with text before it (a draft that was cut), the run is ok only when the part after the error is complete on its own (no refusal, the end marker on its last line), and the note names both lengths. An exit code other than 0 with no error frame and a complete answer stays ok, now with a ⚠ note and opencode's own verdict.
-- **HANDOFF.md says what is on disk.** A channel record naming an answer file that is not on disk gets a 🔴 line. «TRUNCATED-BY-LIMIT» is read only from a line that declares it, never from «not reached» or «: none» in the text.
-- **Plan lines.** A switched-off channel: «only its own name starts it (`--only <name>`) - a group word, a panel or the default skips it» (it used to say a group word could start it). The «--panel X would ALSO run / DROP» lines leave out the channels that run only when named.
-- **Docs (EN + RU).** Without the opencode CLI its four free voices stay in the plan as `[RUN ]` and each fails at dispatch with «binary not found», spending nothing; «without opencode» leaves them out (README and INSTALL used to say they «do not start»). Nemotron 3 Ultra's OpenRouter route also answers `--ask` on an OpenRouter key when opencode is missing (with opencode it answers there); `ocspark13free` is switched off, its free model left opencode on 2026-10-17; INSTALL's «`--ask` starts with this channel» holds without the Go overlay.
-- **Registry notes name the vendor page instead of copying a price.** OpenRouter's Exa search is $0.007 per request on 2026-10-18 (nine notes said $0.005); Meta's Spark 1.3 Contributor allows 150 requests a minute against Standard's 3,000 (the notes said 100 and «30x»); the OpenRouter Spark spend guard's arithmetic names its Standard 1.3 fallback; the OpenCode Go Spark note no longer promises a run-time fall-through that does not exist (a cascade picks one member when the plan is made).
-- **Anthropic's plugin directory.** `.gitattributes` no longer asks for CRLF on `*.ps1`: the directory refused the repository before scanning for that rule (PowerShell 5.1 and 7 both run the scripts with LF endings). The plugin folder's `CHANGELOG.md` is now a trimmed copy, the newest releases up to 64 KiB and then a pointer to this full file, because the directory holds for a reviewer every non-image file of 256 KiB or more and named this one (410 KB); `update_check.py` still finds there the section of the version it just installed. The build prints the plugin files that are still 256 KiB or more (the code and the registry).
-
 ## Older releases
 
-174 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).
+175 older releases: the full `CHANGELOG.md` at the repository root (https://github.com/igorsaevets/ai-second-opinion/blob/main/CHANGELOG.md).

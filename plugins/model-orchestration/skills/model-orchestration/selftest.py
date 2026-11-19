@@ -2669,9 +2669,16 @@ def suite_spend_guard():
         if cname.startswith("_") or not isinstance(ch, dict):
             continue
         if (ch.get("spend_guard") or {}).get("max_usd_per_review") is not None:
-            check(ch.get("kind") == "openrouter",
+            # R190 И-3: a relay of kind oai (asale / wokey) reports NO cost; call_oai_reviewer then bills each round at
+            # the channel's list price (`price_per_m` {"in", "out"} USD per 1M tokens -> `usd_estimated`), and the
+            # same stop reads that figure. A ceiling on an oai channel WITHOUT a price would print a promise nothing
+            # keeps, so the estimate must be declared (numbers, both halves) - suite_r190_relays proves the arithmetic.
+            _ppm = ch.get("price_per_m") if isinstance(ch.get("price_per_m"), dict) else {}
+            _est = (ch.get("kind") == "oai"
+                    and all(isinstance(_ppm.get(k), (int, float)) and _ppm.get(k) > 0 for k in ("in", "out")))
+            check(ch.get("kind") == "openrouter" or _est,
                   "%s declares a ceiling and runs on a transport that can enforce one" % cname,
-                  "kind=%r" % ch.get("kind"))
+                  "kind=%r price_per_m=%r" % (ch.get("kind"), {k: _ppm.get(k) for k in ("in", "out")}))
     src = inspect.getsource(o.main)
     check("--accept-spend" in inspect.getsource(o.build_parser) if hasattr(o, "build_parser")
           else "--accept-spend" in src,
@@ -3272,6 +3279,16 @@ def suite_panels():
          "Igor 2026-11-09 (same message): «Так же добавить Hy4 чеерз opencode go без fallback»; 2026-11-13: «Это я оставил только дешёвый один hy4». opencode-go/hy4-preview on his OpenCode Go plan, effort high, no fallback. distribution local."),
         ("R181 2026-11-15", "ADD", "ordeepseekv41flash",
          "Igor 2026-11-15: «Модели по дефолту делает по подписке opencode go, а если не работает подписка, то fallback на free, а если не работает free, то оплата по api. deepseek-v4.1-flash glm-5.3-flash mimo-v2.6-flash». DeepSeek V4.1 Flash through OpenRouter (deepseek/deepseek-v4.1-flash), last in its cascade (Go, NVIDIA free, Zen free, OpenRouter), twin_only: it runs only where no free or subscription member can, printed PAID; nvdeepseekv41flash's run-time fallback and the Go copy's second link (R181 И-2). distribution both.")
+        ,
+        ("R190 2026-11-17", "ADD", "ornemotron3ultra",
+         "Igor 2026-11-17: «Nemotron 3 Ultra запускаем только один раз только в cheap, а не и в cheap и standart». "
+         "The OpenRouter copy joins its cascade's cheap panel (back from R83's REMOVE), so every panel holds ONE "
+         "Nemotron voice - the cascade runs one member. Never read its answer (reading_note)."),
+        ("R190 2026-11-17", "ADD", "wkgrok46",
+         "Igor 2026-11-17: «Теперь надо вот эти модели добавить в наш плагин и мне и в kit: ... wokey grok-4.6 ...». "
+         "Grok 4.6 through the wokey relay, last in the cascade [grokbuild, wkgrok46] and grokbuild's run-time "
+         "fallback: cheap like grokbuild, the voice it stands in for; it runs where Grok Build cannot (kit users "
+         "without the CLI or its subscription), printed PAID with a $2 ceiling (list-price estimate).")
     ]
     # The fold. Last event per channel wins; order is the file's order, which is why the list is
     # append-only. `ADDED_TO_CHEAP_SINCE` / `REMOVED_FROM_CHEAP_SINCE` keep their names because
@@ -5086,9 +5103,13 @@ def suite_r60_shipped_docs_and_kit_exclusion():
             # on dev, breaks on install" class is caught right here at build time, before push.
             sh_selftest = skill_out / "selftest.py"
             if sh_selftest.is_file():
+                # R190 И-3 (2026-11-18): 300 -> 900 s. The full selftest of R190 И-2 died here on TimeoutExpired in
+                # both trees; measured alone, the shipped selftest ran 310 s (145 suites, slowest 36 s:
+                # runs/r190-asale-wokey-models/i3/time_shipped_selftest_i3.py) - growth past the bound, not a hang,
+                # and inside a full run it shares the machine with the other tree.
                 p2 = subprocess.run([PY, str(sh_selftest), "--quiet"],
                                     capture_output=True, text=True, encoding="utf-8",
-                                    errors="replace", timeout=300, cwd=str(skill_out))
+                                    errors="replace", timeout=900, cwd=str(skill_out))
                 # Extract the summary line. On failure, its last line is the tail of the failure
                 # list; on success, it says "N/N checks passed".
                 out = (p2.stdout or "") + (p2.stderr or "")
@@ -8195,6 +8216,10 @@ def main():
                   suite_r185_grok420_kit_off,
                   suite_r186_glm_timeout_cut,
                   suite_r187_sparks_wonder,
+                  suite_r189_kit_panels,
+                  suite_r190_relays,
+                  suite_r190_i4_relay_agent,
+                  suite_r190_i7_no_session_log,
                   suite_r168_i3_free_transports,
                   suite_r168_i4_panel_fixes,
                   suite_r169_agy_argon,
@@ -13802,13 +13827,24 @@ def suite_r143_i3_free_voices():
           % (nv, paid), repr((kit["channels"][nv].get("enabled"), chans[paid].get("distribution"))))
     kit["channels"][nv]["enabled"] = True
     not_nv = lambda c: "%s is not set" % chans[nv]["env_model"]["key_env"] if c == nv else True  # noqa: E731
-    for label, rdy, want in (("ready", yes, [nv]), ("its key missing", not_nv, [paid])):
+    # RESTATED 2026-11-17 (R189 И-2): the kit's Kimi cascade holds the wokey.ai copy before the OpenRouter one (Igor «Kimi
+    # K3 тоже в начале wokey.ai»), so «its key missing» hands the voice to wkkimik3, and the OpenRouter copy carries it only
+    # where wokey.ai is not set up either.
+    # RESTATED 2026-11-18 (R190 И-3): the asale.ai copy askimik3 comes before wokey (Igor «если у asale цена ниже wokey,
+    # то asale ставим до wokey»), so «its key missing» hands the voice to askimik3; wokey carries it where asale is not
+    # set up, OpenRouter where neither relay is.
+    wk = "askimik3"
+    not_nv_as = lambda c: not_nv(c) if c == nv else ("no asale key" if c == wk else True)  # noqa: E731
+    not_nv_wk = lambda c: not_nv(c) if c == nv else ("no relay" if c in (wk, "wkkimik3") else True)  # noqa: E731
+    for label, rdy, want in (("ready", yes, [nv]), ("its key missing", not_nv, [wk]),
+                             ("its key and asale.ai missing", not_nv_as, ["wkkimik3"]),
+                             ("its key, asale.ai and wokey.ai missing", not_nv_wk, [paid])):
         p = routing.resolve(copy.deepcopy(kit), panel="standard", ready=rdy)
         on = sorted(c for c in kimi if c in p and p[c]["enabled"])
         check(on == want, "R143 И-3 (c): kit standard plan, %s %s -> one Kimi: %s" % (nv, label, want),
               repr(on))
         if rdy is not_nv:
-            check(any("not ready here" in str(x) and paid in str(x) for x in p[nv]["why"]),
+            check(any("not ready here" in str(x) and ("so %s runs instead" % wk) in str(x) for x in p[nv]["why"]),
                   "R143 И-3 (c): the plan says why %s did not run and who runs instead" % nv,
                   repr(p[nv]["why"])[-200:])
         pc = routing.resolve(copy.deepcopy(kit), panel="cheap", ready=rdy)
@@ -14053,10 +14089,19 @@ def suite_r142_i6_kimi():
         check(got == [nv], "R142 И-6 (a): «только кими» runs the free Kimi, not the paid one", repr(got))
         got = run(nokey, route="только кими")
         check(paid not in got, "R142 И-6 (a): a cheap «только кими» never buys the paid voice", repr(got))
+        # RESTATED 2026-11-17 (R189 И-2): two paid Kimi copies now - wokey.ai first (Igor «Kimi K3 тоже в начале
+        # wokey.ai»), OpenRouter where wokey.ai is not set up.
+        # RESTATED 2026-11-18 (R190 И-3): three paid copies now - asale.ai first (Igor «если у asale цена ниже wokey, то
+        # asale ставим до wokey»), wokey.ai, OpenRouter where neither relay is set up.
+        nokey_as = lambda c: "probe: no key" if c == nv else ("no asale key" if c.startswith("as") else True)  # noqa: E731
+        nokey_wk = lambda c: "probe: no key" if c == nv else ("no relay" if c.startswith(("wk", "as")) else True)  # noqa: E731
         got = (run(yes, route="только кими, стандартная панель"),
-               run(nokey, route="только кими, стандартная панель"))
-        check(got == ([nv], [paid]), "R142 И-6 (a): in the standard panel the free Kimi runs when "
-              "ready and the paid one only when it is not", repr(got))
+               run(nokey, route="только кими, стандартная панель"),
+               run(nokey_as, route="только кими, стандартная панель"),
+               run(nokey_wk, route="только кими, стандартная панель"))
+        check(got == ([nv], ["askimik3"], ["wkkimik3"], [paid]), "R142 И-6 (a): in the standard panel the free Kimi "
+              "runs when ready and a paid one only when it is not - the asale.ai copy, then wokey.ai, else OpenRouter "
+              "(RESTATED R189, R190)", repr(got))
         got = run(yes, route="не используй кими")
         check(got and not set(got) & set(kimi), "R142 И-6 (a): «не используй кими» drops EVERY Kimi "
               "(the NVIDIA one used to stay)", repr(got))
@@ -14411,9 +14456,10 @@ def suite_r146_i3_spark_go():
     # checks below say «no fallback» now; (e) keeps the run-time fallback MECHANISM on a fixture registry.
     check(ch.get("kind") == "opencode" and ch.get("model") == "opencode-go/muse-spark-1.3-contributor"
           and ch.get("effort") == "xhigh" and ch.get("distribution") == "both"   # R179: local -> kit; R187: both
-          and ch.get("fallback") is None and ch.get("panel") == "cheap",
+          and ch.get("fallback") == "orspark13cont" and ch.get("panel") == "cheap",
           "R146 И-3 (a) ocspark13go = opencode, opencode-go/muse-spark-1.3-contributor #xhigh, both (R187), "
-          "cheap; no run-time fallback since R154 И-3 (the free Spark is gone)")
+          "cheap; RESTATED 2026-11-17 (R189, Igor's cheap «Вариант A»): its run-time fallback is the OpenRouter "
+          "copy orspark13cont (R154 И-3 - SUPERSEDED: none, the free Spark was gone)", repr(ch.get("fallback")))
     # R164 (2026-10-22): the Go Spark is Spark 1.2 Contributor now (ocspark12go); ocspark13go is off, by name only.
     grp = next((g for g in reg.get("_cascade_groups") or [] if "ocspark12go" in g), [])
     check(grp[:1] == ["ocspark12go"] and (reg.get("ask_default") or [None])[0] == "ocspark12go",
@@ -14428,9 +14474,10 @@ def suite_r146_i3_spark_go():
     both = ["ocspark13go", "ocspark13free"]
     p = rt.resolve(rt.load_registry(), only=both, ready=yes)
     fb = (p.get("ocspark13go") or {}).get("fallback") or {}
-    check(p["ocspark13go"]["enabled"] and not p["ocspark13free"]["enabled"] and not fb,
-          "R146 И-3 (b) both Sparks named: ONE runs (ocspark13go), and since R154 И-3 nothing is armed as its "
-          "fallback", repr(fb))
+    check(p["ocspark13go"]["enabled"] and not p["ocspark13free"]["enabled"]
+          and fb.get("channel") == "orspark13cont" and not fb.get("off"),
+          "R146 И-3 (b) both Sparks named: ONE runs (ocspark13go); RESTATED 2026-11-17 (R189): the OpenRouter copy "
+          "orspark13cont is armed as its fallback (R154 И-3 - SUPERSEDED: nothing was)", repr(fb))
     pc = rt.resolve(rt.load_registry(), panel="cheap", ready=yes)
     if ((reg.get("channels") or {}).get("ocspark12go") or {}).get("enabled"):
         # R187: the 1.3 Go Spark is a voice of its own beside mcspark13 - it runs wherever this tree enables
@@ -14450,9 +14497,13 @@ def suite_r146_i3_spark_go():
           "R146 И-3 (c) --skip ocspark13go: the free Spark runs instead")
     p3 = rt.resolve(rt.load_registry(), only=["ocspark13go"], skip=["ocspark13free"], ready=yes)
     fb3 = (p3.get("ocspark13go") or {}).get("fallback") or {}
-    check(p3["ocspark13go"]["enabled"] and not fb3,
-          "R146 И-3 (c) --skip ocspark13free: the Go Spark runs; since R154 И-3 it has no fallback to turn off",
-          repr(fb3))
+    p3b = rt.resolve(rt.load_registry(), only=["ocspark13go"], skip=["orspark13cont"], ready=yes)
+    fb3b = (p3b.get("ocspark13go") or {}).get("fallback") or {}
+    check(p3["ocspark13go"]["enabled"] and fb3.get("channel") == "orspark13cont" and not fb3.get("off")
+          and p3b["ocspark13go"]["enabled"] and "--skip" in str(fb3b.get("off") or ""),
+          "R146 И-3 (c) --skip ocspark13free: the Go Spark runs; RESTATED 2026-11-17 (R189): its OpenRouter "
+          "fallback stays armed, and --skip orspark13cont turns it off (R154 И-3 - SUPERSEDED: no fallback)",
+          "%r / %r" % (fb3, fb3b))
     kit = rt.load_registry(overlay=False)
     for c in (kit.get("channels") or {}).values():
         if isinstance(c, dict) and c.get("distribution") == "local":
@@ -14491,8 +14542,9 @@ def suite_r146_i3_spark_go():
     del calls[:]
     res = {"ocspark13go": dict(quota)}
     o.run_fallbacks(res, p, reg, ["ocspark13go"], submit=fake_submit, same_voice=rt.same_voice)
-    check(calls == [], "R146 И-3 (e) the real registry since R154 И-3: a Go-plan death runs nothing else",
-          "calls=%r" % calls)
+    check(calls == ["orspark13cont"] and (res.get("orspark13cont") or {}).get("fallback_for") == "ocspark13go",
+          "R146 И-3 (e) the real registry, RESTATED 2026-11-17 (R189): a Go-plan death runs the OpenRouter copy "
+          "orspark13cont once after the round (R154 И-3 - SUPERSEDED: nothing else ran)", "calls=%r" % calls)
 
     class _Done(object):
         returncode = 1
@@ -15328,9 +15380,10 @@ def suite_r149_i3_muse_hotfix():
     def call(rc, recs, export_ok=True):
         state["serve"], state["export_ok"] = (rc, recs), export_ok
         return o.call_musecode("brief", "R149I3-END", os.path.join(tmp, "a.md"), effort="xhigh")
-    real = _sp.run
+    real, real_bin = _sp.run, o.muse_bin
     try:
         _sp.run = fake
+        o.muse_bin = lambda: "muse-fake"   # R190 И-7: pin the binary - the session-log gate reads the installed one
         good = call(0, head + term("completed", "Finding.\nR149I3-END"))
         crash = call(1, head + delta)
         late = call(1, head + term("completed", "Finding.\nR149I3-END"))
@@ -15338,6 +15391,7 @@ def suite_r149_i3_muse_hotfix():
         noexp = call(0, head + term("completed", "Finding.\nR149I3-END"), export_ok=False)
     finally:
         _sp.run = real
+        o.muse_bin = real_bin
         _sh.rmtree(tmp, ignore_errors=True)
     c = state.get("cmd") or []
     ts = [c[i + 1] for i, x in enumerate(c[:-1]) if x == "-c" and str(c[i + 1]).startswith("run.toolset=")]
@@ -16266,13 +16320,28 @@ def suite_r153_i6_hotfix():
     d1, _ = runs(kit, route="только cli без %s" % victim) if victim else (None, "")
     named = _r.explicitly_named(kit, route="только кими, не используй kimik3")
     named_ctl = _r.explicitly_named(kit, route="только kimik3")
+    # RESTATED 2026-11-17 (R189 И-2): the kit's kimi family holds a second PAID member, wkkimik3 (wokey.ai). Where wokey
+    # is ready, excluding kimik3 leaves wkkimik3 -> the R153 И-5 stop names it as PAID (never kimik3, never a silent run);
+    # where it is not, every voice is excluded or cannot start -> this stop (R189 И-2 fixed: `can`, not `picked` - it ran
+    # the not-ready wkkimik3 into its preflight).
+    # RESTATED 2026-11-18 (R190 И-3): askimik3 (asale.ai) is the first paid copy now, so the paid stop names both relays,
+    # and the «every voice» world takes BOTH relays away (asale and wokey not set up).
     d3, e5 = runs(kit, route="только кими, не используй kimik3")
+    d4, e6 = runs(kit, route="только кими, не используй kimik3",
+                  ready=lambda n: "no wokey provider" if n.startswith("wk") else (
+                      "no asale key" if n.startswith("as") else True))
     check(bool(victim) and bool(d1) and victim not in d1 and "kimik3" not in named and "kimik3" in named_ctl
-          and d3 is None and "excludes or leaves off every voice" in str(e5) and "kimik3 (" in str(e5),
+          and d3 is None and "(--only askimik3,wkkimik3)" in str(e5)
+          and d4 is None and "excludes or leaves off every voice" in str(e6)
+          and "wkkimik3 (metered, not ready here: no wokey provider)" in str(e6)
+          and "askimik3 (metered, not ready here: no asale key)" in str(e6)
+          and "kimik3 (metered, you excluded it" in str(e6),
           "R153 И-6 (d) an exclusion inside «только <group>» holds («только cli без <a member>» drops it) and an "
-          "excluded name is not «named»: kit «только кими, не используй kimik3» stops instead of running kimik3",
-          "victim=%r ran=%r named=%r ctl=%r kimi=%r" % (victim, d1, sorted(named), sorted(named_ctl),
-                                                       d3 if d3 is not None else str(e5)[:90]))
+          "excluded name is not «named»: kit «только кими, не используй kimik3» stops instead of running kimik3 "
+          "(RESTATED R189: wokey ready -> the paid stop names wkkimik3; not ready -> «excludes every voice»)",
+          "victim=%r ran=%r named=%r ctl=%r kimi=%r / %r" % (victim, d1, sorted(named), sorted(named_ctl),
+                                                            d3 if d3 is not None else str(e5)[:90],
+                                                            d4 if d4 is not None else str(e6)[:90]))
 
     class _P:
         def __init__(self, out, rc=0):
@@ -16594,9 +16663,21 @@ def suite_r153_i3_family_room():
     # R153 И-5 SUPERSEDES the «run kimik3» half: that Kimi is PAID and two free ones are declared, so the word
     # now stops and names them (suite_r153_i5_hotfix). Still pinned here: never an empty round.
     kn, _ = runs(kit, only=["kimik3"])
-    check(ships_on == ["kimik3"] and ko == [] and kr == [] and "will not start" in why and kn == ["kimik3"],
+    # RESTATED 2026-11-17 (R189 И-2): the kit ships a second PAID Kimi, wkkimik3 (wokey.ai, Igor «Kimi K3 тоже в начале
+    # wokey.ai»), so the stop names both paid channels; `--only kimik3` still runs the one named (and a named member wins
+    # the cascade since R189 И-2 - suite_r189_kit_panels).
+    try:                                                  # runs() keeps 160 chars; the channel list sits at the end
+        _r.resolve(_cp.deepcopy(kit), ready=yes, only=["kimi"])
+        stop_full = ""
+    except _r.RouteError as e:
+        stop_full = str(e)
+    # RESTATED 2026-11-18 (R190 И-3): a third paid Kimi ships, askimik3 (asale.ai), FIRST of the paid copies (Igor «если
+    # у asale цена ниже wokey, то asale ставим до wokey») - the stop names all three in cascade order.
+    check(ships_on == ["askimik3", "wkkimik3", "kimik3"] and ko == [] and kr == [] and "will not start" in why
+          and "(--only askimik3,wkkimik3,kimik3)" in stop_full and kn == ["kimik3"],
           "R153 И-3 (a) kit, cheap default: `--only kimi` and «только кими» are never an empty round - they stop "
-          "and name the paid kimik3 (R153 И-5); `--only kimik3` runs it",
+          "and name the paid askimik3 + wkkimik3 + kimik3 (R153 И-5; RESTATED R189: was kimik3 alone; R190: + asale); "
+          "`--only kimik3` runs it",
           "ships_on=%r only=%r route=%r why=%r named=%r" % (ships_on, ko, kr, why[-120:], kn))
     liv = _cp.deepcopy(kit)
     liv["channels"]["kimik3free"]["enabled"] = True       # the mechanism, not this tree's product
@@ -17341,18 +17422,20 @@ def suite_r149_i2_muse_code():
         return _sp.CompletedProcess(cmd, 0, "\n".join(_j.dumps(r) for r in recs) + "\n",
                                     "muse: workspace root: X (cwd default)\nmuse: Skills: 24 loaded")
 
-    real = _sp.run
+    real, real_bin = _sp.run, o.muse_bin
     kenv = {k: os.environ.get(k) for k in ("META_API_KEY", "MODEL_API_KEY")}
     outf = os.path.join(tmp, "answer.md")
     try:
         os.environ["META_API_KEY"] = os.environ["MODEL_API_KEY"] = "dummy"
         _sp.run = fake
+        o.muse_bin = lambda: "muse-fake"   # R190 И-7: pin the binary - the session-log gate reads the installed one
         r = o.call_musecode("THE BRIEF " * 900, "R149I2-END", outf, model="muse-wonder-1.0-contributor",
                             effort="xhigh", system="SYSTEM LAYER", max_steps=120)
         seen["fail"] = True
         r2 = o.call_musecode("brief", "R149I2-END", outf + "2", effort="xhigh", system="S")
     finally:
         _sp.run = real
+        o.muse_bin = real_bin
         for k, v in kenv.items():
             if v is None:
                 os.environ.pop(k, None)
@@ -17715,7 +17798,12 @@ def suite_r155_i3_wonder_by_name():
     # the set of one-voice words is a PRODUCT pin on purpose: a new member means a new word that starts gated channels
     check(all((chs.get(c) or {}).get("explicit_only") is True for c in W)
           and ov.get("wonder") == list(W) and "kimi" in ov
-          and set(ov) <= {"wonder", "kimi", "mimoflash", "glmflash", "deepseekflash", "grok420voice"}
+          # RESTATED 2026-11-18 (R190 И-3): R190 И-2 made «gemini 4 argon» and «glm 5.3» name the VOICE (the R178
+          # pattern) - groups `argon` (agy4argon, wkgemini4argon, asgemini4argon) and `glm53` (wkglm53, orglm53), with
+          # no explicit_only member, so neither opens a gated channel (the guards below).
+          and set(ov) <= {"wonder", "kimi", "mimoflash", "glmflash", "deepseekflash", "grok420voice", "argon", "glm53"}
+          and not any((chs.get(c) or {}).get("explicit_only") for c in ov.get("argon") or [])
+          and not any((chs.get(c) or {}).get("explicit_only") for c in ov.get("glm53") or [])
           and not any((chs.get(c) or {}).get("explicit_only") for c in ov.get("mimoflash") or [])
           and not any((chs.get(c) or {}).get("explicit_only") for c in ov.get("glmflash") or [])
           and not any((chs.get(c) or {}).get("explicit_only") for c in ov.get("deepseekflash") or [])
@@ -17811,8 +17899,19 @@ def suite_r155_i3_wonder_by_name():
     kof = _cp.deepcopy(base)
     for c in ("kimik3free", "kimik3"):
         kof["channels"][c]["enabled"] = False             # Igor's overlay since 2026-10-17 (Kimi off by default)
+    # RESTATED 2026-11-17 (R189): wkkimik3 (wokey.ai, the first PAID Kimi transport, on in the source) joined the Kimi
+    # cascade and the `kimi` group. This check's subject is the free / paid pair under explicit_only, so both worlds keep
+    # the wokey copy off - as the operator's settings file does (R158). R189's own suite pins the wokey-first order.
+    # RESTATED 2026-11-18 (R190 И-3): a second paid relay copy, askimik3 (asale.ai, before wokey: Igor «если у asale цена
+    # ниже wokey, то asale ставим до wokey»), joined the same cascade and group - kept off here for the same reason.
+    for _relay in ("wkkimik3", "askimik3"):
+        if _relay in kof["channels"]:
+            kof["channels"][_relay]["enabled"] = False
     h1 = runs(kof, panel="standard", route="только кими")[0]
     kxo = _cp.deepcopy(base)
+    for _relay in ("wkkimik3", "askimik3"):              # R189 / R190: see above
+        if _relay in kxo["channels"]:
+            kxo["channels"][_relay]["enabled"] = False
     for c in ("kimik3free", "kimik3"):
         kxo["channels"][c]["enabled"] = True            # the MECHANISM: the kit ships kimik3free off (R153 И-2 #5)
         kxo["channels"][c]["explicit_only"] = True
@@ -19207,9 +19306,12 @@ def suite_r154_i3_free_voices():
     check((pn.get("ocspark13free") or {}).get("enabled") is True,
           "R154 И-3 (c) control: by its own name ocspark13free still starts (and fails with opencode's message)")
     pl = rt.resolve(copy.deepcopy(reg), panel="cheap", ready=yes)
-    check((ch.get("ocspark13go") or {}).get("fallback") is None
-          and not ((pl.get("ocspark13go") or {}).get("fallback") or {}),
-          "R154 И-3 (d) ocspark13go arms no run-time fallback: the free Spark it fell back to is gone")
+    check((ch.get("ocspark13go") or {}).get("fallback") == "orspark13cont"
+          and (((pl.get("ocspark13go") or {}).get("fallback") or {}).get("channel") == "orspark13cont"
+               if (pl.get("ocspark13go") or {}).get("enabled") else True),
+          "R154 И-3 (d) RESTATED 2026-11-17 (R189, cheap «Вариант A»): ocspark13go's run-time fallback is the "
+          "OpenRouter copy orspark13cont, no longer the free Spark (gone since 2026-10-17)",
+          repr(((pl.get("ocspark13go") or {}).get("fallback"))))
     pk2 = rt.resolve(copy.deepcopy(kit), panel="cheap",            # R179: the kit's Go Sparks need the Go plan
                      ready=lambda n: ("no MODEL_API_KEY" if n == "spark12cont" else
                                       "no OpenCode Go plan" if n in ("ocspark12go", "ocspark13go") else True))
@@ -19374,7 +19476,11 @@ def suite_r154_i6_opencode_word_grading_retry():
         # R171: 1 since the Step 5 opencode copy went off (the operator 2026-10-31); the set still equals oc_on
         # R180: the GLM 5.3 Flash cascade holds two opencode copies (Go, then the free Zen one) - ONE voice, so the
         # run starts the enabled opencode channels AFTER the cascade (every CLI ready here: the Go copy carries it)
-        oc_run = {n for n, s in rt._apply_cascade({n: {"enabled": True, "why": []} for n in oc_on}, kit, yes).items()
+        # RESTATED 2026-11-17 (R189 И-2): the kit's standard panel holds opencode channels too (wkkimik3 / wkglm53 /
+        # wkqwen38max, wokey.ai through opencode); a family word adds no standard voice to the default cheap room
+        # (R124), so the cheap round's opencode voices are the cheap-panel members.
+        oc_room = {n for n in oc_on if n in rt.panel_members(kit, "cheap")}
+        oc_run = {n for n, s in rt._apply_cascade({n: {"enabled": True, "why": []} for n in oc_room}, kit, yes).items()
                   if s["enabled"]}
         check(got == oc_run and len(oc_run) >= 1 and "ocspark13free" not in got,
               "R154 И-6 (a) %s runs the enabled opencode voices, never the dead ocspark13free" % how,
@@ -20931,8 +21037,14 @@ def suite_r178_route_residuals():
     check(on(plan) == ["nvglm53flash"],
           "[fix] (d2) R180 И-2: «только глм 5.3 флеш» where opencode is missing runs the next ready transport (NVIDIA "
           "free), never an opencode copy that cannot run", err[:200] or ", ".join(on(plan)))
+    # RESTATED 2026-11-18 (R190 И-3): since R190 И-2 «glm 5.3» names the GLM 5.3 VOICE (group glm53: the wokey copy,
+    # then OpenRouter - Igor «wokey glm-5.3 ... и мне и в kit»); the cascade runs its first ready member, so the
+    # OpenRouter copy runs only where wokey cannot. The control still asks: GLM 5.3, ONE member, never Flash.
     plan, err = run("only glm 5.3")
-    check(on(plan) == ["orglm53"], "[control] (d) «only glm 5.3» still runs GLM 5.3", err[:200] or ", ".join(on(plan)))
+    plan2, err2 = run("only glm 5.3", ready=lambda n: "stub: no wokey key" if n.startswith("wk") else True)
+    check(on(plan) == ["wkglm53"] and on(plan2) == ["orglm53"],
+          "[control] (d) «only glm 5.3» still runs GLM 5.3 (R190: the wokey copy where it can run, else OpenRouter)",
+          (err[:200] or ", ".join(on(plan))) + " / " + (err2[:200] or ", ".join(on(plan2))))
     plan, err = run("only glm-5.3 flash")
     check(plan is None and "'flash'" in err, "[fix] (e) a model word after a model alias stops the route",
           err[:200] or ", ".join(on(plan)))
@@ -21002,11 +21114,16 @@ def suite_r180_new_voices():
     # build transform, asserted here; every check below then runs on the source's shape (those two on, as on the
     # operator's machine), so the suite means the same in both trees. Found by R60: the shipped selftest was red on (a),
     # (c1) and (e1) - 2552/2555 - while the source was green.
+    # SUPERSEDED 2026-11-18 (R190 И-3): both ship ON now - Igor 2026-11-18 «flashx legal, да, ставь в оба» and the
+    # R190 И-1 correction (feedback-distribution-is-igors-call: R180 made them local on MY guess, filed as his words;
+    # no «только у меня» -> both). FlashX Legal still runs only with --system legal-research (apply_system_gate), Hy4
+    # only where the Go plan lists it (R179). The source-shape switch below stays for a tree built before R190.
     if (HERE / "VERSION").is_file():
-        check(all((ch.get(n) or {}).get("distribution") == "local" and (ch.get(n) or {}).get("enabled") is False
+        check(all((ch.get(n) or {}).get("distribution", "both") == "both" and (ch.get(n) or {}).get("enabled") is True
                   for n in (LEG, HY)),
-              "[guard] R180 (a0) a shipped tree carries FlashX Legal and Hy4 present and OFF (distribution local)",
-              repr([(n, (ch.get(n) or {}).get("enabled")) for n in (LEG, HY)]))
+              "[guard] R180 (a0) SUPERSEDED by R190: a shipped tree carries FlashX Legal and Hy4 present and ON "
+              "(distribution both)",
+              repr([(n, (ch.get(n) or {}).get("enabled"), (ch.get(n) or {}).get("distribution")) for n in (LEG, HY)]))
         for n in (LEG, HY):
             if n in ch:
                 ch[n]["enabled"] = True
@@ -21041,8 +21158,8 @@ def suite_r180_new_voices():
         bad.append(LEG)
     x = g(HY)
     if (x.get("kind"), x.get("model"), x.get("distribution"), x.get("effort"), x.get("panel"), x.get("enabled"),
-            x.get("fallback")) != ("opencode", "opencode-go/hy4", "local", "high", "cheap", True, None):  # R181: hy4
-        bad.append(HY)
+            x.get("fallback")) != ("opencode", "opencode-go/hy4", "both", "high", "cheap", True, None):  # R181: hy4
+        bad.append(HY)                                   # RESTATED R190 И-3: distribution both (Igor 17.11, was local)
 
     def mem(n):
         return set((grp.get(n) or {}).get("channels") or [])
@@ -21122,9 +21239,12 @@ def suite_r180_new_voices():
     hf = ((pz or {}).get(HY) or {})
     check(pz is not None and HY in on(pz) and not hf.get("fallback"), "[fix] R180 (e1) Hy4 Preview runs in the source "
           "registry's cheap panel, with no fallback", repr((HY in on(pz or {}), hf.get("fallback"), ez)))
+    # SUPERSEDED 2026-11-18 (R190 И-3): Hy4 ships in the kit - R180 made it local on MY guess, filed as Igor's words;
+    # Igor 2026-11-17 (feedback-distribution-is-igors-call): who gets a channel is his call, no «только у меня» -> both.
+    # A kit user without the Go plan does not start it: opencode-go/ is ready only where `opencode models` lists it (R179).
     pk, ek = res(r=kit, panel="cheap")
-    check(pk is not None and HY not in on(pk), "[guard] R180 (e2) the kit-shaped registry leaves Hy4 off (local)",
-          repr(ek))
+    check(pk is not None and HY in on(pk), "[guard] R180 (e2) SUPERSEDED by R190: the kit-shaped registry ships Hy4 "
+          "(distribution both) and runs it in the cheap panel where the Go plan is ready", repr(ek))
 
     igor = _copy.deepcopy(reg)
     igor["channels"]["ocglm53flashfree"]["enabled"] = False
@@ -21971,6 +22091,759 @@ def suite_r184_i2_opencode_stop():
           "in the operator's store took 7-94 min; the 40-min TIMEOUT threw away 6 of 6 on 2026-11-15)", repr(mins))
 
 
+def suite_r190_i4_relay_agent():
+    """R190 И-4 (2026-11-18), the operator: «Получается мы можем дать моделям харнес opencode. Просто я считаю, что таким
+    моделям лучше давать доступ, т.к. через наш скрипт как агенты они мало что смогут сделать, к примеру не смогут
+    эффективно изучить код, протестировать его, использовать MCP.» and «особенно у opencode много чатов и потом когда я
+    пользуюсь opencode сложно найти чат». runs/r190-asale-wokey-models/i4/ (free stand-in run + two live agents).
+    (a) [fix] the registry: the nine relay channels declare agent_harness opencode; the three asale ones keys_hidden,
+        so channel_may_read_keys says NO for asale and YES for wokey.
+    (b) [fix] _relay_sse: an unstreamed answer becomes the stream opencode reads (reasoning as a string, text, tool
+        calls with their index, the finish reason, usage, [DONE]).
+    (c) [fix] _relay_scrub replaces a key VALUE and a SECRET_PATTERNS run anywhere in the messages; _relay_cost takes
+        the relay's own cost first, else the list price.
+    (d) [fix] the meter (no opencode, a fake relay): the relay gets the real key and its own model id; a streamed
+        answer passes through with its usage counted; an unstreamed relay is asked unstreamed and answers as SSE; a
+        relay error keeps its status; the ceiling answers 402; a wrong token 401; a keys-hidden route scrubs.
+    (e) [fix] _relay_agent_plan: an agent where opencode has `--standalone` + `--archived`, the loop (with the reason)
+        where it lacks them or is missing, nothing for a channel without agent_harness or a non-relay provider.
+    (f) [fix] call_opencode creates every session archived and titled «second-opinion:<channel>» where supported,
+        and adds neither where not.
+    (g) [fix] call_oai_reviewer runs the agent only when the dispatcher passed `agent`; an agent that dies at its start
+        hands the channel to the loop once, said so; both dispatch sites pass `agent=`.
+    """
+    import json as _json
+    import threading as _th
+    import urllib.request as _ur
+    from http.server import BaseHTTPRequestHandler as _BH, ThreadingHTTPServer as _TS
+    print("\n-- R190 И-4: relay voices as opencode agents through the local relay meter; harness sessions archived")
+    import routing as rt
+    import orchestrate as o
+    reg = rt.load_registry(overlay=False)
+    ch = reg.get("channels") or {}
+    RELAYS = ["wkgpt61sol", "wkkimik3", "wkglm53", "wkqwen38max", "wkgemini4argon", "wkgrok46",
+              "asgpt61sol", "askimik3", "asgemini4argon"]
+    bad = [n for n in RELAYS if (ch.get(n) or {}).get("agent_harness") != "opencode"]
+    hid = sorted(n for n, c in ch.items() if isinstance(c, dict) and c.get("keys_hidden") is True)
+    check(not bad and hid == ["asgemini4argon", "asgpt61sol", "askimik3"]
+          and not any(o.channel_may_read_keys(n, reg) for n in hid)
+          and all(o.channel_may_read_keys(n, reg) for n in RELAYS if n.startswith("wk")),
+          "R190 И-4 (a) [fix] nine relay channels agent_harness opencode; asale keys_hidden -> may not read keys",
+          "missing %s, keys_hidden %s" % (bad, hid))
+    sse = o._relay_sse({"id": "x", "model": "m", "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+                        "choices": [{"finish_reason": "tool_calls", "message": {
+                            "role": "assistant", "content": "hi", "reasoning_content": "think",
+                            "tool_calls": [{"id": "t1", "type": "function",
+                                            "function": {"name": "read", "arguments": "{}"}}]}}]})
+    ev = [ln[6:] for ln in sse.split("\n") if ln.startswith("data: ")]
+    try:
+        c1, c2 = _json.loads(ev[0]), _json.loads(ev[1])
+        d = c1["choices"][0]["delta"]
+        ok_b = (ev[-1] == "[DONE]" and d.get("content") == "hi" and d.get("reasoning_content") == "think"
+                and d["tool_calls"][0].get("index") == 0 and c2["choices"][0]["finish_reason"] == "tool_calls"
+                and c2.get("usage", {}).get("prompt_tokens") == 5)
+        nonstr = _json.loads(o._relay_sse({"choices": [{"message": {"content": "a", "reasoning": {"x": 1}}}]})
+                             .split("\n")[0][6:])["choices"][0]["delta"]
+        ok_b = ok_b and "reasoning_content" not in nonstr
+    except (ValueError, KeyError, IndexError, TypeError):
+        ok_b = False
+    check(ok_b, "R190 И-4 (b) [fix] an unstreamed answer -> SSE (reasoning string only, tool_calls indexed, usage)",
+          sse[:300])
+    key = "k" * 8 + "R190I4" + "z" * 18
+    msgs, n = o._relay_scrub([{"role": "tool", "content": "token=%s ok" % key}, {"x": [key, 3]}],
+                             {"R190I4_TEST_API_KEY": {key}})
+    flat = _json.dumps(msgs)
+    check(key not in flat and n == 2 and "[REDACTED:R190I4_TEST_API_KEY]" in flat and '3]' in flat
+          and o._relay_cost({"cost": 0.5, "prompt_tokens": 9}, {"in": 1, "out": 1}) == 0.5
+          and abs(o._relay_cost({"prompt_tokens": 1000000, "completion_tokens": 500000}, {"in": 0.2, "out": 2})
+                  - 1.2) < 1e-9
+          and o._relay_cost({}, {"in": 1, "out": 1}) is None,
+          "R190 И-4 (c) [fix] the scrub removes key values in nested messages; cost = relay's, else list price",
+          "n=%s %s" % (n, flat[:200]))
+    seen = []
+
+    class _H(_BH):
+        def log_message(self, *a):
+            return
+
+        def do_POST(self):
+            b = _json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode("utf-8"))
+            seen.append({"auth": self.headers.get("Authorization"), "model": b.get("model"),
+                         "stream": b.get("stream"), "flat": _json.dumps(b.get("messages"))})
+            if "FAIL503" in seen[-1]["flat"]:
+                out, code, ct = b'{"error":{"message":"no supply"}}', 503, "application/json"
+            elif b.get("stream"):
+                out = ('data: {"choices":[{"index":0,"delta":{"content":"ok"}}]}\n\n'
+                       'data: {"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":10}}\n\n'
+                       'data: [DONE]\n\n').encode()
+                code, ct = 200, "text/event-stream"
+            else:
+                out = _json.dumps({"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                                   "usage": {"prompt_tokens": 1000, "completion_tokens": 10}}).encode()
+                code, ct = 200, "application/json"
+            self.send_response(code)
+            self.send_header("Content-Type", ct)
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+
+    srv = _TS(("127.0.0.1", 0), _H)
+    _th.Thread(target=srv.serve_forever, daemon=True).start()
+    url = "http://127.0.0.1:%d/v1/chat/completions" % srv.server_address[1]
+    m = o._relay_meter()
+
+    def post(route, body, tok=None):
+        rq = _ur.Request(m.base(route) + "/chat/completions", data=_json.dumps(body).encode(),
+                         headers={"Authorization": "Bearer " + (tok or route["token"]),
+                                  "Content-Type": "application/json"})
+        try:
+            with _ur.urlopen(rq, timeout=20) as rs:
+                return rs.status, rs.read().decode("utf-8")
+        except _ur.HTTPError as e:
+            return e.code, (e.read() or b"").decode("utf-8")
+    price = {"in": 1.0, "out": 1.0}
+    rs_ = m.add(channel="s", model="up-model", prov={"url": url, "streaming": True}, key="REALKEY-S", price=price,
+                ceiling=5.0, scrub=False, secret_values=None, req_timeout=20)
+    ru_ = m.add(channel="u", model="up-u", prov={"url": url, "streaming": False}, key="REALKEY-U", price=price,
+                ceiling=5.0, scrub=True, secret_values={"R190I4_TEST_API_KEY": {key}}, req_timeout=20)
+    s1 = post(rs_, {"model": "aso-relay/x", "stream": True, "messages": [{"role": "user", "content": key}]})
+    u1 = post(ru_, {"model": "aso-relay/x", "stream": True, "messages": [{"role": "user", "content": key}]})
+    e1 = post(ru_, {"model": "x", "stream": True, "messages": [{"role": "user", "content": "FAIL503"}]})
+    t1 = post(ru_, {"model": "x", "messages": []}, tok="wrong")
+    ru_["usd"], ru_["usd_max"] = 4.9, 0.2
+    c1 = post(ru_, {"model": "x", "stream": True, "messages": []})
+    m.close(rs_)
+    m.close(ru_)
+    srv.shutdown()
+    up = seen[:2]
+    ok_d = (s1[0] == 200 and '"usage"' in s1[1] and abs(rs_["usd"] - 0.00101) < 1e-9
+            and u1[0] == 200 and u1[1].startswith("data: ") and "[DONE]" in u1[1]
+            and len(up) == 2 and up[0]["auth"] == "Bearer REALKEY-S" and up[0]["model"] == "up-model"
+            and up[0]["stream"] is True and key in up[0]["flat"]
+            and up[1]["auth"] == "Bearer REALKEY-U" and up[1]["model"] == "up-u" and up[1]["stream"] is False
+            and key not in up[1]["flat"] and "[REDACTED:" in up[1]["flat"]
+            and e1[0] == 503 and t1[0] == 401 and c1[0] == 402 and ru_["stopped"] is True
+            and ru_["wire"][0].get("redacted") == 1)
+    check(ok_d, "R190 И-4 (d) [fix] the meter: real key + upstream model, stream passed / unstreamed -> SSE, 503 kept, "
+          "402 ceiling, 401 token, scrub on a keys-hidden route",
+          "s1=%s u1=%s e1=%s t1=%s c1=%s up=%s" % (s1[0], u1[0], e1[0], t1[0], c1[0],
+                                                   [(x["auth"], x["model"], x["stream"]) for x in up]))
+    saved = {k: getattr(o, k) for k in ("opencode_bin", "_opencode_version", "_opencode_supports_standalone",
+                                        "_opencode_supports_archived")}
+    fake_bin = os.path.abspath(__file__)
+    try:
+        o.opencode_bin = lambda: fake_bin
+        o._opencode_version = lambda b: (2, 3, 1)
+        o._opencode_supports_standalone = lambda b: True
+        o._opencode_supports_archived = lambda b: True
+        e_run = o._relay_agent_plan("wkglm53", None, reg)
+        e_asale = o._relay_agent_plan("askimik3", None, reg)
+        e_none = o._relay_agent_plan("orglm53", None, reg)
+        o._opencode_supports_archived = lambda b: False
+        e_old = o._relay_agent_plan("wkglm53", None, reg)
+        o.opencode_bin = lambda: os.path.join(os.path.dirname(fake_bin), "no-such-opencode.exe")
+        e_miss = o._relay_agent_plan("wkglm53", None, reg)
+    finally:
+        for k, v in saved.items():
+            setattr(o, k, v)
+    check(e_run["run"] and "AGENT in opencode" in e_run["line"] and "streams wokey" in e_run["line"]
+          and e_asale["run"] and "UNSTREAMED" in e_asale["line"] and "key-shaped values removed" in e_asale["line"]
+          and e_none == {"run": False, "line": None}
+          and not e_old["run"] and "2.2.6+" in e_old["line"] and "our own loop" in e_old["line"]
+          and not e_miss["run"] and "not installed" in e_miss["line"],
+          "R190 И-4 (e) [fix] the transport: agent with --standalone + --archived, else the loop with its reason",
+          repr([e_run, e_old, e_miss])[:400])
+    cmds = []
+
+    class _P:
+        returncode, stdout, stderr = 0, "", ""
+    saved = {k: getattr(o, k) for k in ("opencode_bin", "_opencode_version", "_opencode_supports_standalone",
+                                        "_opencode_supports_archived", "_run_tree", "_opencode_store_merge")}
+    try:
+        o.opencode_bin = lambda: "opencode"
+        o._opencode_version = lambda b: (2, 3, 1)
+        o._opencode_supports_standalone = lambda b: False
+        o._opencode_store_merge = lambda raw, t, c, note: (t, c, "ndjson")
+        o._run_tree = lambda cmd, **kw: (cmds.append(list(cmd)), _P())[1]
+        tmpf = os.path.join(tempfile.mkdtemp(prefix="r190i4-"), "o.md")
+        for arch in (True, False):
+            o._opencode_supports_archived = (lambda v: (lambda b: v))(arch)
+            o.call_opencode("brief", "M-END", tmpf, model="opencode-go/x", effort="max", name="ocx")
+    finally:
+        for k, v in saved.items():
+            setattr(o, k, v)
+    a_, b_ = (cmds + [[], []])[:2]
+    check("--archived" in a_ and a_[a_.index("--title") + 1] == "second-opinion:ocx" and "--archived" not in b_
+          and "--title" not in b_,
+          "R190 И-4 (f) [fix] every harness opencode session archived + titled where supported, neither where not",
+          repr(cmds)[:300])
+    calls = []
+    saved = {k: getattr(o, k) for k in ("call_relay_agent",)}
+    try:
+        o.call_relay_agent = lambda *a, **k: (calls.append(k.get("name")),
+                                              {"channel": k.get("name"), "ok": False, "error": "boom"})[1]
+        direct = o.call_oai_reviewer("b", "M", os.path.join(tempfile.mkdtemp(prefix="r190i4g-"), "x.md"),
+                                     model="m", name="zz", provider="no-such-provider")
+        n_direct = len(calls)
+        fell = o.call_oai_reviewer("b", "M", os.path.join(tempfile.mkdtemp(prefix="r190i4h-"), "x.md"),
+                                   model="m", name="zz", provider="no-such-provider", agent={"run": True})
+    finally:
+        for k, v in saved.items():
+            setattr(o, k, v)
+    src = open(os.path.join(HERE, "orchestrate.py"), encoding="utf-8").read()
+    check(n_direct == 0 and "no-such-provider" in str(direct.get("error")) and len(calls) == 1
+          and "no-such-provider" in str(fell.get("error"))
+          and any("failed at its start" in str(x) for x in fell.get("notes") or [])
+          and src.count("agent=_relay_agent_plan(cname, p.get(\"provider\"), reg)") == 2,
+          "R190 И-4 (g) [fix] the agent only on the dispatcher's word; a dead start -> the loop once; 2 dispatch sites",
+          "direct calls %d, total %d, fell %r" % (n_direct, len(calls), str(fell)[:160]))
+
+
+def suite_r190_i7_no_session_log():
+    """R190 И-7 (2026-11-19), the operator: «Тогда да, внедряем эту опцию. что бы диалоги из второго мнения не
+    сохранялись. Пока что давай диалоги не будем удалять». runs/r190-asale-wokey-models/i7/ (Muse Code 1.4.23, three
+    small live runs: with `--no-session-log` nothing new in the sessions folder or session-index.db and the settings
+    folder unchanged; without it 4 files + the index; the stream's run_usage equal to the export's sums, n=2).
+    (a) [fix] _muse_supports_no_session_log: True for a binary carrying the flag's help sentence AND the run_usage
+        record kind; False for a flag-only binary, a launcher shim (< 1 MB) and a missing path.
+    (b) [fix] where supported call_musecode adds `--no-session-log`, takes the tokens from the run's own stream and
+        never calls `muse export`; the result says session_log off.
+    (c) [fix] where not supported: no flag, the log kept, the tokens from `muse export` as before - unless the stream
+        itself carries run_usage (then no export call).
+    (d) [fix] the log off and no usage record on the stream: no export call, a «no token counts» note naming it.
+    (e) [fix] _musecode_session_log_line (the plan's [session log] line) says off or kept.
+    (f) [guard] the records the harness READS stay saved: no Codex --ephemeral, Qwen --chat-recording, Grok's named
+        session; Claude Code keeps --no-session-persistence.
+    """
+    import inspect as _insp
+    import json as _json
+    import shutil as _sh
+    import subprocess as _sp
+    import tempfile as _tf
+    print("\n-- R190 И-7: second-opinion dialogs not saved where the CLI allows it (Muse Code --no-session-log)")
+    import orchestrate as o
+    tmp = _tf.mkdtemp(prefix="r190i7-")
+    pad = b"\0" * 1000100
+    paths = {}
+    for nm, body in (("both", pad + b"Do not persist session event logs to disk\0run_usage\0"),
+                     ("flagonly", pad + b"Do not persist session event logs to disk\0"),
+                     ("shim", b"@echo off\r\nrem Do not persist session event logs to disk run_usage\r\n")):
+        p = os.path.join(tmp, "muse-%s.exe" % nm)
+        with open(p, "wb") as f:
+            f.write(body)
+        paths[nm] = p
+    paths["missing"] = os.path.join(tmp, "absent", "muse.exe")
+    try:
+        sup = {k: o._muse_supports_no_session_log(v) for k, v in paths.items()}
+    except Exception as exc:  # noqa: BLE001 - the check below reports it
+        sup = {"RAISED": repr(exc)[:160]}
+    check(sup == {"both": True, "flagonly": False, "shim": False, "missing": False},
+          "R190 И-7 (a) [fix] Muse Code runs without a session log only where its binary has the flag AND reports the "
+          "tokens on its stream (run_usage); a flag-only binary, a launcher shim and a missing path keep the log",
+          repr(sup))
+
+    sess = {"stream": {"kind": "session", "id": "S-R190I7"}, "payload": {"kind": "command_accepted"}}
+    use = {"stream": {"kind": "exec.usage", "id": "U"},
+           "payload": {"kind": "run_usage", "models": [{"input_tokens": 45065, "cached_tokens": 22385,
+                                                        "output_tokens": 210, "reasoning_tokens": 128}]}}
+    term = {"stream": {"kind": "session", "id": "S-R190I7"},
+            "payload": {"kind": "run_terminal", "terminal": "completed", "text": "fine\nM-R190I7"}}
+    state = {"cmds": [], "exports": 0, "recs": []}
+
+    def fake_run(cmd, **kw):
+        state["cmds"].append(list(cmd))
+        return _sp.CompletedProcess(cmd, 0, stdout="\n".join(_json.dumps(r) for r in state["recs"]) + "\n",
+                                    stderr="")
+
+    def fake_export(*a, **k):
+        state["exports"] += 1
+        return {"input_tokens": 7, "output_tokens": 3, "reasoning_tokens": 2, "cached_tokens": 0}
+
+    def call(binary, recs):
+        state["recs"], state["exports"] = recs, 0
+        o.muse_bin = lambda: binary
+        r = o.call_musecode("brief", "M-R190I7", os.path.join(tmp, "a.md"), model="muse-spark-1.3", effort="max",
+                            timeout=60, name="t")
+        return r, list(state["cmds"][-1]), state["exports"]
+    old = (o._run_tree, o._musecode_usage, o.muse_bin)
+    res = {}
+    try:
+        o._run_tree, o._musecode_usage = fake_run, fake_export
+        res["b"] = call(paths["both"], [sess, use, term])
+        res["c"] = call(paths["flagonly"], [sess, term])
+        res["c2"] = call(paths["flagonly"], [sess, use, term])
+        res["d"] = call(paths["both"], [sess, term])
+    except Exception as exc:  # noqa: BLE001 - the checks below report it
+        res["RAISED"] = repr(exc)[:200]
+    finally:
+        o._run_tree, o._musecode_usage, o.muse_bin = old
+
+    def view(k):
+        if k not in res:
+            return res.get("RAISED", "missing")
+        r, c, n = res[k]
+        return {"flag": "--no-session-log" in c, "exports": n, "in": r.get("in_tokens"), "out": r.get("out_tokens"),
+                "reasoning": r.get("reasoning_tokens"), "cached": r.get("cached_in_tokens"),
+                "log": r.get("session_log"), "ok": r.get("ok"), "notes": r.get("notes")}
+    vb, vc, vc2, vd = view("b"), view("c"), view("c2"), view("d")
+    check(isinstance(vb, dict) and vb["flag"] and vb["exports"] == 0 and vb["in"] == 45065 and vb["out"] == 210
+          and vb["reasoning"] == 128 and vb["cached"] == 22385 and vb["log"] == "off" and vb["ok"] is True,
+          "R190 И-7 (b) [fix] where supported: `--no-session-log` on the command line, the tokens from the run's own "
+          "stream (run_usage), `muse export` not called, session_log off", repr(vb))
+    check(isinstance(vc, dict) and not vc["flag"] and vc["exports"] == 1 and vc["in"] == 7 and vc["log"] == "kept"
+          and isinstance(vc2, dict) and not vc2["flag"] and vc2["exports"] == 0 and vc2["in"] == 45065,
+          "R190 И-7 (c) [fix] where not supported: no flag, the log kept and the tokens from `muse export` as before - "
+          "unless the stream itself carries run_usage (then no export call)", repr((vc, vc2)))
+    check(isinstance(vd, dict) and vd["flag"] and vd["exports"] == 0 and vd["in"] is None
+          and any("no token counts" in n and "session log off" in n for n in vd["notes"] or []),
+          "R190 И-7 (d) [fix] the log off and no usage record on the stream: no export call (there is no log to read), "
+          "a «no token counts» note that names the switched-off log", repr(vd))
+    try:
+        lines = (o._musecode_session_log_line(paths["both"]), o._musecode_session_log_line(paths["missing"]))
+    except Exception as exc:  # noqa: BLE001 - the check below reports it
+        lines = ("RAISED " + repr(exc)[:160], "")
+    check(lines[0].startswith("off") and "--no-session-log" in lines[0] and lines[1].startswith("kept"),
+          "R190 И-7 (e) [fix] the plan's [session log] line says off (with the flag) or kept, per the installed Muse "
+          "Code", repr(lines))
+    try:
+        src = {f: _insp.getsource(getattr(o, f)) for f in ("call_codex", "call_qwencli", "call_claudecli",
+                                                          "call_grokcli")}
+    except Exception as exc:  # noqa: BLE001 - the check below reports it
+        src = {"RAISED": repr(exc)[:160]}
+    check("--ephemeral" not in src.get("call_codex", "--ephemeral")
+          and '"--chat-recording"' in src.get("call_qwencli", "")
+          and '"--no-session-persistence"' in src.get("call_claudecli", "")
+          and '"--session-id"' in src.get("call_grokcli", ""),
+          "R190 И-7 (f) [guard] the records the harness READS stay saved: Codex never runs --ephemeral (its rollout gives "
+          "the weekly quota and the death note), Qwen keeps --chat-recording (the budget salvage resumes it), Grok keeps "
+          "its named session (its events are read during the run); Claude Code keeps --no-session-persistence",
+          repr({k: len(v) for k, v in src.items()}))
+    _sh.rmtree(tmp, ignore_errors=True)
+
+
+def suite_r190_relays():
+    """R190 (2026-11-17 / 18), the operator: «Теперь надо вот эти модели добавить в наш плагин и мне и в kit: asale
+    gpt-6.1-sol, wokey gpt-6.1-sol, asale kimi-k3, asale gemini-4-argon, wokey grok-4.6, wokey glm-5.3», «asale стоит
+    после подписок, но до openrouter в pipeline fallback. если у asale цена ниже wokey, то asale ставим до wokey», «wokey
+    4 argon да, ставь перед» asale, «Nemotron 3 Ultra запускаем только один раз только в cheap», Hy4 + FlashX Legal in
+    the kit, «Если подписки нет у меня то ... DeepSeek V4 Pro ... не запускаем». runs/r190-asale-wokey-models/.
+    (a) [fix] OAI providers asale (2 requests at once, ASALE_API_KEY) + wokey (WOKEY_API_KEY), both effort_field; nvidia
+        keeps «high» as its declared default.
+    (b) [fix] the six relay channels + the three wk* moved to our loop: kind oai, both, on, measured depth, list price,
+        a spend ceiling; wkqwen38max declares no depth.
+    (c) [fix] cascades in cost order + the run-time fallbacks after the subscriptions (with the second link).
+    (d) [fix] the request: reasoning_effort = the channel's depth; NONE for a channel without one on a relay; nvidia
+        still sends «high» when none is declared.
+    (e) [fix] asale's slots: four parallel calls never hold more than two requests at once.
+    (f) [fix] a relay that reports no cost gets the list-price estimate (usd, usd_estimated).
+    (g) [fix] the voice words: «glm 5.3» / «gemini 4 argon» name the voice - the cascade picks the transport.
+    (h) [fix] one Nemotron voice in every panel; Hy4 + FlashX Legal ship; a note that claims the operator's words
+        quotes them («»).
+    (i) [fix] only_with_subscription: off where no subscription voice can run, on where one can, on when named.
+    (j) [guard] the kit's plain cheap panel with everything ready runs no relay; price_per_m reaches the plan slot.
+    """
+    import copy as _copy
+    import threading as _th
+    import time as _time
+    print("\n-- R190: asale.ai + wokey.ai relays after the subscriptions, the voice words, one Nemotron, Hy4 in the kit")
+    import routing as rt
+    import orchestrate as o
+    reg = rt.load_registry(overlay=False)
+    ch = reg.get("channels") or {}
+    cas = [c for c in reg.get("_cascade_groups") or [] if isinstance(c, list)]
+    kit = _copy.deepcopy(reg)
+    for c in kit["channels"].values():
+        if isinstance(c, dict) and c.get("distribution") == "local":
+            c["enabled"] = False
+    P = o.OAI_PROVIDERS
+    a_, w_ = P.get("asale") or {}, P.get("wokey") or {}
+    check(a_.get("key_env") == "ASALE_API_KEY" and a_.get("max_concurrent") == 2 and a_.get("depth") == "effort_field"
+          and "gw.asale.ai" in str(a_.get("url")) and w_.get("key_env") == "WOKEY_API_KEY"
+          and w_.get("depth") == "effort_field" and "api.wokey.ai" in str(w_.get("url")) and not w_.get("max_concurrent")
+          and (P.get("nvidia") or {}).get("effort_default") == "high",
+          "R190 (a) [fix] providers asale (2 at once) + wokey, effort_field; nvidia's default «high» declared",
+          repr(sorted(P)))
+    WANT = {"asgpt61sol": ("asale", "gpt-6.1-sol", "max"), "wkgpt61sol": ("wokey", "gpt-6.1-sol", "max"),
+            "askimik3": ("asale", "kimi-k3", "max"), "wkgemini4argon": ("wokey", "gemini-4-argon", "high"),
+            "asgemini4argon": ("asale", "gemini-4-argon", "high"), "wkgrok46": ("wokey", "grok-4.6", "xhigh"),
+            "wkkimik3": ("wokey", "kimi-k3", "max"), "wkglm53": ("wokey", "glm-5.3", "max"),
+            "wkqwen38max": ("wokey", "qwen3.8-max", None)}
+    bad = []
+    for n, (prov, mid, eff) in WANT.items():
+        c = ch.get(n) or {}
+        pr = c.get("price_per_m") or {}
+        if not (c.get("kind") == "oai" and c.get("provider") == prov and c.get("model") == mid
+                and c.get("distribution") == "both" and c.get("enabled") is True and c.get("cost") == "metered"
+                and ((c.get("reasoning") or {}).get("effort") if c.get("reasoning") else None) == eff
+                and isinstance(pr.get("in"), (int, float)) and isinstance(pr.get("out"), (int, float))
+                and (c.get("spend_guard") or {}).get("max_usd_per_review")
+                and not (c.get("web") or {}).get("enabled") and (c.get("fetch_tool") or {}).get("enabled") is True):
+            bad.append(n)
+    check(not bad, "R190 (b) [fix] six relay channels + wkkimik3 / wkglm53 / wkqwen38max on our loop (oai, both, on, "
+          "measured depth, list price, spend ceiling; Qwen no depth)", repr(bad))
+    want_c = [["codex", "asgpt61sol", "wkgpt61sol"], ["nvkimik3", "kimik3free", "askimik3", "wkkimik3", "kimik3"],
+              ["agy4argon", "wkgemini4argon", "asgemini4argon"], ["grokbuild", "wkgrok46"], ["wkglm53", "orglm53"]]
+    fb = {n: (ch.get(n) or {}).get("fallback") for n in ("codex", "asgpt61sol", "agy4argon", "wkgemini4argon",
+                                                         "grokbuild")}
+    check(all(g in cas for g in want_c) and fb == {"codex": "asgpt61sol", "asgpt61sol": "wkgpt61sol",
+                                                   "agy4argon": "wkgemini4argon", "wkgemini4argon": "asgemini4argon",
+                                                   "grokbuild": "wkgrok46"},
+          "R190 (c) [fix] cascades subscription -> cheaper relay -> OpenRouter; fallbacks after Codex / agy Argon / "
+          "Grok Build with the second link", repr((fb, [g for g in want_c if g not in cas])))
+
+    sent = []
+
+    class _Stop(Exception):
+        pass
+
+    def fake_urlopen(rq, timeout=None):
+        sent.append((rq.full_url, json.loads(rq.data.decode("utf-8"))))
+        raise _Stop("captured")
+
+    envs = ("ASALE_API_KEY", "WOKEY_API_KEY", "NVIDIA_NIM_API_KEY")
+    keep_open, keep_env = o.urllib.request.urlopen, {e: os.environ.get(e) for e in envs}
+    out = os.path.join(tempfile.mkdtemp(prefix="orch-r190-"), "X.md")
+
+    def body_of(name, reasoning, provider):
+        del sent[:]
+        try:
+            o.call_oai_reviewer("brief", "R190-MARK", out, model="m", name=name, reasoning=reasoning,
+                                provider=provider, timeout=5)
+        except Exception:                                # noqa: BLE001 - the capture is what is judged
+            pass
+        return sent[0] if sent else (None, {})
+    try:
+        o.urllib.request.urlopen = fake_urlopen
+        for e in envs:
+            os.environ[e] = "test-not-a-key"
+        u1, b1 = body_of("asgpt61sol", (ch.get("asgpt61sol") or {}).get("reasoning"), "asale")
+        u2, b2 = body_of("wkqwen38max", (ch.get("wkqwen38max") or {}).get("reasoning"), "wokey")
+        u3, b3 = body_of("wkgrok46", (ch.get("wkgrok46") or {}).get("reasoning"), "wokey")
+        u4, b4 = body_of("nvx", None, "nvidia")
+    finally:
+        o.urllib.request.urlopen = keep_open
+        for e, v in keep_env.items():
+            if v is None:
+                os.environ.pop(e, None)
+            else:
+                os.environ[e] = v
+    check("gw.asale.ai" in str(u1) and b1.get("reasoning_effort") == "max" and "api.wokey.ai" in str(u2)
+          and "reasoning_effort" not in b2 and b3.get("reasoning_effort") == "xhigh" and b4.get("reasoning_effort") == "high",
+          "R190 (d) [fix] reasoning_effort = the channel's depth (asale max, wokey grok xhigh), none for wkqwen38max, "
+          "nvidia still «high» by default", repr((u1, b1.get("reasoning_effort"), u2, "reasoning_effort" in b2,
+                                                 b3.get("reasoning_effort"), b4.get("reasoning_effort"))))
+
+    # (e) + (f): an unstreamed test copy of the asale provider (its own slots), a fake transport that answers
+    live, peak, lock = [0], [0], _th.Lock()
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_open(rq, at, stream):
+        with lock:
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+        _time.sleep(0.4)
+        with lock:
+            live[0] -= 1
+        return _Resp()
+
+    def fake_read(resp, at):
+        return json.dumps({"model": "gpt-6.1-sol", "choices": [{"message": {"content": "a review line\n" * 300 + "R190-MARK"},
+                                                                 "finish_reason": "stop"}],
+                           "usage": {"prompt_tokens": 1000000, "completion_tokens": 500000}}).encode("utf-8")
+
+    keep = (o._open_bounded, o._read_body_bounded, os.environ.get("ASALE_API_KEY"))
+    res = []
+    had = "asale" in P
+    try:
+        if had:
+            P["r190t"] = dict(P["asale"], streaming=False, url="https://r190t.invalid/v1/chat/completions")
+        o._open_bounded, o._read_body_bounded = fake_open, fake_read
+        os.environ["ASALE_API_KEY"] = "test-not-a-key"
+
+        def one(i):
+            res.append(o.call_oai_reviewer("brief", "R190-MARK", out.replace("X.md", "S%d.md" % i), model="gpt-6.1-sol",
+                                           name="asgpt61sol", provider="r190t", timeout=30,
+                                           price_per_m={"in": 2.0, "out": 10.0}))
+        ts = [_th.Thread(target=one, args=(i,)) for i in range(4)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join(60)
+    except TypeError as e:                               # the NC tree: no price_per_m parameter
+        res.append({"error": str(e)})
+    finally:
+        o._open_bounded, o._read_body_bounded = keep[0], keep[1]
+        P.pop("r190t", None)
+        if keep[2] is None:
+            os.environ.pop("ASALE_API_KEY", None)
+        else:
+            os.environ["ASALE_API_KEY"] = keep[2]
+    oks = [r for r in res if r.get("ok")]
+    check(had and len(oks) == 4 and peak[0] == 2,
+          "R190 (e) [fix] asale's 2 slots: four parallel calls answered, never more than two requests at once",
+          repr((had, len(oks), peak[0], [r.get("error") for r in res if not r.get("ok")][:1])))
+    check(bool(oks) and all(abs((r.get("usd") or 0) - 7.0) < 1e-6 and r.get("usd_estimated") is True for r in oks),
+          "R190 (f) [fix] no usage.cost -> the list-price estimate: 1M in x $2 + 0.5M out x $10 = $7.00, marked "
+          "usd_estimated", repr([(r.get("usd"), r.get("usd_estimated")) for r in oks][:2]))
+
+    def plan(reg_, ready, **kw):
+        try:
+            return rt.resolve(_copy.deepcopy(reg_), ready=ready, **kw), ""
+        except rt.RouteError as e:
+            return None, str(e)
+
+    def on(p):
+        return {c for c, s in (p or {}).items() if s.get("enabled")}
+
+    def yes(n):
+        return True
+
+    def nowk(n):
+        return "no key" if n.startswith("wk") or n.startswith("agy") else True
+
+    def asale_or(n):
+        return True if (kit["channels"].get(n) or {}).get("kind") == "openrouter" \
+            or (kit["channels"].get(n) or {}).get("provider") == "asale" else "not here"
+    g1, _ = plan(kit, yes, route="только glm 5.3")
+    g2, _ = plan(kit, nowk, route="только глм 5.3")
+    g3, _ = plan(kit, yes, route="только gemini 4 argon")
+    g4, _ = plan(kit, nowk, route="только gemini 4 аргон")
+    g5, _ = plan(kit, asale_or, route="only gemini 4 argon")
+    g6, _ = plan(kit, yes, route="только gemini 4 cli")
+    check(on(g1) == {"wkglm53"} and on(g2) == {"orglm53"} and on(g3) == {"agy4argon"} and on(g4) == {"asgemini4argon"}
+          and on(g5) == {"asgemini4argon"} and on(g6) == {"agy4argon"},
+          "R190 (g) [fix] «glm 5.3» / «gemini 4 argon» name the voice (wokey -> OpenRouter; agy -> wokey -> asale); "
+          "«gemini 4 cli» stays the agy transport", repr([sorted(on(x)) for x in (g1, g2, g3, g4, g5, g6)]))
+
+    nem = {"nvnemotron3ultra", "ocnemotron3ultrafree", "ornemotron3ultra"}
+    def orr(n):
+        return True if (kit["channels"].get(n) or {}).get("kind") == "openrouter" else "not here"
+    counts = []
+    for rdy in (yes, orr):
+        for pn in ("cheap", "standard"):
+            p, _ = plan(kit, rdy, panel=pn)
+            counts.append(len(on(p) & nem))
+    notes_bad = []
+    for n, c in ch.items():
+        if not isinstance(c, dict):
+            continue
+        for k, v in c.items():
+            if k.startswith("_distribution") and isinstance(v, str) and not v.startswith("[SUPERSEDED") and (
+                    "his words" in v or "the operator's words" in v or "(his" in v) and "«" not in v:
+                notes_bad.append("%s.%s" % (n, k))
+    check(counts == [1, 1, 1, 1] and (ch.get("ornemotron3ultra") or {}).get("panel") == "cheap"
+          and (ch.get("ochy4go") or {}).get("distribution") == "both"
+          and (ch.get("orglm53flashxlegal") or {}).get("distribution") == "both" and not notes_bad,
+          "R190 (h) [fix] one Nemotron voice in cheap and standard (all ready / OpenRouter only); Hy4 + FlashX Legal "
+          "ship; a note that claims the operator's words quotes them", repr((counts, notes_bad)))
+
+    sub = _copy.deepcopy(kit)
+    sub["channels"]["ordeepseekv4pro"]["explicit_only"] = False
+    sub["channels"]["ordeepseekv4pro"]["only_with_subscription"] = True
+    s1, _ = plan(sub, orr, panel="standard")
+    s2, _ = plan(sub, yes, panel="standard")
+    s3, _ = plan(sub, orr, route="только ordeepseekv4pro")
+    why = " ".join((s1 or {}).get("ordeepseekv4pro", {}).get("why") or [])
+    check("ordeepseekv4pro" not in on(s1) and "only_with_subscription" in why and "ordeepseekv4pro" in on(s2)
+          and on(s3) == {"ordeepseekv4pro"},
+          "R190 (i) [fix] only_with_subscription: off with its reason where no subscription voice can run, on where "
+          "one can, on when named", repr((sorted(on(s1))[:3], why[-120:], "ordeepseekv4pro" in on(s2), sorted(on(s3)))))
+
+    relays = {n for n, c in ch.items() if isinstance(c, dict) and c.get("provider") in ("asale", "wokey")}
+    pc, _ = plan(kit, yes, panel="cheap")
+    pn, _ = plan(kit, yes, route="только wkgpt61sol") if "wkgpt61sol" in ch else (None, "")
+    pr = ((pn or {}).get("wkgpt61sol") or {}).get("price_per_m") or {}
+    check(not (on(pc) & relays) and (pr.get("in") == 0.18 if "wkgpt61sol" in ch else True),
+          "R190 (j) [guard] the kit's plain cheap panel with everything ready runs no relay; price_per_m reaches the "
+          "plan slot", repr((sorted(on(pc) & relays), pr)))
+
+
+def suite_r189_kit_panels():
+    """R189 (2026-11-17), Igor for the kit's standard panel: «Qwen 3.8 Max по подписке, если нет то ключ wokey.ai если нет
+    то openrouter. deepseekv4pro по дефолту отключен. glm53 wokey.ai если нет то openrouter», «Kimi K3 тоже в начале
+    wokey.ai», and for the cheap one «Вариант A» (the Go Sparks fall back to their OpenRouter copy). R189 И-2 adds: a
+    member the human named by its own name wins the cascade, and «только кими, не используй kimik3» stops where wokey.ai
+    is not set up. Worlds = panel_probe_r189.py (kit shape: `distribution: local` channels off, in-process, free).
+    (a) [fix] registry: wkkimik3 / wkglm53 / wkqwen38max (opencode, `wokey/...`, standard, metered, both); cascades Qwen
+        [qwen38maxcli, wkqwen38max, qwen38max], Kimi [nvkimik3, kimik3free, wkkimik3, kimik3], GLM [wkglm53, orglm53];
+        ordeepseekv4pro explicit_only; qwen38maxcli ships; ocspark12go / ocspark13go fall back to orspark12cont /
+        orspark13cont.
+    (b) [fix] everything ready (a Qwen plan + wokey.ai): Qwen via the CLI, Kimi + GLM via wokey.ai, no DeepSeek V4 Pro.
+    (c) [fix] no wokey.ai: Qwen via the CLI, Kimi + GLM via OpenRouter.
+    (d) [fix] no Qwen CLI, wokey.ai ready: all three via wokey.ai.
+    (e) [fix] OpenRouter only: the three OpenRouter copies, no DeepSeek V4 Pro; by name it still runs.
+    (f) [fix] the Qwen CLI is ready only where its settings name the model (QWEN_HOME fixture); no settings text leaks.
+    (g) [fix] a wokey.ai model is ready only where `opencode models` lists it (a pre-filled listing, no opencode call).
+    (h) [fix] R189 И-2: a member named by its own name wins over an earlier ready one, and the plan says PAID.
+    (i) [fix] R189 И-2: no wokey.ai + «только кими, не используй kimik3» stops («excludes or leaves off every voice»).
+    (j) [fix] a Go-plan death of either Go Spark runs its OpenRouter copy once after the round.
+    (k) [guard] the family word still stops before a paid Kimi (R153 И-5) and the plain cheap panel runs no wokey.ai
+        channel and no standard voice.
+    """
+    import concurrent.futures as _cf
+    import copy as _copy
+    import os as _os
+    import shutil as _sh
+    import tempfile as _tf
+    print("\n-- R189: the kit's standard voices (subscription -> wokey.ai -> OpenRouter), DeepSeek V4 Pro by name, Go "
+          "Sparks -> OpenRouter, a named member wins")
+    import routing as rt
+    import orchestrate as o
+    reg = rt.load_registry(overlay=False)
+    ch = reg.get("channels") or {}
+    cas = [c for c in reg.get("_cascade_groups") or [] if isinstance(c, list)]
+    kit = _copy.deepcopy(reg)
+    for c in kit["channels"].values():
+        if isinstance(c, dict) and c.get("distribution") == "local":
+            c["enabled"] = False
+    voices = {"qwen38maxcli", "wkqwen38max", "qwen38max", "wkkimik3", "kimik3", "wkglm53", "orglm53", "ordeepseekv4pro"}
+
+    def on(plan, among=None):
+        s = {c for c, p in (plan or {}).items() if p.get("enabled")}
+        return s & set(among) if among else s
+
+    def plan(ready, **kw):
+        try:
+            return rt.resolve(_copy.deepcopy(kit), ready=ready, **kw), ""
+        except rt.RouteError as e:
+            return None, str(e)
+
+    def yes(_n):
+        return True
+
+    def nowk(n):
+        return "no wokey provider" if n.startswith("wk") else True
+
+    # SUPERSEDED in part 2026-11-18 (R190): the three wokey.ai channels run on our own loop (kind oai, provider wokey,
+    # the bare model id) and asale's Kimi joined the Kimi cascade before wokey's (cheaper that day).
+    want = {"wkkimik3": "kimi-k3", "wkglm53": "glm-5.3", "wkqwen38max": "qwen3.8-max"}
+    wk = {n: ch.get(n) or {} for n in want}
+    def norelay(n):
+        return "no relay key" if n.startswith(("wk", "as")) else True
+    check(all(v.get("kind") == "oai" and v.get("provider") == "wokey" and str(v.get("model") or "") == want[n]
+              and v.get("distribution") == "both" and v.get("enabled") is True and v.get("panel") == "standard"
+              and v.get("cost") == "metered" for n, v in wk.items())
+          and ["nvkimik3", "kimik3free", "askimik3", "wkkimik3", "kimik3"] in cas
+          and ["qwen38maxcli", "wkqwen38max", "qwen38max"] in cas and ["wkglm53", "orglm53"] in cas
+          and (ch.get("ordeepseekv4pro") or {}).get("explicit_only") is True
+          and (ch.get("qwen38maxcli") or {}).get("distribution") == "both"
+          and (ch.get("ocspark12go") or {}).get("fallback") == "orspark12cont"
+          and (ch.get("ocspark13go") or {}).get("fallback") == "orspark13cont",
+          "[fix] R189 (a) registry: three wokey.ai channels (our own loop since R190, standard, metered, both); cascades "
+          "Qwen [CLI, wokey.ai, OpenRouter], Kimi [two free, asale, wokey.ai, OpenRouter], GLM [wokey.ai, OpenRouter]; "
+          "DeepSeek V4 Pro by "
+          "name only; the Qwen CLI ships; both Go Sparks fall back to their OpenRouter copy",
+          repr({n: (v.get("model"), v.get("distribution")) for n, v in wk.items()}))
+    p2, e2 = plan(yes, panel="standard")
+    voices = voices | {"askimik3"}                      # R190: asale's Kimi, before wokey's
+    check(on(p2, voices) == {"qwen38maxcli", "askimik3", "wkglm53"},
+          "[fix] R189 (b) kit, standard, everything ready (a Qwen plan + the relays): Qwen 3.8 Max via the Qwen CLI, Kimi "
+          "K3 via asale (R190: cheaper than wokey that day), GLM 5.3 via wokey.ai; no DeepSeek V4 Pro, no OpenRouter copy",
+          repr(sorted(on(p2, voices))) + e2[:80])
+    p3, e3 = plan(nowk, panel="standard")
+    p3b, e3b = plan(norelay, panel="standard")
+    check(on(p3, voices) == {"qwen38maxcli", "askimik3", "orglm53"}
+          and on(p3b, voices) == {"qwen38maxcli", "kimik3", "orglm53"},
+          "[fix] R189 (c) kit, standard, no wokey.ai: Qwen via the CLI, Kimi K3 via asale (R190) and GLM 5.3 via "
+          "OpenRouter; with neither relay Kimi K3 and GLM 5.3 via OpenRouter",
+          repr((sorted(on(p3, voices)), sorted(on(p3b, voices)))) + e3[:80] + e3b[:80])
+    p4, e4 = plan(lambda n: "qwen CLI not found" if n == "qwen38maxcli" else True, panel="standard")
+    check(on(p4, voices) == {"wkqwen38max", "askimik3", "wkglm53"},
+          "[fix] R189 (d) kit, standard, no Qwen CLI, the relays ready: Qwen and GLM via wokey.ai, Kimi via asale (R190)",
+          repr(sorted(on(p4, voices))) + e4[:80])
+
+    def oronly(n):
+        return True if (kit["channels"].get(n) or {}).get("kind") == "openrouter" else "no key or CLI"
+    p1, e1 = plan(oronly, panel="standard")
+    pd, ed = plan(oronly, only=["ordeepseekv4pro"])
+    check(on(p1, voices) == {"qwen38max", "kimik3", "orglm53"} and on(pd) == {"ordeepseekv4pro"},
+          "[fix] R189 (e) kit, standard, OpenRouter only: the three OpenRouter copies and no DeepSeek V4 Pro; "
+          "`--only ordeepseekv4pro` still runs it", repr((sorted(on(p1, voices)), sorted(on(pd)), e1[:60], ed[:60])))
+    q = ch.get("qwen38maxcli") or {}
+    model = str(q.get("model") or "").split("#", 1)[0]
+    old = _os.environ.get("QWEN_HOME")
+    td = _tf.mkdtemp(prefix="r189q-")
+    canary = "sk-r189-canary-" + "0" * 16
+    res = []
+    try:
+        _os.environ["QWEN_HOME"] = td
+        res.append(o._qwen_model_problem(q))
+        for body in ('{"model": {"name": "qwen3.6-plus"}, "env": {"X_KEY": "%s"}}' % canary,
+                     '{"modelProviders": {"openai": [{"id": "%s", "envKey": "X_KEY"}]}, "env": {"X_KEY": "%s"}}'
+                     % (model, canary)):
+            with open(_os.path.join(td, "settings.json"), "w", encoding="utf-8") as f:
+                f.write(body)
+            res.append(o._qwen_model_problem(q))
+    except Exception as e:                               # noqa: BLE001 - the pre-R189 tree has no such function
+        res.append("CRASH %s" % type(e).__name__)
+    finally:
+        if old is None:
+            _os.environ.pop("QWEN_HOME", None)
+        else:
+            _os.environ["QWEN_HOME"] = old
+        _sh.rmtree(td, ignore_errors=True)
+    check(len(res) == 3 and bool(model) and isinstance(res[0], str) and isinstance(res[1], str) and res[2] is None
+          and model in res[1] and canary not in "%s %s" % (res[0], res[1]),
+          "[fix] R189 (f) the Qwen CLI is ready only where its settings name the model: no file / another model -> a "
+          "reason naming the model (no settings text in it); declared -> ready", repr(res)[:200])
+    b = o.opencode_bin()
+    # R190: the registry's wk* run on our own loop now; the opencode test stays for a user's own opencode wokey model
+    # (the operator's R158 settings still define such channels, e.g. Claude models through wokey).
+    wkc = {"kind": "opencode", "model": "wokey/kimi-k3"}
+    r_no = o._oc_go_problem(wkc, memo={b: {"opencode-go/glm-5.3-flash", "opencode/mimo-v2.6-flash-free"}})
+    r_yes = o._oc_go_problem(wkc, memo={b: {"wokey/kimi-k3"}})
+    check(isinstance(r_no, str) and "wokey.ai provider is not set up" in r_no and "wokey/kimi-k3" in r_no
+          and r_yes is None,
+          "[fix] R189 (g) a wokey.ai model is ready only where `opencode models` lists it, and the reason names the "
+          "provider to add", repr((r_no, r_yes))[:200])
+    pn, en = plan(yes, panel="standard", route="добавь кими опенроутер")
+    pg, eg = plan(yes, panel="standard", route="добавь orglm53")
+    ps, es = plan(yes, panel="cheap", route="добавь orspark12cont")
+    why = " ".join(((pn or {}).get("kimik3") or {}).get("why") or [])
+    check(on(pn, {"kimik3", "wkkimik3"}) == {"kimik3"} and "you named kimik3" in why and "PAID" in why
+          and on(pg, {"wkglm53", "orglm53"}) == {"orglm53"}
+          and on(ps, {"ocspark12go", "orspark12cont"}) == {"orspark12cont"},
+          "[fix] R189 И-2 (h) a member named by its own name wins the cascade over an earlier ready one: «добавь кими "
+          "опенроутер» -> kimik3, «добавь orglm53» -> orglm53, cheap «добавь orspark12cont» -> orspark12cont; the plan "
+          "says PAID", repr((sorted(on(pn, {"kimik3", "wkkimik3"})), sorted(on(pg, {"wkglm53", "orglm53"})),
+                             sorted(on(ps, {"ocspark12go", "orspark12cont"})), why[-90:], en[:60], eg[:60], es[:60])))
+    pi, ei = plan(norelay, route="только кими, не используй kimik3")   # R190: neither relay (asale's Kimi is paid too)
+    check(pi is None and "excludes or leaves off every voice" in ei and "wkkimik3 (metered, not ready here" in ei,
+          "[fix] R189 И-2 (i) no wokey.ai: «только кими, не используй kimik3» stops and says why (not a dead round of "
+          "the not-ready wkkimik3)", repr(sorted(on(pi))) if pi is not None else ei[:160])
+    calls = []
+
+    def fake_submit(_ex, name):
+        calls.append(name)
+        f = _cf.Future()
+        f.set_result({"ok": True, "text": "openrouter spark answer", "bytes": 23})
+        return f
+
+    quota = {"ok": False, "text": "", "warnings": ["EXIT 1: provider.quota (HTTP 429): usage limit reached"]}
+    rk = _copy.deepcopy(kit)
+    pk = rt.resolve(_copy.deepcopy(rk), only=["ocspark12go", "ocspark13go"], ready=yes)
+    res2 = {"ocspark12go": dict(quota), "ocspark13go": dict(quota)}
+    o.run_fallbacks(res2, pk, rk, ["ocspark12go", "ocspark13go"], submit=fake_submit, same_voice=rt.same_voice)
+    check(sorted(calls) == ["orspark12cont", "orspark13cont"]
+          and (res2.get("orspark12cont") or {}).get("fallback_for") == "ocspark12go"
+          and (res2.get("orspark13cont") or {}).get("fallback_for") == "ocspark13go",
+          "[fix] R189 (j) a Go-plan death of either Go Spark runs its OpenRouter copy once after the round",
+          "calls=%r" % calls)
+    pf, ef = plan(yes, only=["kimi"])
+    pc, ec = plan(yes, panel="cheap")
+    check(pf is None and "will not start" in ef and "kimik3 is PAID" in ef
+          and pc is not None and not on(pc, set(want) | voices),
+          "[guard] R189 (k) «только кими» / `--only kimi` still stops before a paid Kimi (R153 И-5), and the plain "
+          "cheap panel starts no wokey.ai channel and no standard voice",
+          repr((ef[:80], sorted(on(pc, set(want) | voices)), ec[:60])))
+
+
 def suite_r187_sparks_wonder():
     """R187 (2026-11-17), Igor: both Go Contributor Sparks in parallel on his machine and in the kit («И пусть на всякий
     случай у меня и в kit будет 2 паралельно spark contributor по подписке go»), plus Spark 1.3 max on his Muse Code
@@ -22359,9 +23232,12 @@ def suite_r182_i4_grok_version_words():
         if tag == "kit":
             # SUPERSEDED by R185 (2: the kit's `grok` group has ONE startable member (grok420 ships OFF,
             # orgrok420 is explicit_only), so the class «a group word + a bare version» is empty there; (b) still runs.
-            check(not [x for x in rows if x[0] == "grok"],
-                  "[fix] (a) SUPERSEDED by R185: kit: the grok group has one startable member - no derived "
-                  "«grok <version>» row", repr(rows)[:200])
+            # RESTATED 2026-11-18 (R190 И-3): wkgrok46 (Grok 4.6 through wokey, Igor «wokey grok-4.6 ... и мне и в kit»)
+            # ships ON in the group, so the kit has two startable xAI members again - the class is back, with the
+            # same rows as on the operator's machine (grokbuild's version words).
+            check(("grok", "4.6", "grokbuild", "grok-4.6") in rows,
+                  "[fix] (a) RESTATED by R190: kit: the grok group has two startable members (grokbuild + wkgrok46) - "
+                  "«grok 4.6» is a derived row again", repr(rows)[:200])
         else:
             check(("grok", "4.6", "grokbuild", "grok-4.6") in rows,
                   "[guard] (a) %s: the derived rows hold «only grok 4.6» (the class is not empty)" % tag,
@@ -23505,9 +24381,14 @@ def suite_r169_agy_argon():
           and m.get("efforts") == ["low", "medium", "high"] and a.get("enabled") is True
           and not a.get("explicit_only") and a.get("panel") == "standard"
           and a.get("distribution", "both") != "local"
-          and a.get("aliases") == ["agy4argon", "gemini 4 cli", "gemini 4 аргон"],
+          # RESTATED 2026-11-18 (R190 И-3): «gemini 4 аргон» moved to the group `argon` (R190 И-2: the model's words
+          # name the VOICE - agy4argon, then wokey, then asale); «gemini 4 cli» still names the CLI channel.
+          and a.get("aliases") == ["agy4argon", "gemini 4 cli"]
+          and "agy4argon" in ((reg.get("groups") or {}).get("argon") or {}).get("channels", [])
+          and "gemini 4 аргон" in ((reg.get("groups") or {}).get("argon") or {}).get("aliases", []),
           "R169 (a) agy4argon: kind agy, base slug gemini-4-argon, efforts [low, medium, high] as measured, enabled, "
-          "not explicit_only, panel standard, ships, aliases agy4argon + «gemini 4 cli» / «gemini 4 аргон»",
+          "not explicit_only, panel standard, ships, aliases agy4argon + «gemini 4 cli» (R190: «gemini 4 аргон» = "
+          "the voice group argon)",
           repr((a.get("kind"), a.get("model"), m.get("efforts"), a.get("enabled"), a.get("explicit_only"),
                 a.get("panel"), a.get("distribution"), a.get("aliases"))))
 

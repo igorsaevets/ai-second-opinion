@@ -113,7 +113,9 @@
         "orgemini36flash",
         "orgemini38flash",
         "goog36flash",
-        "goog38flash"
+        "goog38flash",
+        "wkgemini4argon",
+        "asgemini4argon"
       ],
       "_added": "2026-08-07 with orgemini36flash. A human who says «gemini» means the MODEL FAMILY, not the billing path - and after this round the family spans a subscription CLI and a metered API. Two words are needed and they are not synonyms: `gemini` = every transport, `agy` = the ones that spend the Antigravity subscription, `openrouter` = the ones that spend the OpenRouter key. Overlapping groups are fine, a group whose name misdescribes its contents is not.",
       "_membership_updated_2026_08_13": "agy37flash and orgemini37flash added round 36; UPGRADED to agy38flash and orgemini38flash R80 (2026-09-03). Six channels then - three via the agy CLI (3.1 pro, 3.6 flash, 3.7→3.8 flash), two via OpenRouter (3.6 flash, 3.7→3.8 flash), one via Google directly (3.6 flash). SEE ALSO _membership_updated_2026_08_14 below.",
@@ -181,7 +183,8 @@
       "channels": [
         "grok420",
         "orgrok420",
-        "grokbuild"
+        "grokbuild",
+        "wkgrok46"
       ],
       "_added": "2026-08-08 with the Grok channels. Same rule that created the `gemini` group one day earlier: the moment one model is reachable two ways, the vendor word has to mean the FAMILY and the transport words have to mean the transport. `grok420` spends the direct xAI key, `orgrok420` spends the OpenRouter key.",
       "aliases": [
@@ -230,6 +233,21 @@
         "глм флэш"
       ]
     },
+    "glm53": {
+      "label": "GLM 5.3 - one voice, every transport (the cascade runs the first member that is ready)",
+      "channels": [
+        "wkglm53",
+        "orglm53"
+      ],
+      "_why_r190": "R190: «только glm 5.3» named the OpenRouter copy (a model alias of orglm53), so it bypassed the operator's «GLM 5.3 у меня надо через wkglm53 без openrouter fallback». The model's name now names the VOICE (the R178 mimoflash pattern); orglm53 / wkglm53 stay the transport names.",
+      "aliases": [
+        "glm-5.3",
+        "glm 5.3",
+        "glm53",
+        "глм 5.3",
+        "глм-5.3"
+      ]
+    },
     "deepseekflash": {
       "label": "DeepSeek V4.1 Flash - one voice, every transport (OpenCode Go plan, NVIDIA free, opencode free, OpenRouter paid); the cascade picks the first that can run here",
       "channels": [
@@ -275,8 +293,11 @@
       "channels": [
         "nvkimik3",
         "kimik3free",
+        "askimik3",
+        "wkkimik3",
         "kimik3"
       ],
+      "_r189": "R189 (2026-11-17): wkkimik3 (wokey.ai through opencode) is the first paid member of the Kimi K3 cascade, so it joins this group - a group that misses a member of its cascade stops being ONE voice (routing.one_voice_groups) and «только кими» started nothing. A group word never wakes an `enabled: false` member: on the operator's machine wkkimik3 stays off.",
       "_added_r142_i6": "R142 И-6 (2026-10-05, BACKLOG Б-53): «только кими» ran the PAID OpenRouter channel while the free NVIDIA one was ready, because these words were aliases of kimik3 - a channel - so the cascade group never applied. Same rule as `grok` and `mimo`: once one model is reachable several ways, the model word means the FAMILY and the transport words mean the transport (`kimi nvidia`, `kimi_free`, `kimi openrouter`). The cascade `[nvkimik3, kimik3free, kimik3]` keeps one voice.",
       "aliases": [
         "kimi",
@@ -310,6 +331,7 @@
     "glm": {
       "label": "every GLM voice (Z.ai), all transports",
       "channels": [
+        "wkglm53",
         "orglm53",
         "nvglm53flash",
         "ocglm53flashfree",
@@ -383,7 +405,8 @@
         "кли",
         "консоль",
         "terminal"
-      ]
+      ],
+      "_r190": "R190: wkkimik3 / wkglm53 / wkqwen38max left this group - they run on our own loop now, not a CLI"
     },
     "opencode": {
       "label": "every channel that runs through the opencode CLI (its free models, and a Go-plan channel where one is set up)",
@@ -407,7 +430,8 @@
       "aliases": [
         "opencode",
         "опенкод"
-      ]
+      ],
+      "_r190": "R190: wkkimik3 / wkglm53 / wkqwen38max left this group - they run on our own loop now, not a CLI"
     },
     "musecode": {
       "label": "every channel that runs through the Muse Code CLI (Meta's subscription)",
@@ -423,6 +447,52 @@
         "muse code",
         "мьюз код",
         "муза код"
+      ]
+    },
+    "argon": {
+      "label": "Gemini 4 Argon - one voice, every transport (agy first, then the cheaper relay)",
+      "channels": [
+        "agy4argon",
+        "wkgemini4argon",
+        "asgemini4argon"
+      ],
+      "_why_r190": "R190: the model's name names the VOICE (R178); «gemini 4 cli» stays the agy transport.",
+      "aliases": [
+        "gemini 4 argon",
+        "gemini-4-argon",
+        "gemini 4 аргон",
+        "джемини 4 аргон",
+        "argon",
+        "аргон"
+      ]
+    },
+    "wokey": {
+      "label": "every voice through wokey.ai (a paid relay, fixed prices)",
+      "channels": [
+        "wkgpt61sol",
+        "wkkimik3",
+        "wkglm53",
+        "wkqwen38max",
+        "wkgemini4argon",
+        "wkgrok46"
+      ],
+      "aliases": [
+        "wokey",
+        "вокей",
+        "wokey.ai"
+      ]
+    },
+    "asale": {
+      "label": "every voice through asale.ai (a P2P relay, floating price)",
+      "channels": [
+        "asgpt61sol",
+        "askimik3",
+        "asgemini4argon"
+      ],
+      "aliases": [
+        "asale",
+        "асале",
+        "asale.ai"
       ]
     }
   },
@@ -656,6 +726,8 @@
       "distribution": "both",
       "label": "OC Spark 1.2 Cont (OpenCode Go)",
       "cost": "subscription",
+      "fallback": "orspark12cont",
+      "_fallback_r189": "R189 (2026-11-17): Variant A of the kit panels (the operator: «Делать будем в след. итерации для cheap Вариант A»; his order «по подписке opencode go ... а если не работает ... оплата по api»). When this Go voice ends the round with no answer, Spark 1.2 Contributor on OpenRouter (orspark12cont, $0.10 / $0.20 per 1M) gets the same brief once - armed only where OPENROUTER_API_KEY is set. There is no free step: Zen no longer lists a free Spark Contributor (opencode models, 2026-11-17).",
       "fetch_fallback_hint_ref": "mcp_fallback",
       "model": "opencode-go/muse-spark-1.2-contributor",
       "effort": "xhigh",
@@ -892,6 +964,8 @@
       "_distribution": "SUPERSEDED 2026-11-17 (R187: distribution both). LOCAL ONLY: it runs on the operator's own OpenCode Go subscription (opencode's own login for the opencode-go provider). package.py flips enabled to false in the kit tree, so an employee's Spark voice stays ocspark13free.",
       "label": "OC Spark 1.3 (OpenCode Go)",
       "cost": "subscription",
+      "fallback": "orspark13cont",
+      "_fallback_r189": "R189 (2026-11-17): Variant A of the kit panels (the operator: «Делать будем в след. итерации для cheap Вариант A»; his order «по подписке opencode go ... а если не работает ... оплата по api»). When this Go voice ends the round with no answer, Spark 1.3 Contributor on OpenRouter (orspark13cont, $0.10 / $0.20 per 1M) gets the same brief once - armed only where OPENROUTER_API_KEY is set. There is no free step: Zen no longer lists a free Spark Contributor (opencode models, 2026-11-17).",
       "_cost": "OpenCode Go plan, not a charge per call: Muse Spark 1.3 Contributor counts $0.10 in / $0.20 out / $0.002 cached read per 1M tokens against the plan's limits - per 5 hours 20%, per week 50%, per month 100% of the monthly amount, $60 for this model (opencode.ai/docs/go, read 2026-10-08). opencode's store records that figure as the session cost (R146 И-3: $0.0015-0.0019 per one-line call, ~14-18K tokens of opencode's own prompt). With the console's «Use balance» option ON, usage past the limits is charged to the Zen balance instead of being refused (same page).",
       "fetch_fallback_hint_ref": "mcp_fallback",
       "model": "opencode-go/muse-spark-1.3-contributor",
@@ -1738,9 +1812,9 @@
       "panel": "cheap",
       "vendor": "zai",
       "provider": "openrouter",
-      "enabled": false,
-      "distribution": "local",
-      "_distribution_r180": "R180: LOCAL until it has answered real legal rounds - a paid voice whose legal domain is unproven for the kit's users (US immigration); package.py flips it off in the kit tree.",
+      "enabled": true,
+      "distribution": "both",
+      "_distribution_r180": "[SUPERSEDED 2026-11-17, R190: this was my inference, not his words] R180: LOCAL until it has answered real legal rounds - a paid voice whose legal domain is unproven for the kit's users (US immigration); package.py flips it off in the kit tree.",
       "only_with_system": [
         "legal-research"
       ],
@@ -1796,16 +1870,17 @@
         "orglm53flashxlegal",
         "orglmlegal"
       ],
-      "notes": "Z.ai's legal-domain variant of GLM 5.3 FlashX (OpenRouter catalogue 2026-11-13). Runs only in a run with --system legal-research, or when named. OPENROUTER_API_KEY."
+      "notes": "Z.ai's legal-domain variant of GLM 5.3 FlashX (OpenRouter catalogue 2026-11-13). Runs only in a run with --system legal-research, or when named. OPENROUTER_API_KEY.",
+      "_distribution_r190": "both - the operator 2026-11-18: «flashx legal, да, ставь в оба.»"
     },
     "ochy4go": {
       "read_order": 2,
       "kind": "opencode",
       "panel": "cheap",
       "vendor": "tencent",
-      "enabled": false,
-      "distribution": "local",
-      "_distribution_r180": "LOCAL ONLY: the operator's OpenCode Go plan and no fallback (his words), so in a kit install without the plan it could only fail; package.py flips it off in the kit tree.",
+      "enabled": true,
+      "distribution": "both",
+      "_distribution_r180": "[SUPERSEDED 2026-11-17, R190: this was my inference, not his words] LOCAL ONLY: the operator's OpenCode Go plan and no fallback (his words), so in a kit install without the plan it could only fail; package.py flips it off in the kit tree.",
       "_added_r180": "R180 (2026-11-13), the operator 2026-11-09: «Так же добавить Hy4 чеерз opencode go без fallback»; 2026-11-13: «Это я оставил только дешёвый один hy4» - opencode v2.2.7 lists ONE Hy4 on Go, opencode-go/hy4-preview (2026-11-09 it listed opencode-go/hy4 too). Panel not named: the cheap one, the panel his message adds voices to; --skip ochy4go or `\"panel\": \"standard\"` in his overlay moves it.",
       "label": "OC Hy4 (OpenCode Go)",
       "cost": "subscription",
@@ -1838,7 +1913,8 @@
         "ochy4"
       ],
       "notes": "Hy4 (Tencent) on the operator's OpenCode Go plan; no fallback (R180). Model opencode-go/hy4 since R181 (2026-11-15; R180 ran hy4-preview, which the operator has since switched off on his plan).",
-      "_effort_r181": "R181 2026-11-15 (D:/Claude Code/runs/r181-go-free-api/go_variants_r181.out): opencode-go/hy4 #max, #xhigh and #medium -> «Variant unavailable»; #high (3.5 s) and no variant (3.6 s) answered - the same ceiling as hy4-preview, effort stays high."
+      "_effort_r181": "R181 2026-11-15 (D:/Claude Code/runs/r181-go-free-api/go_variants_r181.out): opencode-go/hy4 #max, #xhigh and #medium -> «Variant unavailable»; #high (3.5 s) and no variant (3.6 s) answered - the same ceiling as hy4-preview, effort stays high.",
+      "_distribution_r190": "both - the operator 2026-11-17: «А почему я в kit не вижу ochy4go · Go, ты ошибся ... Если нету, то добавь.»"
     },
     "ocglm53flashfree": {
       "read_order": 1,
@@ -1977,6 +2053,60 @@
       "notes": "Free Kimi K3 via Kimi Code CLI + AIHubMix. Full K3 model by Moonshot AI (NOT cut-down), 1.05M context. New kind kimicli — prompt as -p argument (not stdin), NDJSON output with role/content structure. No token metrics from stream-json (session DB only). -m flag crashes — model set via default_model in config.toml. distribution: local (kimi CLI + AIHubMix key not guaranteed for employees). LIVE TESTED 2026-10-02: 8.3s, $0.",
       "_prompt_suffix_restored_r135": "R135 (2026-10-02): added. Training-tier channel (kimi CLI free relay to Moonshot AI). package.py strips from kit (default distribution=local).",
       "_argv_r137": "R137 (2026-10-03): 0 of 3 panels answered - «The command line is too long». The npm kimi.cmd shim runs through cmd.exe: 8,191-char cap (the system preset alone is ~9.3K), the prompt cut at its first newline, %NAME% expanded. call_kimicli now starts node + main.mjs directly; past the 32K CreateProcess cap the brief goes to <out>/kimik3free-ws/BRIEF.md and -p names it (--add-dir). Verified on the session wire: a 9.7K multi-line brief arrived whole with %USERNAME% literal. The file route reached the provider; the model's reading of a 42K file is UNVERIFIED (the free model answered 400 «cannot be served at the moment» both times)."
+    },
+    "askimik3": {
+      "read_order": 1,
+      "kind": "oai",
+      "provider": "asale",
+      "agent_harness": "opencode",
+      "keys_hidden": true,
+      "_keys_hidden_r190i4": "R190 И-4: asale.ai is a P2P market - its sellers see every prompt and tool output; the operator 2026-11-18: «Ничего страшного, главное защиту от api ключей и паролей поставить». channel_may_read_keys says NO: as an agent the relay meter removes key-shaped values from what leaves and the agent's env has no key variables.",
+      "_agent_r190i4": "R190 И-4 (the operator 2026-11-18: «дать моделям харнес opencode ... изучить код, протестировать его, использовать MCP»): runs as an AGENT in opencode (files, shell, MCP) through the harness's local relay meter wherever opencode 2.2.6+ is installed (`run --standalone` + `--archived`), else our own loop; the dry run's [transport] line says which. Set \"agent_harness\": null in your settings file to keep the loop.",
+      "panel": "standard",
+      "vendor": "moonshot",
+      "enabled": true,
+      "distribution": "both",
+      "label": "AS Kimi K3 (asale)",
+      "cost": "metered",
+      "model": "kimi-k3",
+      "role": "code",
+      "reasoning": {
+        "effort": "max"
+      },
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ],
+      "max_tokens": 65536,
+      "price_per_m": {
+        "in": 0.192,
+        "out": 16.0,
+        "_source": "asale.ai market page LIST price (ratio 100 %), read 2026-11-17; the market price was 10 % of it that day and floats every minute, so the estimate is a ceiling, not the bill"
+      },
+      "spend_guard": {
+        "max_usd_per_review": 3.0,
+        "_r190": "an ESTIMATE from price_per_m x the tokens the relay reports (it reports no cost)"
+      },
+      "web": {
+        "enabled": false,
+        "_none": "R190: no search on the relay - the brief plus the harness fetch_url tool"
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8
+      },
+      "timeout": "40m",
+      "models": {
+        "kimi-k3": {
+          "label": "AS Kimi K3 (asale)",
+          "data_policy": "P2P relay asale.ai: the request runs on ANOTHER user's subscription and that seller sees the prompt; paid per token from the user's balance (USDT), base https://gw.asale.ai/v1, key ASALE_API_KEY. The secrets gate still refuses a brief with a key or a password."
+        }
+      },
+      "aliases": [
+        "askimik3"
+      ],
+      "_r190": "R190 (2026-11-17), the operator: «Теперь надо вот эти модели добавить в наш плагин и мне и в kit: asale gpt-6.1-sol, wokey gpt-6.1-sol, asale kimi-k3, asale gemini-4-argon, wokey grok-4.6, wokey glm-5.3» and «asale стоит после подписок, но до openrouter в pipeline fallback. если у asale цена ниже wokey, то asale ставим до wokey»; 2026-11-18 «wokey 4 argon да, ставь перед» asale. A relay reached by our own loop (orchestrate.OAI_PROVIDERS), where `reasoning_effort` reaches the model (meter, runs/r190-asale-wokey-models/)."
     },
     "nvkimik3": {
       "_permissions": "Same as kimik3free (R137 И-2): kimi `-p` already runs in AUTO permission mode, so there is no bypass field; CLI_BYPASS_SAFETY_PROMPT always rides the brief.",
@@ -2226,7 +2356,120 @@
       ],
       "_aliases_r178": "R178 (2026-11-13): «кли» / cli after a channel name is a word the registry spells models with (мимо кли, квен кли), so the R178 guard would stop «только кодекс кли»; Codex IS a CLI, so the phrase names this channel. «codex cli» used to start codex plus the whole cli GROUP.",
       "_lost_the_openai_alias_2026_08_14": "🔴 This channel used to answer to `openai`, and round 38 moved that word to the new `openai` GROUP the moment a second OpenAI channel (orgpt56terrapro) arrived. Identical reasoning to agy's _lost_the_gemini_aliases_2026_08_07, and deliberately caught BEFORE it could mislead rather than after: a vendor word must name the family, and a channel name must name the transport. `--only openai` now means both OpenAI voices; `--only codex` still means this one.",
-      "notes": "Strategic questions and final line-level audits only. Never send it a lookup. Reports no tool telemetry of any kind, so the citation-existence audit is the only instrument that works on it."
+      "notes": "Strategic questions and final line-level audits only. Never send it a lookup. Reports no tool telemetry of any kind, so the citation-existence audit is the only instrument that works on it.",
+      "fallback": "asgpt61sol",
+      "_fallback_r190": "R190: when this subscription voice fails in a round, the paid relay copy runs after the round (asgpt61sol -> wkgpt61sol). The operator ordered the paid relays after the subscriptions himself (17.11), which supersedes for this voice the older «never route around an exhausted limit with a key»."
+    },
+    "asgpt61sol": {
+      "read_order": 1,
+      "kind": "oai",
+      "provider": "asale",
+      "agent_harness": "opencode",
+      "keys_hidden": true,
+      "_keys_hidden_r190i4": "R190 И-4: asale.ai is a P2P market - its sellers see every prompt and tool output; the operator 2026-11-18: «Ничего страшного, главное защиту от api ключей и паролей поставить». channel_may_read_keys says NO: as an agent the relay meter removes key-shaped values from what leaves and the agent's env has no key variables.",
+      "_agent_r190i4": "R190 И-4 (the operator 2026-11-18: «дать моделям харнес opencode ... изучить код, протестировать его, использовать MCP»): runs as an AGENT in opencode (files, shell, MCP) through the harness's local relay meter wherever opencode 2.2.6+ is installed (`run --standalone` + `--archived`), else our own loop; the dry run's [transport] line says which. Set \"agent_harness\": null in your settings file to keep the loop.",
+      "panel": "standard",
+      "vendor": "openai",
+      "enabled": true,
+      "distribution": "both",
+      "label": "AS GPT-6.1 Sol (asale)",
+      "cost": "metered",
+      "model": "gpt-6.1-sol",
+      "role": "code",
+      "reasoning": {
+        "effort": "max"
+      },
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ],
+      "max_tokens": 128000,
+      "price_per_m": {
+        "in": 2.0,
+        "out": 10.0,
+        "_source": "asale.ai market page LIST price (ratio 100 %), read 2026-11-17; the market price was 5 % of it that day and floats every minute, so the estimate is a ceiling, not the bill"
+      },
+      "spend_guard": {
+        "max_usd_per_review": 5.0,
+        "_r190": "an ESTIMATE from price_per_m x the tokens the relay reports (it reports no cost)"
+      },
+      "web": {
+        "enabled": false,
+        "_none": "R190: no search on the relay - the brief plus the harness fetch_url tool"
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8
+      },
+      "timeout": "40m",
+      "fallback": "wkgpt61sol",
+      "models": {
+        "gpt-6.1-sol": {
+          "label": "AS GPT-6.1 Sol (asale)",
+          "data_policy": "P2P relay asale.ai: the request runs on ANOTHER user's subscription and that seller sees the prompt; paid per token from the user's balance (USDT), base https://gw.asale.ai/v1, key ASALE_API_KEY. The secrets gate still refuses a brief with a key or a password."
+        }
+      },
+      "aliases": [
+        "asgpt61sol"
+      ],
+      "_r190": "R190 (2026-11-17), the operator: «Теперь надо вот эти модели добавить в наш плагин и мне и в kit: asale gpt-6.1-sol, wokey gpt-6.1-sol, asale kimi-k3, asale gemini-4-argon, wokey grok-4.6, wokey glm-5.3» and «asale стоит после подписок, но до openrouter в pipeline fallback. если у asale цена ниже wokey, то asale ставим до wokey»; 2026-11-18 «wokey 4 argon да, ставь перед» asale. A relay reached by our own loop (orchestrate.OAI_PROVIDERS), where `reasoning_effort` reaches the model (meter, runs/r190-asale-wokey-models/)."
+    },
+    "wkgpt61sol": {
+      "read_order": 1,
+      "kind": "oai",
+      "provider": "wokey",
+      "agent_harness": "opencode",
+      "_agent_r190i4": "R190 И-4 (the operator 2026-11-18: «дать моделям харнес opencode ... изучить код, протестировать его, использовать MCP»): runs as an AGENT in opencode (files, shell, MCP) through the harness's local relay meter wherever opencode 2.2.6+ is installed (`run --standalone` + `--archived`), else our own loop; the dry run's [transport] line says which. Set \"agent_harness\": null in your settings file to keep the loop.",
+      "panel": "standard",
+      "vendor": "openai",
+      "enabled": true,
+      "distribution": "both",
+      "label": "WK GPT-6.1 Sol (wokey)",
+      "cost": "metered",
+      "model": "gpt-6.1-sol",
+      "role": "code",
+      "reasoning": {
+        "effort": "max"
+      },
+      "supported_efforts": [
+        "max",
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ],
+      "max_tokens": 128000,
+      "price_per_m": {
+        "in": 0.18,
+        "out": 0.9,
+        "_source": "wokey.ai /v1/models pricing, read 2026-11-17 (fixed price, USD per 1M tokens)"
+      },
+      "spend_guard": {
+        "max_usd_per_review": 2.0,
+        "_r190": "an ESTIMATE from price_per_m x the tokens the relay reports (it reports no cost)"
+      },
+      "web": {
+        "enabled": false,
+        "_none": "R190: no search on the relay - the brief plus the harness fetch_url tool"
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8
+      },
+      "timeout": "40m",
+      "models": {
+        "gpt-6.1-sol": {
+          "label": "WK GPT-6.1 Sol (wokey)",
+          "data_policy": "Paid relay wokey.ai (per token, from the user's own prepaid balance; wokey keeps request records 90 days), reached directly by the harness (base https://api.wokey.ai/v1, key WOKEY_API_KEY)."
+        }
+      },
+      "aliases": [
+        "wkgpt61sol"
+      ],
+      "_r190": "R190 (2026-11-17), the operator: «Теперь надо вот эти модели добавить в наш плагин и мне и в kit: asale gpt-6.1-sol, wokey gpt-6.1-sol, asale kimi-k3, asale gemini-4-argon, wokey grok-4.6, wokey glm-5.3» and «asale стоит после подписок, но до openrouter в pipeline fallback. если у asale цена ниже wokey, то asale ставим до wokey»; 2026-11-18 «wokey 4 argon да, ставь перед» asale. A relay reached by our own loop (orchestrate.OAI_PROVIDERS), where `reasoning_effort` reaches the model (meter, runs/r190-asale-wokey-models/)."
     },
     "agy31pro": {
       "read_order": 1,
@@ -2327,10 +2570,7 @@
       "models": {
         "gemini-4-argon": {
           "label": "Gemini 4 Argon",
-          "aliases": [
-            "gemini-4-argon",
-            "gemini 4 argon"
-          ],
+          "aliases": [],
           "efforts": [
             "low",
             "medium",
@@ -2340,11 +2580,121 @@
       },
       "aliases": [
         "agy4argon",
-        "gemini 4 cli",
-        "gemini 4 аргон"
+        "gemini 4 cli"
       ],
       "_aliases_r169": "the operator 2026-10-24: «алиасы мне не нравятся как ты указал, многие наверное будут называть gemini 4 cli gemini 4 аргон» - his two words replace agyargon / аджиаргон; the model's slug and «gemini 4 argon» stay as model aliases.",
-      "notes": "Gemini 4 Argon through the Antigravity subscription CLI (R169) - the deep Gemini voice now that agy 1.4.7 no longer knows gemini-3.1-pro. In the standard panel; its own weekly quota on a Pro plan: see _panel_r169."
+      "notes": "Gemini 4 Argon through the Antigravity subscription CLI (R169) - the deep Gemini voice now that agy 1.4.7 no longer knows gemini-3.1-pro. In the standard panel; its own weekly quota on a Pro plan: see _panel_r169.",
+      "fallback": "wkgemini4argon",
+      "_fallback_r190": "R190: when this subscription voice fails in a round, the paid relay copy runs after the round (wkgemini4argon -> asgemini4argon). The operator ordered the paid relays after the subscriptions himself (17.11), which supersedes for this voice the older «never route around an exhausted limit with a key»."
+    },
+    "wkgemini4argon": {
+      "read_order": 1,
+      "kind": "oai",
+      "provider": "wokey",
+      "agent_harness": "opencode",
+      "_agent_r190i4": "R190 И-4 (the operator 2026-11-18: «дать моделям харнес opencode ... изучить код, протестировать его, использовать MCP»): runs as an AGENT in opencode (files, shell, MCP) through the harness's local relay meter wherever opencode 2.2.6+ is installed (`run --standalone` + `--archived`), else our own loop; the dry run's [transport] line says which. Set \"agent_harness\": null in your settings file to keep the loop.",
+      "panel": "standard",
+      "vendor": "google",
+      "enabled": true,
+      "distribution": "both",
+      "label": "WK Gemini 4 Argon (wokey)",
+      "cost": "metered",
+      "model": "gemini-4-argon",
+      "role": "analysis",
+      "reasoning": {
+        "effort": "high"
+      },
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "max_tokens": 65536,
+      "price_per_m": {
+        "in": 1.2,
+        "out": 6.0,
+        "_source": "wokey.ai /v1/models pricing, read 2026-11-17 (fixed price, USD per 1M tokens)"
+      },
+      "spend_guard": {
+        "max_usd_per_review": 5.0,
+        "_r190": "an ESTIMATE from price_per_m x the tokens the relay reports (it reports no cost)"
+      },
+      "web": {
+        "enabled": false,
+        "_none": "R190: no search on the relay - the brief plus the harness fetch_url tool"
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8
+      },
+      "timeout": "40m",
+      "fallback": "asgemini4argon",
+      "models": {
+        "gemini-4-argon": {
+          "label": "WK Gemini 4 Argon (wokey)",
+          "data_policy": "Paid relay wokey.ai (per token, from the user's own prepaid balance; wokey keeps request records 90 days), reached directly by the harness (base https://api.wokey.ai/v1, key WOKEY_API_KEY)."
+        }
+      },
+      "aliases": [
+        "wkgemini4argon"
+      ],
+      "_r190": "R190 (2026-11-17), the operator: «Теперь надо вот эти модели добавить в наш плагин и мне и в kit: asale gpt-6.1-sol, wokey gpt-6.1-sol, asale kimi-k3, asale gemini-4-argon, wokey grok-4.6, wokey glm-5.3» and «asale стоит после подписок, но до openrouter в pipeline fallback. если у asale цена ниже wokey, то asale ставим до wokey»; 2026-11-18 «wokey 4 argon да, ставь перед» asale. A relay reached by our own loop (orchestrate.OAI_PROVIDERS), where `reasoning_effort` reaches the model (meter, runs/r190-asale-wokey-models/).",
+      "_effort_r190": "high = Gemini's top on the OpenAI-compatible effort scale (agy4argon's ladder low / medium / high); not measured on the relays (asale's counters carry no reasoning tokens for Argon)"
+    },
+    "asgemini4argon": {
+      "read_order": 1,
+      "kind": "oai",
+      "provider": "asale",
+      "agent_harness": "opencode",
+      "keys_hidden": true,
+      "_keys_hidden_r190i4": "R190 И-4: asale.ai is a P2P market - its sellers see every prompt and tool output; the operator 2026-11-18: «Ничего страшного, главное защиту от api ключей и паролей поставить». channel_may_read_keys says NO: as an agent the relay meter removes key-shaped values from what leaves and the agent's env has no key variables.",
+      "_agent_r190i4": "R190 И-4 (the operator 2026-11-18: «дать моделям харнес opencode ... изучить код, протестировать его, использовать MCP»): runs as an AGENT in opencode (files, shell, MCP) through the harness's local relay meter wherever opencode 2.2.6+ is installed (`run --standalone` + `--archived`), else our own loop; the dry run's [transport] line says which. Set \"agent_harness\": null in your settings file to keep the loop.",
+      "panel": "standard",
+      "vendor": "google",
+      "enabled": true,
+      "distribution": "both",
+      "label": "AS Gemini 4 Argon (asale)",
+      "cost": "metered",
+      "model": "gemini-4-argon",
+      "role": "analysis",
+      "reasoning": {
+        "effort": "high"
+      },
+      "supported_efforts": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "max_tokens": 65536,
+      "price_per_m": {
+        "in": 2.0,
+        "out": 10.0,
+        "_source": "asale.ai market page LIST price (ratio 100 %), read 2026-11-17; the market price was 65 % of it that day and floats every minute, so the estimate is a ceiling, not the bill"
+      },
+      "spend_guard": {
+        "max_usd_per_review": 5.0,
+        "_r190": "an ESTIMATE from price_per_m x the tokens the relay reports (it reports no cost)"
+      },
+      "web": {
+        "enabled": false,
+        "_none": "R190: no search on the relay - the brief plus the harness fetch_url tool"
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8
+      },
+      "timeout": "40m",
+      "models": {
+        "gemini-4-argon": {
+          "label": "AS Gemini 4 Argon (asale)",
+          "data_policy": "P2P relay asale.ai: the request runs on ANOTHER user's subscription and that seller sees the prompt; paid per token from the user's balance (USDT), base https://gw.asale.ai/v1, key ASALE_API_KEY. The secrets gate still refuses a brief with a key or a password."
+        }
+      },
+      "aliases": [
+        "asgemini4argon"
+      ],
+      "_r190": "R190 (2026-11-17), the operator: «Теперь надо вот эти модели добавить в наш плагин и мне и в kit: asale gpt-6.1-sol, wokey gpt-6.1-sol, asale kimi-k3, asale gemini-4-argon, wokey grok-4.6, wokey glm-5.3» and «asale стоит после подписок, но до openrouter в pipeline fallback. если у asale цена ниже wokey, то asale ставим до wokey»; 2026-11-18 «wokey 4 argon да, ставь перед» asale. A relay reached by our own loop (orchestrate.OAI_PROVIDERS), where `reasoning_effort` reaches the model (meter, runs/r190-asale-wokey-models/).",
+      "_effort_r190": "high = Gemini's top on the OpenAI-compatible effort scale (agy4argon's ladder low / medium / high); not measured on the relays (asale's counters carry no reasoning tokens for Argon)"
     },
     "agy38flash": {
       "read_order": 3,
@@ -2966,17 +3316,179 @@
       "_added": "2026-10-04 (R142), the operator: «Потом сделай mimo 2.6 Flash как fallback, модели mimo 2.6 Pro». The run-time fallback of mimov26pro (its `fallback` field) - same mimo CLI and Xiaomi key, the lighter model. Cascade group with ocmimo26flashfree: one Flash voice, two transports.",
       "notes": "MiMo v2.6 Flash via the mimo CLI (direct Xiaomi API, metered). Not a panel seat: it answers when mimov26pro gives no usable answer and the Flash voice did not already answer through ocmimo26flashfree, or when named directly."
     },
+    "wkkimik3": {
+      "read_order": 1,
+      "kind": "oai",
+      "provider": "wokey",
+      "agent_harness": "opencode",
+      "_agent_r190i4": "R190 И-4 (the operator 2026-11-18: «дать моделям харнес opencode ... изучить код, протестировать его, использовать MCP»): runs as an AGENT in opencode (files, shell, MCP) through the harness's local relay meter wherever opencode 2.2.6+ is installed (`run --standalone` + `--archived`), else our own loop; the dry run's [transport] line says which. Set \"agent_harness\": null in your settings file to keep the loop.",
+      "panel": "standard",
+      "vendor": "moonshot",
+      "enabled": true,
+      "distribution": "both",
+      "label": "WK Kimi K3 (wokey)",
+      "cost": "metered",
+      "model": "kimi-k3",
+      "served_as": [
+        "k3"
+      ],
+      "_served_as_r190": "wokey answers model \"k3\" for kimi-k3 (meter 2026-11-17, 2/2) - its name for the same model",
+      "role": "code",
+      "reasoning": {
+        "effort": "max"
+      },
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ],
+      "max_tokens": 65536,
+      "price_per_m": {
+        "in": 0.6,
+        "out": 3.0,
+        "_source": "wokey.ai /v1/models pricing, read 2026-11-17 (fixed price, USD per 1M tokens)"
+      },
+      "spend_guard": {
+        "max_usd_per_review": 3.0,
+        "_r190": "an ESTIMATE from price_per_m x the tokens the relay reports (it reports no cost)"
+      },
+      "web": {
+        "enabled": false,
+        "_none": "R190: no search on the relay - the brief plus the harness fetch_url tool"
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8
+      },
+      "timeout": "40m",
+      "models": {
+        "kimi-k3": {
+          "label": "WK Kimi K3 (wokey)",
+          "data_policy": "Paid relay wokey.ai (per token, from the user's own prepaid balance; wokey keeps request records 90 days), reached directly by the harness (base https://api.wokey.ai/v1, key WOKEY_API_KEY)."
+        }
+      },
+      "aliases": [
+        "wkkimik3"
+      ],
+      "_r190": "R190 (2026-11-17): moved from opencode (`wokey/kimi-k3`, which sent no depth and needed the model in the user's opencode list - Qwen 3.8 Max was missing there) to our own loop, provider wokey. R190 (2026-11-17), the operator: «Теперь надо вот эти модели добавить в наш плагин и мне и в kit: asale gpt-6.1-sol, wokey gpt-6.1-sol, asale kimi-k3, asale gemini-4-argon, wokey grok-4.6, wokey glm-5.3» and «asale стоит после подписок, но до openrouter в pipeline fallback. если у asale цена ниже wokey, то asale ставим до wokey»; 2026-11-18 «wokey 4 argon да, ставь перед» asale. A relay reached by our own loop (orchestrate.OAI_PROVIDERS), where `reasoning_effort` reaches the model (meter, runs/r190-asale-wokey-models/).",
+      "_r189": "R189 (2026-11-17), the operator: «STANDARD. Kimi K3 тоже в начале wokey.ai». the first PAID member of the Kimi K3 cascade (nvkimik3, kimik3free, wkkimik3, kimik3) - the two free members before it are off today (NVIDIA retired its Kimi K3; kimik3free is local), so wokey is the first that runs: wokey.ai through the user's own opencode (a provider named `wokey`), else kimik3. Ready only where `opencode models` lists wokey/kimi-k3 (orchestrate._oc_go_problem, R189); a machine without that provider never starts it. The operator's machine keeps his own settings for this name (R158: off there).",
+      "_cost": "wokey.ai GET /v1/models 2026-11-17: $0.60 / $3.00 per 1M tokens (cache read $0.06), context 1,048,576. Paid per token from the user's wokey balance, below the OpenRouter copy.",
+      "_effort_r190": "max: wokey's model page names low/high/max; meter 2026-11-17 kimi-k3 not shown (its default is already max)"
+    },
+    "wkglm53": {
+      "read_order": 1,
+      "kind": "oai",
+      "provider": "wokey",
+      "agent_harness": "opencode",
+      "_agent_r190i4": "R190 И-4 (the operator 2026-11-18: «дать моделям харнес opencode ... изучить код, протестировать его, использовать MCP»): runs as an AGENT in opencode (files, shell, MCP) through the harness's local relay meter wherever opencode 2.2.6+ is installed (`run --standalone` + `--archived`), else our own loop; the dry run's [transport] line says which. Set \"agent_harness\": null in your settings file to keep the loop.",
+      "panel": "standard",
+      "vendor": "zai",
+      "enabled": true,
+      "distribution": "both",
+      "label": "WK GLM 5.3 (wokey)",
+      "cost": "metered",
+      "model": "glm-5.3",
+      "role": "code",
+      "reasoning": {
+        "effort": "max"
+      },
+      "supported_efforts": [
+        "max",
+        "high",
+        "low"
+      ],
+      "max_tokens": 131072,
+      "price_per_m": {
+        "in": 0.21,
+        "out": 0.66,
+        "_source": "wokey.ai /v1/models pricing, read 2026-11-17 (fixed price, USD per 1M tokens)"
+      },
+      "spend_guard": {
+        "max_usd_per_review": 2.0,
+        "_r190": "an ESTIMATE from price_per_m x the tokens the relay reports (it reports no cost)"
+      },
+      "web": {
+        "enabled": false,
+        "_none": "R190: no search on the relay - the brief plus the harness fetch_url tool"
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8
+      },
+      "timeout": "40m",
+      "models": {
+        "glm-5.3": {
+          "label": "WK GLM 5.3 (wokey)",
+          "data_policy": "Paid relay wokey.ai (per token, from the user's own prepaid balance; wokey keeps request records 90 days), reached directly by the harness (base https://api.wokey.ai/v1, key WOKEY_API_KEY)."
+        }
+      },
+      "aliases": [
+        "wkglm53"
+      ],
+      "_r190": "R190 (2026-11-17): moved from opencode (`wokey/glm-5.3`, which sent no depth and needed the model in the user's opencode list - Qwen 3.8 Max was missing there) to our own loop, provider wokey. R190 (2026-11-17), the operator: «Теперь надо вот эти модели добавить в наш плагин и мне и в kit: asale gpt-6.1-sol, wokey gpt-6.1-sol, asale kimi-k3, asale gemini-4-argon, wokey grok-4.6, wokey glm-5.3» and «asale стоит после подписок, но до openrouter в pipeline fallback. если у asale цена ниже wokey, то asale ставим до wokey»; 2026-11-18 «wokey 4 argon да, ставь перед» asale. A relay reached by our own loop (orchestrate.OAI_PROVIDERS), where `reasoning_effort` reaches the model (meter, runs/r190-asale-wokey-models/).",
+      "_r189": "R189 (2026-11-17), the operator: «glm53 wokey.ai если нет то openrouter». first in the GLM 5.3 cascade (wkglm53, orglm53): wokey.ai through the user's own opencode (a provider named `wokey`), else orglm53. Ready only where `opencode models` lists wokey/glm-5.3 (orchestrate._oc_go_problem, R189); a machine without that provider never starts it. The operator's machine keeps his own settings for this name (R158: off there).",
+      "_cost": "wokey.ai GET /v1/models 2026-11-17: $0.21 / $0.66 per 1M tokens (cache read $0.039), context 1,000,000. Paid per token from the user's wokey balance, below the OpenRouter copy.",
+      "_effort_r190": "max: wokey's model page names low/high/max; meter 2026-11-17 glm-5.3 high > low disjoint, xhigh / max answered 200"
+    },
+    "wkqwen38max": {
+      "read_order": 1,
+      "kind": "oai",
+      "provider": "wokey",
+      "agent_harness": "opencode",
+      "_agent_r190i4": "R190 И-4 (the operator 2026-11-18: «дать моделям харнес opencode ... изучить код, протестировать его, использовать MCP»): runs as an AGENT in opencode (files, shell, MCP) through the harness's local relay meter wherever opencode 2.2.6+ is installed (`run --standalone` + `--archived`), else our own loop; the dry run's [transport] line says which. Set \"agent_harness\": null in your settings file to keep the loop.",
+      "panel": "standard",
+      "vendor": "alibaba",
+      "enabled": true,
+      "distribution": "both",
+      "label": "WK Qwen 3.8 Max (wokey)",
+      "cost": "metered",
+      "model": "qwen3.8-max",
+      "role": "analysis",
+      "max_tokens": 65536,
+      "price_per_m": {
+        "in": 0.5175,
+        "out": 1.5525,
+        "_source": "wokey.ai /v1/models pricing, read 2026-11-17 (fixed price, USD per 1M tokens)"
+      },
+      "spend_guard": {
+        "max_usd_per_review": 3.0,
+        "_r190": "an ESTIMATE from price_per_m x the tokens the relay reports (it reports no cost)"
+      },
+      "web": {
+        "enabled": false,
+        "_none": "R190: no search on the relay - the brief plus the harness fetch_url tool"
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8
+      },
+      "timeout": "40m",
+      "models": {
+        "qwen3.8-max": {
+          "label": "WK Qwen 3.8 Max (wokey)",
+          "data_policy": "Paid relay wokey.ai (per token, from the user's own prepaid balance; wokey keeps request records 90 days), reached directly by the harness (base https://api.wokey.ai/v1, key WOKEY_API_KEY)."
+        }
+      },
+      "aliases": [
+        "wkqwen38max"
+      ],
+      "_r190": "R190 (2026-11-17): moved from opencode (`wokey/qwen3.8-max`, which sent no depth and needed the model in the user's opencode list - Qwen 3.8 Max was missing there) to our own loop, provider wokey. R190 (2026-11-17), the operator: «Теперь надо вот эти модели добавить в наш плагин и мне и в kit: asale gpt-6.1-sol, wokey gpt-6.1-sol, asale kimi-k3, asale gemini-4-argon, wokey grok-4.6, wokey glm-5.3» and «asale стоит после подписок, но до openrouter в pipeline fallback. если у asale цена ниже wokey, то asale ставим до wokey»; 2026-11-18 «wokey 4 argon да, ставь перед» asale. A relay reached by our own loop (orchestrate.OAI_PROVIDERS), where `reasoning_effort` reaches the model (meter, runs/r190-asale-wokey-models/).",
+      "_r189": "R189 (2026-11-17), the operator: «Qwen 3.8 Max по подписке, если нет то ключ wokey.ai если нет то openrouter». second in the Qwen 3.8 Max cascade (qwen38maxcli, wkqwen38max, qwen38max): wokey.ai through the user's own opencode (a provider named `wokey`), else qwen38max. Ready only where `opencode models` lists wokey/qwen3.8-max (orchestrate._oc_go_problem, R189); a machine without that provider never starts it. The operator's machine keeps his own settings for this name (R158: off there).",
+      "_cost": "wokey.ai GET /v1/models 2026-11-17: $0.5175 / $1.5525 per 1M tokens (cache read $0.1035), context 1,000,000. Paid per token from the user's wokey balance, below the OpenRouter copy.",
+      "_effort_r190": "no `reasoning`: the depth knob of qwen3.8-max on wokey is not measured yet, and an invented value would be a parameter nobody saw bite (OAI effort_field sends none)"
+    },
     "qwen38maxcli": {
       "read_order": 1,
       "kind": "qwencli",
       "panel": "standard",
       "_panel_changed_r131": "R131 (2026-10-01), the operator: «Qwen 3.8 Max qwen code cli давай перенесем из cheap panel в standart, он очень долго думает и быстро расходует токены, будем использовать редко.» Moved out of cheap panel to standard. Cheap panel is now 4 CLI channels (ocspark13free, mimov26pro, agy38flash, grokbuild). qwen38maxcli still runs on --panel standard (standard ⊃ cheap on the panel ladder — this move narrows that cover) and on any direct naming. The reason is cost of time, not cost of money: Token Plan subscription is free at the margin, but xhigh reasoning + ~15K-token QWEN.md context (SUPERSEDED R130 D1: QWEN.md is now neutralised, so the latency reason is almost entirely the xhigh reasoning tier itself) + tool-use loops stretched self-review past 25 min twice during R128 (F finding). Standard panel is the right room for a channel we launch rarely.",
       "vendor": "alibaba",
-      "enabled": false,
+      "enabled": true,
       "bypass_permissions": true,
       "_bypass_permissions": "2026-09-30 (the operator's request). Qwen Code CLI uses --yolo (`-y`) to auto-approve all actions in headless mode. Without it, qwen -p defaults to Ask Permissions and hangs on any tool call (nobody to answer the prompt). Same blast radius as other bypassed CLI channels: every built-in tool (run_shell_command, write_file, edit, web_fetch) and every MCP server in ~/.qwen/settings.json runs without a prompt. Deny-lists and hooks still hold. The SAFETY DIRECTIVE prepended by _with_bypass_safety guards against delete-first behaviour; neutral_cwd() plus settings.json's own excludeTools list shrink what the shell and MCPs can reach.",
-      "distribution": "local",
-      "_distribution": "LOCAL ONLY. Needs (1) Qwen Code CLI installed (npm global or Alibaba install script → %APPDATA%\\npm\\qwen.cmd on Windows), (2) BAILIAN_TOKEN_PLAN_API_KEY in ~/.qwen/settings.json's env block (Token Plan Individual Standard subscription at home.qwencloud.com/analytics/token-plan/individual). Kit users without these should use orqwen38max or qwen38max channels via OpenRouter — this channel does NOT ship in the public kit.",
+      "distribution": "both",
+      "_distribution_r189": "R189 (2026-11-17), the operator: «В Kit standart: Qwen 3.8 Max по подписке, если нет то ключ wokey.ai если нет то openrouter». Ships ON: first in the Qwen 3.8 Max cascade (qwen38maxcli, wkqwen38max, qwen38max). It counts as ready only where the qwen CLI is installed AND its settings declare this model (orchestrate._qwen_model_problem: a model id, never a key, is read); otherwise the cascade moves on to wokey.ai, then OpenRouter.",
+      "_distribution": "SUPERSEDED 2026-11-17 by R189 (distribution both; ready only where the model is configured). LOCAL ONLY. Needs (1) Qwen Code CLI installed (npm global or Alibaba install script → %APPDATA%\\npm\\qwen.cmd on Windows), (2) BAILIAN_TOKEN_PLAN_API_KEY in ~/.qwen/settings.json's env block (Token Plan Individual Standard subscription at home.qwencloud.com/analytics/token-plan/individual). Kit users without these should use orqwen38max or qwen38max channels via OpenRouter — this channel does NOT ship in the public kit.",
       "label": "Qwen 3.8 Max CLI",
       "cost": "subscription",
       "_cost": "Alibaba Cloud Model Studio Token Plan Individual Standard. the operator 2026-09-30: Plan quota 45,000 (per home.qwencloud.com/analytics/token-plan/individual). Per-call cost not reported in CLI output; subscription covers it. On the Token Plan the model is reached at https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1 (OpenAI-compatible).",
@@ -3202,7 +3714,7 @@
     "ornemotron3ultra": {
       "read_order": 3,
       "kind": "openrouter",
-      "panel": "standard",
+      "panel": "cheap",
       "_panel_standard_since_R83": "Moved OUT of the cheap panel 2026-09-06 (R83 wave 1, plan item 10, the operator's OK): the 04.09 cheap-panel test spent 297 s and 1.4M input tokens and returned NO answer (runs/r80-panel-test; memory r80-panel-test-results), and the operator's standing note above says never to read this channel anyway. A default-round seat that returns nothing is wall-clock plus a token bomb. Demoted, not deleted: still enabled, still runs by name and on --panel standard. The selftest's PANEL_EVENTS ledger carries the same decision.",
       "vendor": "nvidia",
       "provider": "openrouter",
@@ -3257,7 +3769,8 @@
         "nvidia"
       ],
       "notes": "550B MoE (55B active), hybrid Transformer-Mamba, 1M context, and free. Its seat costs nothing, so the only reason to drop it is wall-clock. Expect provider-side rate limiting.",
-      "_prompt_suffix_restored_r135": "R135 (2026-10-02): restored. Original recipient (R34, 2026-08-07). Lost between R34 and R69 during whole-file rewrites before git. package.py strips from kit (distribution=both, but prompt_suffix distribution defaults to local)."
+      "_prompt_suffix_restored_r135": "R135 (2026-10-02): restored. Original recipient (R34, 2026-08-07). Lost between R34 and R69 during whole-file rewrites before git. package.py strips from kit (distribution=both, but prompt_suffix distribution defaults to local).",
+      "_panel_r190": "R190 (2026-11-17), the operator: «Nemotron 3 Ultra запускаем только один раз только в cheap, а не и в cheap и standart» - the OpenRouter copy joins its cascade's cheap panel, so every panel holds ONE Nemotron voice."
     },
     "ordeepseekv4pro": {
       "read_order": 1,
@@ -3268,6 +3781,8 @@
       "provider": "openrouter",
       "enabled": true,
       "distribution": "both",
+      "explicit_only": true,
+      "_explicit_only_r189": "R189 (2026-11-17), the operator: «В Kit standart: ... deepseekv4pro по дефолту отключен». Off by default: no panel, default run or group word starts it; its own name does (`--only ordeepseekv4pro`, «deepseek v4 pro»). The operator's machine keeps it in his standard panel through his settings file (explicit_only false there).",
       "label": "DeepSeek V4 Pro",
       "cost": "metered",
       "model": "deepseek/deepseek-v4-pro",
@@ -3430,7 +3945,63 @@
         "билд"
       ],
       "notes": "The subscription Grok voice, free at the margin like agy and codex. Its web_search and web_fetch are ON by default (the flag is --disable-web-search), the vendor runs the loop, and the harness fetches nothing here - so its grounding is its own claim and only the citation-existence audit can test it. Requires 500K context_window (since Grok Build 1.0.47 each frontier model exposes context_windows [256000,500000] with 256K default; docs.x.ai/build/settings). Harness ensures [model.\"grok-4.6\"] etc. context_window=500000 in ~/.grok/config.toml via _ensure_grok_500k() before every run — both THIS machine and the KIT (orchestrate.py is shipped).",
-      "_500k_2026_10_25": "R172: frontier models 4.5/4.6/4.7 offer 256K default + 500K; panel expects 500K (auto-compact 80% = 400K vs 204K). models_cache.json 2026-10-25 shows 256000 default. Fix is orchestrate._ensure_grok_500k() + ~/.grok/config.toml entries, not channels.json model field."
+      "_500k_2026_10_25": "R172: frontier models 4.5/4.6/4.7 offer 256K default + 500K; panel expects 500K (auto-compact 80% = 400K vs 204K). models_cache.json 2026-10-25 shows 256000 default. Fix is orchestrate._ensure_grok_500k() + ~/.grok/config.toml entries, not channels.json model field.",
+      "fallback": "wkgrok46",
+      "_fallback_r190": "R190: when this subscription voice fails in a round, the paid relay copy runs after the round (wkgrok46). The operator ordered the paid relays after the subscriptions himself (17.11), which supersedes for this voice the older «never route around an exhausted limit with a key»."
+    },
+    "wkgrok46": {
+      "read_order": 1,
+      "kind": "oai",
+      "provider": "wokey",
+      "agent_harness": "opencode",
+      "_agent_r190i4": "R190 И-4 (the operator 2026-11-18: «дать моделям харнес opencode ... изучить код, протестировать его, использовать MCP»): runs as an AGENT in opencode (files, shell, MCP) through the harness's local relay meter wherever opencode 2.2.6+ is installed (`run --standalone` + `--archived`), else our own loop; the dry run's [transport] line says which. Set \"agent_harness\": null in your settings file to keep the loop.",
+      "panel": "cheap",
+      "vendor": "xai",
+      "enabled": true,
+      "distribution": "both",
+      "label": "WK Grok 4.6 (wokey)",
+      "cost": "metered",
+      "model": "grok-4.6",
+      "role": "code",
+      "reasoning": {
+        "effort": "xhigh"
+      },
+      "supported_efforts": [
+        "xhigh",
+        "high",
+        "medium",
+        "low"
+      ],
+      "max_tokens": 65536,
+      "price_per_m": {
+        "in": 0.28,
+        "out": 0.84,
+        "_source": "wokey.ai /v1/models pricing, read 2026-11-17 (fixed price, USD per 1M tokens)"
+      },
+      "spend_guard": {
+        "max_usd_per_review": 2.0,
+        "_r190": "an ESTIMATE from price_per_m x the tokens the relay reports (it reports no cost)"
+      },
+      "web": {
+        "enabled": false,
+        "_none": "R190: no search on the relay - the brief plus the harness fetch_url tool"
+      },
+      "fetch_tool": {
+        "enabled": true,
+        "max_calls": 8
+      },
+      "timeout": "40m",
+      "models": {
+        "grok-4.6": {
+          "label": "WK Grok 4.6 (wokey)",
+          "data_policy": "Paid relay wokey.ai (per token, from the user's own prepaid balance; wokey keeps request records 90 days), reached directly by the harness (base https://api.wokey.ai/v1, key WOKEY_API_KEY)."
+        }
+      },
+      "aliases": [
+        "wkgrok46"
+      ],
+      "_r190": "R190 (2026-11-17), the operator: «Теперь надо вот эти модели добавить в наш плагин и мне и в kit: asale gpt-6.1-sol, wokey gpt-6.1-sol, asale kimi-k3, asale gemini-4-argon, wokey grok-4.6, wokey glm-5.3» and «asale стоит после подписок, но до openrouter в pipeline fallback. если у asale цена ниже wokey, то asale ставим до wokey»; 2026-11-18 «wokey 4 argon да, ставь перед» asale. A relay reached by our own loop (orchestrate.OAI_PROVIDERS), where `reasoning_effort` reaches the model (meter, runs/r190-asale-wokey-models/).",
+      "_effort_r190": "xhigh is grok-4.6's top on wokey: `max` answered 400 «Invalid reasoning effort» (ceiling_r190.py)"
     },
     "orglm53": {
       "read_order": 2,
@@ -3479,12 +4050,7 @@
           "label": "GLM 5.3",
           "data_policy": "Metered API through OpenRouter. No provider pin yet — run doctor --online after first real run to discover and pin providers. OpenRouter documents `provider.data_collection: deny` and `provider.zdr: true` as per-request controls; NEITHER IS SET HERE — see _data_controls_not_wired at the end of this file.",
           "aliases": [
-            "z-ai/glm-5.3",
-            "glm-5.3",
-            "glm 5.3",
-            "glm53",
-            "глм 5.3",
-            "глм-5.3"
+            "z-ai/glm-5.3"
           ]
         }
       },
@@ -3663,6 +4229,8 @@
     [
       "nvkimik3",
       "kimik3free",
+      "askimik3",
+      "wkkimik3",
       "kimik3"
     ],
     [
@@ -3695,8 +4263,33 @@
     [
       "cgptdeskseat",
       "cgptseat"
+    ],
+    [
+      "qwen38maxcli",
+      "wkqwen38max",
+      "qwen38max"
+    ],
+    [
+      "wkglm53",
+      "orglm53"
+    ],
+    [
+      "codex",
+      "asgpt61sol",
+      "wkgpt61sol"
+    ],
+    [
+      "agy4argon",
+      "wkgemini4argon",
+      "asgemini4argon"
+    ],
+    [
+      "grokbuild",
+      "wkgrok46"
     ]
   ],
+  "_cascade_groups_r189": "R189 (2026-11-17), the operator for the kit's standard panel: «Qwen 3.8 Max по подписке, если нет то ключ wokey.ai если нет то openrouter ... glm53 wokey.ai если нет то openrouter» and «Kimi K3 тоже в начале wokey.ai». Three cascades now start with the cheaper transport the user may have: [qwen38maxcli, wkqwen38max, qwen38max] (subscription CLI, wokey.ai, OpenRouter), [nvkimik3, kimik3free, wkkimik3, kimik3] (free first - both free members are off today), [wkglm53, orglm53]. A wokey member is ready only where the user's opencode lists its model (a provider named `wokey`); the CLI only where the qwen CLI declares qwen3.8-max. Nemotron 3 Ultra stays ONE voice: ornemotron3ultra (standard) is the same cascade as the cheap panel's nvnemotron3ultra and its run-time fallback, never a second Nemotron.",
+  "_cascade_groups_r190": "R190 (2026-11-17/18): the subscription first, then the cheaper relay, OpenRouter last. Prices that day (USD per 1M in/out): GPT-6.1 Sol asale 0.10/0.50 (market) < wokey 0.18/0.90; Kimi K3 asale 0.019/1.60 < wokey 0.60/3.00 < OpenRouter; Gemini 4 Argon wokey 1.20/6.00 < asale 1.30/6.50 (the operator 18.11: «wokey 4 argon да, ставь перед» asale); Grok 4.6 wokey only. asale's price floats every minute (5-100 % of list), so this order is today's snapshot - a cheaper relay by the live price is a later step.",
   "_cascade_groups_r187": "R187 (2026-11-17), the operator: «И пусть на всякий случай у меня и в kit будет 2 паралельно spark contributor по подписке go. Просто если посмотреть бенчмарк по Legal вопросам spark 1.2 лучше чем 1.3 А 1.3 лучше чем 1.2 по ИТ вопросам. ... А стоит contributor дешево, поэтому пусть оба паралельно работают. А у меня плюс еще spark 1.3 max через muse подписку и Wonder в стандартной панели, в идеале конечно что бы работал только по подписке, а не напрямую, если подписка закончилась.» mcspark13 (Spark 1.3 in Standard mode at max on his Muse Code subscription) left the Spark 1.3 Contributor cascade it had led since R164: on his machine it is a voice of its own BESIDE ocspark13go (Spark 1.3 Contributor on the OpenCode Go plan, xhigh) and ocspark12go (Spark 1.2 Contributor on the Go plan) - three Spark voices. Same weights, a different mode, depth and transport: the pairing he asked for. A kit has no mcspark13 (distribution local), so the kit's Spark 1.3 cascade and plan do not change.",
   "_cascade_groups_doc": "Panel cascade: when several channels carry the SAME model through different transports, only the first READY one runs; the rest are skipped. Order matters - cheapest/free first. The panel runs independent VOICES in parallel; paying three transports for one voice is waste, not breadth. Added 2026-09-04 (the operator: 'незачем у одних и тех же моделей спрашивать'). R143 И-3 (2026-10-05): a group may span panels. kimik3 (standard, OpenRouter, paid) is the last member of nvkimik3's group; members are only the channels already in THIS run's plan, so a cheap run never pulls kimik3 in, and a standard run gets one Kimi - nvkimik3 when its CLI and key are here, else kimik3.",
   "_ask_default_doc": "Added 2026-08-30 (R69). The order --ask resolves its channel when --ask-channel is not passed: the FIRST entry that is enabled AND whose transport key is actually present in the environment wins; if none has a key, the first enabled entry runs and its preflight explains what is missing. Until R69 the default was the argparse literal `spark12cont`, which for a kit user holding only an OPENROUTER_API_KEY pointed the one-shot path at the one channel they cannot run - degradation was graceful, but the default was wrong for exactly the user the kit exists for. the operator's 2026-08-08 instruction «--ask по умолчанию идёт на spark12cont - оставляем на нем» is preserved by the ORDER: spark12cont is first, so any machine with a MODEL_API_KEY behaves exactly as before. Names here must be CHANNEL names - not groups, not aliases - and selftest enforces that.",

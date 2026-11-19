@@ -637,6 +637,16 @@ export OPENROUTER_API_KEY="<your key>"
 > guard stops a review at $1.00). When `MODEL_API_KEY` is absent and opencode has no Go plan, `--ask` starts with `orspark12cont`:
 > the choice comes from `ask_default` in `channels.json` and is printed when it fires.
 
+### Relays: wokey.ai and asale.ai — `WOKEY_API_KEY`, `ASALE_API_KEY`
+
+Optional, since 1.125.0. Each key adds cheaper paid routes for the big models; what runs where is in [README → Relays](README.md#relays-wokeyai-and-asaleai-since-11250). Set either, both or none.
+
+- **wokey.ai:** sign up at [wokey.ai](https://wokey.ai), top up (USDT) and create a key. wokey's own installer for opencode is NOT needed: the harness calls `https://api.wokey.ai/v1` itself and, for an agent run, gives opencode a provider of its own for that run only. If you run wokey's installer for your own opencode use, note that it also sets opencode's default model to `wokey/auto`.
+- **asale.ai:** sign up at [asale.ai](https://asale.ai), top up (USDT) and create a key; the harness calls `https://gw.asale.ai/v1`. Read [PRIVACY.md](PRIVACY.md#the-relays-wokeyai-and-asaleai-since-11250) first: on this market a seller serves your request and can see it.
+- Put each key in its variable the way you set `OPENROUTER_API_KEY` above, in your own terminal, never in a chat with an AI. `python doctor.py` reports each one as present / absent with its length, never the value.
+- **opencode 2.2.6 or newer** turns every relay voice into an agent with tools (files, shell, your opencode MCP servers); without it, or with an older one, the voice is a plain API call. The dry run (`python orchestrate.py --dry-run --panel standard ...`) prints a `[transport]` line per relay channel.
+- Without either key, Kimi K3, Qwen 3.8 Max and GLM 5.3 keep their OpenRouter copies as in 1.124.0 (Qwen 3.8 Max takes the Qwen Code CLI first where it is set up), and GPT-6.1 Sol, Gemini 4 Argon and Grok 4.6 keep only their CLI.
+
 ### The premium batch panel — same keys, one more
 
 The optional premium panel (`premium/premium_panel.py` — see the README's «Premium» section) is
@@ -846,6 +856,10 @@ finished, and the MCP servers that failed at start. Your own
 `grok` sessions are unaffected; to keep them from importing too, set `GROK_CLAUDE_MCPS_ENABLED=0` (and
 any of the others) in your user environment, or `mcps = false` under `[compat.claude]` in
 `~/.grok/config.toml`.
+
+### Qwen Code CLI (Qwen 3.8 Max on your Qwen plan — since 1.125.0)
+
+The standard panel's Qwen 3.8 Max runs through the Qwen Code CLI (`qwen38maxcli`) when `qwen` is installed and signed in AND your user settings file names the model: `qwen3.8-max` as `model.name`, or as the `id` of an entry under `modelProviders`, in `~/.qwen/settings.json` (or `$QWEN_HOME/settings.json`). Otherwise the voice goes to wokey.ai, then OpenRouter, and the plan says why. Qwen Code has no command that lists your plan's models, so the harness reads that one file: a model declared only in Qwen Code's system-level settings is not seen. Which Alibaba plan includes `qwen3.8-max` is Alibaba's to say; on 2026-11-17 Qwen Code's docs named the QwenCloud Token Plan and pay-as-you-go keys, not the Coding Plan. The harness runs `qwen` with `--chat-recording`, so these dialogs are kept in Qwen Code's history: its budget salvage resumes them.
 
 ### Antigravity CLI (Gemini)
 
