@@ -639,7 +639,7 @@ export OPENROUTER_API_KEY="<your key>"
 
 ### Relays: wokey.ai and asale.ai — `WOKEY_API_KEY`, `ASALE_API_KEY`
 
-Optional, since 1.125.0. Each key adds cheaper paid routes for the big models; what runs where is in [README → Relays](README.md#relays-wokeyai-and-asaleai-since-11250). Set either, both or none.
+Optional, since 1.125.0. Each key adds cheaper paid routes for the big models; `python routing.py --panel standard` prints what runs where. Set either, both or none.
 
 - **wokey.ai:** sign up at [wokey.ai](https://wokey.ai), top up (USDT) and create a key. wokey's own installer for opencode is NOT needed: the harness calls `https://api.wokey.ai/v1` itself and, for an agent run, gives opencode a provider of its own for that run only. If you run wokey's installer for your own opencode use, note that it also sets opencode's default model to `wokey/auto`.
 - **asale.ai:** sign up at [asale.ai](https://asale.ai), top up (USDT) and create a key; the harness calls `https://gw.asale.ai/v1`. Read [PRIVACY.md](PRIVACY.md#the-relays-wokeyai-and-asaleai-since-11250) first: on this market a seller serves your request and can see it.
